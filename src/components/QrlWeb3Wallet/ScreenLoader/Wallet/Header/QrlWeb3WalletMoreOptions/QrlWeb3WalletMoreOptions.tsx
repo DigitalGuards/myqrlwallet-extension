@@ -5,7 +5,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/UI/DropdownMenu";
-import { APP_INDEX_FILE } from "@/constants/qrlWeb3Wallet";
+import { APP_TAB_FILE } from "@/constants/qrlWeb3Wallet";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
 import {
@@ -31,7 +31,7 @@ const QrlWeb3WalletMoreOptions = observer(() => {
 
   const openInTab = () => {
     browser.tabs.create({
-      url: browser.runtime.getURL(APP_INDEX_FILE),
+      url: browser.runtime.getURL(APP_TAB_FILE),
     });
   };
 

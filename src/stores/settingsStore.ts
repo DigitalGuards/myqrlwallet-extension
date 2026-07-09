@@ -58,25 +58,17 @@ class SettingsStore {
     this.theme = this.isDarkMode ? THEME.DARK : THEME.LIGHT;
     document?.documentElement?.classList?.add(this.theme);
 
-    // Side-panel mode is identified solely by the `?sidepanel=true` URL
-    // parameter set by `applySidePanelPreference` in the service worker.
-    // No viewport heuristic — viewport-driven detection flipped layouts
-    // unexpectedly on resize / high-DPI displays.
+    // Each surface is identified deterministically by a URL marker, never by a
+    // viewport measurement. The action popup loads bare `index.html` (from the
+    // manifest `default_popup`), the side panel is opened with `?sidepanel=true`,
+    // and the expanded full-tab view is opened with `?tab=true` (APP_TAB_FILE).
+    // The old first-paint height heuristic mis-flagged the popup as a tab when
+    // the measurement landed after Chrome had already grown the popup document,
+    // leaving it rendered with `h-screen` instead of the fixed 600px popup size.
     const urlParams = new URLSearchParams(window.location.search);
     this.isSidePanel = urlParams.has("sidepanel");
-
-    // Popup vs tab is still derived from viewport because Chromium does
-    // not expose a deterministic "is this the action popup" signal.
-    const htmlElement = document?.documentElement;
-    if (!this.isSidePanel && htmlElement) {
-      const actualWidth = htmlElement.clientWidth;
-      const actualHeight = htmlElement.clientHeight;
-      const isNarrow = Math.abs(actualWidth - 368) <= 24;
-      const isShort = Math.abs(actualHeight - 25) <= 24;
-      this.isPopupWindow = isNarrow && isShort;
-    } else {
-      this.isPopupWindow = false;
-    }
+    const isTab = urlParams.has("tab");
+    this.isPopupWindow = !this.isSidePanel && !isTab;
 
     this.#loadSettings();
   }

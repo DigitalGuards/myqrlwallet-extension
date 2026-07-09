@@ -1,4 +1,4 @@
-import { APP_INDEX_FILE } from "@/constants/qrlWeb3Wallet";
+import { APP_TAB_FILE } from "@/constants/qrlWeb3Wallet";
 import { useStore } from "@/stores/store";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
@@ -17,7 +17,7 @@ const LockPassword = observer(() => {
     if (!hasPasswordSet) {
       if (isPopupWindow) {
         browser.tabs.create({
-          url: browser.runtime.getURL(APP_INDEX_FILE),
+          url: browser.runtime.getURL(APP_TAB_FILE),
         });
       } else {
         setIsOnboarding(true);
