@@ -25,6 +25,7 @@ import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import BackButton from "../../../Shared/BackButton/BackButton";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
+import DiscoveredNFTCollections from "./DiscoveredNFTCollections/DiscoveredNFTCollections";
 import NFTCollectionImportSuccess from "./NFTCollectionImportSuccess/NFTCollectionImportSuccess";
 
 const FormSchema = z.object({
@@ -86,6 +87,7 @@ const ImportNFTCollection = observer(() => {
         ) : (
           <Form {...form}>
             <BackButton />
+            <DiscoveredNFTCollections />
             <form
               name="importNFTCollection"
               aria-label="importNFTCollection"

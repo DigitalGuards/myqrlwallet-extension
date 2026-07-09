@@ -24,6 +24,7 @@ import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import BackButton from "../../../Shared/BackButton/BackButton";
+import DiscoveredTokens from "./DiscoveredTokens/DiscoveredTokens";
 import TokenImportSuccess from "./TokenImportSuccess/TokenImportSuccess";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
 
@@ -84,6 +85,7 @@ const ImportToken = observer(() => {
         ) : (
           <Form {...form}>
             <BackButton />
+            <DiscoveredTokens />
             <form
               name="importAccount"
               aria-label="importAccount"

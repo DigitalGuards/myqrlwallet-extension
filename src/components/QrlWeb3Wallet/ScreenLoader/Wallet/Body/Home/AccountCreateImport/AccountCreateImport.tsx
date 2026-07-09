@@ -8,9 +8,22 @@ import {
   CardTitle,
 } from "@/components/UI/Card";
 import { ROUTES } from "@/router/router";
+import {
+  discoverNftCollections,
+  discoverTokens,
+} from "@/services/assetDiscovery";
 import { useStore } from "@/stores/store";
 import { cva } from "class-variance-authority";
-import { Download, History, Image, Logs, Plus, Send, Usb } from "lucide-react";
+import {
+  Download,
+  History,
+  Image,
+  Logs,
+  Plus,
+  Send,
+  Sparkles,
+  Usb,
+} from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -61,14 +74,18 @@ const AccountCreateImport = observer(() => {
   const { t } = useTranslation();
   const { state } = useLocation();
   const { qrlStore } = useStore();
-  const { activeAccount } = qrlStore;
+  const { activeAccount, qrlConnection } = qrlStore;
   const { accountAddress } = activeAccount;
+  const { blockchain } = qrlConnection;
 
   const hasActiveAccount = !!accountAddress;
   const hasAccountCreationPreference = !!state?.hasAccountCreationPreference;
   const hasTokensPreference = !!state?.hasTokensPreference;
 
   const [tokenContractsList, setTokenContractsList] = useState<string[]>([]);
+  const [discoveredTokenCount, setDiscoveredTokenCount] = useState(0);
+  const [discoveredCollectionCount, setDiscoveredCollectionCount] =
+    useState(0);
 
   useEffect(() => {
     (async () => {
@@ -77,6 +94,49 @@ const AccountCreateImport = observer(() => {
       setTokenContractsList(storedTokens.map((token) => token?.address));
     })();
   }, [accountAddress]);
+
+  // Explorer-side asset discovery: count what the explorer sees on this
+  // address but the user has not imported yet, and surface a hint above
+  // the import buttons. Adding still requires an explicit pick on the
+  // import screens.
+  useEffect(() => {
+    let cancelled = false;
+    setDiscoveredTokenCount(0);
+    setDiscoveredCollectionCount(0);
+    (async () => {
+      if (!accountAddress) return;
+      const [tokens, storedTokens, collections, storedCollections] =
+        await Promise.all([
+          discoverTokens(accountAddress, blockchain.chainId),
+          StorageUtil.getTokenContractsList(accountAddress),
+          discoverNftCollections(accountAddress, blockchain.chainId),
+          StorageUtil.getNFTCollectionsList(accountAddress),
+        ]);
+      if (cancelled) return;
+      const existingTokens = new Set(
+        storedTokens.map((token) => token.address.toLowerCase()),
+      );
+      const existingCollections = new Set(
+        storedCollections.map((collection) =>
+          collection.address.toLowerCase(),
+        ),
+      );
+      setDiscoveredTokenCount(
+        tokens.filter(
+          (token) => !existingTokens.has(token.address.toLowerCase()),
+        ).length,
+      );
+      setDiscoveredCollectionCount(
+        collections.filter(
+          (collection) =>
+            !existingCollections.has(collection.address.toLowerCase()),
+        ).length,
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountAddress, blockchain]);
 
   return (
     <div className="flex animate-appear-in flex-col gap-8">
@@ -116,10 +176,27 @@ const AccountCreateImport = observer(() => {
               <TokensCardContent />
             </CardContent>
             <CardFooter className="flex-col gap-4">
+              {discoveredTokenCount > 0 && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Sparkles className="h-4 w-4 shrink-0 text-secondary" />
+                  {t("discovery.tokensFound", {
+                    count: discoveredTokenCount,
+                  })}
+                </div>
+              )}
               <Link className="w-full" to={ROUTES.IMPORT_TOKEN}>
                 <Button className="w-full" type="button">
-                  <Download className="mr-2 h-4 w-4" />
-                  {t('home.importToken')}
+                  {discoveredTokenCount > 0 ? (
+                    <>
+                      <Plus className="mr-2 h-4 w-4" />
+                      {t("discovery.reviewAndAdd")}
+                    </>
+                  ) : (
+                    <>
+                      <Download className="mr-2 h-4 w-4" />
+                      {t("home.importToken")}
+                    </>
+                  )}
                 </Button>
               </Link>
               {tokenContractsList.length > ZRC_20_ITEMS_DISPLAY_LIMIT && (
@@ -139,11 +216,28 @@ const AccountCreateImport = observer(() => {
             <CardContent>
               <NFTCollections />
             </CardContent>
-            <CardFooter>
+            <CardFooter className="flex-col gap-4">
+              {discoveredCollectionCount > 0 && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Sparkles className="h-4 w-4 shrink-0 text-secondary" />
+                  {t("discovery.collectionsFound", {
+                    count: discoveredCollectionCount,
+                  })}
+                </div>
+              )}
               <Link className="w-full" to={ROUTES.IMPORT_NFT_COLLECTION}>
                 <Button className="w-full" type="button">
-                  <Image className="mr-2 h-4 w-4" />
-                  {t('nft.importButton')}
+                  {discoveredCollectionCount > 0 ? (
+                    <>
+                      <Plus className="mr-2 h-4 w-4" />
+                      {t("discovery.reviewAndAdd")}
+                    </>
+                  ) : (
+                    <>
+                      <Image className="mr-2 h-4 w-4" />
+                      {t("nft.importButton")}
+                    </>
+                  )}
                 </Button>
               </Link>
             </CardFooter>
