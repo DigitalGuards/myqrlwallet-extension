@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 
 const NewAccount = () => {
   return (
-    <Link to={ROUTES.HOME} state={{ hasAccountCreationPreference: true }}>
+    <Link to={ROUTES.HOME}>
       <Button className="flex w-full gap-2">
         <Plus size="18" /> Create or import an account
       </Button>

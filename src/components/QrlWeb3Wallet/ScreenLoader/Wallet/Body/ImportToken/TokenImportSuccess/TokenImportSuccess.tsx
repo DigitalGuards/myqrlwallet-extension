@@ -49,7 +49,7 @@ const TokenImportSuccess = observer(
         decimals: parseInt(decimals?.toString() ?? "0"),
         image: "",
       });
-      navigate(ROUTES.HOME, { state: { hasTokensPreference: true } });
+      navigate(ROUTES.HOME);
     };
 
     return (

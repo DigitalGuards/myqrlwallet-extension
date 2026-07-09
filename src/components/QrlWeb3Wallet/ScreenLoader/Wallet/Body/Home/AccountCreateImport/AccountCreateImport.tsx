@@ -13,7 +13,6 @@ import {
   discoverTokens,
 } from "@/services/assetDiscovery";
 import { useStore } from "@/stores/store";
-import { cva } from "class-variance-authority";
 import {
   Download,
   History,
@@ -26,7 +25,7 @@ import {
   Usb,
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import ActiveAccountDisplay from "./ActiveAccountDisplay/ActiveAccountDisplay";
 import CircuitBackground from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/CircuitBackground/CircuitBackground";
@@ -36,53 +35,14 @@ import { useEffect, useState } from "react";
 import StorageUtil from "@/utilities/storageUtil";
 import { ZRC_20_ITEMS_DISPLAY_LIMIT } from "@/constants/zrc20Token";
 
-const tokensClasses = cva("w-full", {
-  variants: {
-    hasTokensPreference: {
-      true: ["order-first"],
-      false: ["order-2"],
-    },
-  },
-  defaultVariants: {
-    hasTokensPreference: false,
-  },
-});
-
-const nftClasses = cva("w-full", {
-  variants: {
-    hasTokensPreference: {
-      true: ["order-first"],
-      false: ["order-3"],
-    },
-  },
-  defaultVariants: {
-    hasTokensPreference: false,
-  },
-});
-
-const addAccountsClasses = cva("w-full", {
-  variants: {
-    hasAccountCreationPreference: {
-      true: ["order-first"],
-      false: ["order-4"],
-    },
-  },
-  defaultVariants: {
-    hasAccountCreationPreference: false,
-  },
-});
-
 const AccountCreateImport = observer(() => {
   const { t } = useTranslation();
-  const { state } = useLocation();
   const { qrlStore } = useStore();
   const { activeAccount, qrlConnection } = qrlStore;
   const { accountAddress } = activeAccount;
   const { blockchain } = qrlConnection;
 
   const hasActiveAccount = !!accountAddress;
-  const hasAccountCreationPreference = !!state?.hasAccountCreationPreference;
-  const hasTokensPreference = !!state?.hasTokensPreference;
 
   const [tokenContractsList, setTokenContractsList] = useState<string[]>([]);
   const [discoveredTokenCount, setDiscoveredTokenCount] = useState(0);
@@ -144,7 +104,7 @@ const AccountCreateImport = observer(() => {
     <div className="flex animate-appear-in flex-col gap-8">
       {hasActiveAccount && (
         <>
-          <Card className="relative order-1 w-full overflow-hidden border-l-4 border-l-blue-accent">
+          <Card className="relative w-full overflow-hidden border-l-4 border-l-blue-accent">
             <CircuitBackground />
             <div className="relative z-10">
               <CardHeader className="bg-gradient-to-r from-blue-accent/5 to-transparent">
@@ -179,7 +139,7 @@ const AccountCreateImport = observer(() => {
               </CardFooter>
             </div>
           </Card>
-          <Card className={tokensClasses({ hasTokensPreference })}>
+          <Card className="w-full">
             <CardHeader>
               <CardTitle>{t('home.tokens')}</CardTitle>
             </CardHeader>
@@ -220,7 +180,7 @@ const AccountCreateImport = observer(() => {
               )}
             </CardFooter>
           </Card>
-          <Card className={nftClasses({ hasTokensPreference })}>
+          <Card className="w-full">
             <CardHeader>
               <CardTitle>{t('home.nftCollections')}</CardTitle>
             </CardHeader>
@@ -255,7 +215,7 @@ const AccountCreateImport = observer(() => {
           </Card>
         </>
       )}
-      <Card className={addAccountsClasses({ hasAccountCreationPreference })}>
+      <Card className="w-full">
         <CardHeader>
           <CardTitle>{t('home.addAccounts')}</CardTitle>
           <CardDescription>

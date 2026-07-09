@@ -81,7 +81,7 @@ const DiscoveredTokens = observer(() => {
           image: "",
         });
       }
-      navigate(ROUTES.HOME, { state: { hasTokensPreference: true } });
+      navigate(ROUTES.HOME);
     } finally {
       setIsAdding(false);
     }
