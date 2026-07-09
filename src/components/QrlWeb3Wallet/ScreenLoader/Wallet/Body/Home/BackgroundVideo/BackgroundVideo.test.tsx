@@ -17,29 +17,11 @@ describe("BackgroundVideo", () => {
       </StoreProvider>,
     );
 
-  it("should display the light background video when the light theme is applied", () => {
-    const theme = "light";
-    renderComponent(
-      mockedStore({ settingsStore: { isDarkMode: false, theme } }),
-    );
+  it("should render the brand tree background", () => {
+    renderComponent();
 
-    const videoElement = screen.getByTestId("backgroundVideoTestId");
-    const videoSource = videoElement.querySelector("source");
-    expect(videoElement).toBeInTheDocument();
-    expect(videoSource).toBeInTheDocument();
-    expect(videoSource).toHaveAttribute("src", `qrl-video-${theme}.mp4`);
-  });
-
-  it("should display the dark background video when the dark theme is applied", () => {
-    const theme = "dark";
-    renderComponent(
-      mockedStore({ settingsStore: { isDarkMode: true, theme } }),
-    );
-
-    const videoElement = screen.getByTestId("backgroundVideoTestId");
-    const videoSource = videoElement.querySelector("source");
-    expect(videoElement).toBeInTheDocument();
-    expect(videoSource).toBeInTheDocument();
-    expect(videoSource).toHaveAttribute("src", `qrl-video-${theme}.mp4`);
+    const treeElement = screen.getByTestId("backgroundVideoTestId");
+    expect(treeElement).toBeInTheDocument();
+    expect(treeElement).toHaveAttribute("src", "tree.svg");
   });
 });

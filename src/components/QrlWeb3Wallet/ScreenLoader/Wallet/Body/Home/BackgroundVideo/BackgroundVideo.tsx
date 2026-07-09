@@ -1,36 +1,13 @@
-import { useStore } from "@/stores/store";
-import { cva } from "class-variance-authority";
-import { observer } from "mobx-react-lite";
-
-const backgroundVideoClasses = cva("absolute inset-0 z-0 overflow-hidden", {
-  variants: {
-    isDarkMode: {
-      true: ["top-0 -left-24 scale-150"],
-      false: ["-top-44 -left-4"],
-    },
-  },
-  defaultVariants: {
-    isDarkMode: false,
-  },
-});
-
-const BackgroundVideo = observer(() => {
-  const { settingsStore } = useStore();
-  const { isDarkMode, theme } = settingsStore;
-
-  const backgroundVideoSource = "qrl-video-".concat(theme).concat(".mp4");
-
+const BackgroundVideo = () => {
   return (
-    <video
+    <img
       data-testid="backgroundVideoTestId"
-      autoPlay
-      muted
-      loop
-      className={backgroundVideoClasses({ isDarkMode })}
-    >
-      <source src={backgroundVideoSource} type="video/mp4" />
-    </video>
+      className="pointer-events-none absolute -left-8 top-0 z-0 h-96 w-96 scale-125 opacity-[0.08]"
+      src="tree.svg"
+      alt=""
+      aria-hidden
+    />
   );
-});
+};
 
 export default BackgroundVideo;
