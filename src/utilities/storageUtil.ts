@@ -1,7 +1,9 @@
 import {
   BlockchainDataType,
   DEFAULT_BLOCKCHAIN,
+  LEGACY_TESTNET_RPC,
   QRL_BLOCKCHAINS,
+  QRL_TESTNET_RPC_PROXY,
 } from "@/configuration/qrlBlockchainConfig";
 import {
   ConnectedAccountsDataType,
@@ -260,8 +262,20 @@ class StorageUtil {
     const storedBlockchains = (
       await browser.storage.local.get(BLOCKCHAINS_IDENTIFIER)
     )?.[BLOCKCHAINS_IDENTIFIER];
-    return (storedBlockchains?.[ALL_BLOCKCHAINS_IDENTIFIER] ??
+    const chains = (storedBlockchains?.[ALL_BLOCKCHAINS_IDENTIFIER] ??
       QRL_BLOCKCHAINS) as BlockchainDataType[];
+    // Read-time migration: stored lists persisted before 0.4.10 still carry
+    // the cleartext builtin-testnet RPC. Rewrite only that exact default on
+    // non-custom chains; custom chains and user-edited URLs are untouched.
+    return chains.map((chain) =>
+      !chain.isCustomChain && chain.rpcUrls?.[0] === LEGACY_TESTNET_RPC
+        ? {
+            ...chain,
+            rpcUrls: [QRL_TESTNET_RPC_PROXY],
+            defaultRpcUrl: QRL_TESTNET_RPC_PROXY,
+          }
+        : chain,
+    );
   }
 
   /**

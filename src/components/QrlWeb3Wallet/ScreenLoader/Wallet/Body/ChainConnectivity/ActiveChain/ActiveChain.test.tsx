@@ -33,7 +33,9 @@ describe("ActiveChain", () => {
     expect(screen.getByText("Mocked Chain Icon")).toBeInTheDocument();
     expect(screen.getByText("QRL Zond Testnet v2")).toBeInTheDocument();
     expect(screen.getByText("Chain ID 1337")).toBeInTheDocument();
-    expect(screen.getByText("http://209.250.255.226:8545")).toBeInTheDocument();
+    expect(
+      screen.getByText("https://qrlwallet.com/api/qrl-rpc/testnet"),
+    ).toBeInTheDocument();
     const link = screen.getByRole("link", { name: "Edit chain" });
     expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute("href", ROUTES.ADD_EDIT_CHAIN);
