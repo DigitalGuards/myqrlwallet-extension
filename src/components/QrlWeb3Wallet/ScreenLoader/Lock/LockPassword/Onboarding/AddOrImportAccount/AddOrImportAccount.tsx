@@ -27,8 +27,10 @@ import {
 } from "@/components/UI/Form";
 import { Input } from "@/components/UI/Input";
 import { Label } from "@/components/UI/Label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/UI/tabs";
 import MnemonicWordListing from "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/CreateAccount/MnemonicDisplay/MnemonicWordListing/MnemonicWordListing";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
+import withSuspense from "@/functions/withSuspense";
 import { useStore } from "@/stores/store";
 import StringUtil from "@/utilities/stringUtil";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -43,12 +45,29 @@ import {
   X,
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import { useState } from "react";
+import { lazy, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { ONBOARDING_STEPS, OnboardingStepType } from "../Onboarding";
 import AccountAddressDisplay from "./AccountAddressDisplay/AccountAddressDisplay";
+
+const ImportHexSeedForm = withSuspense(
+  lazy(
+    () =>
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportHexSeedForm/ImportHexSeedForm"
+      ),
+  ),
+);
+const ImportEncryptedWallet = withSuspense(
+  lazy(
+    () =>
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportEncryptedWallet/ImportEncryptedWallet"
+      ),
+  ),
+);
 
 const createFormSchema = (t: TFunction) =>
   z.object({
@@ -105,6 +124,14 @@ const AddOrImportAccount = observer(
       await addAnAccountToWallet(account);
     };
 
+    // Shared success handler for the hex-seed and wallet-file tabs: each sub
+    // form only produces the account, then we close the dialog and hand it to
+    // the same onboarding persistence path the mnemonic tab uses.
+    const onImported = async (account: Web3BaseWalletAccount) => {
+      setOpen(false);
+      await onImportAccount(account);
+    };
+
     async function onSubmit(formData: z.infer<typeof FormSchema>) {
       try {
         const { qrl } = new Web3();
@@ -122,12 +149,16 @@ const AddOrImportAccount = observer(
         }
       } catch (error) {
         control.setError("mnemonicPhrases", {
-          message: t("onboarding.account.importMnemonicError", { error: String(error) }),
+          message: t("onboarding.account.importMnemonicError", {
+            error: String(error),
+          }),
         });
       }
     }
 
-    const revoceryPhrasesDescription = t("onboarding.account.recoveryDescription");
+    const revoceryPhrasesDescription = t(
+      "onboarding.account.recoveryDescription",
+    );
     const continueWarning = t("onboarding.account.continueDialogWarning");
 
     return (
@@ -169,7 +200,9 @@ const AddOrImportAccount = observer(
                     </DialogTrigger>
                     <DialogContent className="w-80 rounded-md">
                       <DialogHeader className="text-left">
-                        <DialogTitle>{t("onboarding.account.continueDialogTitle")}</DialogTitle>
+                        <DialogTitle>
+                          {t("onboarding.account.continueDialogTitle")}
+                        </DialogTitle>
                         <DialogDescription>{continueWarning}</DialogDescription>
                       </DialogHeader>
                       <DialogFooter className="flex flex-row gap-4">
@@ -215,79 +248,108 @@ const AddOrImportAccount = observer(
                 <Plus className="mr-2 h-4 w-4" />
                 {t("onboarding.account.createButton")}
               </Button>
-              <Form {...form}>
-                <form
-                  className="w-full"
-                  name="importAccountForm"
-                  aria-label="importAccountForm"
-                >
-                  <Dialog open={open} onOpenChange={setOpen}>
-                    <Button
-                      className="w-full"
-                      type="button"
-                      onClick={() => {
-                        form.reset();
-                        setOpen(true);
-                      }}
-                    >
-                      <Download className="mr-2 h-4 w-4" />
-                      {t("onboarding.account.importButton")}
-                    </Button>
-                    <DialogContent className="w-80 rounded-md">
-                      <DialogHeader className="text-left">
-                        <DialogTitle>{t("onboarding.account.importDialogTitle")}</DialogTitle>
-                      </DialogHeader>
-                      <FormField
-                        control={control}
-                        name="mnemonicPhrases"
-                        render={({ field }) => (
-                          <FormItem>
-                            <Label></Label>
-                            <FormControl>
-                              <Input
-                                {...field}
-                                aria-label={field.name}
-                                autoComplete="off"
-                                disabled={isSubmitting}
-                                placeholder={t("onboarding.account.importPlaceholder")}
-                                type="text"
-                              />
-                            </FormControl>
-                            <FormDescription>
-                              {t("onboarding.account.importDescription")}
-                            </FormDescription>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <MnemonicWordListing mnemonic={watch().mnemonicPhrases} />
-                      <DialogFooter className="flex flex-row gap-2">
-                        <DialogClose asChild>
-                          <Button
-                            className="w-full"
-                            type="button"
-                            variant="outline"
-                            aria-label="Cancel"
-                          >
-                            <X className="mr-2 h-4 w-4" />
-                            {t("onboarding.account.importCancel")}
-                          </Button>
-                        </DialogClose>
-                        <Button
+              <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    className="w-full"
+                    type="button"
+                    onClick={() => {
+                      form.reset();
+                      setOpen(true);
+                    }}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    {t("onboarding.account.importButton")}
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="w-80 rounded-md">
+                  <DialogHeader className="text-left">
+                    <DialogTitle>
+                      {t("onboarding.account.importDialogTitle")}
+                    </DialogTitle>
+                  </DialogHeader>
+                  <Tabs defaultValue="mnemonic" className="w-full">
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="mnemonic">
+                        {t("importAccount.tabMnemonic")}
+                      </TabsTrigger>
+                      <TabsTrigger value="hexSeed">
+                        {t("importAccount.tabHexSeed")}
+                      </TabsTrigger>
+                      <TabsTrigger value="walletFile">
+                        {t("importAccount.tabWalletFile")}
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="mnemonic">
+                      <Form {...form}>
+                        <form
                           className="w-full"
-                          type="button"
-                          disabled={isSubmitting || !isValid}
-                          aria-label="Import"
-                          onClick={handleSubmit(onSubmit)}
+                          name="importAccountForm"
+                          aria-label="importAccountForm"
                         >
-                          <Download className="mr-2 h-4 w-4" />
-                          {t("onboarding.account.importSubmit")}
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </form>
-              </Form>
+                          <FormField
+                            control={control}
+                            name="mnemonicPhrases"
+                            render={({ field }) => (
+                              <FormItem>
+                                <Label></Label>
+                                <FormControl>
+                                  <Input
+                                    {...field}
+                                    aria-label={field.name}
+                                    autoComplete="off"
+                                    disabled={isSubmitting}
+                                    placeholder={t(
+                                      "onboarding.account.importPlaceholder",
+                                    )}
+                                    type="text"
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t("onboarding.account.importDescription")}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          <MnemonicWordListing
+                            mnemonic={watch().mnemonicPhrases}
+                          />
+                          <div className="mt-4 flex flex-row gap-2">
+                            <DialogClose asChild>
+                              <Button
+                                className="w-full"
+                                type="button"
+                                variant="outline"
+                                aria-label="Cancel"
+                              >
+                                <X className="mr-2 h-4 w-4" />
+                                {t("onboarding.account.importCancel")}
+                              </Button>
+                            </DialogClose>
+                            <Button
+                              className="w-full"
+                              type="button"
+                              disabled={isSubmitting || !isValid}
+                              aria-label="Import"
+                              onClick={handleSubmit(onSubmit)}
+                            >
+                              <Download className="mr-2 h-4 w-4" />
+                              {t("onboarding.account.importSubmit")}
+                            </Button>
+                          </div>
+                        </form>
+                      </Form>
+                    </TabsContent>
+                    <TabsContent value="hexSeed">
+                      <ImportHexSeedForm onImported={onImported} />
+                    </TabsContent>
+                    <TabsContent value="walletFile">
+                      <ImportEncryptedWallet onImported={onImported} />
+                    </TabsContent>
+                  </Tabs>
+                </DialogContent>
+              </Dialog>
             </>
           )}
         </CardFooter>
