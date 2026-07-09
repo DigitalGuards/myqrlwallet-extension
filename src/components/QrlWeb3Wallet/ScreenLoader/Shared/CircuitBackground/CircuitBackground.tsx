@@ -1,8 +1,10 @@
 const CircuitBackground = () => {
   return (
     <img
-      className="absolute inset-0 h-full w-full animate-pulse overflow-hidden object-cover object-center opacity-20 [animation-duration:8s]"
-      src="circuit.svg"
+      className="pointer-events-none absolute inset-0 z-0 h-full w-full object-contain object-center opacity-[0.08]"
+      src="tree.svg"
+      alt=""
+      aria-hidden
     />
   );
 };
