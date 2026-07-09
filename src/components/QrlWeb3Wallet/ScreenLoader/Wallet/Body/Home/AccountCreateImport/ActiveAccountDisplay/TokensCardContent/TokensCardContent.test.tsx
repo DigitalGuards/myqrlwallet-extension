@@ -6,10 +6,6 @@ import { MemoryRouter } from "react-router-dom";
 import TokensCardContent from "./TokensCardContent";
 
 vi.mock(
-  "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/NativeToken/NativeToken",
-  () => ({ default: () => <div>Mocked Native token</div> }),
-);
-vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/ZRC20Tokens/ZRC20Tokens",
   () => ({ default: () => <div>Mocked ZRC 20 token</div> }),
 );
@@ -29,7 +25,14 @@ describe("TokensCardContent", () => {
   it("should render the token card content component", () => {
     renderComponent();
 
-    expect(screen.getByText("Mocked Native token")).toBeInTheDocument();
     expect(screen.getByText("Mocked ZRC 20 token")).toBeInTheDocument();
+  });
+
+  it("should not list the native asset as a token", () => {
+    renderComponent();
+
+    // QRL is the chain's native asset; its balance lives on the Active
+    // account card, never in the token list.
+    expect(screen.queryByText(/native/i)).not.toBeInTheDocument();
   });
 });
