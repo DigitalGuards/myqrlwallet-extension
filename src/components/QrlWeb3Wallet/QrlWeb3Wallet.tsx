@@ -10,7 +10,7 @@ const qrlWalletBodyClasses = cva(
   {
     variants: {
       mode: {
-        popup: ["w-[23rem] h-[48rem]"],
+        popup: ["w-[23rem] h-[600px]"],
         tab: ["w-full max-w-lg mx-auto h-screen border-2 rounded-md shadow-2xl"],
         sidepanel: ["w-full max-w-lg mx-auto h-screen"],
       },
