@@ -8,7 +8,8 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        default:
+          "bg-gradient-to-b from-[hsl(199,89%,74%)] to-[hsl(199,89%,58%)] text-slate-950 shadow-[0_0_16px_-4px_hsl(var(--blue-accent))] transition-all hover:from-[hsl(199,89%,78%)] hover:to-[hsl(199,89%,62%)] hover:shadow-[0_0_24px_-2px_hsl(var(--blue-accent))]",
         constructive:
           "bg-constructive text-constructive-foreground hover:bg-constructive/90",
         destructive:
