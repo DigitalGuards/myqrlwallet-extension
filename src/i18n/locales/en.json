@@ -1,5 +1,5 @@
 {
-  "lock.title": "QRL Web3 Wallet",
+  "lock.title": "MyQRLWallet",
   "lock.unlock.title": "Unlock Wallet",
   "lock.unlock.description": "Unlock the wallet with your password",
   "lock.unlock.passwordPlaceholder": "Password",
@@ -10,7 +10,7 @@
   "lock.unlock.errorFailed": "Failed to unlock wallet. Please try again.",
 
   "welcome.title": "Welcome",
-  "welcome.description": "Let's start using the QRL Web3 Wallet",
+  "welcome.description": "Let's start using MyQRLWallet",
   "welcome.tagline1": "We are",
   "welcome.tagline2": "The Quantum",
   "welcome.tagline3": "Resistant Ledger",
@@ -45,7 +45,7 @@
   "onboarding.account.importError": "Account could not be imported from your mnemonic phrases",
   "onboarding.account.importMnemonicError": "There was an error while reading the mnemonic phrases. {{error}}",
   "onboarding.completed.title": "That's All",
-  "onboarding.completed.description": "The QRL Web3 Wallet is now ready for use. You can open it from the browser extensions.",
+  "onboarding.completed.description": "MyQRLWallet is now ready for use. You can open it from the browser extensions.",
   "onboarding.completed.button": "Done",
 
   "home.activeAccount": "Active account",
@@ -275,7 +275,7 @@
   "dapp.confirmDisconnect": "Confirm Disconnect",
   "dapp.connectivityWithWallet": "Connectivity with wallet",
   "dapp.notConnected": "Not Connected",
-  "dapp.notConnectedDescription": "QRL Web3 Wallet is not connected with this website.",
+  "dapp.notConnectedDescription": "MyQRLWallet is not connected with this website.",
   "dapp.connectedAccountsDescription": "The following accounts are connected, and can interact with this website.",
   "dapp.editConnectedAccounts": "Edit connected accounts",
   "dapp.editAccounts": "Edit accounts",

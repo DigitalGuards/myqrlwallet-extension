@@ -40,7 +40,7 @@ describe("OnboardingCompleted", () => {
     );
     expect(
       screen.getByText(
-        "The QRL Web3 Wallet is now ready for use. You can open it from the browser extensions.",
+        "MyQRLWallet is now ready for use. You can open it from the browser extensions.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByTestId("onboarding-completed")).toBeInTheDocument();

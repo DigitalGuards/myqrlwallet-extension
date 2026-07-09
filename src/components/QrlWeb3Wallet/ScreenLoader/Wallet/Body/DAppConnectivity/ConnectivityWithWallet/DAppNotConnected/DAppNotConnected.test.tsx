@@ -23,7 +23,7 @@ describe("DAppNotConnected", () => {
     expect(screen.getByTestId("unlink-icon")).toBeInTheDocument();
     expect(screen.getByText("Not Connected")).toBeInTheDocument();
     expect(
-      screen.getByText("QRL Web3 Wallet is not connected with this website."),
+      screen.getByText("MyQRLWallet is not connected with this website."),
     ).toBeInTheDocument();
   });
 });

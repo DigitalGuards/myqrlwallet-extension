@@ -599,7 +599,7 @@ const TokenTransfer = observer(() => {
                 <X className="mr-2 h-4 w-4" />
                 {t('transfer.cancelButton')}
               </Button>
-              <Button disabled={isSubmitting || !isValid || !!balanceError || qrnsResolving || (isQrnsName(watchedReceiver) && !resolvedAddress)} className="w-full">
+              <Button variant="secondary" disabled={isSubmitting || !isValid || !!balanceError || qrnsResolving || (isQrnsName(watchedReceiver) && !resolvedAddress)} className="w-full">
                 {isSubmitting ? (
                   <Loader className="mr-2 h-4 w-4 animate-spin" />
                 ) : (

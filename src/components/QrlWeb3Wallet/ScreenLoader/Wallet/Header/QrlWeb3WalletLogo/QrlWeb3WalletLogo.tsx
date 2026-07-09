@@ -17,7 +17,7 @@ const QrlWeb3WalletLogo = () => {
           <img
             className="h-6 w-6"
             src="icons/qrl/default.png"
-            alt="QRL Web3 Wallet Logo"
+            alt="MyQRLWallet Logo"
           />
         </TooltipTrigger>
         <TooltipContent side="bottom">

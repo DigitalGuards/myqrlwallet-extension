@@ -37,7 +37,7 @@ describe("Welcome", () => {
       screen.getByRole("heading", { level: 3, name: "Welcome" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Let's start using the QRL Web3 Wallet"),
+      screen.getByText("Let's start using MyQRLWallet"),
     ).toBeInTheDocument();
     expect(screen.getByText("We are")).toBeInTheDocument();
     expect(screen.getByText("The Quantum")).toBeInTheDocument();

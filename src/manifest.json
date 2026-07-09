@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "minimum_chrome_version": "114",
-  "name": "QRL Web3 Wallet",
-  "description": "A web3 wallet that run on the QRL blockchain.",
+  "name": "MyQRLWallet",
+  "description": "MyQRLWallet: a quantum-resistant web3 wallet for the QRL blockchain.",
   "icons": {
     "16": "icons/qrl/16.png",
     "24": "icons/qrl/24.png",
@@ -12,7 +12,7 @@
   },
   "action": {
     "default_popup": "index.html",
-    "default_title": "QRL Web3 Wallet",
+    "default_title": "MyQRLWallet",
     "default_icon": {
       "16": "icons/qrl/16.png",
       "128": "icons/qrl/128.png"

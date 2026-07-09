@@ -95,7 +95,7 @@ const AccountCreateImport = observer(() => {
                 to={ROUTES.TOKEN_TRANSFER}
                 state={{ shouldStartFresh: true }}
               >
-                <Button className="w-full" type="button">
+                <Button className="w-full" type="button" variant="secondary">
                   <Send className="mr-2 h-4 w-4" />
                   {t('home.sendQuanta')}
                 </Button>

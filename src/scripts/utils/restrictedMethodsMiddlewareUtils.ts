@@ -230,7 +230,7 @@ export const checkUrlOriginHasBeenConnected = async (url: string) => {
   return {
     canProceed: hasConnectedAccounts,
     proceedError: providerErrors.unauthorized({
-      message: "The dApp is not connected to the QRL Web3 Wallet.",
+      message: "The dApp is not connected to MyQRLWallet.",
     }),
   };
 };

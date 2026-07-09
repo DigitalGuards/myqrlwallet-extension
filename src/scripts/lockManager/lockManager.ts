@@ -283,7 +283,7 @@ class LockManager {
   static getDecryptedKeys() {
     if (!this.decryptedKeys) {
       this.clearDecryptedKeys();
-      throw new Error("QRL Web3 Wallet is locked");
+      throw new Error("MyQRLWallet is locked");
     }
     return this.decryptedKeys;
   }
