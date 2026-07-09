@@ -239,6 +239,13 @@ class LockManager {
   static async encryptAccount(accountData: EncryptAccountType) {
     const { password: rawPassword, seed } = accountData;
     const password = rawPassword.normalize("NFC");
+    // Never persist a keystore under an empty password: the Argon2id KDF
+    // accepts "" and the ciphertext is then trivially recomputable from the
+    // cleartext salt stored beside it. Defence in depth behind
+    // getWalletPassword's own guard.
+    if (!password) {
+      throw new Error("Refusing to encrypt an account without a password");
+    }
     const keystores = await StorageUtil.getKeystores();
     const encryptedKeyStore = await encrypt(seed, password);
     const updatedKeyStores = [...keystores, encryptedKeyStore];
@@ -277,7 +284,16 @@ class LockManager {
   static getWalletPassword() {
     // Force the locked-state error if keys are gone.
     this.getDecryptedKeys();
-    return this.walletPassword ?? "";
+    // After a service-worker restart the decrypted keys self-heal from
+    // session storage but the password does NOT (it is memory-only). If we
+    // returned "" here, adding or importing an account would silently
+    // encrypt the new keystore under an empty password, which anyone who
+    // reads the stored keystore could recompute. Fail closed instead: the
+    // popup re-arms us from its cached password, or the user re-unlocks.
+    if (!this.walletPassword) {
+      throw new Error("MyQRLWallet password is unavailable");
+    }
+    return this.walletPassword;
   }
 
   static getDecryptedKeys() {

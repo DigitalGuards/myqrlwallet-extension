@@ -1,3 +1,4 @@
+import { Alert, AlertDescription } from "@/components/UI/Alert";
 import { scrollShellToTop } from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/UI/tabs";
 import withSuspense from "@/functions/withSuspense";
@@ -46,6 +47,7 @@ const ImportAccount = observer(() => {
   const { t } = useTranslation();
   const [account, setAccount] = useState<Web3BaseWalletAccount>();
   const [hasAccountImported, setHasAccountImported] = useState(false);
+  const [finalizeError, setFinalizeError] = useState("");
   const { lockStore, qrlStore } = useStore();
   const { encryptAccount, getWalletPassword } = lockStore;
   const { setActiveAccount } = qrlStore;
@@ -58,8 +60,16 @@ const ImportAccount = observer(() => {
     scrollShellToTop();
     setAccount(importedAccount);
     await setActiveAccount(importedAccount.address);
-    const password = await getWalletPassword();
-    await encryptAccount(importedAccount, password);
+    try {
+      // Fail closed if the password is unavailable (SW restarted, no cached
+      // password): never persist the keystore under an empty password.
+      const password = await getWalletPassword();
+      await encryptAccount(importedAccount, password);
+    } catch {
+      setFinalizeError(t("account.passwordUnavailable"));
+      return;
+    }
+    setFinalizeError("");
     setHasAccountImported(true);
   };
 
@@ -72,6 +82,11 @@ const ImportAccount = observer(() => {
         ) : (
           <>
             <BackButton />
+            {finalizeError && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertDescription>{finalizeError}</AlertDescription>
+              </Alert>
+            )}
             <Tabs defaultValue="mnemonic" className="w-full">
               <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="mnemonic">

@@ -180,7 +180,7 @@ const mockedStoreValues: StoreType = {
     lock: async () => {},
     initializeStorageListener: () => {},
     getWalletPassword: async () => {
-      return "";
+      return "test-password";
     },
     getMnemonicPhrases: async (accountAddress: string) => {
       return accountAddress;

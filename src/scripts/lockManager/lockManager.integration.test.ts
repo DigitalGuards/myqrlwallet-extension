@@ -239,9 +239,9 @@ describe("Auto-lock integration scenarios", () => {
       await advanceAndFireAlarms(minutes(10));
       expect(await checkLocked()).toBe(false);
 
-      // Activity at 10 min — sends a GET_WALLET_PASSWORD message
-      // This triggers the activity reset in lockManagerListener
-      await sendMessage(LOCK_MANAGER_MESSAGES.GET_WALLET_PASSWORD);
+      // Activity at 10 min — a decrypted-keys fetch (e.g. the user signs or
+      // checks a balance) triggers the activity reset in lockManagerListener.
+      await sendMessage(LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS);
       // The alarm was recreated with fresh 15 minutes from now
 
       // 10 more minutes (total 20 min from start, but only 10 from last activity)

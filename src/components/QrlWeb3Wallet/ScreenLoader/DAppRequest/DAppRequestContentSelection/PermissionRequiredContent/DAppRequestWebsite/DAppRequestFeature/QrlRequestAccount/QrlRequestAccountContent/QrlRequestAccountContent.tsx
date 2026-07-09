@@ -10,7 +10,7 @@ import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 
 const QrlRequestAccountContent = observer(() => {
   const { t } = useTranslation();
-  const { dAppRequestStore } = useStore();
+  const { dAppRequestStore, qrlStore } = useStore();
   const { addToResponseData, setCanProceed, currentTabData } = dAppRequestStore;
 
   const [isLoadingBlockchains, setIsLoadingBlockchains] = useState(true);
@@ -25,9 +25,33 @@ const QrlRequestAccountContent = observer(() => {
   useEffect(() => {
     (async () => {
       const allBlockchains = await StorageUtil.getAllBlockChains();
-      setSelectedAccounts(currentTabData?.connectedAccounts ?? []);
+
+      // First connect for this site: preselect the active account and the
+      // wallet's current chain so the default approval is a single click.
+      // Sites with prior grants keep exactly what they had.
+      const storedAccounts = currentTabData?.connectedAccounts ?? [];
+      const activeAddress = qrlStore.activeAccount.accountAddress;
+      setSelectedAccounts(
+        storedAccounts.length
+          ? storedAccounts
+          : activeAddress
+            ? [activeAddress]
+            : [],
+      );
+
+      const storedBlockchains = currentTabData?.connectedBlockchains ?? [];
+      const activeBlockchain = allBlockchains.find(
+        (blockchain) =>
+          blockchain.chainId === qrlStore.qrlConnection.blockchain.chainId,
+      );
       setAllBlockchains(allBlockchains);
-      setSelectedBlockchains(currentTabData?.connectedBlockchains ?? []);
+      setSelectedBlockchains(
+        storedBlockchains.length
+          ? storedBlockchains
+          : activeBlockchain
+            ? [activeBlockchain]
+            : [],
+      );
       setIsLoadingBlockchains(false);
     })();
   }, [currentTabData]);

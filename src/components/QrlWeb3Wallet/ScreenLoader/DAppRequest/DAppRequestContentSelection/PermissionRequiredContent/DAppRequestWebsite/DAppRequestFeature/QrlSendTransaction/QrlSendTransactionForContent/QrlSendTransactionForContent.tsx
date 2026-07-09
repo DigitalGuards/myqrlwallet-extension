@@ -206,9 +206,21 @@ const QrlSendTransactionForContent = observer(
         } else {
           // Regular account - use mnemonic-based signing
           const mnemonicPhrases = await getMnemonicPhrases(from ?? "");
+          const seed = getHexSeedFromMnemonic(mnemonicPhrases);
+          // Guard, as every other signing surface does: the seed must derive
+          // the requested sender. Fails fast if `from` is a stale/removed
+          // account (getMnemonicPhrases returns "") instead of feeding an
+          // empty seed into signTransaction.
+          const addressFromMnemonic =
+            qrlInstance?.accounts.seedToAccount(seed)?.address;
+          if ((from ?? "") !== addressFromMnemonic) {
+            throw new Error(
+              "Signing account does not match the requested sender",
+            );
+          }
           const signedTransaction = await qrlInstance?.accounts.signTransaction(
             transactionObject,
-            getHexSeedFromMnemonic(mnemonicPhrases),
+            seed,
           );
           rawTransactionToSend = signedTransaction?.rawTransaction;
         }
@@ -308,9 +320,21 @@ const QrlSendTransactionForContent = observer(
         } else {
           // Regular account - use mnemonic-based signing
           const mnemonicPhrases = await getMnemonicPhrases(from ?? "");
+          const seed = getHexSeedFromMnemonic(mnemonicPhrases);
+          // Guard, as every other signing surface does: the seed must derive
+          // the requested sender. Fails fast if `from` is a stale/removed
+          // account (getMnemonicPhrases returns "") instead of feeding an
+          // empty seed into signTransaction.
+          const addressFromMnemonic =
+            qrlInstance?.accounts.seedToAccount(seed)?.address;
+          if ((from ?? "") !== addressFromMnemonic) {
+            throw new Error(
+              "Signing account does not match the requested sender",
+            );
+          }
           const signedTransaction = await qrlInstance?.accounts.signTransaction(
             transactionObject,
-            getHexSeedFromMnemonic(mnemonicPhrases),
+            seed,
           );
           rawTransactionToSend = signedTransaction?.rawTransaction;
         }
@@ -401,7 +425,7 @@ const QrlSendTransactionForContent = observer(
             <div className="flex flex-col gap-1">
               <div>{t('dapp.sendTransaction.data')}</div>
               <div className="flex gap-2">
-                <div className="max-h-[8rem] w-full overflow-hidden break-words font-bold text-secondary">
+                <div className="max-h-[8rem] w-full overflow-auto break-words font-bold text-secondary">
                   {data}
                 </div>
                 <Tooltip delayDuration={0}>

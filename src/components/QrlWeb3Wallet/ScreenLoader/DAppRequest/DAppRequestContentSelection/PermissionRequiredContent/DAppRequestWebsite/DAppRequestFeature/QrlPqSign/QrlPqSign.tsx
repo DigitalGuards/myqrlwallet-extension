@@ -59,6 +59,20 @@ const QrlPqSign = observer(() => {
     ? (payload as TypedDataPayload)
     : null;
 
+  // The ML-DSA digest binds the whole QRLDomain (hashStruct("QRLDomain",
+  // ...)), so surface the fields that decide WHICH contract/chain the
+  // signature authorises. Showing only domain.name would be blind signing.
+  const domain = typedPayload?.domain;
+  const verifyingContract =
+    typeof domain?.verifyingContract === "string"
+      ? domain.verifyingContract
+      : "";
+  const domainChainId =
+    domain?.chainId !== undefined && domain?.chainId !== null
+      ? String(domain.chainId)
+      : "";
+  const hasChainId = domainChainId !== "";
+
   useEffect(() => {
     if (isConnected) {
       setOnPermissionCallBack(async (hasApproved: boolean) => {
@@ -107,10 +121,33 @@ const QrlPqSign = observer(() => {
         <div className="flex flex-col gap-1">
           <div>{t("dapp.pqSignature.typedData")}</div>
           <div className="text-xs text-yellow-600">{t("dapp.pqSignature.typedWarning")}</div>
-          <div className="max-h-[10rem] overflow-auto rounded bg-muted/40 p-2 font-mono text-xs text-secondary">
-            <div>
+          <div className="flex flex-col gap-1 rounded bg-muted/40 p-2 text-xs">
+            <div className="font-semibold text-secondary">
               {String(typedPayload?.domain?.name ?? "")} · {typedPayload?.primaryType}
             </div>
+            {verifyingContract && (
+              <div className="break-all">
+                <span className="text-muted-foreground">
+                  {t("dapp.pqSignature.verifyingContract")}:
+                </span>{" "}
+                <span className="font-mono text-secondary">{verifyingContract}</span>
+              </div>
+            )}
+            {hasChainId && (
+              <div>
+                <span className="text-muted-foreground">
+                  {t("dapp.pqSignature.chainId")}:
+                </span>{" "}
+                <span className="font-mono text-secondary">{domainChainId}</span>
+              </div>
+            )}
+          </div>
+          {!hasChainId && (
+            <div className="rounded border border-yellow-500 bg-yellow-50 p-2 text-xs text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-200">
+              {t("dapp.pqSignature.noChainId")}
+            </div>
+          )}
+          <div className="max-h-[10rem] overflow-auto rounded bg-muted/40 p-2 font-mono text-xs text-secondary">
             <pre className="whitespace-pre-wrap break-words">
               {JSON.stringify(typedPayload?.message ?? {}, null, 2)}
             </pre>
@@ -126,7 +163,7 @@ const QrlPqSign = observer(() => {
             <div className="text-xs text-red-600">{t("dapp.pqSignature.hiddenChars")}</div>
           )}
           <div className="flex justify-between gap-2">
-            <div className="max-h-[8rem] w-full overflow-hidden break-words font-bold text-secondary">
+            <div className="max-h-[8rem] w-full overflow-auto break-words font-bold text-secondary">
               {challenge}
             </div>
             <Tooltip delayDuration={0}>

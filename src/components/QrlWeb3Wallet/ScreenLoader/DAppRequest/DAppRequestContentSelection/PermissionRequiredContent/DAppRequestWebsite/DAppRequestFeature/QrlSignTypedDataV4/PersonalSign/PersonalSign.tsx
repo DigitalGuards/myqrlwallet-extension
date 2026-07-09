@@ -52,7 +52,10 @@ const PersonalSign = observer(() => {
     if (isConnected) {
       const onPermissionCallBack = async (hasApproved: boolean) => {
         if (hasApproved) {
-          personalSign();
+          // Must await: onPermission reads responseData the moment this
+          // resolves, so a bare call would send the dApp an empty result
+          // before signing finishes.
+          await personalSign();
         }
       };
       setOnPermissionCallBack(onPermissionCallBack);
@@ -120,7 +123,7 @@ const PersonalSign = observer(() => {
           </div>
         )}
         <div className="flex justify-between gap-2">
-          <div className="max-h-[8rem] w-full overflow-hidden break-words font-bold text-secondary">
+          <div className="max-h-[8rem] w-full overflow-auto break-words font-bold text-secondary">
             {challenge}
           </div>
           <Tooltip delayDuration={0}>

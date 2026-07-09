@@ -203,7 +203,10 @@ const QrlSignTypedDataV4Content = observer(() => {
     if (isConnected) {
       const onPermissionCallBack = async (hasApproved: boolean) => {
         if (hasApproved) {
-          signTypedDataV4();
+          // Must await: onPermission reads responseData the moment this
+          // resolves, so a bare call would send the dApp an empty result
+          // before signing finishes.
+          await signTypedDataV4();
         }
       };
       setOnPermissionCallBack(onPermissionCallBack);

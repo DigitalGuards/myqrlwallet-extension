@@ -69,6 +69,10 @@ describe("QrlSendTransactionForContent", () => {
           getTransactionCount: async () => 0,
           getChainId: async () => 1,
           accounts: {
+            // seedToAccount backs the sender-derivation guard in the signing path.
+            seedToAccount: () => ({
+              address: "Q20D20b8026B8F02540246f58120ddAAf35AECD9B",
+            }),
             signTransaction: async () => ({
               rawTransaction: "0xsignedraw",
             }),
@@ -261,6 +265,10 @@ describe("QrlSendTransactionForContent", () => {
             getTransactionCount: async () => 0,
             getChainId: async () => 1,
             accounts: {
+              // seedToAccount backs the sender-derivation guard in the signing path.
+              seedToAccount: () => ({
+                address: "Q20D20b8026B8F02540246f58120ddAAf35AECD9B",
+              }),
               signTransaction: mockSignTransaction,
             },
             sendSignedTransaction: mockSendSignedTransaction,
@@ -335,6 +343,10 @@ describe("QrlSendTransactionForContent", () => {
               getTransactionCount: async () => 0,
               getChainId: async () => 1,
               accounts: {
+                // seedToAccount backs the sender-derivation guard in the signing path.
+                seedToAccount: () => ({
+                  address: "Q20D20b8026B8F02540246f58120ddAAf35AECD9B",
+                }),
                 signTransaction: async () => ({
                   rawTransaction: "0xsignedraw",
                 }),
@@ -409,6 +421,10 @@ describe("QrlSendTransactionForContent", () => {
               getGasPrice: async () => BigInt(1000),
               getTransactionCount: async () => 0,
               accounts: {
+                // seedToAccount backs the sender-derivation guard in the signing path.
+                seedToAccount: () => ({
+                  address: "Q20D20b8026B8F02540246f58120ddAAf35AECD9B",
+                }),
                 signTransaction: async () => ({
                   rawTransaction: "0xsignedlegacy",
                 }),
@@ -501,6 +517,10 @@ describe("QrlSendTransactionForContent", () => {
               getTransactionCount: async () => 0,
               getChainId: async () => 1,
               accounts: {
+                // seedToAccount backs the sender-derivation guard in the signing path.
+                seedToAccount: () => ({
+                  address: "Q20D20b8026B8F02540246f58120ddAAf35AECD9B",
+                }),
                 signTransaction: async () => ({
                   rawTransaction: "0xsigneddeploy",
                 }),
@@ -645,6 +665,10 @@ describe("QrlSendTransactionForContent", () => {
               getGasPrice: async () => BigInt(1000),
               getTransactionCount: async () => 0,
               accounts: {
+                // seedToAccount backs the sender-derivation guard in the signing path.
+                seedToAccount: () => ({
+                  address: "Q20D20b8026B8F02540246f58120ddAAf35AECD9B",
+                }),
                 signTransaction: async () => ({
                   rawTransaction: undefined,
                 }),

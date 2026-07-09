@@ -6,7 +6,10 @@ import {
 import type {
   ChangePasswordWorkerResponse,
 } from "@/scripts/workers/changePasswordWorker";
-import StorageUtil, { LockState } from "@/utilities/storageUtil";
+import StorageUtil, {
+  LockState,
+  PRICE_CACHE_IDENTIFIER,
+} from "@/utilities/storageUtil";
 import { KeyStore, Web3BaseWalletAccount } from "@theqrl/web3";
 import { action, makeAutoObservable, runInAction } from "mobx";
 import browser from "webextension-polyfill";
@@ -109,15 +112,56 @@ class LockStore {
   }
 
   initializeStorageListener() {
-    browser.storage.onChanged.addListener(async () => {
+    browser.storage.onChanged.addListener(async (changes, areaName) => {
+      // Ignore the automated 60s price-cache refresh. It is not user
+      // activity, so letting it drive readLockState (which pings the SW)
+      // would keep re-arming the inactivity auto-lock and the wallet would
+      // never lock while a surface stays open.
+      const changedKeys = Object.keys(changes);
+      if (
+        areaName === "local" &&
+        changedKeys.length > 0 &&
+        changedKeys.every((key) => key === PRICE_CACHE_IDENTIFIER)
+      ) {
+        return;
+      }
       await this.readLockState();
     });
   }
 
-  async getWalletPassword() {
-    const password = await browser.runtime.sendMessage({
-      name: LOCK_MANAGER_MESSAGES.GET_WALLET_PASSWORD,
-    });
+  async getWalletPassword(): Promise<string> {
+    const requestPassword = async (): Promise<string | undefined> => {
+      try {
+        // The SW rejects (not returns "") when its memory-only password was
+        // lost to a restart; treat both a reject and a falsy value as "gone".
+        return (await browser.runtime.sendMessage({
+          name: LOCK_MANAGER_MESSAGES.GET_WALLET_PASSWORD,
+        })) as string | undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
+    let password = await requestPassword();
+    // If this popup still holds the password + keys from unlock, re-arm the SW
+    // and retry once so adding an account stays a no-friction path after a SW
+    // restart. Only when cachedKeys is present, so we never overwrite the SW's
+    // session-restored keys with an empty set.
+    if (!password && this.cachedPassword && this.cachedKeys) {
+      try {
+        await this.sendWithRetry({
+          name: LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
+          data: { keys: this.cachedKeys, walletPassword: this.cachedPassword },
+        });
+        password = await requestPassword();
+      } catch {
+        // fall through to the guard below
+      }
+    }
+    if (!password) {
+      // Never let the caller encrypt with "": force a re-unlock instead.
+      throw new Error("WALLET_PASSWORD_UNAVAILABLE");
+    }
     return password;
   }
 
@@ -134,9 +178,14 @@ class LockStore {
   }
 
   async encryptAccount(account: Web3BaseWalletAccount, password: string) {
+    // Never persist a keystore under an empty password (the SW rejects it too;
+    // this stops the round-trip early and keeps the guarantee visible here).
+    if (!password) {
+      throw new Error("WALLET_PASSWORD_UNAVAILABLE");
+    }
     const accountData: EncryptAccountType = {
       seed: account?.seed ?? "",
-      password: password ?? "",
+      password,
     };
     await browser.runtime.sendMessage({
       name: LOCK_MANAGER_MESSAGES.ENCRYPT_ACCOUNT,

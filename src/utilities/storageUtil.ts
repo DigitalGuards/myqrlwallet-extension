@@ -55,7 +55,9 @@ const NFT_COLLECTIONS_IDENTIFIER = "NFT_COLLECTIONS";
 const ALL_NFT_COLLECTIONS_IDENTIFIER = "ALL_NFT_COLLECTIONS";
 
 const SETTINGS_IDENTIFIER = "SETTINGS";
-const PRICE_CACHE_IDENTIFIER = "PRICE_CACHE";
+// Exported so the lock-state storage listener can ignore automated price
+// refreshes (they must not count as user activity for auto-lock).
+export const PRICE_CACHE_IDENTIFIER = "PRICE_CACHE";
 
 export type WalletSettings = {
   themePreference?: "system" | "light" | "dark";

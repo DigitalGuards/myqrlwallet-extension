@@ -22,7 +22,26 @@ import Web3, {
   Web3QRLInterface,
   utils,
 } from "@theqrl/web3";
+import { BigNumber } from "bignumber.js";
 import { action, makeAutoObservable, observable, runInAction } from "mobx";
+
+/**
+ * Convert a human token amount (a JS number from the form) to integer base
+ * units without float error. `value * 10 ** decimals` overflows float
+ * precision for high-decimal tokens (signing a corrupted amount) and yields
+ * non-integers like 110.00000000000001 that `BigInt()` rejects with a
+ * RangeError (blocking everyday sends). BigNumber shifts the decimal point on
+ * the string representation, then floors so we can never send more than the
+ * displayed amount.
+ */
+const toTokenBaseUnits = (value: number, decimals: number): bigint =>
+  BigInt(
+    // Stringify first: bignumber.js 4.1.0 throws on a number literal with more
+    // than 15 significant digits, which a high-precision amount can exceed.
+    new BigNumber(String(value))
+      .times(new BigNumber(10).pow(decimals))
+      .toFixed(0, BigNumber.ROUND_DOWN),
+  );
 
 type ActiveAccountType = {
   accountAddress: string;
@@ -665,7 +684,7 @@ class QrlStore {
       );
       const contractTransfer = contract.methods.transfer(
         to,
-        BigInt(value * 10 ** decimals),
+        toTokenBaseUnits(value, decimals),
       );
       const estimatedGasLimit = Number(
         await contractTransfer.estimateGas({ from }),
@@ -714,7 +733,7 @@ class QrlStore {
         );
         const contractTransfer = contract.methods.transfer(
           to,
-          BigInt(value * 10 ** decimals),
+          toTokenBaseUnits(value, decimals),
         );
         const { maxFeePerGas, maxPriorityFeePerGas } =
           await this.getGasFeeData(overrides);
@@ -815,18 +834,26 @@ class QrlStore {
           type: 2,
         };
       } else {
+        // Any token/NFT entry carries a contract address; the real
+        // transaction goes TO the contract with the transfer calldata, not to
+        // the human recipient. Keying only off isZrc20Token sent NFT
+        // replacements to the recipient EOA with the calldata as inert bytes,
+        // consuming the nonce and destroying the transfer while it reported
+        // success. Route every contract interaction to its contract, with
+        // value 0, and preserve the original calldata.
+        const isContractInteraction = !!originalTx.tokenContractAddress;
         transactionObject = {
           from: originalTx.from,
-          to: originalTx.isZrc20Token
+          to: isContractInteraction
             ? originalTx.tokenContractAddress
             : originalTx.to,
-          value: originalTx.isZrc20Token
+          value: isContractInteraction
             ? "0"
             : utils.toPlanck(originalTx.amount, "quanta"),
           nonce,
           gasLimit:
             originalTx.gasLimit ??
-            (originalTx.isZrc20Token
+            (isContractInteraction
               ? ZRC_20_TOKEN_UNITS_OF_GAS
               : NATIVE_TOKEN_UNITS_OF_GAS),
           maxFeePerGas: `0x${finalMaxFee.toString(16)}`,

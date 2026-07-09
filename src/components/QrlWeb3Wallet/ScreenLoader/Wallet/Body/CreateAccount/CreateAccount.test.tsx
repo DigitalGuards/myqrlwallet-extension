@@ -122,6 +122,52 @@ describe("CreateAccount", () => {
     expect(continueButton).toBeEnabled();
   });
 
+  it("should show an error and not reveal the mnemonic when the password is unavailable", async () => {
+    renderComponent(
+      mockedStore({
+        lockStore: {
+          getWalletPassword: async () => {
+            throw new Error("WALLET_PASSWORD_UNAVAILABLE");
+          },
+        },
+        qrlStore: {
+          qrlInstance: {
+            accounts: {
+              create: () => ({
+                address: "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1",
+                seed: "",
+                sign: () => ({ messageHash: "", signature: "", message: "" }),
+                signTransaction: async () => ({
+                  messageHash: "",
+                  rawTransaction: "",
+                  signature: "",
+                  transactionHash: "",
+                }),
+                encrypt: async () => {
+                  throw new Error("Not implemented");
+                },
+              }),
+            },
+          },
+        },
+      }),
+    );
+
+    await act(async () => {
+      await userEvent.click(
+        screen.getByRole("button", { name: "Create account" }),
+      );
+    });
+
+    expect(
+      await screen.findByText(
+        "Your unlocked session expired. Lock the wallet and unlock it again, then retry.",
+      ),
+    ).toBeInTheDocument();
+    // The seed must not be persisted or revealed on the failure path.
+    expect(screen.queryByText("Keep this safe")).not.toBeInTheDocument();
+  });
+
   it("should render the account creation success component once the mnemonic phrases are downloaded and confirmed", async () => {
     renderComponent(
       mockedStore({

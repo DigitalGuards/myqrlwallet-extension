@@ -234,6 +234,13 @@ const TransactionDetail = observer(() => {
           chainId,
           pendingStatus: "pending",
           nonce: transaction.nonce,
+          // Carry the fields a subsequent speed-up needs to rebuild the
+          // transaction faithfully. Dropping data/gasLimit made a second
+          // speed-up of a token/NFT transfer send an empty contract call.
+          data: transaction.data,
+          gasLimit: transaction.gasLimit,
+          maxFeePerGas: transaction.maxFeePerGas,
+          maxPriorityFeePerGas: transaction.maxPriorityFeePerGas,
         };
 
         await transactionHistoryStore.addTransaction(
