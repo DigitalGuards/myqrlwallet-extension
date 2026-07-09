@@ -9,33 +9,15 @@ import {
 } from "@/components/UI/Card";
 import { MoveRight } from "lucide-react";
 import { ONBOARDING_STEPS, OnboardingStepType } from "../Onboarding";
-import { useStore } from "@/stores/store";
-import { cva } from "class-variance-authority";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
-
-const videoClasses = cva("w-full scale-[2.5]", {
-  variants: {
-    isDarkMode: {
-      true: ["rotate-90"],
-      false: ["rotate-180"],
-    },
-  },
-  defaultVariants: {
-    isDarkMode: false,
-  },
-});
 
 type WelcomeProps = {
   selectStep: (step: OnboardingStepType) => void;
 };
 
 const Welcome = observer(({ selectStep }: WelcomeProps) => {
-  const { settingsStore } = useStore();
-  const { isDarkMode, theme } = settingsStore;
   const { t } = useTranslation();
-
-  const videoSource = "qrl-video-".concat(theme).concat(".mp4");
 
   return (
     <Card className="animate-appear-in shadow-xl">
@@ -46,19 +28,23 @@ const Welcome = observer(({ selectStep }: WelcomeProps) => {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="relative flex h-32 w-full overflow-hidden">
-          <div className="absolute inset-0 z-10 flex flex-col justify-end text-lg text-secondary">
-            <div className="opacity-50">{t("welcome.tagline1")}</div>
-            <div className="font-bold">{t("welcome.tagline2")}</div>
-            <div className="font-bold">{t("welcome.tagline3")}</div>
+        <div className="flex h-32 w-full items-center gap-5 overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/40 to-secondary/10 px-6">
+          <img
+            src="icons/qrl/default.png"
+            alt="MyQRLWallet"
+            className="h-16 w-16 shrink-0 drop-shadow-md"
+          />
+          <div className="flex flex-col leading-tight">
+            <span className="text-xs uppercase tracking-widest text-muted-foreground">
+              {t("welcome.tagline1")}
+            </span>
+            <span className="text-lg font-bold text-secondary">
+              {t("welcome.tagline2")}
+            </span>
+            <span className="text-lg font-bold text-secondary">
+              {t("welcome.tagline3")}
+            </span>
           </div>
-          <video autoPlay muted loop className={videoClasses({ isDarkMode })}>
-            <source
-              src={videoSource}
-              type="video/mp4"
-              data-testid="welcome-video"
-            />
-          </video>
         </div>
       </CardContent>
       <CardFooter>

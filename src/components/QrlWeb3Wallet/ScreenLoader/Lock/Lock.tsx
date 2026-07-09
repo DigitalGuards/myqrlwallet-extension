@@ -10,27 +10,30 @@ const Lock = observer(() => {
   const { t } = useTranslation();
 
   return (
-    <div className="relative flex min-h-full w-full flex-1 flex-col items-center gap-12 p-8">
-      <img
-        className="absolute inset-0 h-full w-full animate-pulse overflow-hidden object-cover object-center"
-        src="circuit.svg"
+    <div className="relative flex min-h-full w-full flex-1 flex-col items-center justify-center gap-10 overflow-hidden p-8">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-secondary/20 blur-3xl"
       />
-      <div className="relative z-10 flex flex-col gap-8">
+      <div className="relative z-10 flex flex-col items-center gap-4">
         <img
-          className="absolute -right-20 -top-16 z-0"
+          className="h-16 w-16 drop-shadow-md"
           src="icons/qrl/default.png"
+          alt="MyQRLWallet"
         />
-        <div className="relative z-10 text-6xl font-bold">
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">
           {t("lock.title")}
-        </div>
+        </h1>
       </div>
-      <div className="relative z-10 w-full">
+      <div className="relative z-10 w-full max-w-sm">
         {isLoading ? (
-          <Loader
-            className="animate-spin text-foreground"
-            size="86"
-            data-testid="loader-icon"
-          />
+          <div className="flex justify-center">
+            <Loader
+              className="animate-spin text-secondary"
+              size="48"
+              data-testid="loader-icon"
+            />
+          </div>
         ) : (
           <LockPassword />
         )}

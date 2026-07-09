@@ -13,8 +13,11 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
 
-const WALLET_VERSION = "0.1.1";
-const REPO_URL = "https://github.com/theQRL/qrl-web3-wallet";
+const WALLET_VERSION =
+  typeof chrome !== "undefined" && chrome.runtime?.getManifest
+    ? chrome.runtime.getManifest().version
+    : "0.4.0";
+const REPO_URL = "https://github.com/DigitalGuards/myqrlwallet-extension";
 
 const SettingsAbout = observer(() => {
   const navigate = useNavigate();
