@@ -1,3 +1,4 @@
+import { scrollShellToTop } from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
 import { ROUTES } from "@/router/router";
 import StorageUtil from "@/utilities/storageUtil";
 import { useEffect, useState } from "react";
@@ -27,7 +28,7 @@ const RouteMonitor = () => {
   }, []);
 
   useEffect(() => {
-    window.scrollTo(0, 0);
+    scrollShellToTop();
     (async () => {
       if (previousRouteUsed) await StorageUtil.setActivePage(pathname);
     })();

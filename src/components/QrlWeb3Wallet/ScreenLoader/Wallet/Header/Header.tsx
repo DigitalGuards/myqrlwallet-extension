@@ -44,7 +44,7 @@ const QrlWeb3WalletMoreOptions = withSuspense(
 
 const Header = () => {
   return (
-    <div className="sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between border-b-2 border-secondary bg-background px-4">
+    <div className="z-20 flex h-16 shrink-0 items-center justify-between border-b-2 border-secondary bg-background px-4">
       <QrlWeb3WalletLogo />
       <div className="flex items-center gap-2">
         <AccountBadge />

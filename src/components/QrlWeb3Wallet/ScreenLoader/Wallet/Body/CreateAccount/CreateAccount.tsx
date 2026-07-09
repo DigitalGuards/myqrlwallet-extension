@@ -1,3 +1,4 @@
+import { scrollShellToTop } from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
 import withSuspense from "@/functions/withSuspense";
 import { useStore } from "@/stores/store";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
@@ -26,7 +27,7 @@ const CreateAccount = observer(() => {
   const [hasMnemonicNoted, setHasMnemonicNoted] = useState(false);
 
   const onAccountCreated = async (account?: Web3BaseWalletAccount) => {
-    window.scrollTo(0, 0);
+    scrollShellToTop();
     if (account) {
       setAccount(account);
       await setActiveAccount(account?.address);
@@ -37,7 +38,7 @@ const CreateAccount = observer(() => {
   };
 
   const onMnemonicNoted = () => {
-    window.scrollTo(0, 0);
+    scrollShellToTop();
     setHasMnemonicNoted(true);
   };
 

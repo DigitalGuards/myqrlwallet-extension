@@ -1,3 +1,4 @@
+import { scrollShellToTop } from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/UI/tabs";
 import withSuspense from "@/functions/withSuspense";
 import { useStore } from "@/stores/store";
@@ -54,7 +55,7 @@ const ImportAccount = observer(() => {
   // on the single existing encrypted-storage route (encryptAccount stores the
   // hex seed via the lock manager keystore).
   const finalizeImport = async (importedAccount: Web3BaseWalletAccount) => {
-    window.scrollTo(0, 0);
+    scrollShellToTop();
     setAccount(importedAccount);
     await setActiveAccount(importedAccount.address);
     const password = await getWalletPassword();

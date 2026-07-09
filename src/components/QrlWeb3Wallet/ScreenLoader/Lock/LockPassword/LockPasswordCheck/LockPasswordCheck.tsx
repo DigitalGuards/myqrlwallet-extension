@@ -1,3 +1,4 @@
+import { scrollShellToTop } from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
 import { Button } from "@/components/UI/Button";
 import {
   Card,
@@ -41,7 +42,7 @@ const LockPasswordCheck = observer(() => {
 
   useEffect(() => {
     setTimeout(() => {
-      window.scrollTo(0, 0);
+      scrollShellToTop();
       setFocus("password");
     }, 0);
   }, [unlockAttempt]);
@@ -58,7 +59,7 @@ const LockPasswordCheck = observer(() => {
   } = form;
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
-    window.scrollTo(0, 0);
+    scrollShellToTop();
     try {
       const unlocked = await unlock(formData.password);
       if (!unlocked) {

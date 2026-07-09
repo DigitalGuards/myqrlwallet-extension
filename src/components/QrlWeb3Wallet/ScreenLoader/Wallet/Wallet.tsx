@@ -1,4 +1,5 @@
 import withSuspense from "@/functions/withSuspense";
+import ScrollRegion from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
 import { lazy } from "react";
 
 const Header = withSuspense(
@@ -17,7 +18,9 @@ const Wallet = () => {
   return (
     <>
       <Header />
-      <Body />
+      <ScrollRegion>
+        <Body />
+      </ScrollRegion>
     </>
   );
 };
