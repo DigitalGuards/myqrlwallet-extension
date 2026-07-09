@@ -12,15 +12,17 @@ import './index.css'
 // index.html pins html/body to height:100% + overflow:hidden (the
 // double-scrollbar fix), which leaves the document without an intrinsic
 // height, so the popup opens collapsed to a sliver: the 600px wallet
-// container is exactly the overflow being hidden. Pin explicit pixel
-// dimensions on the popup surface only; the side panel and expanded tab
+// container is exactly the overflow being hidden. Pin an explicit pixel
+// height on the popup surface only; the side panel and expanded tab
 // (marked ?sidepanel= / ?tab=, same markers as settingsStore) own their
-// viewport and keep the 100% chain.
+// viewport and keep the 100% chain. Width stays unpinned: the body
+// min-width in index.html already gives the popup its intrinsic width,
+// and a hard body width squeezes the wallet container's scrollbar
+// gutter into a horizontal scrollbar.
 const surfaceParams = new URLSearchParams(window.location.search);
 if (!surfaceParams.has('sidepanel') && !surfaceParams.has('tab')) {
   document.documentElement.style.setProperty('height', '600px', 'important');
   document.body.style.setProperty('height', '600px', 'important');
-  document.body.style.setProperty('width', '23rem', 'important');
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

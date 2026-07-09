@@ -6,7 +6,10 @@ import { useStore } from "@/stores/store";
 import { cva } from "class-variance-authority";
 
 const qrlWalletBodyClasses = cva(
-  "relative flex flex-col overflow-y-auto [scrollbar-gutter:stable] bg-background text-foreground",
+  // overflow-x-hidden is load-bearing: setting overflow-y alone makes
+  // overflow-x compute to auto, and the vertical scrollbar's gutter can
+  // squeeze full-width content into a horizontal scrollbar.
+  "relative flex flex-col overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] bg-background text-foreground",
   {
     variants: {
       mode: {
