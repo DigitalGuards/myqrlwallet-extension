@@ -15,6 +15,7 @@ import {
 } from "@/components/UI/Form";
 import { Input } from "@/components/UI/Input";
 import { Label } from "@/components/UI/Label";
+import { Slider } from "@/components/UI/Slider";
 import { NATIVE_TOKEN } from "@/constants/nativeToken";
 import { formatFiatCompact } from "@/functions/formatFiat";
 import { parseBalanceValue } from "@/functions/parseBalanceValue";
@@ -28,7 +29,7 @@ import { validator, utils, qrl } from "@theqrl/web3";
 import { BigNumber } from "bignumber.js";
 import { Loader, Send, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -77,6 +78,7 @@ const TokenTransfer = observer(() => {
     sendRawTransaction,
     qrlInstance,
     getGasFeeData,
+    getNativeTokenGas,
     getAccountBalance,
   } = qrlStore;
   const { accountAddress } = activeAccount;
@@ -89,6 +91,8 @@ const TokenTransfer = observer(() => {
   const [tokenName, setTokenName] = useState(NATIVE_TOKEN.name);
   const [tokenSymbol, setTokenSymbol] = useState(NATIVE_TOKEN.symbol);
   const [estimatedGasFee, setEstimatedGasFee] = useState("");
+  const [nativeGasReserve, setNativeGasReserve] = useState("0");
+  const [sliderValue, setSliderValue] = useState(0);
   const [balanceError, setBalanceError] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [gasFeeOverrides, setGasFeeOverrides] = useState<
@@ -282,6 +286,7 @@ const TokenTransfer = observer(() => {
 
   const resetForm = async () => {
     await StorageUtil.clearTransactionValues();
+    setSliderValue(0);
     reset({ receiverAddress: "", amount: 0 });
   };
 
@@ -423,6 +428,88 @@ const TokenTransfer = observer(() => {
     setBalanceError("");
   }, [watchedAmount, estimatedGasFee, tokenBalance, isZrc20Token, accountAddress]);
 
+  // Worst-case gas reserve for native transfers so the slider's Max can
+  // never pick a value that leaves nothing for gas. Unlike the selector's
+  // estimate this needs no recipient/amount, so Max works on a blank form.
+  // Recomputed when the tier changes (advanced overrides move the limit).
+  useEffect(() => {
+    if (isZrc20Token) {
+      setNativeGasReserve("0");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const fee = await getNativeTokenGas(gasFeeOverrides);
+        if (!cancelled) setNativeGasReserve(fee || "0");
+      } catch {
+        if (!cancelled) setNativeGasReserve("0");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isZrc20Token, gasFeeOverrides, getNativeTokenGas]);
+
+  // Balance available for the amount itself. Tokens spend gas from the
+  // native balance, so their full token balance is sendable.
+  const maxSendable = useMemo(() => {
+    if (isZrc20Token) return parseBalanceValue(tokenBalance);
+    const balance = parseBalanceValue(getAccountBalance(accountAddress));
+    const reserve = new BigNumber(nativeGasReserve || "0");
+    const sendable = balance.minus(reserve);
+    return sendable.gt(0) ? sendable : new BigNumber(0);
+  }, [
+    isZrc20Token,
+    tokenBalance,
+    accountAddress,
+    nativeGasReserve,
+    getAccountBalance,
+  ]);
+
+  const applyPercentage = (percentage: number) => {
+    setSliderValue(percentage);
+    if (maxSendable.isZero()) {
+      form.setValue("amount", 0, { shouldValidate: true });
+      return;
+    }
+    // For 100% round DOWN at 8 decimals so float parsing can never push
+    // the amount above the gas-adjusted balance; below 100% round down to
+    // 6 decimals for a readable value.
+    const formatted =
+      percentage === 100
+        ? maxSendable.toFixed(8, BigNumber.ROUND_DOWN)
+        : maxSendable
+            .times(percentage)
+            .dividedBy(100)
+            .toFixed(6, BigNumber.ROUND_DOWN);
+    const numeric = parseFloat(formatted);
+    form.setValue("amount", Number.isFinite(numeric) ? numeric : 0, {
+      shouldValidate: true,
+      shouldDirty: true,
+    });
+  };
+
+  // Typing an amount moves the slider to match.
+  useEffect(() => {
+    const amountNumber = Number(watchedAmount);
+    if (
+      !Number.isFinite(amountNumber) ||
+      amountNumber <= 0 ||
+      maxSendable.isZero()
+    ) {
+      setSliderValue(0);
+      return;
+    }
+    const percentage = BigNumber.min(
+      new BigNumber(amountNumber).dividedBy(maxSendable).times(100),
+      100,
+    )
+      .round(0, BigNumber.ROUND_HALF_UP)
+      .toNumber();
+    setSliderValue(percentage);
+  }, [watchedAmount, maxSendable]);
+
   const watchedReceiver = watch("receiverAddress");
   const resolveTimerRef = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
@@ -530,18 +617,19 @@ const TokenTransfer = observer(() => {
                       </FormItem>
                     )}
                   />
-                  <div className="flex items-start gap-4">
-                    <FormField
-                      control={control}
-                      name="amount"
-                      render={({ field }) => (
-                        <FormItem>
-                          <Label>{t('transfer.amountLabel')}</Label>
+                  <FormField
+                    control={control}
+                    name="amount"
+                    render={({ field }) => (
+                      <FormItem>
+                        <Label>{t('transfer.amountLabel')}</Label>
+                        <div className="relative">
                           <FormControl>
                             <Input
                               {...field}
                               aria-label={field.name}
                               autoComplete="off"
+                              className="pr-16"
                               disabled={isSubmitting}
                               placeholder={t('transfer.amountPlaceholder')}
                               type="number"
@@ -549,32 +637,74 @@ const TokenTransfer = observer(() => {
                               onWheel={(e) => (e.target as HTMLInputElement).blur()}
                             />
                           </FormControl>
-                          <FormDescription>
-                            {t('transfer.amountDescription')}
-                            {!isZrc20Token &&
-                              settingsStore.showBalanceAndPrice &&
-                              priceStore.getPrice(settingsStore.currency) > 0 &&
-                              field.value > 0 && (
-                                <span className="ml-1 text-muted-foreground">
-                                  {formatFiatCompact(
-                                    field.value,
-                                    priceStore.getPrice(settingsStore.currency),
-                                    settingsStore.currency,
-                                  )}
-                                </span>
-                              )}
-                          </FormDescription>
-                          <FormMessage />
-                          {balanceError && (
-                            <p className="text-sm font-medium text-destructive">
-                              {balanceError}
-                            </p>
-                          )}
-                        </FormItem>
-                      )}
-                    />
-                    <div className="w-8 pt-8 text-lg">{tokenSymbol}</div>
-                  </div>
+                          <span className="pointer-events-none absolute right-3 top-1/2 max-w-14 -translate-y-1/2 truncate text-sm text-muted-foreground">
+                            {tokenSymbol}
+                          </span>
+                        </div>
+
+                        <div className="mt-2 flex flex-col gap-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">
+                              {t('transfer.percentOfBalance')}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {sliderValue}%
+                            </span>
+                          </div>
+                          <Slider
+                            aria-label={t('transfer.percentOfBalance')}
+                            value={[sliderValue]}
+                            min={0}
+                            max={100}
+                            step={1}
+                            disabled={isSubmitting}
+                            onValueChange={(value) =>
+                              applyPercentage(value[0] ?? 0)
+                            }
+                          />
+                          <div className="flex gap-2">
+                            {[25, 50, 75, 100].map((percentage) => (
+                              <Button
+                                key={percentage}
+                                className="flex-1"
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={isSubmitting}
+                                onClick={() => applyPercentage(percentage)}
+                              >
+                                {percentage === 100
+                                  ? t('transfer.max')
+                                  : `${percentage}%`}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <FormDescription>
+                          {t('transfer.amountDescription')}
+                          {!isZrc20Token &&
+                            settingsStore.showBalanceAndPrice &&
+                            priceStore.getPrice(settingsStore.currency) > 0 &&
+                            field.value > 0 && (
+                              <span className="ml-1 text-muted-foreground">
+                                {formatFiatCompact(
+                                  field.value,
+                                  priceStore.getPrice(settingsStore.currency),
+                                  settingsStore.currency,
+                                )}
+                              </span>
+                            )}
+                        </FormDescription>
+                        <FormMessage />
+                        {balanceError && (
+                          <p className="text-sm font-medium text-destructive">
+                            {balanceError}
+                          </p>
+                        )}
+                      </FormItem>
+                    )}
+                  />
                   <GasFeeSelector
                     isZrc20Token={isZrc20Token}
                     tokenContractAddress={tokenContractAddress}
@@ -599,7 +729,7 @@ const TokenTransfer = observer(() => {
                 <X className="mr-2 h-4 w-4" />
                 {t('transfer.cancelButton')}
               </Button>
-              <Button variant="secondary" disabled={isSubmitting || !isValid || !!balanceError || qrnsResolving || (isQrnsName(watchedReceiver) && !resolvedAddress)} className="w-full">
+              <Button disabled={isSubmitting || !isValid || !!balanceError || qrnsResolving || (isQrnsName(watchedReceiver) && !resolvedAddress)} className="w-full">
                 {isSubmitting ? (
                   <Loader className="mr-2 h-4 w-4 animate-spin" />
                 ) : (

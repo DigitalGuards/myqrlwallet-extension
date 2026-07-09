@@ -14,3 +14,15 @@ Object.defineProperty(window, "matchMedia", {
 Object.defineProperty(window, "scrollTo", {
   value: vi.fn().mockImplementation((x, y) => ({ x, y })),
 });
+
+// jsdom has no ResizeObserver; Radix Slider observes its thumb size.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+if (!("ResizeObserver" in globalThis)) {
+  Object.defineProperty(globalThis, "ResizeObserver", {
+    value: ResizeObserverStub,
+  });
+}

@@ -2,7 +2,7 @@
   "name": "myqrlwallet-extension",
   "description": "A browser extension, for creating accounts, signing transactions and sending transactions over the QRL blockchain.",
   "private": true,
-  "version": "0.4.14",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
@@ -127,6 +127,7 @@
     "@ledgerhq/hw-transport": "6.35.0",
     "@ledgerhq/hw-transport-webhid": "6.35.0",
     "@radix-ui/react-select": "2.2.6",
+    "@radix-ui/react-slider": "1.4.3",
     "@theqrl/qrl-cryptography": "0.1.1",
     "eth-phishing-detect": "1.2.0",
     "i18next": "25.10.10",

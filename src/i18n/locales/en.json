@@ -87,6 +87,8 @@
   "transfer.receiverDescription": "Receiver's public address or QRNS name",
   "transfer.amountLabel": "Amount",
   "transfer.amountDescription": "Amount to send",
+  "transfer.percentOfBalance": "Percentage of balance",
+  "transfer.max": "Max",
   "transfer.receiverPlaceholder": "Address or QRNS name (e.g. alice.qrl)",
   "transfer.amountPlaceholder": "Amount",
   "transfer.cancelButton": "Cancel",

@@ -581,4 +581,92 @@ describe("TokenTransfer", () => {
       { timeout: 5000 },
     );
   });
+
+  describe("balance slider", () => {
+    it("should fill the full native balance on Max when no gas reserve is known", async () => {
+      renderComponent(
+        mockedStore({
+          qrlStore: {
+            getAccountBalance: () => "100.0 QRL",
+          },
+        }),
+      );
+
+      const maxButton = await screen.findByRole("button", { name: "Max" });
+      await userEvent.click(maxButton);
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("spinbutton", { name: "amount" }),
+        ).toHaveValue(100);
+      });
+      expect(screen.getByText("100%")).toBeInTheDocument();
+    });
+
+    it("should subtract the native gas reserve from Max", async () => {
+      renderComponent(
+        mockedStore({
+          qrlStore: {
+            getAccountBalance: () => "10.0 QRL",
+            getNativeTokenGas: async () => "0.5",
+          },
+        }),
+      );
+
+      const maxButton = await screen.findByRole("button", { name: "Max" });
+      // The reserve estimate is async; retry Max until it reflects it.
+      await waitFor(async () => {
+        await userEvent.click(maxButton);
+        expect(
+          screen.getByRole("spinbutton", { name: "amount" }),
+        ).toHaveValue(9.5);
+      });
+    });
+
+    it("should apply a quick percentage of the balance", async () => {
+      renderComponent(
+        mockedStore({
+          qrlStore: {
+            getAccountBalance: () => "100.0 QRL",
+          },
+        }),
+      );
+
+      const quarterButton = await screen.findByRole("button", {
+        name: "25%",
+      });
+      await userEvent.click(quarterButton);
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("spinbutton", { name: "amount" }),
+        ).toHaveValue(25);
+      });
+    });
+
+    it("should use the full token balance for Max on ZRC-20 transfers", async () => {
+      renderComponentWithState({
+        tokenDetails: {
+          isZrc20Token: true,
+          tokenContractAddress: "Q1234567890abcdef1234567890abcdef12345678",
+          tokenDecimals: 18,
+          tokenImage: "token.png",
+          tokenBalance: "50.0 TST",
+          tokenName: "Test Token",
+          tokenSymbol: "TST",
+        },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Send TST")).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Max" }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("spinbutton", { name: "amount" }),
+        ).toHaveValue(50);
+      });
+    });
+  });
 });

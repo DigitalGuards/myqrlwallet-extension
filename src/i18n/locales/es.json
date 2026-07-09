@@ -87,6 +87,8 @@
   "transfer.receiverDescription": "Dirección pública o nombre QRNS del destinatario",
   "transfer.amountLabel": "Monto",
   "transfer.amountDescription": "Monto a enviar",
+  "transfer.percentOfBalance": "Porcentaje del saldo",
+  "transfer.max": "Máx",
   "transfer.receiverPlaceholder": "Dirección o nombre QRNS (ej. alice.qrl)",
   "transfer.amountPlaceholder": "Monto",
   "transfer.cancelButton": "Cancelar",
