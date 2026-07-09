@@ -1,4 +1,9 @@
-export const QRL_WALLET_PROVIDER_NAME = "qrl-wallet-provider";
+// Page-visible channel names. Deliberately NOT the upstream "qrl-wallet-*"
+// values: WindowPostMessageStream rides the shared window.postMessage bus,
+// so if this fork and the upstream QRL Web3 Wallet use the same names, each
+// extension's content script relays the other's provider traffic and a
+// single dApp request spawns approval popups in BOTH extensions.
+export const QRL_WALLET_PROVIDER_NAME = "myqrlwallet-provider";
 
 export const EXTENSION_MESSAGES = {
   CONNECTION_READY: "QRL_WALLET_CONNECTION_READY",
@@ -8,9 +13,9 @@ export const EXTENSION_MESSAGES = {
 } as const;
 
 export const QRL_POST_MESSAGE_STREAM = {
-  INPAGE: "qrl-wallet-in-page",
-  CONTENT_SCRIPT: "qrl-wallet-content-script",
-  CONTENT_SCRIPT_KEEP_ALIVE: "qrl-wallet-content-script-keep-alive",
+  INPAGE: "myqrlwallet-in-page",
+  CONTENT_SCRIPT: "myqrlwallet-content-script",
+  CONTENT_SCRIPT_KEEP_ALIVE: "myqrlwallet-content-script-keep-alive",
 } as const;
 
 // Per-request lifecycle port. The popup connects this port while a dApp
