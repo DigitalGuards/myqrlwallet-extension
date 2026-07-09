@@ -8,6 +8,21 @@ import App from './App.tsx'
 import './i18n'
 import './index.css'
 
+// Chrome sizes the action popup from the document's intrinsic size.
+// index.html pins html/body to height:100% + overflow:hidden (the
+// double-scrollbar fix), which leaves the document without an intrinsic
+// height, so the popup opens collapsed to a sliver: the 600px wallet
+// container is exactly the overflow being hidden. Pin explicit pixel
+// dimensions on the popup surface only; the side panel and expanded tab
+// (marked ?sidepanel= / ?tab=, same markers as settingsStore) own their
+// viewport and keep the 100% chain.
+const surfaceParams = new URLSearchParams(window.location.search);
+if (!surfaceParams.has('sidepanel') && !surfaceParams.has('tab')) {
+  document.documentElement.style.setProperty('height', '600px', 'important');
+  document.body.style.setProperty('height', '600px', 'important');
+  document.body.style.setProperty('width', '23rem', 'important');
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
