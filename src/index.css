@@ -45,12 +45,13 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
 
-    --scrollbar-track-color: #ffffff;
+    /* Match qrlwallet.com: muted-foreground thumb on the page background.
+       Var references resolve at use time, so the dark theme's token
+       overrides flow through without per-theme scrollbar values. */
+    --scrollbar-track-color: hsl(var(--background));
 
     --scrollbar-width: thin;
-    /* Muted thumb: full orange-500 reads as a glowing strip against the
-       dark navy; keep the hue, drop the volume. Dark theme overrides. */
-    --scrollbar-thumb-color: hsl(25 35% 55%);
+    --scrollbar-thumb-color: hsl(var(--muted-foreground));
     --radius: 0.5rem;
 
     --chart-1: 12 76% 61%;
@@ -95,8 +96,6 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
 
-    --scrollbar-track-color: #020817;
-    --scrollbar-thumb-color: hsl(25 30% 32%);
 
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
