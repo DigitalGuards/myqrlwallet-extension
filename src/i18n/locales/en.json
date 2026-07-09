@@ -526,5 +526,7 @@
   "dapp.pqSignature.typedData": "Typed data",
   "dapp.pqSignature.typedWarning": "Only sign typed data from sites you trust. It can authorize actions.",
   "dapp.pqSignature.notHex": "Message is not hex-encoded; displaying raw input.",
-  "dapp.pqSignature.hiddenChars": "Warning: this message contained hidden formatting characters; they were removed from the display. The signed bytes still include them."
+  "dapp.pqSignature.hiddenChars": "Warning: this message contained hidden formatting characters; they were removed from the display. The signed bytes still include them.",
+  "home.send": "Send",
+  "home.history": "History"
 }

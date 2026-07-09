@@ -44,7 +44,7 @@ describe("AccountCreateImport", () => {
 
     expect(screen.queryByText("Active account")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Send Quanta" }),
+      screen.queryByRole("button", { name: "Send" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
       "Add accounts",
@@ -102,7 +102,7 @@ describe("AccountCreateImport", () => {
       "Create a new account or import an existing account.",
     );
     const sendQuantaButton = screen.getByRole("button", {
-      name: "Send Quanta",
+      name: "Send",
     });
     const createNewButton = screen.getByRole("button", {
       name: "Create a new account",
@@ -146,13 +146,13 @@ describe("AccountCreateImport", () => {
     );
 
     const historyButton = screen.getByRole("button", {
-      name: "Transaction History",
+      name: "History",
     });
     expect(historyButton).toBeInTheDocument();
     expect(historyButton).toBeEnabled();
 
     const historyLink = screen.getByRole("link", {
-      name: "Transaction History",
+      name: "History",
     });
     expect(historyLink).toHaveAttribute("href", "/transaction-history");
   });
@@ -163,7 +163,7 @@ describe("AccountCreateImport", () => {
     );
 
     expect(
-      screen.queryByRole("button", { name: "Transaction History" }),
+      screen.queryByRole("button", { name: "History" }),
     ).not.toBeInTheDocument();
   });
 });

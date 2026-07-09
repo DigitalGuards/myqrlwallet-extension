@@ -526,5 +526,7 @@
   "dapp.pqSignature.typedData": "Datos tipados",
   "dapp.pqSignature.typedWarning": "Firme datos tipados solo de sitios en los que confíe. Pueden autorizar acciones.",
   "dapp.pqSignature.notHex": "El mensaje no está codificado en hex; se muestra la entrada sin procesar.",
-  "dapp.pqSignature.hiddenChars": "Advertencia: este mensaje contenía caracteres de formato ocultos; se eliminaron de la vista. Los bytes firmados aún los incluyen."
+  "dapp.pqSignature.hiddenChars": "Advertencia: este mensaje contenía caracteres de formato ocultos; se eliminaron de la vista. Los bytes firmados aún los incluyen.",
+  "home.send": "Enviar",
+  "home.history": "Historial"
 }

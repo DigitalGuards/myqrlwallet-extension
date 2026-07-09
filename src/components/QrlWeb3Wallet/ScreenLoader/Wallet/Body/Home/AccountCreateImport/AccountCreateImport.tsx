@@ -20,6 +20,7 @@ import {
   Image,
   Logs,
   Plus,
+  QrCode,
   Send,
   Sparkles,
   Usb,
@@ -28,6 +29,7 @@ import { observer } from "mobx-react-lite";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import ActiveAccountDisplay from "./ActiveAccountDisplay/ActiveAccountDisplay";
+import CircuitBackground from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/CircuitBackground/CircuitBackground";
 import TokensCardContent from "./ActiveAccountDisplay/TokensCardContent/TokensCardContent";
 import NFTCollections from "./ActiveAccountDisplay/TokensCardContent/NFTCollections/NFTCollections";
 import { useEffect, useState } from "react";
@@ -142,31 +144,40 @@ const AccountCreateImport = observer(() => {
     <div className="flex animate-appear-in flex-col gap-8">
       {hasActiveAccount && (
         <>
-          <Card className="order-1 w-full">
-            <CardHeader>
-              <CardTitle>{t('home.activeAccount')}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ActiveAccountDisplay />
-            </CardContent>
-            <CardFooter className="flex-col gap-2">
-              <Link
-                className="w-full"
-                to={ROUTES.TOKEN_TRANSFER}
-                state={{ shouldStartFresh: true }}
-              >
-                <Button className="w-full" type="button" variant="secondary">
-                  <Send className="mr-2 h-4 w-4" />
-                  {t('home.sendQuanta')}
-                </Button>
-              </Link>
-              <Link className="w-full" to={ROUTES.TRANSACTION_HISTORY}>
-                <Button className="w-full" type="button" variant="outline">
-                  <History className="mr-2 h-4 w-4" />
-                  {t('home.transactionHistory')}
-                </Button>
-              </Link>
-            </CardFooter>
+          <Card className="relative order-1 w-full overflow-hidden border-l-4 border-l-blue-accent">
+            <CircuitBackground />
+            <div className="relative z-10">
+              <CardHeader className="bg-gradient-to-r from-blue-accent/5 to-transparent">
+                <CardTitle>{t('home.activeAccount')}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ActiveAccountDisplay />
+              </CardContent>
+              <CardFooter className="gap-2">
+                <Link
+                  className="flex-1"
+                  to={ROUTES.TOKEN_TRANSFER}
+                  state={{ shouldStartFresh: true }}
+                >
+                  <Button className="w-full" type="button">
+                    <Send className="mr-2 h-4 w-4" />
+                    {t('home.send')}
+                  </Button>
+                </Link>
+                <Link className="flex-1" to={ROUTES.TRANSACTION_HISTORY}>
+                  <Button className="w-full" type="button" variant="outline">
+                    <History className="mr-2 h-4 w-4" />
+                    {t('home.history')}
+                  </Button>
+                </Link>
+                <Link className="flex-1" to={ROUTES.RECEIVE}>
+                  <Button className="w-full" type="button" variant="secondary">
+                    <QrCode className="mr-2 h-4 w-4" />
+                    {t('home.receive')}
+                  </Button>
+                </Link>
+              </CardFooter>
+            </div>
           </Card>
           <Card className={tokensClasses({ hasTokensPreference })}>
             <CardHeader>

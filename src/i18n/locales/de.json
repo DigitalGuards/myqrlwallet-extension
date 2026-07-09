@@ -526,5 +526,7 @@
   "dapp.pqSignature.typedData": "Typisierte Daten",
   "dapp.pqSignature.typedWarning": "Signieren Sie typisierte Daten nur von Seiten, denen Sie vertrauen. Sie können Aktionen autorisieren.",
   "dapp.pqSignature.notHex": "Nachricht ist nicht hex-kodiert; Rohdaten werden angezeigt.",
-  "dapp.pqSignature.hiddenChars": "Warnung: Diese Nachricht enthielt versteckte Formatierungszeichen; sie wurden aus der Anzeige entfernt. Die signierten Bytes enthalten sie weiterhin."
+  "dapp.pqSignature.hiddenChars": "Warnung: Diese Nachricht enthielt versteckte Formatierungszeichen; sie wurden aus der Anzeige entfernt. Die signierten Bytes enthalten sie weiterhin.",
+  "home.send": "Senden",
+  "home.history": "Verlauf"
 }
