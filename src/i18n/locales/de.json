@@ -8,14 +8,12 @@
   "lock.unlock.buttonLoading": "Entsperren...",
   "lock.unlock.errorIncorrect": "Das eingegebene Passwort ist falsch",
   "lock.unlock.errorFailed": "Wallet konnte nicht entsperrt werden. Bitte versuche es erneut.",
-
   "welcome.title": "Willkommen",
   "welcome.description": "Lass uns MyQRLWallet verwenden",
   "welcome.tagline1": "Wir sind",
   "welcome.tagline2": "Das Quanten-",
   "welcome.tagline3": "resistente Hauptbuch",
   "welcome.button": "Weiter",
-
   "onboarding.password.title": "Wallet-Passwort Festlegen",
   "onboarding.password.description": "Lege ein Passwort für diese Wallet fest",
   "onboarding.password.placeholder": "Passwort",
@@ -47,7 +45,6 @@
   "onboarding.completed.title": "Das war's",
   "onboarding.completed.description": "MyQRLWallet ist jetzt einsatzbereit. Du kannst sie über die Browser-Erweiterungen öffnen.",
   "onboarding.completed.button": "Fertig",
-
   "home.activeAccount": "Aktives Konto",
   "home.sendQuanta": "Quanta Senden",
   "home.receive": "Empfangen",
@@ -73,7 +70,6 @@
   "home.hide": "Ausblenden",
   "home.unhide": "Einblenden",
   "home.hiddenAccounts": "Ausgeblendete Konten ({{count}})",
-
   "account.addressLabel": "Kontoadresse",
   "account.balanceLabel": "Guthaben",
   "account.ledger": "Ledger-Konto",
@@ -85,7 +81,6 @@
   "account.copied": "Kopiert",
   "account.copy": "Kopieren",
   "account.done": "Fertig",
-
   "transfer.activeAccount": "Aktives Konto",
   "transfer.makeTransaction": "Transaktion durchführen",
   "transfer.sendTo": "Senden an",
@@ -116,7 +111,6 @@
   "transfer.balance": "Guthaben",
   "transfer.qrnsResolving": "QRNS-Name wird aufgelöst...",
   "transfer.qrnsResolutionFailed": "QRNS-Name konnte nicht aufgelöst werden",
-
   "validation.receiverRequired": "Empfängeradresse ist erforderlich",
   "validation.amountPositive": "Betrag muss größer als 0 sein",
   "validation.addressInvalid": "Adresse ist ungültig",
@@ -127,7 +121,6 @@
   "validation.currencyNameRequired": "Währungsname ist erforderlich",
   "validation.currencySymbolRequired": "Währungssymbol ist erforderlich",
   "validation.decimalsPositive": "Dezimalstellen müssen positiv sein",
-
   "gasFee.label": "Gasgebühr",
   "gasFee.estimating": "Gasgebühr wird geschätzt",
   "gasFee.estimated": "Geschätzte Gasgebühr beträgt {{amount}}",
@@ -143,7 +136,6 @@
   "gasFee.maxFee": "Max. Gebühr (Planck)",
   "gasFee.gasLimit": "Gas-Limit",
   "gasFee.placeholderAuto": "Automatisch",
-
   "txHistory.title": "Transaktionsverlauf",
   "txHistory.filterAll": "Alle",
   "txHistory.filterNative": "Nativ",
@@ -153,7 +145,6 @@
   "txHistory.typeSend": "Senden",
   "txHistory.speedUp": "Beschleunigen",
   "txHistory.cancel": "Abbrechen",
-
   "txDetail.title": "Transaktionsdetails",
   "txDetail.notFound": "Transaktion nicht gefunden",
   "txDetail.statusPending": "Ausstehend",
@@ -180,13 +171,11 @@
   "txDetail.viewExplorer": "Im Block-Explorer anzeigen",
   "txDetail.waiting": "Warte auf Bestätigung...",
   "txDetail.copy": "{{label}} kopieren",
-
   "receive.title": "Empfangen",
   "receive.copyAddress": "Adresse kopieren",
-
   "chain.activeChain": "Aktive Kette",
   "chain.chainId": "Ketten-ID {{chainId}}",
-  "chain.editChain": "Kette bearbeiten",
+  "chain.editChain": "Chain bearbeiten",
   "chain.addTitle": "Kette hinzufügen",
   "chain.editTitle": "Kette bearbeiten",
   "chain.addButton": "Kette hinzufügen",
@@ -194,15 +183,15 @@
   "chain.addingButton": "Kette wird hinzugefügt",
   "chain.editingButton": "Kette wird bearbeitet",
   "chain.cancelButton": "Abbrechen",
-  "chain.chainName": "Kettenname",
+  "chain.chainName": "Chain-Name",
   "chain.chainNameDescription": "Blockchain-Name",
   "chain.chainNamePlaceholder": "QRL customnet",
-  "chain.chainIdLabel": "Ketten-ID",
+  "chain.chainIdLabel": "Chain ID",
   "chain.chainIdDescription": "Eindeutige Ketten-ID",
   "chain.chainIdPlaceholder": "111",
   "chain.rpcUrls": "RPC-URLs",
   "chain.blockExplorerUrls": "Block-Explorer-URLs",
-  "chain.iconUrls": "Symbol-URLs",
+  "chain.iconUrls": "Icon-URLs",
   "chain.currencyName": "Währungsname",
   "chain.currencyNameDescription": "Währung dieser Blockchain",
   "chain.currencyNamePlaceholder": "QRL",
@@ -218,7 +207,6 @@
   "chain.errorChainIdExists": "Eine Blockchain mit der Ketten-ID {{chainId}} existiert bereits.",
   "chain.defaultUrl": "Standard-URL",
   "chain.deleteUrl": "URL löschen",
-
   "dapp.permissionTitle": "Deine Genehmigung erforderlich",
   "dapp.permissionDescription": "Es gibt eine eingehende Anfrage. Überprüfe die Details und entscheide, ob sie erlaubt werden soll.",
   "dapp.permissionQuestion": "Vertraust du dieser Anfrage und möchtest sie erlauben?",
@@ -290,23 +278,14 @@
   "dapp.selectBlockchains": "Wähle die Blockchains aus, die diese Website verwenden soll",
   "dapp.noBlockchainsAvailable": "Keine Blockchains verfügbar",
   "dapp.addChain.warning": "Bevor du die Blockchain hinzufügst und Transaktionen durchführst, stelle sicher, dass du verstehst, was du tust.",
-
   "nav.home": "Startseite",
   "nav.dappConnectivity": "DApp-Konnektivität",
   "nav.blockchainSelection": "Blockchain-Auswahl",
   "nav.accounts": "Konten",
-
-  "chain.chainName": "Chain-Name",
-  "chain.chainIdLabel": "Chain ID",
   "chain.symbol": "Symbol",
   "chain.decimals": "Dezimalstellen",
-  "chain.currencyName": "Währungsname",
-  "chain.rpcUrls": "RPC-URLs",
-  "chain.blockExplorerUrls": "Block-Explorer-URLs",
-  "chain.iconUrls": "Icon-URLs",
   "chain.otherChains": "Andere Chains",
   "chain.connectChain": "Chain verbinden",
-  "chain.editChain": "Chain bearbeiten",
   "chain.deleteChain": "Chain löschen",
   "chain.deleteChainConfirm": "Möchtest du die Chain '{{name}}' löschen?",
   "chain.cancelDelete": "Löschen abbrechen",
@@ -315,11 +294,9 @@
   "chain.addUrlDescription": "Du kannst URLs hinzufügen und eine als Standard-URL auswählen.",
   "chain.addUrl": "URL hinzufügen",
   "chain.enterUrl": "Gib die hinzuzufügende URL ein",
-
   "createAccount.title": "Neues Konto erstellen",
   "createAccount.description": "Du kannst ein neues Konto zu dieser Wallet hinzufügen. Stelle nach der Erstellung sicher, dass du die Wiederherstellungsphrasen sicher aufbewahrst.",
   "createAccount.button": "Konto erstellen",
-
   "mnemonic.keepSafe": "Sicher aufbewahren",
   "mnemonic.description": "Verliere diese mnemonischen Phrasen nicht. Lade sie jetzt herunter. Du könntest sie eines Tages brauchen, um dein neues Konto {{address}} zu importieren oder wiederherzustellen",
   "mnemonic.continueWarning": "Es wird dringend empfohlen, erst nach dem Herunterladen der mnemonischen Wiederherstellungsphrasen fortzufahren. Falls bereits geschehen, bitte fortfahren.",
@@ -329,7 +306,6 @@
   "mnemonic.goBack": "Zurück",
   "mnemonic.hexSeed": "Hex-Seed",
   "mnemonic.phrases": "Mnemonische Phrasen",
-
   "importAccount.title": "Bestehendes Konto importieren",
   "importAccount.pasteMnemonic": "Mnemonische Phrasen einfügen",
   "importAccount.importFailed": "Das Konto konnte nicht aus den mnemonischen Phrasen importiert werden",
@@ -354,7 +330,6 @@
   "importAccount.walletFileInvalid": "This is not a valid MyQRLWallet encrypted wallet file",
   "importAccount.walletFileDecryptFailed": "Could not decrypt the wallet file. Check the password and try again.",
   "importAccount.walletFileNoAccounts": "No accounts were found in the wallet file",
-
   "tokens.allZrc20": "Alle ZRC 20 Token",
   "tokens.sendToken": "{{symbol}} senden",
   "tokens.hideToken": "Token ausblenden",
@@ -362,7 +337,6 @@
   "tokens.hideConfirm": "Möchtest du '{{symbol}}' aus der Wallet ausblenden?",
   "tokens.cancelHide": "Ausblenden abbrechen",
   "tokens.confirmHide": "Ausblenden bestätigen",
-
   "txDetail.speedUpTitle": "Transaktion beschleunigen",
   "txDetail.cancelTitle": "Transaktion abbrechen",
   "txDetail.speedUpDescription": "Dies wird deine Transaktion mit einer höheren Gasgebühr erneut einreichen, um sie zu priorisieren. Die neue Gasgebühr wird mindestens 10% höher sein als die ursprüngliche.",
@@ -372,13 +346,11 @@
   "txDetail.estimating": "Wird geschätzt...",
   "txDetail.goBack": "Zurück",
   "txDetail.cancelTransaction": "Transaktion abbrechen",
-
   "common.careful": "Achtung!",
   "common.edit": "Bearbeiten",
   "common.cancel": "Abbrechen",
   "common.add": "Hinzufügen",
   "common.more": "Mehr",
-
   "recipient.dialogTitle": "Empfänger Auswählen",
   "recipient.tabAccounts": "Meine Konten",
   "recipient.tabContacts": "Kontakte",
@@ -387,14 +359,12 @@
   "recipient.emptyContacts": "Keine gespeicherten Kontakte",
   "recipient.emptyRecent": "Keine letzten Transaktionen",
   "recipient.openAddressBook": "Adressbuch öffnen",
-
   "header.openInTab": "In Tab Öffnen",
   "header.openSidePanel": "Als Seitenleiste Öffnen",
   "header.switchToPopup": "Zum Popup Wechseln",
   "header.contacts": "Kontakte",
   "header.settings": "Einstellungen",
   "header.lockWallet": "Wallet Sperren",
-
   "settings.title": "Einstellungen",
   "settings.appearance": "Aussehen",
   "settings.security": "Sicherheit",
@@ -450,7 +420,6 @@
   "settings.about.chainId": "Ketten-ID",
   "settings.about.accounts": "Konten",
   "settings.about.github": "GitHub-Repository",
-
   "contacts.title": "Kontakte",
   "contacts.addButton": "Hinzufügen",
   "contacts.empty": "Noch keine Kontakte",
@@ -460,7 +429,6 @@
   "contacts.editButton": "Bearbeiten",
   "contacts.deleteButton": "Löschen",
   "contacts.cancelButton": "Abbrechen",
-
   "importToken.title": "Token importieren",
   "importToken.contractAddress": "Vertragsadresse",
   "importToken.contractAddressPlaceholder": "Vertragsadresse",
@@ -475,7 +443,6 @@
   "importToken.totalSupplyLabel": "Gesamtangebot",
   "importToken.balanceLabel": "Guthaben",
   "importToken.decimalsLabel": "Dezimalstellen",
-
   "discovery.tokensFound_one": "Der Explorer hat {{count}} Token auf dieser Adresse gefunden.",
   "discovery.tokensFound_other": "Der Explorer hat {{count}} Token auf dieser Adresse gefunden.",
   "discovery.collectionsFound_one": "Der Explorer hat {{count}} NFT-Sammlung auf dieser Adresse gefunden.",
@@ -489,7 +456,6 @@
   "discovery.itemCount_one": "{{count}} Stück",
   "discovery.itemCount_other": "{{count}} Stück",
   "discovery.unknownCollection": "Unbekannte Sammlung",
-
   "nft.importCollection": "NFT-Kollektion importieren",
   "nft.importButton": "NFT-Kollektion importieren",
   "nft.contractPlaceholder": "NFT-Vertragsadresse",
@@ -515,7 +481,6 @@
   "nft.sendNft": "NFT senden",
   "nft.sendNftButton": "NFT senden",
   "nft.sendingNft": "NFT wird gesendet...",
-
   "ledger.connectTitle": "Ledger-Gerät verbinden",
   "ledger.connectDescription": "Verbinde dein Ledger-Gerät und öffne die QRL Zond App, um Konten zu importieren.",
   "ledger.beforeConnecting": "Vor dem Verbinden:",
@@ -544,7 +509,6 @@
   "ledger.accountsImportedPlural": "{{count}} Konten importiert",
   "ledger.successInfo": "Du kannst diese Konten jetzt zum Signieren von Transaktionen verwenden. Dein Ledger-Gerät wird für die Genehmigung jeder Transaktion benötigt.",
   "ledger.done": "Fertig",
-
   "common.copy": "Kopieren",
   "common.copied": "Kopiert!",
   "common.close": "Schließen",
@@ -553,11 +517,14 @@
   "common.yes": "Ja",
   "common.no": "Nein",
   "common.loading": "Laden...",
-
   "phishing.warningTitle": "Phishing-Warnung",
   "phishing.warningDescription": "Diese Website wurde als bekannte Phishing-Seite identifiziert. Eine Interaktion kann zum Verlust von Geldern führen.",
   "phishing.matchedDomain": "Diese Domain gibt sich als {{domain}} aus.",
   "phishing.suspiciousDomain": "Diese Domain wurde als verdächtig identifiziert.",
   "phishing.rejectButton": "Ablehnen und schließen",
-  "phishing.proceedButton": "Ich verstehe das Risiko, trotzdem fortfahren"
+  "phishing.proceedButton": "Ich verstehe das Risiko, trotzdem fortfahren",
+  "dapp.pqSignature.typedData": "Typisierte Daten",
+  "dapp.pqSignature.typedWarning": "Signieren Sie typisierte Daten nur von Seiten, denen Sie vertrauen. Sie können Aktionen autorisieren.",
+  "dapp.pqSignature.notHex": "Nachricht ist nicht hex-kodiert; Rohdaten werden angezeigt.",
+  "dapp.pqSignature.hiddenChars": "Warnung: Diese Nachricht enthielt versteckte Formatierungszeichen; sie wurden aus der Anzeige entfernt. Die signierten Bytes enthalten sie weiterhin."
 }

@@ -151,6 +151,8 @@ const checkRequestCanProceed = async (req: JsonRpcRequest<JsonRpcRequest>) => {
     case RESTRICTED_METHODS.WALLET_GET_CAPABILITIES:
     case RESTRICTED_METHODS.QRL_SEND_TRANSACTION:
     case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4:
+    case RESTRICTED_METHODS.QRL_SIGN_MESSAGE:
+    case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA:
     case RESTRICTED_METHODS.PERSONAL_SIGN:
       return await checkAccountHasBeenAuthorized(req);
     default:
@@ -390,6 +392,8 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
               break;
             }
             case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4:
+            case RESTRICTED_METHODS.QRL_SIGN_MESSAGE:
+            case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA:
             case RESTRICTED_METHODS.PERSONAL_SIGN: {
               const signedData = restrictedMethodResult?.response;
               if (signedData) {

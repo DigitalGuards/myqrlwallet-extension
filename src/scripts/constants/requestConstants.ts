@@ -53,6 +53,8 @@ export const RESTRICTED_METHODS = Object.freeze({
   QRL_REQUEST_ACCOUNTS: "qrl_requestAccounts",
   QRL_SEND_TRANSACTION: "qrl_sendTransaction",
   QRL_SIGN_TYPED_DATA_V4: "qrl_signTypedData_v4",
+  QRL_SIGN_MESSAGE: "qrl_signMessage",
+  QRL_SIGN_TYPED_DATA: "qrl_signTypedData",
 });
 
 export const ALL_REQUEST_METHODS = Object.values({

@@ -20,6 +20,8 @@ const getFromAddress = (req: JsonRpcRequest<JsonRpcRequest>) => {
       return req.params?.[0]?.from ?? "";
     case RESTRICTED_METHODS.WALLET_GET_CAPABILITIES:
     case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4:
+    case RESTRICTED_METHODS.QRL_SIGN_MESSAGE:
+    case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA:
       // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
       return req.params?.[0];
     case RESTRICTED_METHODS.PERSONAL_SIGN:

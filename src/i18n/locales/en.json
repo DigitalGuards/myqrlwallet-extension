@@ -8,14 +8,12 @@
   "lock.unlock.buttonLoading": "Unlocking",
   "lock.unlock.errorIncorrect": "The entered password is incorrect",
   "lock.unlock.errorFailed": "Failed to unlock wallet. Please try again.",
-
   "welcome.title": "Welcome",
   "welcome.description": "Let's start using MyQRLWallet",
   "welcome.tagline1": "We are",
   "welcome.tagline2": "The Quantum",
   "welcome.tagline3": "Resistant Ledger",
   "welcome.button": "Continue",
-
   "onboarding.password.title": "Set Wallet Password",
   "onboarding.password.description": "Set a password for this wallet",
   "onboarding.password.placeholder": "Password",
@@ -47,7 +45,6 @@
   "onboarding.completed.title": "That's All",
   "onboarding.completed.description": "MyQRLWallet is now ready for use. You can open it from the browser extensions.",
   "onboarding.completed.button": "Done",
-
   "home.activeAccount": "Active account",
   "home.sendQuanta": "Send Quanta",
   "home.receive": "Receive",
@@ -73,7 +70,6 @@
   "home.hide": "Hide",
   "home.unhide": "Unhide",
   "home.hiddenAccounts": "Hidden accounts ({{count}})",
-
   "account.addressLabel": "Account address",
   "account.balanceLabel": "Balance",
   "account.ledger": "Ledger account",
@@ -85,7 +81,6 @@
   "account.copied": "Copied",
   "account.copy": "Copy",
   "account.done": "Done",
-
   "transfer.activeAccount": "Active account",
   "transfer.makeTransaction": "Make a transaction",
   "transfer.sendTo": "Send to",
@@ -116,7 +111,6 @@
   "transfer.balance": "Balance",
   "transfer.qrnsResolving": "Resolving QRNS name...",
   "transfer.qrnsResolutionFailed": "Could not resolve QRNS name",
-
   "validation.receiverRequired": "Receiver address is required",
   "validation.amountPositive": "Amount should be more than 0",
   "validation.addressInvalid": "Address is invalid",
@@ -127,7 +121,6 @@
   "validation.currencyNameRequired": "Currency name is required",
   "validation.currencySymbolRequired": "Currency symbol is required",
   "validation.decimalsPositive": "Decimals should be positive",
-
   "gasFee.label": "Gas fee",
   "gasFee.estimating": "Estimating gas fee",
   "gasFee.estimated": "Estimated gas fee is {{amount}}",
@@ -143,7 +136,6 @@
   "gasFee.maxFee": "Max fee (planck)",
   "gasFee.gasLimit": "Gas limit",
   "gasFee.placeholderAuto": "Auto",
-
   "txHistory.title": "Transaction History",
   "txHistory.filterAll": "All",
   "txHistory.filterNative": "Native",
@@ -153,7 +145,6 @@
   "txHistory.typeSend": "Send",
   "txHistory.speedUp": "Speed Up",
   "txHistory.cancel": "Cancel",
-
   "txDetail.title": "Transaction Details",
   "txDetail.notFound": "Transaction not found",
   "txDetail.statusPending": "Pending",
@@ -180,10 +171,8 @@
   "txDetail.viewExplorer": "View on Block Explorer",
   "txDetail.waiting": "Waiting for confirmation...",
   "txDetail.copy": "Copy {{label}}",
-
   "receive.title": "Receive",
   "receive.copyAddress": "Copy address",
-
   "chain.activeChain": "Active chain",
   "chain.chainId": "Chain ID {{chainId}}",
   "chain.editChain": "Edit chain",
@@ -218,7 +207,6 @@
   "chain.errorChainIdExists": "A blockchain with the chain ID {{chainId}} already exist.",
   "chain.defaultUrl": "Default URL",
   "chain.deleteUrl": "Delete URL",
-
   "dapp.permissionTitle": "Your permission required",
   "dapp.permissionDescription": "Here is a request coming in. Go through the details and decide if it needs to be allowed.",
   "dapp.permissionQuestion": "Do you trust and want to allow this?",
@@ -290,23 +278,14 @@
   "dapp.selectBlockchains": "Select the blockchains you want this site to use",
   "dapp.noBlockchainsAvailable": "No blockchains available",
   "dapp.addChain.warning": "Before adding the blockchain and making transactions, make sure you understand what you are doing.",
-
   "nav.home": "Home",
   "nav.dappConnectivity": "DApp Connectivity",
   "nav.blockchainSelection": "Blockchain Selection",
   "nav.accounts": "Accounts",
-
-  "chain.chainName": "Chain name",
-  "chain.chainIdLabel": "Chain ID",
   "chain.symbol": "Symbol",
   "chain.decimals": "Decimals",
-  "chain.currencyName": "Currency name",
-  "chain.rpcUrls": "RPC URLs",
-  "chain.blockExplorerUrls": "Block Explorer URLs",
-  "chain.iconUrls": "Icon URLs",
   "chain.otherChains": "Other chains",
   "chain.connectChain": "Connect chain",
-  "chain.editChain": "Edit chain",
   "chain.deleteChain": "Delete chain",
   "chain.deleteChainConfirm": "Do you want to delete the chain '{{name}}'?",
   "chain.cancelDelete": "Cancel Delete",
@@ -315,11 +294,9 @@
   "chain.addUrlDescription": "You may add URLs, and select one as the default URL.",
   "chain.addUrl": "Add URL",
   "chain.enterUrl": "Enter the URL to be added",
-
   "createAccount.title": "Create a new account",
   "createAccount.description": "You can add a new account to this wallet. After creating the account, ensure you keep the account recovery phrases safe.",
   "createAccount.button": "Create account",
-
   "mnemonic.keepSafe": "Keep this safe",
   "mnemonic.description": "Don't lose this mnemonic phrases. Download it right now. You may need this someday to import or recover your new account {{address}}",
   "mnemonic.continueWarning": "It is highly recommended that you continue after downloading the recovery mnemonic phrases. If you already have, please continue.",
@@ -329,7 +306,6 @@
   "mnemonic.goBack": "Go back",
   "mnemonic.hexSeed": "Hex Seed",
   "mnemonic.phrases": "Mnemonic Phrases",
-
   "importAccount.title": "Import an existing account",
   "importAccount.pasteMnemonic": "Paste the mnemonic phrases",
   "importAccount.importFailed": "Account could not be imported from the mnemonic phrases",
@@ -354,7 +330,6 @@
   "importAccount.walletFileInvalid": "This is not a valid MyQRLWallet encrypted wallet file",
   "importAccount.walletFileDecryptFailed": "Could not decrypt the wallet file. Check the password and try again.",
   "importAccount.walletFileNoAccounts": "No accounts were found in the wallet file",
-
   "tokens.allZrc20": "All ZRC 20 tokens",
   "tokens.sendToken": "Send {{symbol}}",
   "tokens.hideToken": "Hide Token",
@@ -362,7 +337,6 @@
   "tokens.hideConfirm": "Do you want to hide '{{symbol}}' from wallet?",
   "tokens.cancelHide": "Cancel Hide",
   "tokens.confirmHide": "Confirm Hide",
-
   "txDetail.speedUpTitle": "Speed Up Transaction",
   "txDetail.cancelTitle": "Cancel Transaction",
   "txDetail.speedUpDescription": "This will re-submit your transaction with a higher gas fee to prioritize it. The new gas fee will be at least 10% higher than the original.",
@@ -372,13 +346,11 @@
   "txDetail.estimating": "Estimating...",
   "txDetail.goBack": "Go Back",
   "txDetail.cancelTransaction": "Cancel Transaction",
-
   "common.careful": "Careful!",
   "common.edit": "Edit",
   "common.cancel": "Cancel",
   "common.add": "Add",
   "common.more": "More",
-
   "recipient.dialogTitle": "Select Recipient",
   "recipient.tabAccounts": "My Accounts",
   "recipient.tabContacts": "Contacts",
@@ -387,14 +359,12 @@
   "recipient.emptyContacts": "No contacts saved",
   "recipient.emptyRecent": "No recent transactions",
   "recipient.openAddressBook": "Open address book",
-
   "header.openInTab": "Open In Tab",
   "header.openSidePanel": "Open as Side Panel",
   "header.switchToPopup": "Switch to Popup",
   "header.contacts": "Contacts",
   "header.settings": "Settings",
   "header.lockWallet": "Lock Wallet",
-
   "settings.title": "Settings",
   "settings.appearance": "Appearance",
   "settings.security": "Security",
@@ -450,7 +420,6 @@
   "settings.about.chainId": "Chain ID",
   "settings.about.accounts": "Accounts",
   "settings.about.github": "GitHub Repository",
-
   "contacts.title": "Contacts",
   "contacts.addButton": "Add",
   "contacts.empty": "No contacts yet",
@@ -460,7 +429,6 @@
   "contacts.editButton": "Edit",
   "contacts.deleteButton": "Delete",
   "contacts.cancelButton": "Cancel",
-
   "importToken.title": "Import token",
   "importToken.contractAddress": "Contract Address",
   "importToken.contractAddressPlaceholder": "Contract address",
@@ -475,7 +443,6 @@
   "importToken.totalSupplyLabel": "Total supply",
   "importToken.balanceLabel": "Balance",
   "importToken.decimalsLabel": "Decimals",
-
   "discovery.tokensFound_one": "Explorer found this address to own {{count}} token.",
   "discovery.tokensFound_other": "Explorer found this address to own {{count}} tokens.",
   "discovery.collectionsFound_one": "Explorer found this address to own {{count}} NFT collection.",
@@ -489,7 +456,6 @@
   "discovery.itemCount_one": "{{count}} item",
   "discovery.itemCount_other": "{{count}} items",
   "discovery.unknownCollection": "Unknown collection",
-
   "nft.importCollection": "Import NFT Collection",
   "nft.importButton": "Import NFT Collection",
   "nft.contractPlaceholder": "NFT contract address",
@@ -515,7 +481,6 @@
   "nft.sendNft": "Send NFT",
   "nft.sendNftButton": "Send NFT",
   "nft.sendingNft": "Sending NFT...",
-
   "ledger.connectTitle": "Connect Ledger Device",
   "ledger.connectDescription": "Connect your Ledger device and open the QRL Zond app to import accounts.",
   "ledger.beforeConnecting": "Before connecting:",
@@ -544,7 +509,6 @@
   "ledger.accountsImportedPlural": "{{count}} accounts imported",
   "ledger.successInfo": "You can now use these accounts to sign transactions. Your Ledger device will be required to approve each transaction.",
   "ledger.done": "Done",
-
   "common.copy": "Copy",
   "common.copied": "Copied!",
   "common.close": "Close",
@@ -553,11 +517,14 @@
   "common.yes": "Yes",
   "common.no": "No",
   "common.loading": "Loading...",
-
   "phishing.warningTitle": "Phishing Warning",
   "phishing.warningDescription": "This website has been flagged as a known phishing site. Interacting with it may result in loss of funds.",
   "phishing.matchedDomain": "This domain is impersonating {{domain}}.",
   "phishing.suspiciousDomain": "This domain has been identified as suspicious.",
   "phishing.rejectButton": "Reject and Close",
-  "phishing.proceedButton": "I understand the risk, proceed anyway"
+  "phishing.proceedButton": "I understand the risk, proceed anyway",
+  "dapp.pqSignature.typedData": "Typed data",
+  "dapp.pqSignature.typedWarning": "Only sign typed data from sites you trust. It can authorize actions.",
+  "dapp.pqSignature.notHex": "Message is not hex-encoded; displaying raw input.",
+  "dapp.pqSignature.hiddenChars": "Warning: this message contained hidden formatting characters; they were removed from the display. The signed bytes still include them."
 }

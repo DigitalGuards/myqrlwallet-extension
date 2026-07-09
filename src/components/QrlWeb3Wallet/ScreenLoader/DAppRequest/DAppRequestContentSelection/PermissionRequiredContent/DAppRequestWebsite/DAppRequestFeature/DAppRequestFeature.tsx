@@ -4,6 +4,7 @@ import { observer } from "mobx-react-lite";
 import QrlRequestAccount from "./QrlRequestAccount/QrlRequestAccount";
 import QrlSendTransaction from "./QrlSendTransaction/QrlSendTransaction";
 import QrlSignTypedDataV4 from "./QrlSignTypedDataV4/QrlSignTypedDataV4";
+import QrlPqSign from "./QrlPqSign/QrlPqSign";
 
 const DAppRequestFeature = observer(() => {
   const { dAppRequestStore } = useStore();
@@ -18,6 +19,9 @@ const DAppRequestFeature = observer(() => {
     case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4:
     case RESTRICTED_METHODS.PERSONAL_SIGN:
       return <QrlSignTypedDataV4 />;
+    case RESTRICTED_METHODS.QRL_SIGN_MESSAGE:
+    case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA:
+      return <QrlPqSign />;
     default:
       return <></>;
   }
