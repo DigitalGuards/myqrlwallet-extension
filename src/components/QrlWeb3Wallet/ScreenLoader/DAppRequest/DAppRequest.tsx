@@ -15,7 +15,7 @@ const DAppRequest = observer(() => {
   const { dAppRequestData, approvalProcessingStatus, onPermission } =
     dAppRequestStore;
   const { hasCompleted } = approvalProcessingStatus;
-  const { phishingDetectionEnabled } = settingsStore;
+  const { phishingDetectionEnabled, isPopupWindow } = settingsStore;
 
   const [phishingAcknowledged, setPhishingAcknowledged] = useState(false);
 
@@ -30,10 +30,15 @@ const DAppRequest = observer(() => {
     phishingResult.detectorStatus !== "ready";
 
   useEffect(() => {
-    if (hasCompleted) {
+    // Only the transient action popup closes itself after resolving; in the
+    // docked side panel (and the expanded tab) window.close() tears the whole
+    // surface down. There the storage.onChanged listener in dAppRequestStore
+    // already resets the request state when the middleware entry clears, and
+    // ScreenLoader falls back to the wallet screen on its own.
+    if (hasCompleted && isPopupWindow) {
       window.close();
     }
-  }, [hasCompleted]);
+  }, [hasCompleted, isPopupWindow]);
 
   // Hold a port open while the dApp request is on screen. The middleware
   // listens for this port's disconnect to resolve as user-rejected when the
@@ -81,7 +86,7 @@ const DAppRequest = observer(() => {
             {phishingResult?.detectorStatus
               ? ` (${phishingResult.detectorStatus})`
               : ""}
-            . The dApp below has not been checked against any blocklist —
+            . The dApp below has not been checked against any blocklist;
             verify the origin manually before approving.
           </div>
         )}
