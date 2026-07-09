@@ -1,4 +1,8 @@
 import { LOCK_MANAGER_MESSAGES } from "@/scripts/lockManager/lockManager";
+import {
+  fetchOnChainHistory,
+  ON_CHAIN_PAGE_SIZE,
+} from "@/services/onChainHistory";
 import type {
   TokenFilter,
   TransactionHistoryEntry,
@@ -31,18 +35,33 @@ type QrlInstance = {
 
 class TransactionHistoryStore {
   transactions: TransactionHistoryEntry[] = [];
+  onChainTransactions: TransactionHistoryEntry[] = [];
+  onChainTotal = 0;
+  onChainPage = 0;
   isLoading = false;
+  isLoadingOnChain = false;
   filter: TokenFilter = "all";
   private pollingInterval: ReturnType<typeof setInterval> | null = null;
+  /** Bumped per loadOnChainHistory call so a slow response for a
+   *  previously-active account cannot land on the current one. */
+  private onChainRequestId = 0;
 
   constructor() {
     makeAutoObservable(this, {
       transactions: observable,
+      onChainTransactions: observable,
+      onChainTotal: observable,
+      onChainPage: observable,
       isLoading: observable,
+      isLoadingOnChain: observable,
       filter: observable,
+      mergedTransactions: computed,
       filteredTransactions: computed,
       pendingTransactions: computed,
+      hasMoreOnChain: computed,
       loadHistory: action.bound,
+      loadOnChainHistory: action.bound,
+      loadMoreOnChain: action.bound,
       addTransaction: action.bound,
       updateTransaction: action.bound,
       setFilter: action.bound,
@@ -52,17 +71,37 @@ class TransactionHistoryStore {
     });
   }
 
+  /** Local entries (pending metadata, token detail) joined with the
+   *  explorer's view of the address. On hash collision the local entry
+   *  wins: it knows token metadata and the pending lifecycle. */
+  get mergedTransactions(): TransactionHistoryEntry[] {
+    const localHashes = new Set(
+      this.transactions.map((tx) => tx.transactionHash.toLowerCase()),
+    );
+    return [
+      ...this.transactions,
+      ...this.onChainTransactions.filter(
+        (tx) => !localHashes.has(tx.transactionHash.toLowerCase()),
+      ),
+    ].sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  get hasMoreOnChain(): boolean {
+    return this.onChainTransactions.length < this.onChainTotal;
+  }
+
   get filteredTransactions(): TransactionHistoryEntry[] {
-    if (this.filter === "all") return this.transactions;
+    const merged = this.mergedTransactions;
+    if (this.filter === "all") return merged;
     if (this.filter === "native")
-      return this.transactions.filter(
+      return merged.filter(
         (tx) => !tx.isZrc20Token && !tx.tokenContractAddress,
       );
     if (this.filter === "nft")
-      return this.transactions.filter(
+      return merged.filter(
         (tx) => !tx.isZrc20Token && !!tx.tokenContractAddress,
       );
-    return this.transactions.filter((tx) => tx.isZrc20Token);
+    return merged.filter((tx) => tx.isZrc20Token);
   }
 
   get pendingTransactions(): TransactionHistoryEntry[] {
@@ -88,6 +127,74 @@ class TransactionHistoryStore {
     } finally {
       runInAction(() => {
         this.isLoading = false;
+      });
+    }
+  }
+
+  async loadOnChainHistory(accountAddress: string, chainId: string) {
+    const requestId = ++this.onChainRequestId;
+    this.onChainTransactions = [];
+    this.onChainTotal = 0;
+    this.onChainPage = 0;
+    this.isLoadingOnChain = true;
+    try {
+      const { entries, totalCount } = await fetchOnChainHistory(
+        accountAddress,
+        chainId,
+        1,
+      );
+      runInAction(() => {
+        if (requestId !== this.onChainRequestId) return;
+        this.onChainTransactions = entries;
+        this.onChainTotal = totalCount;
+        this.onChainPage = 1;
+      });
+    } finally {
+      runInAction(() => {
+        if (requestId === this.onChainRequestId) {
+          this.isLoadingOnChain = false;
+        }
+      });
+    }
+  }
+
+  async loadMoreOnChain(accountAddress: string, chainId: string) {
+    if (this.isLoadingOnChain || !this.hasMoreOnChain) return;
+    const requestId = this.onChainRequestId;
+    const nextPage = this.onChainPage + 1;
+    this.isLoadingOnChain = true;
+    try {
+      const { entries, totalCount } = await fetchOnChainHistory(
+        accountAddress,
+        chainId,
+        nextPage,
+      );
+      runInAction(() => {
+        if (requestId !== this.onChainRequestId) return;
+        const seen = new Set(
+          this.onChainTransactions.map((tx) =>
+            tx.transactionHash.toLowerCase(),
+          ),
+        );
+        this.onChainTransactions = [
+          ...this.onChainTransactions,
+          ...entries.filter(
+            (tx) => !seen.has(tx.transactionHash.toLowerCase()),
+          ),
+        ];
+        this.onChainPage = nextPage;
+        // A short page means the explorer is exhausted regardless of what
+        // the count says, so Load More can never spin forever.
+        this.onChainTotal =
+          entries.length < ON_CHAIN_PAGE_SIZE
+            ? this.onChainTransactions.length
+            : totalCount;
+      });
+    } finally {
+      runInAction(() => {
+        if (requestId === this.onChainRequestId) {
+          this.isLoadingOnChain = false;
+        }
       });
     }
   }

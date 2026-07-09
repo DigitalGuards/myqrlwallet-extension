@@ -57,6 +57,44 @@ describe("TransactionHistory", () => {
     expect(screen.getByText("No transactions yet")).toBeInTheDocument();
   });
 
+  it("should load on-chain history for the active account on mount", () => {
+    const loadOnChainHistory = vi.fn();
+    renderComponent(
+      mockedStore({
+        transactionHistoryStore: { loadOnChainHistory } as any,
+      }),
+    );
+
+    expect(loadOnChainHistory).toHaveBeenCalledWith(
+      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      expect.any(String),
+    );
+  });
+
+  it("should show Load More while the explorer has more pages", async () => {
+    const loadMoreOnChain = vi.fn();
+    renderComponent(
+      mockedStore({
+        transactionHistoryStore: {
+          hasMoreOnChain: true,
+          loadMoreOnChain,
+        } as any,
+      }),
+    );
+
+    const button = screen.getByRole("button", { name: "Load More" });
+    await userEvent.click(button);
+    expect(loadMoreOnChain).toHaveBeenCalled();
+  });
+
+  it("should hide Load More when the explorer is exhausted", () => {
+    renderComponent();
+
+    expect(
+      screen.queryByRole("button", { name: "Load More" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("should render transaction items grouped by date", () => {
     const entries = [
       makeSampleEntry(),

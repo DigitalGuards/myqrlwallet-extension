@@ -56,6 +56,32 @@ describe("TransactionHistoryItem", () => {
     expect(screen.getByText("Failed")).toBeInTheDocument();
   });
 
+  it("should render a received transaction with the incoming direction", () => {
+    // Mocked active account is the sample's from address; swap the ends
+    // so the entry is incoming.
+    renderComponent(
+      makeSampleEntry({
+        from: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+        to: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      }),
+    );
+
+    expect(screen.getByText("Receive")).toBeInTheDocument();
+    expect(screen.getByText("+2.5 QRL")).toBeInTheDocument();
+    expect(screen.queryByText("Send")).not.toBeInTheDocument();
+  });
+
+  it("should render a self-send as a send", () => {
+    renderComponent(
+      makeSampleEntry({
+        from: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+        to: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      }),
+    );
+
+    expect(screen.getByText("Send")).toBeInTheDocument();
+  });
+
   it("should render a ZRC-20 token transaction", () => {
     renderComponent(
       makeSampleEntry({

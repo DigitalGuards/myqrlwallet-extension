@@ -5,7 +5,7 @@ import type {
   PendingStatus,
   TransactionHistoryEntry,
 } from "@/types/transactionHistory";
-import { ArrowUpRight, Loader } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Loader } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -52,11 +52,20 @@ const TransactionHistoryItem = observer(({
   transaction,
 }: TransactionHistoryItemProps) => {
   const { t } = useTranslation();
-  const { priceStore, settingsStore } = useStore();
+  const { priceStore, qrlStore, settingsStore } = useStore();
   const { amount, tokenSymbol, status, pendingStatus } = transaction;
   const navigate = useNavigate();
   const displayStatus = getDisplayStatus(pendingStatus, status);
   const isPending = displayStatus === "pending";
+
+  // Explorer-sourced entries include transfers TO this account; local
+  // entries are always sends. Self-sends render as sends.
+  const accountAddress =
+    qrlStore.activeAccount.accountAddress?.toLowerCase() ?? "";
+  const isIncoming =
+    !!accountAddress &&
+    transaction.to?.toLowerCase() === accountAddress &&
+    transaction.from?.toLowerCase() !== accountAddress;
 
   const { showBalanceAndPrice, currency } = settingsStore;
   const qrlPrice = priceStore.getPrice(currency);
@@ -78,10 +87,16 @@ const TransactionHistoryItem = observer(({
   return (
     <Link to={ROUTES.TRANSACTION_DETAIL} state={{ transaction }}>
       <div className="flex cursor-pointer items-center gap-3 rounded-md border p-3 transition-colors hover:bg-accent">
-        <ArrowUpRight className="h-8 w-8 shrink-0 text-secondary" />
+        {isIncoming ? (
+          <ArrowDownLeft className="h-8 w-8 shrink-0 text-green-500" />
+        ) : (
+          <ArrowUpRight className="h-8 w-8 shrink-0 text-secondary" />
+        )}
         <div className="flex flex-1 items-center justify-between">
           <div className="flex flex-col">
-            <span className="text-sm font-medium">{t('txHistory.typeSend')}</span>
+            <span className="text-sm font-medium">
+              {t(isIncoming ? 'txHistory.typeReceive' : 'txHistory.typeSend')}
+            </span>
             <span className={`text-xs ${getStatusColor(displayStatus)}`}>
               {isPending && (
                 <Loader className="mr-1 inline h-3 w-3 animate-spin" />
@@ -90,7 +105,10 @@ const TransactionHistoryItem = observer(({
             </span>
           </div>
           <div className="flex flex-col items-end">
-            <span className="text-sm font-medium">
+            <span
+              className={`text-sm font-medium ${isIncoming ? "text-green-500" : ""}`}
+            >
+              {isIncoming ? "+" : ""}
               {amount} {tokenSymbol}
             </span>
             {fiatDisplay && (

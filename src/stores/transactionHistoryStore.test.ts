@@ -27,6 +27,18 @@ vi.mock("@/utilities/storageUtil", () => ({
   },
 }));
 
+const { mockFetchOnChainHistory } = vi.hoisted(() => ({
+  mockFetchOnChainHistory: vi
+    .fn<any>()
+    .mockResolvedValue({ entries: [], totalCount: 0 }),
+}));
+
+vi.mock("@/services/onChainHistory", () => ({
+  __esModule: true,
+  ON_CHAIN_PAGE_SIZE: 10,
+  fetchOnChainHistory: (...args: any[]) => mockFetchOnChainHistory(...args),
+}));
+
 const makeSampleEntry = (
   overrides: Partial<TransactionHistoryEntry> = {},
 ): TransactionHistoryEntry => ({
@@ -427,5 +439,121 @@ describe("TransactionHistoryStore", () => {
 
     // No qrlInstance, so no polling should start
     expect(store.pendingTransactions).toEqual([pendingEntry]);
+  });
+
+  describe("on-chain history", () => {
+    const ADDRESS = "Q20B714091cF2a62DADda2847803e3f1B9D2D3779";
+    const CHAIN = "0x539";
+
+    beforeEach(() => {
+      mockFetchOnChainHistory.mockResolvedValue({
+        entries: [],
+        totalCount: 0,
+      });
+    });
+
+    it("should merge explorer entries with local ones, local wins on hash collision", async () => {
+      const local = makeSampleEntry({
+        id: "0xAAA",
+        transactionHash: "0xAAA",
+        tokenSymbol: "TST",
+        timestamp: 2000,
+      });
+      const duplicate = makeSampleEntry({
+        id: "0xaaa",
+        transactionHash: "0xaaa",
+        timestamp: 2000,
+      });
+      const explorerOnly = makeSampleEntry({
+        id: "0xbbb",
+        transactionHash: "0xbbb",
+        timestamp: 3000,
+      });
+      mockGetTransactionHistory.mockResolvedValue([local]);
+      mockFetchOnChainHistory.mockResolvedValue({
+        entries: [duplicate, explorerOnly],
+        totalCount: 2,
+      });
+
+      const store = new TransactionHistoryStore();
+      await store.loadHistory(ADDRESS);
+      await store.loadOnChainHistory(ADDRESS, CHAIN);
+
+      expect(mockFetchOnChainHistory).toHaveBeenCalledWith(ADDRESS, CHAIN, 1);
+      const merged = store.mergedTransactions;
+      expect(merged.map((tx) => tx.transactionHash)).toEqual([
+        "0xbbb",
+        "0xAAA",
+      ]);
+      expect(merged[1].tokenSymbol).toBe("TST");
+      expect(store.filteredTransactions).toEqual(merged);
+      expect(store.isLoadingOnChain).toBe(false);
+    });
+
+    it("should page with loadMoreOnChain, dedupe, and stop on a short page", async () => {
+      const page1 = [
+        makeSampleEntry({ id: "0x1", transactionHash: "0x1", timestamp: 3 }),
+        makeSampleEntry({ id: "0x2", transactionHash: "0x2", timestamp: 2 }),
+      ];
+      mockFetchOnChainHistory.mockResolvedValue({
+        entries: page1,
+        totalCount: 3,
+      });
+
+      const store = new TransactionHistoryStore();
+      await store.loadOnChainHistory(ADDRESS, CHAIN);
+      expect(store.hasMoreOnChain).toBe(true);
+
+      // Page 2 overlaps page 1 (chain grew) and comes back short.
+      mockFetchOnChainHistory.mockResolvedValue({
+        entries: [
+          makeSampleEntry({ id: "0x2", transactionHash: "0x2", timestamp: 2 }),
+          makeSampleEntry({ id: "0x3", transactionHash: "0x3", timestamp: 1 }),
+        ],
+        totalCount: 3,
+      });
+      await store.loadMoreOnChain(ADDRESS, CHAIN);
+
+      expect(mockFetchOnChainHistory).toHaveBeenLastCalledWith(
+        ADDRESS,
+        CHAIN,
+        2,
+      );
+      expect(store.onChainTransactions.map((tx) => tx.transactionHash)).toEqual(
+        ["0x1", "0x2", "0x3"],
+      );
+      expect(store.hasMoreOnChain).toBe(false);
+    });
+
+    it("should ignore a stale response after the account switches", async () => {
+      let resolveFirst: (value: any) => void = () => {};
+      const firstCall = new Promise((resolve) => {
+        resolveFirst = resolve;
+      });
+      mockFetchOnChainHistory.mockReturnValueOnce(firstCall);
+
+      const store = new TransactionHistoryStore();
+      const first = store.loadOnChainHistory("Qold", CHAIN);
+
+      mockFetchOnChainHistory.mockResolvedValueOnce({
+        entries: [
+          makeSampleEntry({ id: "0xnew", transactionHash: "0xnew" }),
+        ],
+        totalCount: 1,
+      });
+      await store.loadOnChainHistory("Qnew", CHAIN);
+
+      resolveFirst({
+        entries: [
+          makeSampleEntry({ id: "0xold", transactionHash: "0xold" }),
+        ],
+        totalCount: 1,
+      });
+      await first;
+
+      expect(
+        store.onChainTransactions.map((tx) => tx.transactionHash),
+      ).toEqual(["0xnew"]);
+    });
   });
 });

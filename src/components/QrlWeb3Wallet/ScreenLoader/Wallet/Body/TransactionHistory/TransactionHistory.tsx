@@ -1,3 +1,4 @@
+import { Button } from "@/components/UI/Button";
 import {
   Card,
   CardContent,
@@ -46,10 +47,16 @@ const groupByDate = (
 const TransactionHistory = observer(() => {
   const { t } = useTranslation();
   const { qrlStore, transactionHistoryStore } = useStore();
-  const { activeAccount } = qrlStore;
+  const { activeAccount, qrlConnection } = qrlStore;
   const { accountAddress } = activeAccount;
-  const { filteredTransactions, isLoading, filter } =
-    transactionHistoryStore;
+  const { blockchain } = qrlConnection;
+  const {
+    filteredTransactions,
+    isLoading,
+    isLoadingOnChain,
+    hasMoreOnChain,
+    filter,
+  } = transactionHistoryStore;
 
   const groupedTransactions = useMemo(
     () => groupByDate(filteredTransactions),
@@ -59,11 +66,18 @@ const TransactionHistory = observer(() => {
   useEffect(() => {
     if (accountAddress) {
       transactionHistoryStore.loadHistory(accountAddress, qrlStore.qrlInstance as Parameters<typeof transactionHistoryStore.loadHistory>[1]);
+      transactionHistoryStore.loadOnChainHistory(
+        accountAddress,
+        blockchain.chainId,
+      );
     }
     return () => {
       transactionHistoryStore.stopPolling();
     };
-  }, [accountAddress]);
+  }, [accountAddress, blockchain.chainId]);
+
+  const showInitialSpinner =
+    isLoading || (isLoadingOnChain && filteredTransactions.length === 0);
 
   return (
     <div className="w-full">
@@ -100,13 +114,13 @@ const TransactionHistory = observer(() => {
               </TabsList>
             </Tabs>
 
-            {isLoading && (
+            {showInitialSpinner && (
               <div className="flex items-center justify-center py-8">
                 <Loader className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             )}
 
-            {!isLoading && filteredTransactions.length === 0 && (
+            {!showInitialSpinner && filteredTransactions.length === 0 && (
               <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
                 <History className="h-12 w-12" />
                 <p className="text-sm">{t('txHistory.empty')}</p>
@@ -129,6 +143,26 @@ const TransactionHistory = observer(() => {
                   </div>
                 ))}
               </div>
+            )}
+
+            {!showInitialSpinner && hasMoreOnChain && (
+              <Button
+                className="w-full"
+                type="button"
+                variant="outline"
+                disabled={isLoadingOnChain}
+                onClick={() =>
+                  void transactionHistoryStore.loadMoreOnChain(
+                    accountAddress,
+                    blockchain.chainId,
+                  )
+                }
+              >
+                {isLoadingOnChain && (
+                  <Loader className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                {t('txHistory.loadMore')}
+              </Button>
             )}
           </CardContent>
         </Card>

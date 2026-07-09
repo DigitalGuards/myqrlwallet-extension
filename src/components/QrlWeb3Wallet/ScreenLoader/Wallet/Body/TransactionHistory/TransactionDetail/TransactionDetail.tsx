@@ -6,6 +6,7 @@ import {
   CardTitle,
 } from "@/components/UI/Card";
 import { Separator } from "@/components/UI/Separator";
+import { getExplorerApiBase } from "@/configuration/assetDiscoveryConfig";
 import { NATIVE_TOKEN_UNITS_OF_GAS } from "@/constants/nativeToken";
 import { formatFiatCompact } from "@/functions/formatFiat";
 import { getOptimalGasFee } from "@/functions/getOptimalGasFee";
@@ -312,14 +313,27 @@ const TransactionDetail = observer(() => {
     replacedByAction,
   } = transaction;
 
+  // Received transfers (explorer-sourced) carry a fee the SENDER paid;
+  // presenting amount + fee as "total cost" would misstate them.
+  const activeAddress =
+    qrlStore.activeAccount.accountAddress?.toLowerCase() ?? "";
+  const isIncoming =
+    !!activeAddress &&
+    to?.toLowerCase() === activeAddress &&
+    from?.toLowerCase() !== activeAddress;
+
   const displayStatus = getDisplayStatus(pendingStatus, status);
   const badgeConfig = STATUS_BADGE_CONFIG[displayStatus] ?? DEFAULT_BADGE_CONFIG;
   const isPending = displayStatus === "pending";
   const canReplace =
     isPending && transaction.nonce !== undefined;
 
+  // Explorer-sourced entries have no gas breakdown, only the fee the
+  // explorer pre-computed in QRL units.
+  const hasGasBreakdown = gasUsed !== "" && effectiveGasPrice !== "";
   const totalGasFeeInPlanck = Number(gasUsed) * Number(effectiveGasPrice);
-  const totalGasFeeQrl = utils.fromPlanck(totalGasFeeInPlanck, "quanta");
+  const totalGasFeeQrl =
+    transaction.paidFeesQrl ?? utils.fromPlanck(totalGasFeeInPlanck, "quanta");
   const gasPriceQrl = utils.fromPlanck(Number(effectiveGasPrice), "quanta");
   const totalCost = amount + Number(totalGasFeeQrl);
 
@@ -339,8 +353,13 @@ const TransactionDetail = observer(() => {
     second: "2-digit",
   });
 
+  // Chains indexed by zondscan link there (the web explorer and its API
+  // share an origin); anything else falls back to the legacy explorer.
+  const explorerBase = getExplorerApiBase(transaction.chainId);
   const hashWithoutPrefix = transactionHash.replace(/^0x/, "");
-  const explorerTxUrl = `https://explorer.theqrl.org/tx/${hashWithoutPrefix}`;
+  const explorerTxUrl = explorerBase
+    ? `${explorerBase}/tx/${transactionHash}`
+    : `https://explorer.theqrl.org/tx/${hashWithoutPrefix}`;
 
   const openInExplorer = () => {
     if (explorerTxUrl) {
@@ -421,9 +440,11 @@ const TransactionDetail = observer(() => {
               <span className="text-lg font-bold">
                 {amount} {tokenSymbol}
               </span>
-              <span className="text-xs text-muted-foreground">
-                {fiatAmount || "—"}
-              </span>
+              {fiatAmount && (
+                <span className="text-xs text-muted-foreground">
+                  {fiatAmount}
+                </span>
+              )}
             </div>
 
             <Separator />
@@ -449,22 +470,26 @@ const TransactionDetail = observer(() => {
                     </span>
                     <span className="text-sm font-medium">{blockNumber}</span>
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs text-muted-foreground">
-                      {t('txDetail.gasUsed')}
-                    </span>
-                    <span className="text-sm font-medium">
-                      {Number(gasUsed).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs text-muted-foreground">
-                      {t('txDetail.gasPrice')}
-                    </span>
-                    <span className="text-sm font-medium">
-                      {getOptimalGasFee(gasPriceQrl)}
-                    </span>
-                  </div>
+                  {hasGasBreakdown && (
+                    <>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs text-muted-foreground">
+                          {t('txDetail.gasUsed')}
+                        </span>
+                        <span className="text-sm font-medium">
+                          {Number(gasUsed).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs text-muted-foreground">
+                          {t('txDetail.gasPrice')}
+                        </span>
+                        <span className="text-sm font-medium">
+                          {getOptimalGasFee(gasPriceQrl)}
+                        </span>
+                      </div>
+                    </>
+                  )}
                   <div className="flex flex-col gap-1">
                     <span className="text-xs text-muted-foreground">
                       {t('txDetail.totalGasFee')}
@@ -480,19 +505,21 @@ const TransactionDetail = observer(() => {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-muted-foreground">
-                    {t('txDetail.totalCost')}
-                  </span>
-                  <span className="text-sm font-bold">
-                    {getOptimalGasFee(totalCost.toString())}
-                  </span>
-                  {fiatTotalCost && (
+                {!isIncoming && (
+                  <div className="flex flex-col gap-1">
                     <span className="text-xs text-muted-foreground">
-                      {fiatTotalCost}
+                      {t('txDetail.totalCost')}
                     </span>
-                  )}
-                </div>
+                    <span className="text-sm font-bold">
+                      {getOptimalGasFee(totalCost.toString())}
+                    </span>
+                    {fiatTotalCost && (
+                      <span className="text-xs text-muted-foreground">
+                        {fiatTotalCost}
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 <Separator />
               </>

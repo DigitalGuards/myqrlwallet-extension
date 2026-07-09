@@ -23,6 +23,9 @@ export type TransactionHistoryEntry = {
   status: boolean;
   timestamp: number;
   chainId: string;
+  /** Explorer-sourced entries carry the fee pre-computed in QRL units;
+   *  locally-sent entries derive it from gasUsed * effectiveGasPrice. */
+  paidFeesQrl?: string;
   // Pending transaction support (all optional for backward compat)
   pendingStatus?: PendingStatus;
   nonce?: number;
