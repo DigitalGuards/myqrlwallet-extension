@@ -20,7 +20,20 @@ describe("ImportHexSeedForm", () => {
           accounts: {
             seedToAccount: (_seed: string | Uint8Array) => ({
               address: "Q2090E9F38771876FB6Fc51a6b464121d3cC093A1",
-              seed: _seed,
+              seed: typeof _seed === "string" ? _seed : "",
+              sign: (_data: string | Record<string, unknown>) => ({
+                messageHash: "",
+                signature: "",
+              }),
+              signTransaction: async () => ({
+                messageHash: "",
+                rawTransaction: "",
+                signature: "",
+                transactionHash: "",
+              }),
+              encrypt: async () => {
+                throw new Error("Not implemented");
+              },
             }),
           },
         },

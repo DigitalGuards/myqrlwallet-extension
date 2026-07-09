@@ -32,6 +32,14 @@ const ImportHexSeedForm = withSuspense(
       ),
   ),
 );
+const ImportEncryptedWallet = withSuspense(
+  lazy(
+    () =>
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportEncryptedWallet/ImportEncryptedWallet"
+      ),
+  ),
+);
 
 const ImportAccount = observer(() => {
   const { t } = useTranslation();
@@ -64,12 +72,15 @@ const ImportAccount = observer(() => {
           <>
             <BackButton />
             <Tabs defaultValue="mnemonic" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
+              <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="mnemonic">
                   {t("importAccount.tabMnemonic")}
                 </TabsTrigger>
                 <TabsTrigger value="hexSeed">
                   {t("importAccount.tabHexSeed")}
+                </TabsTrigger>
+                <TabsTrigger value="walletFile">
+                  {t("importAccount.tabWalletFile")}
                 </TabsTrigger>
               </TabsList>
               <TabsContent value="mnemonic">
@@ -77,6 +88,9 @@ const ImportAccount = observer(() => {
               </TabsContent>
               <TabsContent value="hexSeed">
                 <ImportHexSeedForm onImported={finalizeImport} />
+              </TabsContent>
+              <TabsContent value="walletFile">
+                <ImportEncryptedWallet onImported={finalizeImport} />
               </TabsContent>
             </Tabs>
           </>
