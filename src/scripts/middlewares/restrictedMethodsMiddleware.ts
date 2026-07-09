@@ -24,6 +24,26 @@ import {
 } from "../utils/restrictedMethodsMiddlewareUtils";
 import { DAppRequestType, DAppResponseType } from "./middlewareTypes";
 
+// Chrome lets the user dock ANY extension in the side panel manually,
+// without the wallet's sidePanelPreferred setting ever being flipped. When a
+// panel context is live, openPopup() would spawn a second, competing
+// approval surface next to it; the storage subscription already surfaces the
+// request in the open panel. runtime.getContexts needs Chrome 116+, so this
+// is feature-detected and fails open to the popup path.
+const isSidePanelOpen = async (): Promise<boolean> => {
+  try {
+    if (typeof chrome === "undefined" || !chrome.runtime?.getContexts) {
+      return false;
+    }
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: [chrome.runtime.ContextType.SIDE_PANEL],
+    });
+    return contexts.length > 0;
+  } catch {
+    return false;
+  }
+};
+
 const QRL_WALLET_DAPP_CONNECTION_REQUIRED_METHODS: string[] = [
   RESTRICTED_METHODS.WALLET_ADD_QRL_CHAIN,
   RESTRICTED_METHODS.WALLET_GET_CAPABILITIES,
@@ -189,7 +209,7 @@ const getRestrictedMethodResult = async (
   // openPopup() in that mode spawns a competing approval surface, so
   // we skip it and rely on the badge + side-panel storage subscription
   // to surface the request.
-  if (!settings.sidePanelPreferred) {
+  if (!settings.sidePanelPreferred && !(await isSidePanelOpen())) {
     try {
       await browser.action.openPopup();
     } catch {
@@ -280,7 +300,7 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
     if (isRequestPending) {
       try {
         const settings = await StorageUtil.getSettings();
-        if (!settings.sidePanelPreferred) {
+        if (!settings.sidePanelPreferred && !(await isSidePanelOpen())) {
           await browser.action.openPopup();
         }
       } finally {
