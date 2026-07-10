@@ -538,5 +538,10 @@
   "home.send": "Enviar",
   "home.history": "Historial",
   "lock.loading": "Preparando tu monedero",
-  "home.connecting": "Conectando a la red"
+  "home.connecting": "Conectando a la red",
+  "lock.retrying": "Activando el servicio del monedero (intento {{attempt}})",
+  "loader.phaseChain": "Cargando la configuración de la cadena",
+  "loader.phaseNetwork": "Contactando con la red",
+  "loader.phaseAccounts": "Obteniendo saldos",
+  "loader.phaseSession": "Restaurando tu sesión"
 }
