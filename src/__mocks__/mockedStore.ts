@@ -46,6 +46,11 @@ const mockedStoreValues: StoreType = {
       isLoading: false,
       blockchain: DEFAULT_BLOCKCHAIN,
     },
+    initProgress: {
+      active: false,
+      fraction: 1,
+      phase: "session",
+    },
     qrlInstance: undefined,
     fetchAccounts: async () => {},
     fetchQrlConnection: async () => {},
