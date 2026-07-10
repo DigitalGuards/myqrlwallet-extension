@@ -51,7 +51,7 @@ const SettingsPreferences = observer(() => {
   return (
     <div className="w-full">
       <CircuitBackground />
-      <div className="relative z-10 p-8">
+      <div className="page-enter relative z-10 p-8">
         <Card className="w-full">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">

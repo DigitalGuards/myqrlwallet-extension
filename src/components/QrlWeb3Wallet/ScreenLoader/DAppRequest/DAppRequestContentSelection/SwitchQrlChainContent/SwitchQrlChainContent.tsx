@@ -39,7 +39,7 @@ const SwitchQrlChainContent = observer(() => {
   };
 
   return (
-    <Card className="w-full">
+    <Card className="surface-ember w-full animate-appear-in">
       <div className="p-6">
         <div className="mb-1 text-xs font-bold">{t('dapp.switchChain.title')}</div>
         <div>{t('dapp.switchChain.description')}</div>

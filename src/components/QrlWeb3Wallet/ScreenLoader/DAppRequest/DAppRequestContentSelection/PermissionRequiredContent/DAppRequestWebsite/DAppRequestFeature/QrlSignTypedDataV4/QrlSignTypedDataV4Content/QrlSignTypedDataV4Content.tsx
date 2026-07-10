@@ -256,7 +256,7 @@ const QrlSignTypedDataV4Content = observer(() => {
       <div className="flex flex-col rounded-md p-2">
         <div className="flex flex-col gap-1">
           <div>{t('dapp.signature.fromAddress')}</div>
-          <div className="w-64 font-bold text-secondary">{`${prefixFromAddress} ${addressSplitFromAddress.join(" ")}`}</div>
+          <div className="font-data w-64 font-bold text-blue-accent">{`${prefixFromAddress} ${addressSplitFromAddress.join(" ")}`}</div>
         </div>
       </div>
       <div className="rounded-md bg-muted/50 p-2 text-xs">
@@ -266,7 +266,7 @@ const QrlSignTypedDataV4Content = observer(() => {
         </div>
       </div>
       {isApprovalSignature && (
-        <div className="rounded-md border border-red-500 bg-red-50 p-2 text-xs text-red-900 dark:bg-red-900/30 dark:text-red-200">
+        <div className="rounded-md border border-destructive/60 bg-destructive/10 p-2 text-xs text-destructive dark:text-red-200">
           <strong>Token approval:</strong> this signature ({primaryType}) authorises the spender below to move tokens from your account once submitted on-chain. Verify each field carefully before approving.
           <div className="mt-1 flex flex-col gap-1">
             {approvalSpender && (
@@ -290,12 +290,12 @@ const QrlSignTypedDataV4Content = observer(() => {
         </div>
       )}
       {chainIdMissing && (
-        <div className="rounded-md border border-yellow-500 bg-yellow-50 p-2 text-xs text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-200">
+        <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
           <strong>Warning:</strong> the dApp did not declare a chainId in the EIP-712 domain. This signature is not bound to any chain and could be replayed on any chain hosting the verifying contract.
         </div>
       )}
       {chainIdMismatch && (
-        <div className="rounded-md border border-yellow-500 bg-yellow-50 p-2 text-xs text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-200">
+        <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
           <strong>Warning:</strong> the EIP-712 domain chainId ({declaredChainId}) does not match the wallet&apos;s active chain ({activeChainId}). The signature will be valid on the declared chain only.
         </div>
       )}

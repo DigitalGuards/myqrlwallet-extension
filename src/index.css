@@ -4,104 +4,113 @@
 
 @layer base {
   /*
-   * MyQRLWallet design tokens.
-   * Mapped from the web wallet system (myqrlwallet-frontend/src/index.css):
-   * dark navy background, orange `secondary` accent, `blue-accent`, muted
-   * grays and subtle borders. Tailwind v3 here, so the tokens live in this
-   * CSS variable layer and are wired through tailwind.config.js.
+   * MyQRLWallet design tokens: "Obsidian & Ember", ported from the web
+   * wallet system (myqrlwallet-frontend/src/index.css). One deep warm-ink
+   * surface family, ember orange as the single action color, QRL battery
+   * blue as the identity color (addresses, account markers): orange acts,
+   * blue identifies. Tailwind v3 here, so the tokens live in this CSS
+   * variable layer and are wired through tailwind.config.js.
+   *
+   * The rest of the product family (web, desktop, mobile) is dark-only;
+   * the extension keeps its light preference, so :root carries a warm
+   * paper counterpart of the same palette.
    */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 36 25% 96%;
+    --foreground: 235 15% 8%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 235 15% 8%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 235 15% 8%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    /* Ember: the single action color */
+    --primary: 24 96% 50%;
+    --primary-foreground: 24 90% 97%;
 
-    --secondary: 25 95% 53%;
-    --secondary-foreground: 210 40% 98%;
+    /* QRL Orange kept as the brand accent token (rails, edges, badges) */
+    --secondary: 25 95% 48%;
+    --secondary-foreground: 24 90% 97%;
 
-    --blue-accent: 199 89% 64%;
-    --blue-accent-foreground: 222.2 47.4% 11.2%;
+    /* QRL battery blue, darkened for light surfaces */
+    --blue-accent: 199 89% 38%;
+    --blue-accent-foreground: 200 90% 97%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --success: 152 55% 34%;
+    --success-foreground: 152 80% 97%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --muted: 36 15% 90%;
+    --muted-foreground: 234 8% 40%;
 
-    --constructive: 120 100% 40%;
-    --constructive-foreground: 222.2 84% 4.9%;
+    --accent: 36 18% 91%;
+    --accent-foreground: 235 15% 8%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --constructive: 152 55% 34%;
+    --constructive-foreground: 152 80% 97%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --destructive: 0 68% 46%;
+    --destructive-foreground: 0 0% 98%;
 
-    /* Match qrlwallet.com: muted-foreground thumb on the page background.
-       Var references resolve at use time, so the dark theme's token
-       overrides flow through without per-theme scrollbar values. */
-    --scrollbar-track-color: hsl(var(--background));
+    --border: 235 10% 86%;
+    --input: 235 10% 82%;
+    --ring: 24 96% 50%;
 
     --scrollbar-width: thin;
-    --scrollbar-thumb-color: hsl(var(--muted-foreground));
-    --radius: 0.5rem;
+    --scrollbar-track-color: transparent;
+    --scrollbar-thumb-color: hsl(var(--muted-foreground) / 0.35);
+    --radius: 0.75rem;
 
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
+    --chart-1: 24 96% 55%;
+    --chart-2: 190 90% 58%;
+    --chart-3: 40 95% 60%;
+    --chart-4: 168 60% 45%;
+    --chart-5: 340 70% 58%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+    --background: 235 15% 4%;
+    --foreground: 36 20% 95%;
 
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
+    --card: 235 13% 7%;
+    --card-foreground: 36 20% 95%;
 
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 235 14% 6%;
+    --popover-foreground: 36 20% 95%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary: 24 96% 55%;
+    --primary-foreground: 24 90% 6%;
 
     --secondary: 25 95% 53%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary-foreground: 24 90% 6%;
 
     --blue-accent: 199 89% 64%;
-    --blue-accent-foreground: 210 40% 98%;
+    --blue-accent-foreground: 200 90% 8%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --success: 152 55% 48%;
+    --success-foreground: 152 80% 8%;
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --muted: 235 10% 12%;
+    --muted-foreground: 234 8% 64%;
 
-    --constructive: 120 100% 40%;
-    --constructive-foreground: 222.2 84% 4.9%;
+    --accent: 235 11% 13%;
+    --accent-foreground: 36 20% 95%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --constructive: 152 55% 48%;
+    --constructive-foreground: 152 80% 8%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --destructive: 0 68% 46%;
+    --destructive-foreground: 0 0% 98%;
 
+    --border: 235 10% 15%;
+    --input: 235 10% 17%;
+    --ring: 24 96% 55%;
 
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+    --chart-1: 24 96% 55%;
+    --chart-2: 190 90% 58%;
+    --chart-3: 40 95% 60%;
+    --chart-4: 168 60% 45%;
+    --chart-5: 340 70% 58%;
   }
 }
 
@@ -114,8 +123,35 @@
     box-sizing: border-box;
   }
 
+  ::selection {
+    background: hsl(var(--primary) / 0.35);
+    color: hsl(var(--foreground));
+  }
+
   body {
     @apply bg-background text-foreground;
+    font-family: theme("fontFamily.sans");
+    font-feature-settings: "ss01" on;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Atmosphere behind the wallet surface: grain plus an ember glow up top
+     and a faint cyan glow below, exactly as on qrlwallet.com. Dark theme
+     only: the glows are tuned for ink, not paper. */
+  .dark body {
+    background-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E"),
+      radial-gradient(30rem 20rem at 15% -8%, hsl(24 96% 55% / 0.1), transparent 62%),
+      radial-gradient(26rem 18rem at 105% 110%, hsl(190 90% 58% / 0.05), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: theme("fontFamily.display");
+    letter-spacing: -0.02em;
   }
 
   #root {
@@ -133,3 +169,98 @@
     -moz-appearance: textfield;
   }
 }
+
+/* Component-layer surfaces: sit below Tailwind utilities so per-card
+   overrides (bg-*, border-*) still win. */
+@layer components {
+  /* Data voice: addresses, hashes, balances. */
+  .font-data {
+    font-family: theme("fontFamily.mono");
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* Glass surface: the one card treatment used everywhere. Deliberately NO
+     backdrop-filter: it would give every card its own stacking context and
+     trap z-indexed popovers under sibling cards (frontend lesson). */
+  .surface-glass {
+    background:
+      linear-gradient(180deg, hsl(var(--foreground) / 0.045), transparent 42%),
+      hsl(var(--card) / 0.88);
+    border: 1px solid hsl(var(--foreground) / 0.08);
+    box-shadow:
+      0 1px 0 hsl(var(--foreground) / 0.05) inset,
+      0 18px 40px -24px hsl(235 30% 2% / 0.9);
+  }
+
+  /* Ember edge treatment for "hero" cards (active account, approvals). */
+  .surface-ember {
+    background:
+      linear-gradient(180deg, hsl(var(--primary) / 0.07), transparent 46%),
+      hsl(var(--card) / 0.86);
+    border: 1px solid hsl(var(--primary) / 0.22);
+    box-shadow:
+      0 1px 0 hsl(var(--primary) / 0.14) inset,
+      0 18px 44px -22px hsl(24 96% 40% / 0.28);
+  }
+}
+
+/* Plain CSS on purpose: Tailwind v3 tree-shakes custom classes and
+   keyframes declared inside @layer utilities against the content scan;
+   these keyframes back config-level animation utilities so they must
+   always ship. */
+/* Orchestrated screen entrance: apply .page-enter to a route's outer
+   wrapper; direct children rise in with a soft stagger. */
+  .page-enter > * {
+    animation: rise-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+  .page-enter > *:nth-child(2) {
+    animation-delay: 60ms;
+  }
+  .page-enter > *:nth-child(3) {
+    animation-delay: 120ms;
+  }
+  .page-enter > *:nth-child(4) {
+    animation-delay: 180ms;
+  }
+  .page-enter > *:nth-child(n + 5) {
+    animation-delay: 240ms;
+  }
+
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.995);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  /* Soft pulsing halo for live/status dots. */
+  .glow-dot {
+    box-shadow: 0 0 0 0 currentColor;
+    animation: glow-pulse 2.4s ease-out infinite;
+  }
+
+  @keyframes glow-pulse {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent);
+    }
+    70% {
+      box-shadow: 0 0 0 7px transparent;
+    }
+    100% {
+      box-shadow: 0 0 0 0 transparent;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .page-enter > *,
+    .animate-appear-in,
+    .animate-rise,
+    .glow-dot {
+      animation: none;
+    }
+  }

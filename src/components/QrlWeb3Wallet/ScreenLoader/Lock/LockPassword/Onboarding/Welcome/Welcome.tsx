@@ -20,7 +20,7 @@ const Welcome = observer(({ selectStep }: WelcomeProps) => {
   const { t } = useTranslation();
 
   return (
-    <Card className="animate-appear-in shadow-xl">
+    <Card className="surface-ember animate-appear-in">
       <CardHeader>
         <CardTitle>{t("welcome.title")}</CardTitle>
         <CardDescription className="break-words">

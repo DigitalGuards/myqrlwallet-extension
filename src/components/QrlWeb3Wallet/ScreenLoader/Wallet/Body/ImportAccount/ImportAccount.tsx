@@ -76,7 +76,7 @@ const ImportAccount = observer(() => {
   return (
     <>
       <CircuitBackground />
-      <div className="relative z-10 p-8">
+      <div className="page-enter relative z-10 p-8">
         {hasAccountImported ? (
           <AccountImportSuccess account={account} />
         ) : (

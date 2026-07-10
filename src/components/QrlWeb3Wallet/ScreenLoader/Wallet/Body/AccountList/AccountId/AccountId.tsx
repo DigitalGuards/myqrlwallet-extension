@@ -48,7 +48,7 @@ const AccountId = observer(({ account, hideLabel }: AccountIdType) => {
       )}
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-1">
-          <div className="flex flex-wrap gap-1">
+          <div className="font-data flex flex-wrap gap-1 text-blue-accent">
             <div className="text-xs">
               {prefix}
               {addressSplit[0]}
@@ -65,7 +65,7 @@ const AccountId = observer(({ account, hideLabel }: AccountIdType) => {
             </span>
           )}
         </div>
-        <div className="text-xs text-secondary">
+        <div className="font-data text-xs text-foreground/90">
           {accountBalance}
           {fiatDisplay && (
             <span className="ml-1 text-muted-foreground">{fiatDisplay}</span>

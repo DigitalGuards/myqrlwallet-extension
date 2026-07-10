@@ -6,6 +6,11 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import './i18n'
+// Brand fonts, self-hosted (MV3 CSP forbids remote fonts). Explicit
+// /index.css paths so vite rewrites the package-relative woff2 URLs.
+import '@fontsource-variable/sora/index.css'
+import '@fontsource-variable/instrument-sans/index.css'
+import '@fontsource-variable/jetbrains-mono/index.css'
 import './index.css'
 
 // Chrome sizes the action popup from the document's intrinsic size.
