@@ -28,7 +28,6 @@ import { observer } from "mobx-react-lite";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import ActiveAccountDisplay from "./ActiveAccountDisplay/ActiveAccountDisplay";
-import CircuitBackground from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/CircuitBackground/CircuitBackground";
 import TokensCardContent from "./ActiveAccountDisplay/TokensCardContent/TokensCardContent";
 import NFTCollections from "./ActiveAccountDisplay/TokensCardContent/NFTCollections/NFTCollections";
 import { useEffect, useState } from "react";
@@ -104,8 +103,7 @@ const AccountCreateImport = observer(() => {
     <div className="page-enter flex flex-col gap-8">
       {hasActiveAccount && (
         <>
-          <Card className="surface-ember relative w-full overflow-hidden">
-            <CircuitBackground />
+          <Card className="surface-ember relative w-full overflow-hidden [background:linear-gradient(180deg,hsl(var(--primary)/0.06),transparent_46%),hsl(var(--card)/0.45)]">
             <div className="relative z-10">
               <CardHeader>
                 <CardTitle>{t('home.activeAccount')}</CardTitle>

@@ -1,8 +1,8 @@
 import { useStore } from "@/stores/store";
-import { Loader } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import LockPassword from "./LockPassword/LockPassword";
+import BrandedLoader from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/BrandedLoader/BrandedLoader";
 
 const Lock = observer(() => {
   const { lockStore } = useStore();
@@ -28,11 +28,7 @@ const Lock = observer(() => {
       <div className="relative z-10 w-full max-w-sm">
         {isLoading ? (
           <div className="flex justify-center">
-            <Loader
-              className="animate-spin text-secondary"
-              size="48"
-              data-testid="loader-icon"
-            />
+            <BrandedLoader label={t("lock.loading")} />
           </div>
         ) : (
           <LockPassword />

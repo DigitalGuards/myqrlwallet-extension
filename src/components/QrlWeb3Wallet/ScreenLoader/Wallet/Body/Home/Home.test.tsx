@@ -35,7 +35,7 @@ describe("Home", () => {
       mockedStore({ qrlStore: { qrlConnection: { isLoading: true } } }),
     );
 
-    expect(screen.getByText("Mocked Loader")).toBeInTheDocument();
+    expect(screen.getByTestId("loader-icon")).toBeInTheDocument();
   });
 
   it("should render the account create import component if connected to the blockchain", async () => {

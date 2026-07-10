@@ -33,7 +33,7 @@ describe("ActiveAccountDisplay", () => {
 
     expect(screen.getByText("2.45 QRL")).toBeInTheDocument();
     expect(
-      screen.getByText("Q 20504 6e6A6 E159e D6ACe dE46A 36CAD 6D449 C80A1"),
+      screen.getByText("Q20504...C80A1"),
     ).toBeInTheDocument();
   });
 });
