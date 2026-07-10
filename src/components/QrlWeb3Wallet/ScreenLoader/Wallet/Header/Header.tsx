@@ -44,7 +44,7 @@ const QrlWeb3WalletMoreOptions = withSuspense(
 
 const Header = () => {
   return (
-    <div className="z-20 flex h-16 shrink-0 items-center justify-between border-b-2 border-secondary bg-background px-4">
+    <div className="relative z-20 flex h-16 shrink-0 items-center justify-between border-b border-foreground/10 bg-background/85 px-4">
       <QrlWeb3WalletLogo />
       <div className="flex items-center gap-2">
         <AccountBadge />
@@ -52,6 +52,11 @@ const Header = () => {
         <ChainBadge displayChainName={false} />
         <QrlWeb3WalletMoreOptions />
       </div>
+      {/* Ember hairline: the brand rail, softened from the old border-b-2 */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-primary/70 via-primary/25 to-transparent"
+      />
     </div>
   );
 };

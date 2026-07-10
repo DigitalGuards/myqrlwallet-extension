@@ -56,7 +56,7 @@ const DAppRequestWebsite = observer(() => {
         </div>
       </div>
       {isCrossOriginIframe && (
-        <div className="rounded-md border border-yellow-500 bg-yellow-50 p-2 text-xs text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-200">
+        <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
           <strong>Embedded request:</strong> this dApp is loaded inside an
           iframe on <span className="font-mono">{parentOrigin}</span>. Verify
           you trust the page hosting the iframe before approving.

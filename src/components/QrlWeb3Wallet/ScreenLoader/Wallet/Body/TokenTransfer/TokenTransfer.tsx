@@ -550,7 +550,7 @@ const TokenTransfer = observer(() => {
     <Form {...form}>
       <form className="w-full" onSubmit={handleSubmit(onSubmit)}>
         <CircuitBackground />
-        <div className="relative z-10 p-8">
+        <div className="page-enter relative z-10 p-8">
           <BackButton />
           <Card className="w-full">
             <CardHeader className="flex flex-col gap-4 pb-4">
@@ -604,7 +604,7 @@ const TokenTransfer = observer(() => {
                           </p>
                         )}
                         {resolvedAddress && !qrnsResolving && (
-                          <p className="text-xs text-green-500">
+                          <p className="text-xs text-success">
                             → {resolvedAddress}
                           </p>
                         )}

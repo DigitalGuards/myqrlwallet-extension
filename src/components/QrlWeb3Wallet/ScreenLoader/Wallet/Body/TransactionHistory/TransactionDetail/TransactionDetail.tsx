@@ -63,7 +63,7 @@ const CopyableField = ({
           aria-label={`Copy ${label}`}
         >
           {copied ? (
-            <Check className="h-4 w-4 text-green-500" />
+            <Check className="h-4 w-4 text-success" />
           ) : (
             <Copy className="h-4 w-4" />
           )}
@@ -83,8 +83,8 @@ function getDisplayStatus(
 
 const STATUS_BADGE_CONFIG: Record<string, { className: string; labelKey: string }> = {
   pending: { className: "bg-amber-500/10 text-amber-500", labelKey: "txDetail.statusPending" },
-  confirmed: { className: "bg-green-500/10 text-green-500", labelKey: "txDetail.statusConfirmed" },
-  failed: { className: "bg-red-500/10 text-red-500", labelKey: "txDetail.statusFailed" },
+  confirmed: { className: "bg-success/10 text-success", labelKey: "txDetail.statusConfirmed" },
+  failed: { className: "bg-destructive/10 text-destructive", labelKey: "txDetail.statusFailed" },
   replaced: { className: "bg-muted text-muted-foreground", labelKey: "txDetail.statusReplaced" },
   cancelled: { className: "bg-muted text-muted-foreground", labelKey: "txDetail.statusCancelled" },
   dropped: { className: "bg-muted text-muted-foreground", labelKey: "txDetail.statusDropped" },
@@ -291,7 +291,7 @@ const TransactionDetail = observer(() => {
     return (
       <div className="w-full">
         <CircuitBackground />
-        <div className="relative z-10 p-8">
+        <div className="page-enter relative z-10 p-8">
           <BackButton />
           <Card className="w-full">
             <CardContent className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
@@ -377,7 +377,7 @@ const TransactionDetail = observer(() => {
   return (
     <div className="w-full">
       <CircuitBackground />
-      <div className="relative z-10 p-8">
+      <div className="page-enter relative z-10 p-8">
         <BackButton />
         <Card className="w-full">
           <CardHeader>
@@ -412,7 +412,7 @@ const TransactionDetail = observer(() => {
                   </Button>
                   <Button
                     variant="outline"
-                    className="flex-1 border-red-500/50 text-red-500 hover:bg-red-500/10"
+                    className="flex-1 border-destructive/50 text-destructive hover:bg-destructive/10"
                     onClick={() => setCancelDialogOpen(true)}
                   >
                     <Ban className="mr-2 h-4 w-4" />

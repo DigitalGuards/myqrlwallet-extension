@@ -120,7 +120,7 @@ const QrlPqSign = observer(() => {
       {isTypedData ? (
         <div className="flex flex-col gap-1">
           <div>{t("dapp.pqSignature.typedData")}</div>
-          <div className="text-xs text-yellow-600">{t("dapp.pqSignature.typedWarning")}</div>
+          <div className="text-xs text-amber-600 dark:text-amber-300">{t("dapp.pqSignature.typedWarning")}</div>
           <div className="flex flex-col gap-1 rounded bg-muted/40 p-2 text-xs">
             <div className="font-semibold text-secondary">
               {String(typedPayload?.domain?.name ?? "")} · {typedPayload?.primaryType}
@@ -143,7 +143,7 @@ const QrlPqSign = observer(() => {
             )}
           </div>
           {!hasChainId && (
-            <div className="rounded border border-yellow-500 bg-yellow-50 p-2 text-xs text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-200">
+            <div className="rounded border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
               {t("dapp.pqSignature.noChainId")}
             </div>
           )}
@@ -157,7 +157,7 @@ const QrlPqSign = observer(() => {
         <div className="flex flex-col gap-1">
           <div>{t("dapp.signature.message")}</div>
           {!isHexEncoded && (
-            <div className="text-xs text-yellow-600">{t("dapp.pqSignature.notHex")}</div>
+            <div className="text-xs text-amber-600 dark:text-amber-300">{t("dapp.pqSignature.notHex")}</div>
           )}
           {hasHiddenChars && (
             <div className="text-xs text-red-600">{t("dapp.pqSignature.hiddenChars")}</div>

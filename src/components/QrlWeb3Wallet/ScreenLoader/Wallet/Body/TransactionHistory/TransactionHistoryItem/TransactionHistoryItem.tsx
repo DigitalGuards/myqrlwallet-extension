@@ -27,9 +27,9 @@ function getStatusColor(displayStatus: PendingStatus): string {
     case "pending":
       return "text-amber-500";
     case "confirmed":
-      return "text-green-500";
+      return "text-success";
     case "failed":
-      return "text-red-500";
+      return "text-destructive";
     case "replaced":
     case "cancelled":
     case "dropped":
@@ -88,7 +88,7 @@ const TransactionHistoryItem = observer(({
     <Link to={ROUTES.TRANSACTION_DETAIL} state={{ transaction }}>
       <div className="flex cursor-pointer items-center gap-3 rounded-md border p-3 transition-colors hover:bg-accent">
         {isIncoming ? (
-          <ArrowDownLeft className="h-8 w-8 shrink-0 text-green-500" />
+          <ArrowDownLeft className="h-8 w-8 shrink-0 text-success" />
         ) : (
           <ArrowUpRight className="h-8 w-8 shrink-0 text-secondary" />
         )}
@@ -106,7 +106,7 @@ const TransactionHistoryItem = observer(({
           </div>
           <div className="flex flex-col items-end">
             <span
-              className={`text-sm font-medium ${isIncoming ? "text-green-500" : ""}`}
+              className={`text-sm font-medium ${isIncoming ? "text-success" : ""}`}
             >
               {isIncoming ? "+" : ""}
               {amount} {tokenSymbol}
@@ -126,7 +126,7 @@ const TransactionHistoryItem = observer(({
                 </button>
                 <button
                   onClick={(e) => handleAction(e, "cancel")}
-                  className="rounded bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500 hover:bg-red-500/20"
+                  className="rounded bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive hover:bg-destructive/20"
                 >
                   {t('txHistory.cancel')}
                 </button>

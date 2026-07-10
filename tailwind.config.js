@@ -17,6 +17,11 @@ module.exports = {
   		}
   	},
   	extend: {
+  		fontFamily: {
+  			sans: ['"Instrument Sans Variable"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+  			display: ['"Sora Variable"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+  			mono: ['"JetBrains Mono Variable"', 'ui-monospace', '"SF Mono"', 'monospace'],
+  		},
   		colors: {
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',
@@ -38,6 +43,10 @@ module.exports = {
   			constructive: {
   				DEFAULT: 'hsl(var(--constructive))',
   				foreground: 'hsl(var(--constructive-foreground))'
+  			},
+  			success: {
+  				DEFAULT: 'hsl(var(--success))',
+  				foreground: 'hsl(var(--success-foreground))'
   			},
   			destructive: {
   				DEFAULT: 'hsl(var(--destructive))',
@@ -89,19 +98,12 @@ module.exports = {
   					height: '0'
   				}
   			},
-  			'appear-in': {
-  				'0%': {
-  					opacity: 0
-  				},
-  				'100%': {
-  					opacity: 1
-  				}
-  			},
   		},
   		animation: {
   			'accordion-down': 'accordion-down 0.2s ease-out',
   			'accordion-up': 'accordion-up 0.2s ease-out',
-  			'appear-in': 'appear-in 1s ease 1',
+  			'appear-in': 'rise-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards',
+  			'rise': 'rise-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards',
   		}
   	}
   },

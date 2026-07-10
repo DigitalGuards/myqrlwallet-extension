@@ -79,7 +79,7 @@ const ReplacementConfirmationDialog = ({
         </div>
 
         {error && (
-          <p className="px-1 text-xs text-red-500">{error}</p>
+          <p className="px-1 text-xs text-destructive">{error}</p>
         )}
 
         <AlertDialogFooter>

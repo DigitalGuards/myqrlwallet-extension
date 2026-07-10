@@ -43,7 +43,7 @@ const ActiveAccountDisplay = observer(() => {
 
   return (
     <div className="flex flex-col items-center gap-2 text-center">
-      <div className="animate-appear-in text-2xl font-bold text-foreground">
+      <div className="font-data animate-appear-in text-3xl font-bold tracking-tight text-foreground">
         {accountBalance}
       </div>
       {fiatDisplay && (
@@ -51,7 +51,7 @@ const ActiveAccountDisplay = observer(() => {
           <span>{fiatDisplay}</span>
           {showChange && (
             <span
-              className={`flex items-center gap-0.5 text-xs ${change24h >= 0 ? "text-green-500" : "text-red-500"}`}
+              className={`flex items-center gap-0.5 text-xs ${change24h >= 0 ? "text-success" : "text-destructive"}`}
             >
               {change24h >= 0 ? (
                 <TrendingUp className="h-3 w-3" />
@@ -65,17 +65,17 @@ const ActiveAccountDisplay = observer(() => {
       )}
       <button
         type="button"
-        className="mt-1 inline-flex max-w-full items-center gap-2 rounded-full bg-black/20 px-4 py-1.5 backdrop-blur-sm"
+        className="mt-1 inline-flex max-w-full items-center gap-2 rounded-full border border-blue-accent/30 bg-blue-accent/[0.08] px-4 py-1.5 transition-colors hover:bg-blue-accent/[0.14]"
         aria-label="Copy address"
         onClick={() => void handleCopyAddress()}
       >
-        <span className="break-all font-mono text-xs text-secondary">
+        <span className="break-all font-data text-xs text-blue-accent">
           {`${prefix} ${addressSplit.join(" ")}`}
         </span>
         {copiedAddress ? (
-          <Check className="h-3.5 w-3.5 shrink-0 text-secondary" />
+          <Check className="h-3.5 w-3.5 shrink-0 text-success" />
         ) : (
-          <Copy className="h-3.5 w-3.5 shrink-0 text-secondary/60" />
+          <Copy className="h-3.5 w-3.5 shrink-0 text-blue-accent/60" />
         )}
       </button>
     </div>
