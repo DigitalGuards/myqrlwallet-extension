@@ -236,7 +236,7 @@ const NFTTransfer = observer(() => {
     <Form {...form}>
       <form className="w-full" onSubmit={handleSubmit(onSubmit)}>
         <CircuitBackground />
-        <div className="relative z-10 p-8">
+        <div className="page-enter relative z-10 p-8">
           <BackButton />
           <Card className="w-full">
             <CardHeader>
@@ -313,7 +313,7 @@ const NFTTransfer = observer(() => {
                       </p>
                     )}
                     {resolvedAddress && !qrnsResolving && (
-                      <p className="text-xs text-green-500">
+                      <p className="text-xs text-success">
                         → {resolvedAddress}
                       </p>
                     )}

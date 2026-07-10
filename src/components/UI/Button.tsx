@@ -4,20 +4,20 @@ import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]",
   {
     variants: {
       variant: {
         default:
-          "bg-gradient-to-b from-[hsl(199,89%,74%)] to-[hsl(199,89%,58%)] text-slate-950 shadow-[0_0_16px_-4px_hsl(var(--blue-accent))] transition-all hover:from-[hsl(199,89%,78%)] hover:to-[hsl(199,89%,62%)] hover:shadow-[0_0_24px_-2px_hsl(var(--blue-accent))]",
+          "bg-primary text-primary-foreground shadow-[0_10px_24px_-12px_hsl(24_96%_45%/0.55),inset_0_1px_0_hsl(36_100%_80%/0.35)] hover:bg-primary/90",
         constructive:
           "bg-constructive text-constructive-foreground hover:bg-constructive/90",
         destructive:
           "bg-destructive text-destructive-foreground hover:bg-destructive/90",
         outline:
-          "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+          "border border-foreground/15 bg-transparent hover:bg-foreground/[0.06] hover:text-foreground",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+          "border border-foreground/10 bg-foreground/[0.06] text-foreground hover:bg-foreground/10",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
       },

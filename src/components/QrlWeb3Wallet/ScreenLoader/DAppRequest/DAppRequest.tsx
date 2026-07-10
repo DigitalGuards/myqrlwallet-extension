@@ -80,7 +80,7 @@ const DAppRequest = observer(() => {
       <CircuitBackground />
       <div className="relative z-10 flex flex-col items-center space-y-4 p-4">
         {phishingDetectorUnavailable && (
-          <div className="w-full max-w-md rounded-md border border-yellow-500 bg-yellow-50 p-2 text-xs text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-200">
+          <div className="w-full max-w-md rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
             <strong>Phishing protection unavailable.</strong> The wallet
             could not load its phishing blocklist
             {phishingResult?.detectorStatus

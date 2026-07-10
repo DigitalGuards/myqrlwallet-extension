@@ -106,12 +106,12 @@ const PersonalSign = observer(() => {
     <div className="flex flex-col gap-2 rounded-md p-2">
       <div className="flex flex-col gap-1">
         <div>{t('dapp.signature.fromAddress')}</div>
-        <div className="w-64 font-bold text-secondary">{`${prefixFromAddress} ${addressSplitFromAddress.join(" ")}`}</div>
+        <div className="font-data w-64 font-bold text-blue-accent">{`${prefixFromAddress} ${addressSplitFromAddress.join(" ")}`}</div>
       </div>
       <div className="flex flex-col gap-1">
         <div>{t('dapp.signature.message')}</div>
         {!isHexEncoded && (
-          <div className="text-xs text-yellow-600">
+          <div className="text-xs text-amber-600 dark:text-amber-300">
             Message is not hex-encoded; displaying raw input.
           </div>
         )}

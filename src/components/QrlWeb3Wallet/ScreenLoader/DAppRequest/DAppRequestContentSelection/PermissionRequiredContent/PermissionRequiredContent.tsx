@@ -25,7 +25,7 @@ const PermissionRequiredContent = observer(() => {
 
   return (
     <>
-      <Card className="w-full">
+      <Card className="surface-ember w-full animate-appear-in">
         <div className="flex justify-center pt-6">
           <ChainBadge isDisabled={true} />
         </div>

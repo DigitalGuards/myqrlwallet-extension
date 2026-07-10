@@ -34,7 +34,7 @@ const Receive = observer(() => {
   return (
     <div className="w-full">
       <CircuitBackground />
-      <div className="relative z-10 p-8">
+      <div className="page-enter relative z-10 p-8">
         <BackButton />
         <Card className="w-full">
           <CardHeader>
@@ -45,7 +45,7 @@ const Receive = observer(() => {
               <QRCodeSVG value={accountAddress} size={150} />
             </div>
             <div className="flex items-start gap-2">
-              <span className="break-all text-center text-sm text-secondary">
+              <span className="font-data break-all text-center text-sm text-blue-accent">
                 {`${prefix} ${addressSplit.join(" ")}`}
               </span>
               <button
@@ -54,7 +54,7 @@ const Receive = observer(() => {
                 aria-label={t('receive.copyAddress')}
               >
                 {copied ? (
-                  <Check className="h-4 w-4 text-green-500" />
+                  <Check className="h-4 w-4 text-success" />
                 ) : (
                   <Copy className="h-4 w-4" />
                 )}

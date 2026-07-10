@@ -101,13 +101,13 @@ const AccountCreateImport = observer(() => {
   }, [accountAddress, blockchain]);
 
   return (
-    <div className="flex animate-appear-in flex-col gap-8">
+    <div className="page-enter flex flex-col gap-8">
       {hasActiveAccount && (
         <>
-          <Card className="relative w-full overflow-hidden border-l-4 border-l-blue-accent">
+          <Card className="surface-ember relative w-full overflow-hidden">
             <CircuitBackground />
             <div className="relative z-10">
-              <CardHeader className="bg-gradient-to-r from-blue-accent/5 to-transparent">
+              <CardHeader>
                 <CardTitle>{t('home.activeAccount')}</CardTitle>
               </CardHeader>
               <CardContent>

@@ -8,12 +8,12 @@ import { cva } from "class-variance-authority";
 const qrlWalletBodyClasses = cva(
   // The shell never scrolls: ScrollRegion (below the static header) owns
   // the scrollbar, so the bar cannot run over the header row.
-  "relative flex flex-col overflow-hidden bg-background text-foreground",
+  "relative flex flex-col overflow-hidden bg-transparent text-foreground",
   {
     variants: {
       mode: {
         popup: ["w-[23rem] h-[600px]"],
-        tab: ["w-full max-w-lg mx-auto h-screen border-2 rounded-md shadow-2xl"],
+        tab: ["w-full max-w-lg mx-auto h-screen border rounded-lg shadow-2xl"],
         sidepanel: ["w-full max-w-lg mx-auto h-screen"],
       },
     },
