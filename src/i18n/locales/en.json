@@ -538,5 +538,10 @@
   "home.send": "Send",
   "home.history": "History",
   "lock.loading": "Preparing your wallet",
-  "home.connecting": "Connecting to the network"
+  "home.connecting": "Connecting to the network",
+  "lock.retrying": "Waking the wallet service (attempt {{attempt}})",
+  "loader.phaseChain": "Loading chain settings",
+  "loader.phaseNetwork": "Contacting the network",
+  "loader.phaseAccounts": "Fetching balances",
+  "loader.phaseSession": "Restoring your session"
 }

@@ -538,5 +538,10 @@
   "home.send": "Senden",
   "home.history": "Verlauf",
   "lock.loading": "Wallet wird vorbereitet",
-  "home.connecting": "Verbindung zum Netzwerk wird hergestellt"
+  "home.connecting": "Verbindung zum Netzwerk wird hergestellt",
+  "lock.retrying": "Wallet-Dienst wird geweckt (Versuch {{attempt}})",
+  "loader.phaseChain": "Chain-Einstellungen werden geladen",
+  "loader.phaseNetwork": "Netzwerk wird kontaktiert",
+  "loader.phaseAccounts": "Kontostände werden abgerufen",
+  "loader.phaseSession": "Sitzung wird wiederhergestellt"
 }

@@ -57,6 +57,15 @@ type QrlAccountsType = {
   isLoading: boolean;
 };
 
+export type InitPhaseType = "chain" | "network" | "accounts" | "session";
+
+/** Startup phase reporting so the Home loader can show real progress. */
+export type InitProgressType = {
+  active: boolean;
+  fraction: number;
+  phase: InitPhaseType;
+};
+
 class QrlStore {
   qrlInstance?: Web3QRLInterface;
   qrlConnection = {
@@ -66,11 +75,14 @@ class QrlStore {
   };
   qrlAccounts: QrlAccountsType = { accounts: [], isLoading: false };
   activeAccount: ActiveAccountType = { accountAddress: "" };
+  initProgress: InitProgressType = { active: true, fraction: 0, phase: "chain" };
 
   constructor() {
     makeAutoObservable(this, {
       initializeBlockchain: action.bound,
+      setInitProgress: action.bound,
       qrlInstance: observable.struct,
+      initProgress: observable.struct,
       qrlConnection: observable.struct,
       qrlAccounts: observable.struct,
       activeAccount: observable.struct,
@@ -99,6 +111,7 @@ class QrlStore {
   }
 
   async initializeBlockchain() {
+    this.setInitProgress({ active: true, fraction: 0.06, phase: "chain" });
     await this.refreshBlockchainData();
     const qrlHttpProvider = new Web3.providers.HttpProvider(
       this.qrlConnection.blockchain.defaultRpcUrl || "http://localhost",
@@ -106,9 +119,17 @@ class QrlStore {
     const { qrl } = new Web3({ provider: qrlHttpProvider });
     this.qrlInstance = qrl;
 
+    this.setInitProgress({ active: true, fraction: 0.18, phase: "network" });
     await this.fetchQrlConnection();
+    this.setInitProgress({ active: true, fraction: 0.45, phase: "accounts" });
     await this.fetchAccounts();
+    this.setInitProgress({ active: true, fraction: 0.94, phase: "session" });
     await this.validateActiveAccount();
+    this.setInitProgress({ active: false, fraction: 1, phase: "session" });
+  }
+
+  setInitProgress(progress: InitProgressType) {
+    this.initProgress = progress;
   }
 
   async addChain(chainData: BlockchainDataType) {
@@ -197,6 +218,7 @@ class QrlStore {
     let storedAccountsList: string[] = [];
     const accountListFromStorage = await StorageUtil.getAllAccounts();
     storedAccountsList = accountListFromStorage;
+    let settledBalances = 0;
     try {
       const accountsWithBalance: QrlAccountsType["accounts"] =
         await Promise.all(
@@ -206,6 +228,16 @@ class QrlStore {
             const convertedAccountBalance = getOptimalTokenBalance(
               utils.fromPlanck(accountBalance, "quanta"),
             );
+            settledBalances += 1;
+            // Real per-account progress across the balances phase (0.45-0.94).
+            if (this.initProgress.active && this.initProgress.phase === "accounts") {
+              this.setInitProgress({
+                active: true,
+                fraction:
+                  0.45 + 0.49 * (settledBalances / storedAccountsList.length),
+                phase: "accounts",
+              });
+            }
             return {
               accountAddress: account,
               accountBalance: convertedAccountBalance,

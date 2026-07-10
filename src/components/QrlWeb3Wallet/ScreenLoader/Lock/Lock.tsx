@@ -6,7 +6,7 @@ import BrandedLoader from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/Brande
 
 const Lock = observer(() => {
   const { lockStore } = useStore();
-  const { isLoading } = lockStore;
+  const { isLoading, bootAttempt } = lockStore;
   const { t } = useTranslation();
 
   return (
@@ -28,7 +28,13 @@ const Lock = observer(() => {
       <div className="relative z-10 w-full max-w-sm">
         {isLoading ? (
           <div className="flex justify-center">
-            <BrandedLoader label={t("lock.loading")} />
+            <BrandedLoader
+              label={
+                bootAttempt > 2
+                  ? t("lock.retrying", { attempt: bootAttempt })
+                  : t("lock.loading")
+              }
+            />
           </div>
         ) : (
           <LockPassword />

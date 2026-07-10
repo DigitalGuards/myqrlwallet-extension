@@ -20,6 +20,8 @@ class LockStore {
   hasPasswordSet = true;
   isLoading = true;
   isLocked = true;
+  /** 1-based service-worker wake attempt, surfaced by the boot loader. */
+  bootAttempt = 1;
   private keepAlivePort?: browser.Runtime.Port;
   /**
    * Cached copy of decrypted keys so the popup can re-send them to the SW
@@ -80,10 +82,14 @@ class LockStore {
    * then start the storage listener.
    */
   private async initialize() {
-    // Give the port connection a moment to wake the SW
-    await new Promise((r) => setTimeout(r, 200));
+    // Give the port connection a moment to wake the SW. Kept short: on a
+    // warm SW every ms here is pure added latency before first paint.
+    await new Promise((r) => setTimeout(r, 50));
 
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 14; i++) {
+      runInAction(() => {
+        this.bootAttempt = i + 1;
+      });
       try {
         const { isLocked, hasPasswordSet } =
           await browser.runtime.sendMessage({
@@ -96,9 +102,11 @@ class LockStore {
         });
         break;
       } catch {
-        // Also try reconnecting the port to wake the SW
+        // Also try reconnecting the port to wake the SW. Backoff starts at
+        // 150ms so a cold SW is caught quickly; 14 tries keeps the same
+        // ~16s overall window the old 10x300ms ladder had.
         this.connectKeepAlive();
-        await new Promise((r) => setTimeout(r, 300 * (i + 1)));
+        await new Promise((r) => setTimeout(r, 150 * (i + 1)));
       }
     }
 

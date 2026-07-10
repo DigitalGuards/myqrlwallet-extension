@@ -3,16 +3,18 @@ import { cn } from "@/utilities/stylingUtil";
 type BrandedLoaderProps = {
   label?: string;
   className?: string;
+  /** 0..1 switches the bar from an indeterminate sweep to a real fill. */
+  progress?: number;
 };
 
 /**
- * Branded indeterminate loader: an ember beam sweeping a faint track
- * (styles in index.css). Startup has no real progress fraction to show,
- * so the moving beam plus a status label is what keeps the wait from
- * reading as stuck. Keeps the loader-icon testid contract from the
- * spinner it replaces.
+ * Branded loader (styles in index.css): with a `progress` fraction it is
+ * a determinate ember fill bar; without one it falls back to an
+ * indeterminate sweeping beam for waits that have no measurable fraction
+ * (like waking the service worker). Keeps the loader-icon testid contract
+ * from the spinner it replaces.
  */
-const BrandedLoader = ({ label, className }: BrandedLoaderProps) => (
+const BrandedLoader = ({ label, className, progress }: BrandedLoaderProps) => (
   <div
     role="status"
     data-testid="loader-icon"
@@ -22,7 +24,16 @@ const BrandedLoader = ({ label, className }: BrandedLoaderProps) => (
     )}
   >
     <div className="loader-track">
-      <div className="loader-beam" />
+      {typeof progress === "number" ? (
+        <div
+          className="loader-fill"
+          style={{
+            width: `${Math.round(Math.min(Math.max(progress, 0), 1) * 100)}%`,
+          }}
+        />
+      ) : (
+        <div className="loader-beam" />
+      )}
     </div>
     {label && (
       <span className="animate-pulse text-xs text-muted-foreground">
