@@ -536,5 +536,7 @@
   "dapp.pqSignature.notHex": "El mensaje no está codificado en hex; se muestra la entrada sin procesar.",
   "dapp.pqSignature.hiddenChars": "Advertencia: este mensaje contenía caracteres de formato ocultos; se eliminaron de la vista. Los bytes firmados aún los incluyen.",
   "home.send": "Enviar",
-  "home.history": "Historial"
+  "home.history": "Historial",
+  "lock.loading": "Preparando tu monedero",
+  "home.connecting": "Conectando a la red"
 }

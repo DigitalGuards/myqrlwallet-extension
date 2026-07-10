@@ -1,8 +1,9 @@
 import withSuspense from "@/functions/withSuspense";
 import { useStore } from "@/stores/store";
-import { Loader } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { lazy } from "react";
+import { useTranslation } from "react-i18next";
+import BrandedLoader from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/BrandedLoader/BrandedLoader";
 
 const AccountCreateImport = withSuspense(
   lazy(
@@ -22,6 +23,7 @@ const BackgroundVideo = withSuspense(
 );
 
 const Home = observer(() => {
+  const { t } = useTranslation();
   const { qrlStore } = useStore();
   const { qrlConnection } = qrlStore;
   const { isLoading } = qrlConnection;
@@ -31,7 +33,9 @@ const Home = observer(() => {
       <BackgroundVideo />
       <div className="relative z-10 flex w-full flex-col items-center p-8">
         {isLoading ? (
-          <Loader className="animate-spin text-foreground" size="86" />
+          <div className="flex w-full justify-center pt-24">
+            <BrandedLoader label={t("home.connecting")} />
+          </div>
         ) : (
           <AccountCreateImport />
         )}

@@ -536,5 +536,7 @@
   "dapp.pqSignature.notHex": "Message is not hex-encoded; displaying raw input.",
   "dapp.pqSignature.hiddenChars": "Warning: this message contained hidden formatting characters; they were removed from the display. The signed bytes still include them.",
   "home.send": "Send",
-  "home.history": "History"
+  "home.history": "History",
+  "lock.loading": "Preparing your wallet",
+  "home.connecting": "Connecting to the network"
 }

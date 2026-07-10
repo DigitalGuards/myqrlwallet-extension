@@ -238,6 +238,44 @@
     }
   }
 
+  /* Branded indeterminate loader (BrandedLoader): an ember beam with a
+     battery-blue leading edge sweeping a faint track. */
+  .loader-track {
+    position: relative;
+    width: 100%;
+    height: 4px;
+    border-radius: 999px;
+    background: hsl(var(--foreground) / 0.08);
+    overflow: hidden;
+  }
+
+  .loader-beam {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 40%;
+    border-radius: 999px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--primary) / 0.7) 30%,
+      hsl(var(--primary)) 78%,
+      hsl(var(--blue-accent) / 0.9)
+    );
+    box-shadow: 0 0 12px hsl(var(--primary) / 0.5);
+    animation: loader-sweep 1.15s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  }
+
+  @keyframes loader-sweep {
+    from {
+      transform: translateX(-110%);
+    }
+    to {
+      transform: translateX(280%);
+    }
+  }
+
   /* Soft pulsing halo for live/status dots. */
   .glow-dot {
     box-shadow: 0 0 0 0 currentColor;
@@ -262,5 +300,10 @@
     .animate-rise,
     .glow-dot {
       animation: none;
+    }
+
+    /* A frozen beam reads as stuck; slow it down instead of stopping. */
+    .loader-beam {
+      animation-duration: 2.4s;
     }
   }

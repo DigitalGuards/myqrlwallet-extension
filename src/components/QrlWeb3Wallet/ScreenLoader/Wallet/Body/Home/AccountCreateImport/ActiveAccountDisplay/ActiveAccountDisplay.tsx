@@ -21,6 +21,8 @@ const ActiveAccountDisplay = observer(() => {
 
   const accountBalance = getAccountBalance(accountAddress);
   const { prefix, addressSplit } = StringUtil.getSplitAddress(accountAddress);
+  // Compact pill: full address lives on Receive and the account list.
+  const abbreviatedAddress = `${prefix}${addressSplit[0]}...${addressSplit[addressSplit.length - 1]}`;
 
   const numericBalance = parseBalanceValue(accountBalance).toNumber();
   const price = priceStore.getPrice(currency);
@@ -65,12 +67,13 @@ const ActiveAccountDisplay = observer(() => {
       )}
       <button
         type="button"
-        className="mt-1 inline-flex max-w-full items-center gap-2 rounded-full border border-blue-accent/30 bg-blue-accent/[0.08] px-4 py-1.5 transition-colors hover:bg-blue-accent/[0.14]"
+        className="mt-1 inline-flex items-center gap-2 rounded-full border border-blue-accent/30 bg-blue-accent/[0.08] px-3 py-1.5 transition-colors hover:bg-blue-accent/[0.14]"
         aria-label="Copy address"
+        title={accountAddress}
         onClick={() => void handleCopyAddress()}
       >
-        <span className="break-all font-data text-xs text-blue-accent">
-          {`${prefix} ${addressSplit.join(" ")}`}
+        <span className="font-data text-xs text-blue-accent">
+          {abbreviatedAddress}
         </span>
         {copiedAddress ? (
           <Check className="h-3.5 w-3.5 shrink-0 text-success" />
