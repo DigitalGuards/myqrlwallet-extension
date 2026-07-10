@@ -536,5 +536,7 @@
   "dapp.pqSignature.notHex": "Nachricht ist nicht hex-kodiert; Rohdaten werden angezeigt.",
   "dapp.pqSignature.hiddenChars": "Warnung: Diese Nachricht enthielt versteckte Formatierungszeichen; sie wurden aus der Anzeige entfernt. Die signierten Bytes enthalten sie weiterhin.",
   "home.send": "Senden",
-  "home.history": "Verlauf"
+  "home.history": "Verlauf",
+  "lock.loading": "Wallet wird vorbereitet",
+  "home.connecting": "Verbindung zum Netzwerk wird hergestellt"
 }
