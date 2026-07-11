@@ -23,3 +23,11 @@ export type NFTTokenInfo = {
   metadata?: NFTMetadata;
   imageUrl?: string;
 };
+
+// One token the active account owns inside a collection, as returned by
+// qrlStore.getOwnedNftTokens. `balance` is the ERC-1155 per-id holding as
+// a decimal string; undefined for ZRC721 (ownership is binary).
+export type OwnedNftToken = {
+  tokenId: string;
+  balance?: string;
+};

@@ -16,8 +16,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/UI/DropdownMenu";
+import { getExplorerApiBase } from "@/configuration/assetDiscoveryConfig";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
+import type { NFTStandard } from "@/types/nft";
 import StorageUtil from "@/utilities/storageUtil";
 import { getRandomTailwindTextColor } from "@/utilities/stylingUtil";
 import {
@@ -35,16 +37,26 @@ import TokenListItemLoading from "../../TokenListItemLoading/TokenListItemLoadin
 
 type NFTCollectionItemProps = {
   contractAddress: string;
+  // Standard recorded at import time; refined by live detection below.
+  storedStandard?: NFTStandard;
   triggerReRender?: () => void;
 };
 
 const NFTCollectionItem = observer(
-  ({ contractAddress, triggerReRender }: NFTCollectionItemProps) => {
+  ({
+    contractAddress,
+    storedStandard,
+    triggerReRender,
+  }: NFTCollectionItemProps) => {
     const { t } = useTranslation();
     const navigate = useNavigate();
     const { qrlStore } = useStore();
-    const { qrlConnection, activeAccount, getNftCollectionDetails } =
-      qrlStore;
+    const {
+      qrlConnection,
+      activeAccount,
+      getNftCollectionDetails,
+      getOwnedNftTokens,
+    } = qrlStore;
     const { blockchain } = qrlConnection;
     const { accountAddress } = activeAccount;
 
@@ -52,15 +64,32 @@ const NFTCollectionItem = observer(
       useState<
         Awaited<ReturnType<typeof getNftCollectionDetails>>["collection"]
       >();
+    const [ownedCount, setOwnedCount] = useState<number | undefined>();
     const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
 
     useEffect(() => {
+      let cancelled = false;
       (async () => {
         const details = await getNftCollectionDetails(contractAddress);
-        if (!details.error) {
-          setCollection(details.collection);
+        if (cancelled || details.error || !details.collection) return;
+        setCollection(details.collection);
+        if (details.collection.balance !== undefined) {
+          setOwnedCount(details.collection.balance);
+          return;
         }
+        // ZRC-1155 has no on-chain owner enumeration. On chains with an
+        // explorer, count via the same chain-verified path the gallery
+        // uses (explorer candidates re-checked with balanceOf) so the
+        // row and the gallery can never disagree. Without an explorer
+        // the count is unknowable; leave it undefined rather than
+        // claiming "0 NFTs".
+        if (!getExplorerApiBase(blockchain.chainId)) return;
+        const owned = await getOwnedNftTokens(contractAddress, "ZRC1155");
+        if (!cancelled) setOwnedCount(owned.length);
       })();
+      return () => {
+        cancelled = true;
+      };
     }, [blockchain, accountAddress]);
 
     const onRemove = async () => {
@@ -76,6 +105,13 @@ const NFTCollectionItem = observer(
       return <TokenListItemLoading />;
     }
 
+    // ZRC-1155 contracts routinely omit name()/symbol(); fall back to a
+    // shortened contract address so the row is never blank.
+    const displayName =
+      collection.name ||
+      collection.symbol ||
+      `${contractAddress.slice(0, 10)}...`;
+
     return (
       <>
         <Card
@@ -84,7 +120,11 @@ const NFTCollectionItem = observer(
             navigate(ROUTES.NFT_GALLERY, {
               state: {
                 contractAddress,
-                collectionName: collection.name,
+                // displayName, not the raw name: nameless 1155 contracts
+                // otherwise flow "" into the detail/transfer/history
+                // screens and render identity-less entries.
+                collectionName: displayName,
+                standard: collection.standard ?? storedStandard ?? "ZRC721",
               },
             })
           }
@@ -96,9 +136,16 @@ const NFTCollectionItem = observer(
             />
             <div className="flex w-full flex-col gap-1">
               <div className="text-xs font-bold">
-                {t("nft.ownedNfts", { count: collection.balance })}
+                {ownedCount !== undefined
+                  ? t("nft.ownedNfts", { count: ownedCount })
+                  : displayName}
               </div>
-              <div className="text-xs">{collection.name}</div>
+              <div className="text-xs">
+                {ownedCount !== undefined && displayName}
+                {collection.standard === "ZRC1155" && (
+                  <span className="ml-1 text-muted-foreground">ZRC-1155</span>
+                )}
+              </div>
             </div>
           </div>
           <DropdownMenu>
@@ -134,7 +181,7 @@ const NFTCollectionItem = observer(
             <DialogHeader className="text-left">
               <DialogTitle>{t("nft.removeCollection")}</DialogTitle>
               <DialogDescription>
-                {t("nft.removeConfirm", { name: collection.name })}
+                {t("nft.removeConfirm", { name: displayName })}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="flex flex-row gap-4">

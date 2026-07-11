@@ -6,8 +6,17 @@ import { MemoryRouter } from "react-router-dom";
 import NFTGallery from "./NFTGallery";
 
 vi.mock("./NFTGalleryItem", () => {
-  const MockNFTGalleryItem = ({ tokenId }: { tokenId: string }) => (
-    <div data-testid={`gallery-item-${tokenId}`}>Token #{tokenId}</div>
+  const MockNFTGalleryItem = ({
+    tokenId,
+    balance,
+  }: {
+    tokenId: string;
+    balance?: string;
+  }) => (
+    <div data-testid={`gallery-item-${tokenId}`}>
+      Token #{tokenId}
+      {balance ? ` x${balance}` : ""}
+    </div>
   );
   MockNFTGalleryItem.displayName = "MockNFTGalleryItem";
   return { __esModule: true, default: MockNFTGalleryItem };
@@ -23,7 +32,7 @@ describe("NFTGallery", () => {
 
   const renderComponent = (
     overrides = {},
-    routeState = state,
+    routeState: Record<string, unknown> = state,
   ) =>
     render(
       <StoreProvider value={mockedStore(overrides)}>
@@ -38,7 +47,7 @@ describe("NFTGallery", () => {
   it("should render collection name as title", async () => {
     renderComponent({
       qrlStore: {
-        getOwnedNftTokenIds: vi.fn<any>().mockResolvedValue([]),
+        getOwnedNftTokens: vi.fn<any>().mockResolvedValue([]),
       },
     });
 
@@ -48,21 +57,29 @@ describe("NFTGallery", () => {
   it("should show empty state when no tokens owned", async () => {
     renderComponent({
       qrlStore: {
-        getOwnedNftTokenIds: vi.fn<any>().mockResolvedValue([]),
+        getOwnedNftTokens: vi.fn<any>().mockResolvedValue([]),
       },
     });
 
     await waitFor(() => {
-      expect(screen.getByText("No NFTs found in this collection. The contract may not support token enumeration.")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "No NFTs found in this collection for this account.",
+        ),
+      ).toBeInTheDocument();
     });
   });
 
   it("should render gallery items for owned tokens", async () => {
     renderComponent({
       qrlStore: {
-        getOwnedNftTokenIds: vi
+        getOwnedNftTokens: vi
           .fn<any>()
-          .mockResolvedValue(["1", "2", "3"]),
+          .mockResolvedValue([
+            { tokenId: "1" },
+            { tokenId: "2" },
+            { tokenId: "3" },
+          ]),
       },
     });
 
@@ -73,10 +90,28 @@ describe("NFTGallery", () => {
     });
   });
 
+  it("should pass the route standard to the store and balances to items", async () => {
+    const getOwnedNftTokens = vi
+      .fn<any>()
+      .mockResolvedValue([{ tokenId: "42", balance: "3" }]);
+    renderComponent(
+      { qrlStore: { getOwnedNftTokens } },
+      { ...state, standard: "ZRC1155" },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("gallery-item-42")).toHaveTextContent("x3");
+    });
+    expect(getOwnedNftTokens).toHaveBeenCalledWith(
+      state.contractAddress,
+      "ZRC1155",
+    );
+  });
+
   it("should have a back button", async () => {
     renderComponent({
       qrlStore: {
-        getOwnedNftTokenIds: vi.fn<any>().mockResolvedValue([]),
+        getOwnedNftTokens: vi.fn<any>().mockResolvedValue([]),
       },
     });
 

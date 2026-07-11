@@ -73,7 +73,10 @@ class TransactionHistoryStore {
 
   /** Local entries (pending metadata, token detail) joined with the
    *  explorer's view of the address. On hash collision the local entry
-   *  wins: it knows token metadata and the pending lifecycle. */
+   *  wins: it knows token metadata and the pending lifecycle. Internal
+   *  entries bypass that dedup: they share the outer transaction's hash
+   *  but represent distinct value movement (e.g. a contract paying out
+   *  inside a call this wallet sent). */
   get mergedTransactions(): TransactionHistoryEntry[] {
     const localHashes = new Set(
       this.transactions.map((tx) => tx.transactionHash.toLowerCase()),
@@ -81,7 +84,8 @@ class TransactionHistoryStore {
     return [
       ...this.transactions,
       ...this.onChainTransactions.filter(
-        (tx) => !localHashes.has(tx.transactionHash.toLowerCase()),
+        (tx) =>
+          tx.isInternal || !localHashes.has(tx.transactionHash.toLowerCase()),
       ),
     ].sort((a, b) => b.timestamp - a.timestamp);
   }
@@ -171,16 +175,15 @@ class TransactionHistoryStore {
       );
       runInAction(() => {
         if (requestId !== this.onChainRequestId) return;
+        // Dedup by id, not hash: an internal entry shares its hash with
+        // the outer transaction but is its own row (id carries the call
+        // tree position).
         const seen = new Set(
-          this.onChainTransactions.map((tx) =>
-            tx.transactionHash.toLowerCase(),
-          ),
+          this.onChainTransactions.map((tx) => tx.id.toLowerCase()),
         );
         this.onChainTransactions = [
           ...this.onChainTransactions,
-          ...entries.filter(
-            (tx) => !seen.has(tx.transactionHash.toLowerCase()),
-          ),
+          ...entries.filter((tx) => !seen.has(tx.id.toLowerCase())),
         ];
         this.onChainPage = nextPage;
         // A short page means the explorer is exhausted regardless of what

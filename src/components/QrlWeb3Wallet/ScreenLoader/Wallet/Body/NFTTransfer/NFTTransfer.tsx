@@ -18,6 +18,7 @@ import { Input } from "@/components/UI/Input";
 import { Label } from "@/components/UI/Label";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
+import type { NFTStandard } from "@/types/nft";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import StorageUtil from "@/utilities/storageUtil";
 import StringUtil from "@/utilities/stringUtil";
@@ -36,10 +37,27 @@ import BackButton from "../../../Shared/BackButton/BackButton";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
 import RecipientPicker from "../TokenTransfer/RecipientPicker/RecipientPicker";
 
-const createFormSchema = (t: TFunction) =>
+const createFormSchema = (t: TFunction, maxAmount?: string) =>
   z
     .object({
       receiverAddress: z.string().min(1, t("validation.receiverRequired")),
+      // ERC-1155 only; hidden and defaulted to "1" for ZRC721.
+      amount: z
+        .string()
+        .refine((value) => /^[0-9]+$/.test(value) && BigInt(value) > 0n, {
+          message: t("validation.amountInvalid"),
+        })
+        .refine(
+          (value) => {
+            if (!maxAmount) return true;
+            try {
+              return BigInt(value) <= BigInt(maxAmount);
+            } catch {
+              return false;
+            }
+          },
+          { message: t("validation.amountExceedsBalance") },
+        ),
     })
     .refine(
       (fields) =>
@@ -53,7 +71,6 @@ const createFormSchema = (t: TFunction) =>
 
 const NFTTransfer = observer(() => {
   const { t } = useTranslation();
-  const FormSchema = createFormSchema(t);
   const { state } = useLocation();
   const navigate = useNavigate();
   const { lockStore, qrlStore, transactionHistoryStore } = useStore();
@@ -61,6 +78,7 @@ const NFTTransfer = observer(() => {
   const {
     activeAccount,
     signNftTransfer,
+    getErc1155TokenBalance,
     fetchAccounts,
     sendRawTransaction,
   } = qrlStore;
@@ -71,6 +89,28 @@ const NFTTransfer = observer(() => {
   const collectionName: string = state?.collectionName ?? "";
   const nftImageUrl: string = state?.imageUrl ?? "";
   const nftName: string = state?.nftName ?? "";
+  const standard: NFTStandard = state?.standard ?? "ZRC721";
+  const is1155 = standard === "ZRC1155";
+
+  // Route state carries the balance snapshotted at gallery time; re-read
+  // it live on mount so the max-amount validation can't let a stale
+  // snapshot sign a transfer that reverts on chain.
+  const [ownedBalance, setOwnedBalance] = useState<string | undefined>(
+    state?.balance,
+  );
+  useEffect(() => {
+    if (!is1155) return;
+    let cancelled = false;
+    (async () => {
+      const live = await getErc1155TokenBalance(contractAddress, tokenId);
+      if (!cancelled && live !== undefined) setOwnedBalance(live);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [contractAddress, tokenId, is1155]);
+
+  const FormSchema = createFormSchema(t, is1155 ? ownedBalance : undefined);
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
@@ -86,14 +126,23 @@ const NFTTransfer = observer(() => {
     reValidateMode: "onChange",
     defaultValues: {
       receiverAddress: "",
+      amount: "1",
     },
   });
   const {
     handleSubmit,
     control,
     watch,
+    trigger,
     formState: { isSubmitting, isValid },
   } = form;
+
+  // Re-validate the amount once the live balance lands: the resolver is
+  // recreated with the new max, but a value validated against the stale
+  // snapshot would otherwise keep its old verdict until the next edit.
+  useEffect(() => {
+    if (is1155 && ownedBalance !== undefined) void trigger("amount");
+  }, [ownedBalance, is1155, trigger]);
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     try {
@@ -109,6 +158,8 @@ const NFTTransfer = observer(() => {
         tokenId,
         mnemonicPhrases,
         contractAddress,
+        standard,
+        is1155 ? formData.amount : "1",
       );
 
       const { transactionHash, rawTransaction, error, nonce, maxFeePerGas, maxPriorityFeePerGas, gasLimit, data } = signResult;
@@ -128,13 +179,15 @@ const NFTTransfer = observer(() => {
       }
 
       const { chainId } = await StorageUtil.getActiveBlockChain();
+      const sentAmountSuffix =
+        is1155 && formData.amount !== "1" ? ` ×${formData.amount}` : "";
       const historyEntry: TransactionHistoryEntry = {
         id: transactionHash,
         from: accountAddress,
         to: receiver,
         amount: 0,
         tokenSymbol: collectionName,
-        tokenName: `${nftName || collectionName} #${tokenId}`,
+        tokenName: `${nftName || collectionName} #${tokenId}${sentAmountSuffix}`,
         isZrc20Token: false,
         tokenContractAddress: contractAddress,
         tokenDecimals: 0,
@@ -264,6 +317,7 @@ const NFTTransfer = observer(() => {
                   </div>
                   <div className="text-xs text-muted-foreground">
                     Token #{tokenId}
+                    {is1155 && ownedBalance ? ` · ×${ownedBalance}` : ""}
                   </div>
                 </div>
               </div>
@@ -324,6 +378,34 @@ const NFTTransfer = observer(() => {
                   </FormItem>
                 )}
               />
+
+              {is1155 && (
+                <FormField
+                  control={control}
+                  name="amount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <Label>{t("nft.amount")}</Label>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          aria-label={field.name}
+                          autoComplete="off"
+                          inputMode="numeric"
+                          disabled={isSubmitting}
+                          placeholder="1"
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t("nft.amountDescription", {
+                          count: Number(ownedBalance ?? "1"),
+                        })}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
             </CardContent>
             <CardFooter className="gap-4">
               <Button

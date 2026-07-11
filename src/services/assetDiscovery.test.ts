@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   discoverNftCollections,
+  discoverOwnedNftTokens,
   discoverTokens,
 } from "./assetDiscovery";
 
@@ -94,7 +95,7 @@ describe("discoverTokens", () => {
 });
 
 describe("discoverNftCollections", () => {
-  it("groups per-token rows into ZRC-721 collections", async () => {
+  it("groups per-token rows into collections for both standards", async () => {
     const fetchMock = mockFetchJson({
       address: HOLDER,
       count: 4,
@@ -114,7 +115,14 @@ describe("discoverNftCollections", () => {
           collectionSymbol: "DOO",
         },
         {
-          // 1155 rows are dropped: the extension gallery is 721-only
+          // duplicate (contract, tokenID) row must not inflate tokenCount
+          contractAddress: "Qdddddddddddddddddddddddddddddddddddddddd",
+          tokenID: "2",
+          tokenStandard: "ERC-721",
+          collectionName: "Doodles",
+          collectionSymbol: "DOO",
+        },
+        {
           contractAddress: "Qeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
           tokenID: "7",
           tokenStandard: "ERC-1155",
@@ -146,6 +154,13 @@ describe("discoverNftCollections", () => {
         tokenCount: 2,
       },
       {
+        address: "Qeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        name: "Multi",
+        symbol: "MUL",
+        standard: "ZRC1155",
+        tokenCount: 1,
+      },
+      {
         address: "Qffffffffffffffffffffffffffffffffffffffff",
         name: "",
         symbol: "",
@@ -160,5 +175,91 @@ describe("discoverNftCollections", () => {
     expect(await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID)).toEqual(
       [],
     );
+  });
+});
+
+describe("discoverOwnedNftTokens", () => {
+  const NFTS = {
+    address: HOLDER,
+    count: 4,
+    nfts: [
+      {
+        contractAddress: "0xdddddddddddddddddddddddddddddddddddddddd",
+        tokenID: "1",
+        tokenStandard: "ERC-721",
+      },
+      {
+        contractAddress: "Qdddddddddddddddddddddddddddddddddddddddd",
+        tokenID: "2",
+        tokenStandard: "ERC-721",
+      },
+      {
+        // duplicate row for the same id must be deduped
+        contractAddress: "Qdddddddddddddddddddddddddddddddddddddddd",
+        tokenID: "2",
+        tokenStandard: "ERC-721",
+      },
+      {
+        contractAddress: "Qeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        tokenID: "42",
+        tokenStandard: "ERC-1155",
+        balance: "3",
+      },
+    ],
+  };
+
+  it("filters rows to the requested contract across address encodings", async () => {
+    mockFetchJson(NFTS);
+    const tokens = await discoverOwnedNftTokens(
+      HOLDER,
+      TESTNET_CHAIN_ID,
+      "0xDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+    );
+    expect(tokens).toEqual([
+      { tokenId: "1", standard: "ZRC721", balance: undefined },
+      { tokenId: "2", standard: "ZRC721", balance: undefined },
+    ]);
+  });
+
+  it("carries the explorer balance for 1155 rows", async () => {
+    mockFetchJson(NFTS);
+    const tokens = await discoverOwnedNftTokens(
+      HOLDER,
+      TESTNET_CHAIN_ID,
+      "Qeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    );
+    expect(tokens).toEqual([
+      { tokenId: "42", standard: "ZRC1155", balance: "3" },
+    ]);
+  });
+
+  it("returns an empty list on chains without an explorer", async () => {
+    const fetchMock = mockFetchJson(NFTS);
+    expect(
+      await discoverOwnedNftTokens(
+        HOLDER,
+        "0x1",
+        "Qdddddddddddddddddddddddddddddddddddddddd",
+      ),
+    ).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("caps the candidate list so a hostile response cannot drive an unbounded RPC loop", async () => {
+    mockFetchJson({
+      address: HOLDER,
+      count: 80,
+      nfts: Array.from({ length: 80 }, (_, i) => ({
+        contractAddress: "Qdddddddddddddddddddddddddddddddddddddddd",
+        tokenID: String(i + 1),
+        tokenStandard: "ERC-721",
+      })),
+    });
+    const tokens = await discoverOwnedNftTokens(
+      HOLDER,
+      TESTNET_CHAIN_ID,
+      "Qdddddddddddddddddddddddddddddddddddddddd",
+    );
+    expect(tokens).toHaveLength(50);
   });
 });

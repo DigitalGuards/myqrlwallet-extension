@@ -19,6 +19,25 @@ const sampleRow = {
   BlockNumber: "143412",
 };
 
+// One realistic internal-transaction row (QuantaSwap HTLC claim payout)
+// from the live aggregate endpoint after zondscan #162.
+const sampleInternalRow = {
+  Type: "CALL",
+  CallType: "call",
+  Hash: "0x421b1d9d4c41a6f1d699621dbd4980c78386a51910853f9f90d10ffcb710d8da",
+  From: "Q94cd8e406d2bb4ea251dce3f0558941f2ac056ee",
+  To: "Q79b662ce3d663643df4454a8ba3f532c0de6887f",
+  Input: "0x",
+  Output: "0x",
+  TraceAddress: [1],
+  Value: 43.05396,
+  Gas: "0x5fc7",
+  GasUsed: "0x0",
+  AddressFunctionIdentifier: "",
+  AmountFunctionIdentifier: "0x0",
+  BlockTimestamp: "0x6a5275c4",
+};
+
 const mockFetch = vi.fn<any>();
 
 const okResponse = (body: unknown) => ({
@@ -67,6 +86,62 @@ describe("fetchOnChainHistory", () => {
     expect(entry.gasUsed).toBe("");
     expect(entry.effectiveGasPrice).toBe("");
     expect(entry.chainId).toBe(CHAIN);
+  });
+
+  it("maps internal transactions onto distinct incoming entries", async () => {
+    mockFetch.mockResolvedValue(
+      okResponse({
+        transactions_by_address: [sampleRow],
+        transactions_count: 82,
+        internal_transactions_by_address: [sampleInternalRow],
+        internal_transactions_count: 1,
+      }),
+    );
+
+    const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
+
+    expect(page.entries).toHaveLength(2);
+    const internal = page.entries[1];
+    expect(internal.isInternal).toBe(true);
+    expect(internal.transactionHash).toBe(sampleInternalRow.Hash);
+    // Unique id so it survives dedup against the outer tx with the same hash.
+    expect(internal.id).toBe(`${sampleInternalRow.Hash}-internal-1`);
+    expect(internal.from).toBe(sampleInternalRow.From);
+    expect(internal.to).toBe(sampleInternalRow.To);
+    expect(internal.amount).toBe(43.05396);
+    expect(internal.timestamp).toBe(parseInt("0x6a5275c4", 16) * 1000);
+    expect(internal.paidFeesQrl).toBe("0");
+    expect(internal.tokenSymbol).toBe("QRL");
+    expect(internal.status).toBe(true);
+  });
+
+  it("drives pagination with the larger of the two counts", async () => {
+    mockFetch.mockResolvedValue(
+      okResponse({
+        transactions_by_address: [sampleRow],
+        transactions_count: 3,
+        internal_transactions_by_address: [sampleInternalRow],
+        internal_transactions_count: 40,
+      }),
+    );
+
+    const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
+    expect(page.totalCount).toBe(40);
+  });
+
+  it("tolerates a null internal transaction list (Go nil slice)", async () => {
+    mockFetch.mockResolvedValue(
+      okResponse({
+        transactions_by_address: [sampleRow],
+        transactions_count: 1,
+        internal_transactions_by_address: null,
+        internal_transactions_count: 0,
+      }),
+    );
+
+    const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
+    expect(page.entries).toHaveLength(1);
+    expect(page.entries[0].isInternal).toBeUndefined();
   });
 
   it("skips rows without a transaction hash", async () => {

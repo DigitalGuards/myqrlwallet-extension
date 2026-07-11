@@ -111,8 +111,64 @@ export const ZRC_721_CONTRACT_ABI = [
   },
 ] as const;
 
+// ERC-1155 multi-token standard. Kept to the subset the wallet uses:
+// detection, per-id balance, metadata URI, and single transfers.
+export const ZRC_1155_CONTRACT_ABI = [
+  // ERC-165
+  {
+    inputs: [{ internalType: "bytes4", name: "interfaceId", type: "bytes4" }],
+    name: "supportsInterface",
+    outputs: [{ internalType: "bool", name: "", type: "bool" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "account", type: "address" },
+      { internalType: "uint256", name: "id", type: "uint256" },
+    ],
+    name: "balanceOf",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "id", type: "uint256" }],
+    name: "uri",
+    outputs: [{ internalType: "string", name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "from", type: "address" },
+      { internalType: "address", name: "to", type: "address" },
+      { internalType: "uint256", name: "id", type: "uint256" },
+      { internalType: "uint256", name: "amount", type: "uint256" },
+      { internalType: "bytes", name: "data", type: "bytes" },
+    ],
+    name: "safeTransferFrom",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: "address", name: "operator", type: "address" },
+      { indexed: true, internalType: "address", name: "from", type: "address" },
+      { indexed: true, internalType: "address", name: "to", type: "address" },
+      { indexed: false, internalType: "uint256", name: "id", type: "uint256" },
+      { indexed: false, internalType: "uint256", name: "value", type: "uint256" },
+    ],
+    name: "TransferSingle",
+    type: "event",
+  },
+] as const;
+
 export const ERC_721_INTERFACE_ID = "0x80ac58cd";
 export const ERC_721_ENUMERABLE_INTERFACE_ID = "0x780e9d63";
+export const ERC_1155_INTERFACE_ID = "0xd9b67a26";
 
 export const NFT_UNITS_OF_GAS = 150000;
 export const NFT_ITEMS_DISPLAY_LIMIT = 4;

@@ -33,9 +33,26 @@ type ExplorerAggregateTx = {
   BlockNumber?: string;
 };
 
+// One row of the aggregate's internal-transactions list: value moved by
+// contract code (nested call frames), indexed by the explorer since
+// zondscan #162. Field names are capitalized by the handler.
+type ExplorerAggregateInternalTx = {
+  Type?: string;
+  From?: string;
+  To?: string;
+  Hash?: string;
+  /** QRL units as a JSON number (the explorer's legacy float schema). */
+  Value?: number;
+  /** Block timestamp, hex seconds ("0x6a5275c4"). */
+  BlockTimestamp?: string;
+  TraceAddress?: number[] | null;
+};
+
 type ExplorerAggregateResponse = {
   transactions_by_address?: ExplorerAggregateTx[] | null;
   transactions_count?: number;
+  internal_transactions_by_address?: ExplorerAggregateInternalTx[] | null;
+  internal_transactions_count?: number;
 };
 
 const emptyPage = (): OnChainHistoryPage => ({ entries: [], totalCount: 0 });
@@ -68,6 +85,46 @@ const toEntry = (
   };
 };
 
+const ensureHexPrefix = (hash: string): string =>
+  hash.startsWith("0x") ? hash : `0x${hash}`;
+
+const toInternalEntry = (
+  row: ExplorerAggregateInternalTx,
+  chainId: string,
+): TransactionHistoryEntry => {
+  const timestampSeconds = parseInt(row.BlockTimestamp ?? "", 16);
+  const txHash = ensureHexPrefix(row.Hash ?? "");
+  const trace = Array.isArray(row.TraceAddress)
+    ? row.TraceAddress.join(".")
+    : "";
+  return {
+    // The outer transaction may appear as its own entry with the same
+    // hash, so internal entries need a distinct id (hash + tree position).
+    id: `${txHash}-internal-${trace}`,
+    from: row.From ?? "",
+    to: row.To ?? "",
+    amount:
+      typeof row.Value === "number" && Number.isFinite(row.Value)
+        ? row.Value
+        : 0,
+    tokenSymbol: NATIVE_TOKEN.symbol,
+    tokenName: NATIVE_TOKEN.name,
+    isZrc20Token: false,
+    tokenContractAddress: "",
+    tokenDecimals: NATIVE_TOKEN.decimals,
+    transactionHash: txHash,
+    blockNumber: "",
+    gasUsed: "",
+    effectiveGasPrice: "",
+    // The fee lives on the outer transaction, not the payout frame.
+    paidFeesQrl: "0",
+    status: true,
+    timestamp: Number.isFinite(timestampSeconds) ? timestampSeconds * 1000 : 0,
+    chainId,
+    isInternal: true,
+  };
+};
+
 export async function fetchOnChainHistory(
   address: string,
   chainId: string,
@@ -86,15 +143,29 @@ export async function fetchOnChainHistory(
     const rows = Array.isArray(data?.transactions_by_address)
       ? data.transactions_by_address
       : [];
-    const entries = rows
+    const txEntries = rows
       .filter((row) => !!row.TxHash)
       .map((row) => toEntry(row, chainId));
-    const totalCount =
-      typeof data?.transactions_count === "number" &&
-      data.transactions_count >= 0
-        ? data.transactions_count
-        : entries.length;
-    return { entries, totalCount };
+
+    // Internal transactions ride along in the same response, one page of
+    // each list per request. They surface value received via contract
+    // code (HTLC claims, withdrawals) that the outer transaction hides.
+    const internalRows = Array.isArray(data?.internal_transactions_by_address)
+      ? data.internal_transactions_by_address
+      : [];
+    const internalEntries = internalRows
+      .filter((row) => !!row.Hash)
+      .map((row) => toInternalEntry(row, chainId));
+
+    const countOr = (value: unknown, fallback: number): number =>
+      typeof value === "number" && value >= 0 ? value : fallback;
+    // Both lists paginate together; keep fetching pages until the longer
+    // one is exhausted.
+    const totalCount = Math.max(
+      countOr(data?.transactions_count, txEntries.length),
+      countOr(data?.internal_transactions_count, internalEntries.length),
+    );
+    return { entries: [...txEntries, ...internalEntries], totalCount };
   } catch {
     return emptyPage();
   }
