@@ -8,7 +8,7 @@ import {
 } from "@/components/UI/Card";
 import { ROUTES } from "@/router/router";
 import StringUtil from "@/utilities/stringUtil";
-import type { NFTMetadata } from "@/types/nft";
+import type { NFTMetadata, NFTStandard } from "@/types/nft";
 import { Image, Send } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -26,6 +26,8 @@ const NFTDetail = () => {
   const collectionName: string = state?.collectionName ?? "";
   const metadata: NFTMetadata | null = state?.metadata ?? null;
   const imageUrl: string = state?.imageUrl ?? "";
+  const standard: NFTStandard = state?.standard ?? "ZRC721";
+  const balance: string | undefined = state?.balance;
 
   const [imageError, setImageError] = useState(false);
 
@@ -83,6 +85,20 @@ const NFTDetail = () => {
                   #{tokenId}
                 </div>
               </div>
+              <div className="flex flex-col gap-1">
+                <div className="text-sm">{t("nft.standard")}</div>
+                <div className="text-sm font-bold text-secondary">
+                  {standard === "ZRC1155" ? "ZRC-1155" : "ZRC-721"}
+                </div>
+              </div>
+              {balance && (
+                <div className="flex flex-col gap-1">
+                  <div className="text-sm">{t("nft.ownedCount")}</div>
+                  <div className="text-sm font-bold text-secondary">
+                    {balance}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-1">
@@ -127,6 +143,8 @@ const NFTDetail = () => {
                     collectionName,
                     imageUrl,
                     nftName: metadata?.name ?? "",
+                    standard,
+                    balance,
                   },
                 })
               }

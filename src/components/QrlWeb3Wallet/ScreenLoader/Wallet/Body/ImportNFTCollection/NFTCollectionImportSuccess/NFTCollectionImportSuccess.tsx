@@ -8,6 +8,7 @@ import {
 } from "@/components/UI/Card";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
+import type { NFTStandard } from "@/types/nft";
 import StorageUtil from "@/utilities/storageUtil";
 import StringUtil from "@/utilities/stringUtil";
 import { getRandomTailwindTextColor } from "@/utilities/stylingUtil";
@@ -17,7 +18,13 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 type NFTCollectionImportSuccessProps = {
-  collection?: { name: string; symbol: string; balance: number };
+  collection?: {
+    name: string;
+    symbol: string;
+    // Undefined for ZRC-1155 (no on-chain owner enumeration).
+    balance?: number;
+    standard: NFTStandard;
+  };
   onCancelImport: () => void;
   contractAddress: string;
 };
@@ -37,6 +44,7 @@ const NFTCollectionImportSuccess = observer(
     const name = collection?.name;
     const symbol = collection?.symbol;
     const balance = collection?.balance;
+    const standard = collection?.standard ?? "ZRC721";
 
     const { prefix, addressSplit } =
       StringUtil.getSplitAddress(contractAddress);
@@ -46,7 +54,7 @@ const NFTCollectionImportSuccess = observer(
         address: contractAddress,
         name: name ?? "",
         symbol: symbol ?? "",
-        standard: "ZRC721",
+        standard,
         image: "",
       });
       navigate(ROUTES.HOME);
@@ -81,12 +89,16 @@ const NFTCollectionImportSuccess = observer(
             </div>
             <div className="flex flex-col gap-1">
               <div>{t('nft.standard')}</div>
-              <div className="font-bold text-secondary">ZRC-721</div>
+              <div className="font-bold text-secondary">
+                {standard === "ZRC1155" ? "ZRC-1155" : "ZRC-721"}
+              </div>
             </div>
-            <div className="flex flex-col gap-1">
-              <div>{t('nft.ownedCount')}</div>
-              <div className="font-bold text-secondary">{balance}</div>
-            </div>
+            {balance !== undefined && (
+              <div className="flex flex-col gap-1">
+                <div>{t('nft.ownedCount')}</div>
+                <div className="font-bold text-secondary">{balance}</div>
+              </div>
+            )}
           </div>
         </CardContent>
         <CardFooter className="gap-4">

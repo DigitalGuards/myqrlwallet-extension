@@ -2,7 +2,7 @@ import { Card } from "@/components/UI/Card";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
 import { resolveIpfsUrl, fetchMetadata } from "@/utilities/ipfsUtil";
-import type { NFTMetadata } from "@/types/nft";
+import type { NFTMetadata, NFTStandard } from "@/types/nft";
 import { Image } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
@@ -12,10 +12,19 @@ type NFTGalleryItemProps = {
   contractAddress: string;
   tokenId: string;
   collectionName: string;
+  standard?: NFTStandard;
+  // ERC-1155 per-id holding (decimal string); undefined for ZRC721.
+  balance?: string;
 };
 
 const NFTGalleryItem = observer(
-  ({ contractAddress, tokenId, collectionName }: NFTGalleryItemProps) => {
+  ({
+    contractAddress,
+    tokenId,
+    collectionName,
+    standard = "ZRC721",
+    balance,
+  }: NFTGalleryItemProps) => {
     const navigate = useNavigate();
     const { qrlStore } = useStore();
     const { getNftTokenUri } = qrlStore;
@@ -30,7 +39,7 @@ const NFTGalleryItem = observer(
       (async () => {
         setIsLoading(true);
         try {
-          const uri = await getNftTokenUri(contractAddress, tokenId);
+          const uri = await getNftTokenUri(contractAddress, tokenId, standard);
           if (cancelled) return;
 
           if (uri) {
@@ -59,11 +68,19 @@ const NFTGalleryItem = observer(
       return () => {
         cancelled = true;
       };
-    }, [contractAddress, tokenId]);
+    }, [contractAddress, tokenId, standard]);
 
     const handleClick = () => {
       navigate(ROUTES.NFT_DETAIL, {
-        state: { contractAddress, tokenId, collectionName, metadata, imageUrl },
+        state: {
+          contractAddress,
+          tokenId,
+          collectionName,
+          metadata,
+          imageUrl,
+          standard,
+          balance,
+        },
       });
     };
 
@@ -92,6 +109,11 @@ const NFTGalleryItem = observer(
             <div className="flex h-full w-full items-center justify-center">
               <Image className="h-12 w-12 text-muted-foreground" />
             </div>
+          )}
+          {balance && balance !== "1" && (
+            <span className="absolute right-1 top-1 rounded bg-background/80 px-1.5 py-0.5 text-xs font-bold">
+              ×{balance}
+            </span>
           )}
         </div>
         <div className="p-2">

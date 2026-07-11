@@ -1,5 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { resolveIpfsUrl, fetchMetadata } from "./ipfsUtil";
+import {
+  resolveIpfsUrl,
+  fetchMetadata,
+  substituteErc1155TokenId,
+} from "./ipfsUtil";
 
 describe("resolveIpfsUrl", () => {
   it("should return empty string for empty input", () => {
@@ -8,13 +12,13 @@ describe("resolveIpfsUrl", () => {
 
   it("should resolve ipfs://ipfs/ URIs", () => {
     expect(resolveIpfsUrl("ipfs://ipfs/QmTest123")).toBe(
-      "https://ipfs.io/ipfs/QmTest123",
+      "https://qrlwallet.com/api/ipfs/QmTest123",
     );
   });
 
   it("should resolve ipfs:// URIs", () => {
     expect(resolveIpfsUrl("ipfs://QmTest123")).toBe(
-      "https://ipfs.io/ipfs/QmTest123",
+      "https://qrlwallet.com/api/ipfs/QmTest123",
     );
   });
 
@@ -35,7 +39,7 @@ describe("resolveIpfsUrl", () => {
 
   it("should treat bare strings as CIDs", () => {
     expect(resolveIpfsUrl("QmTest123")).toBe(
-      "https://ipfs.io/ipfs/QmTest123",
+      "https://qrlwallet.com/api/ipfs/QmTest123",
     );
   });
 });
@@ -62,7 +66,7 @@ describe("fetchMetadata", () => {
     const result = await fetchMetadata("ipfs://QmMetadata");
     expect(result).toEqual(mockData);
     expect(global.fetch).toHaveBeenCalledWith(
-      "https://ipfs.io/ipfs/QmMetadata",
+      "https://qrlwallet.com/api/ipfs/QmMetadata",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
@@ -83,5 +87,37 @@ describe("fetchMetadata", () => {
 
     const result = await fetchMetadata("ipfs://QmFail");
     expect(result).toBeNull();
+  });
+});
+
+describe("substituteErc1155TokenId", () => {
+  it("substitutes {id} with 64-char zero-padded lowercase hex", () => {
+    expect(
+      substituteErc1155TokenId("ipfs://QmX/{id}.json", "42"),
+    ).toBe(
+      "ipfs://QmX/000000000000000000000000000000000000000000000000000000000000002a.json",
+    );
+  });
+
+  it("replaces every occurrence of the placeholder", () => {
+    expect(substituteErc1155TokenId("https://x/{id}/{id}.json", "1")).toBe(
+      `https://x/${"0".repeat(63)}1/${"0".repeat(63)}1.json`,
+    );
+  });
+
+  it("returns URIs without a placeholder unchanged", () => {
+    expect(substituteErc1155TokenId("ipfs://QmX/1.json", "42")).toBe(
+      "ipfs://QmX/1.json",
+    );
+  });
+
+  it("returns the URI unchanged when the tokenId is not an integer", () => {
+    expect(substituteErc1155TokenId("https://x/{id}.json", "not-a-number")).toBe(
+      "https://x/{id}.json",
+    );
+  });
+
+  it("handles empty input", () => {
+    expect(substituteErc1155TokenId("", "1")).toBe("");
   });
 });
