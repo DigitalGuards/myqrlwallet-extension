@@ -95,7 +95,13 @@ const TransactionHistoryItem = observer(({
         <div className="flex flex-1 items-center justify-between">
           <div className="flex flex-col">
             <span className="text-sm font-medium">
-              {t(isIncoming ? 'txHistory.typeReceive' : 'txHistory.typeSend')}
+              {t(
+                transaction.isInternal
+                  ? 'txHistory.typeContractTransfer'
+                  : isIncoming
+                    ? 'txHistory.typeReceive'
+                    : 'txHistory.typeSend',
+              )}
             </span>
             <span className={`text-xs ${getStatusColor(displayStatus)}`}>
               {isPending && (
