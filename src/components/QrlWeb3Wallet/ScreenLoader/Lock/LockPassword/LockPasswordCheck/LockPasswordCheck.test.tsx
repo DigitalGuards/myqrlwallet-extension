@@ -113,4 +113,50 @@ describe("LockPasswordCheck", () => {
       expect(unlockButton).toBeEnabled();
     });
   });
+
+  it("toggles the password field between hidden and revealed", async () => {
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          activeAccount: {
+            accountAddress: "Q2090E9F38771876FB6Fc51a6b464121d3cC093A1",
+          },
+        },
+      }),
+    );
+
+    const passwordField = screen.getByLabelText("password");
+    expect(passwordField).toHaveAttribute("type", "password");
+
+    const toggle = screen.getByRole("button", {
+      name: "Toggle password visibility",
+    });
+    // Keyboard-reachable and state-annotated for assistive tech.
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    await userEvent.click(toggle);
+    expect(passwordField).toHaveAttribute("type", "text");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    await userEvent.click(toggle);
+    expect(passwordField).toHaveAttribute("type", "password");
+  });
+
+  it("shows the account identity chip with the abbreviated address", () => {
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          activeAccount: {
+            accountAddress: "Q2090E9F38771876FB6Fc51a6b464121d3cC093A1",
+          },
+        },
+      }),
+    );
+
+    // Abbreviated form (prefix + first group ... last group), not the full address.
+    expect(screen.getByText("Q2090E...093A1")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Q2090E9F38771876FB6Fc51a6b464121d3cC093A1"),
+    ).not.toBeInTheDocument();
+  });
 });

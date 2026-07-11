@@ -17,7 +17,7 @@ const Lock = observer(() => {
       />
       <div className="relative z-10 flex flex-col items-center gap-4">
         <img
-          className="h-16 w-16 drop-shadow-[0_0_18px_hsl(24_96%_55%/0.35)]"
+          className="h-16 w-16 drop-shadow-[0_0_18px_hsl(var(--primary)/0.35)]"
           src="icons/qrl/default.png"
           alt="MyQRLWallet"
         />

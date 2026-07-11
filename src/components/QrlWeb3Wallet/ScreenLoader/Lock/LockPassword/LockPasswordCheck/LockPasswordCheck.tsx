@@ -107,49 +107,59 @@ const LockPasswordCheck = observer(() => {
             </p>
           </div>
 
-          {/* Who is locked: the account identity chip, blue identifies. */}
-          {!!accountAddress && (
-            <div
-              className="inline-flex max-w-full items-center gap-2 rounded-full border border-blue-accent/30 bg-blue-accent/[0.08] px-4 py-1.5"
-              title={accountAddress}
-            >
-              <span className="glow-dot h-2 w-2 shrink-0 rounded-full bg-primary" />
-              <span className="font-data truncate text-xs text-blue-accent">
-                {label || abbreviatedAddress}
-              </span>
-            </div>
-          )}
+          {/* Who is locked: the account identity chip, blue identifies.
+              The row keeps a fixed height even before the address resolves
+              (it lands only after qrlStore's RPC round-trips) so the chip
+              never shifts the focused password field on cold start. */}
+          <div className="flex min-h-[2.125rem] w-full items-center justify-center">
+            {!!accountAddress && (
+              <div
+                className="inline-flex max-w-full items-center gap-2 rounded-full border border-blue-accent/30 bg-blue-accent/[0.08] px-4 py-1.5"
+                title={accountAddress}
+              >
+                {/* text-primary so the glow-dot halo (currentColor) pulses ember, not foreground */}
+                <span className="glow-dot h-2 w-2 shrink-0 rounded-full bg-primary text-primary" />
+                <span className="font-data truncate text-xs text-blue-accent">
+                  {label || abbreviatedAddress}
+                </span>
+              </div>
+            )}
+          </div>
 
           <FormField
             control={control}
             name="password"
             render={({ field }) => (
               <FormItem className="w-full text-left">
-                <FormControl>
-                  <div className="relative">
+                {/* FormControl wraps only the Input so its id / aria-describedby /
+                    aria-invalid land on the field, not the positioning wrapper. */}
+                <div className="relative">
+                  <FormControl>
                     <Input
                       {...field}
                       aria-label={field.name}
+                      autoComplete="current-password"
                       disabled={isSubmitting}
                       placeholder={t("lock.unlock.passwordPlaceholder")}
                       type={showPassword ? "text" : "password"}
                       className="h-12 rounded-xl pr-12 text-base"
                     />
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      aria-label={t("lock.unlock.togglePasswordVisibility")}
-                      className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-2.5 text-muted-foreground transition-colors hover:text-foreground"
-                      onClick={() => setShowPassword((show) => !show)}
-                    >
-                      {showPassword ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </button>
-                  </div>
-                </FormControl>
+                  </FormControl>
+                  <button
+                    type="button"
+                    aria-pressed={showPassword}
+                    aria-label={t("lock.unlock.togglePasswordVisibility")}
+                    disabled={isSubmitting}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-2.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                    onClick={() => setShowPassword((show) => !show)}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
                 <FormDescription className="text-center text-xs">
                   {t("lock.unlock.passwordDescription")}
                 </FormDescription>
