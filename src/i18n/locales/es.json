@@ -543,5 +543,6 @@
   "loader.phaseChain": "Cargando la configuración de la cadena",
   "loader.phaseNetwork": "Contactando con la red",
   "loader.phaseAccounts": "Obteniendo saldos",
-  "loader.phaseSession": "Restaurando tu sesión"
+  "loader.phaseSession": "Restaurando tu sesión",
+  "lock.unlock.togglePasswordVisibility": "Alternar visibilidad de la contraseña"
 }
