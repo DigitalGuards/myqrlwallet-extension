@@ -87,9 +87,9 @@ const mockedStoreValues: StoreType = {
       collection: undefined,
       error: "",
     }),
-    getOwnedNftTokenIds: async () => [],
+    getOwnedNftTokens: async () => [],
+    getErc1155TokenBalance: async () => undefined,
     getNftTokenUri: async () => "",
-    getNftTransferGas: async () => "",
     signNftTransfer: async () => ({
       transactionHash: undefined,
       rawTransaction: undefined,

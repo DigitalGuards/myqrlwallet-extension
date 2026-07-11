@@ -31,10 +31,11 @@ const NFTCollections = observer(() => {
     <>
       {collections
         .slice(0, NFT_ITEMS_DISPLAY_LIMIT)
-        .map(({ address }) => (
+        .map(({ address, standard }) => (
           <NFTCollectionItem
             key={address}
             contractAddress={address}
+            storedStandard={standard}
             triggerReRender={triggerReRender}
           />
         ))}

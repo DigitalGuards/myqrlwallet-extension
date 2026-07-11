@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { useStore } from "@/stores/store";
+import type { OwnedNftToken } from "@/types/nft";
 import { Image } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
@@ -13,30 +14,31 @@ const NFTGallery = observer(() => {
   const { t } = useTranslation();
   const { state } = useLocation();
   const { qrlStore } = useStore();
-  const { getOwnedNftTokenIds, activeAccount, qrlConnection } = qrlStore;
+  const { getOwnedNftTokens, activeAccount, qrlConnection } = qrlStore;
   const { accountAddress } = activeAccount;
   const { blockchain } = qrlConnection;
 
   const contractAddress = state?.contractAddress ?? "";
   const collectionName = state?.collectionName ?? "";
+  const standard = state?.standard ?? "ZRC721";
 
-  const [tokenIds, setTokenIds] = useState<string[]>([]);
+  const [tokens, setTokens] = useState<OwnedNftToken[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setIsLoading(true);
-      const ids = await getOwnedNftTokenIds(contractAddress);
+      const owned = await getOwnedNftTokens(contractAddress, standard);
       if (!cancelled) {
-        setTokenIds(ids);
+        setTokens(owned);
         setIsLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [contractAddress, accountAddress, blockchain]);
+  }, [contractAddress, standard, accountAddress, blockchain]);
 
   return (
     <>
@@ -59,19 +61,21 @@ const NFTGallery = observer(() => {
                   </Card>
                 ))}
               </div>
-            ) : tokenIds.length === 0 ? (
+            ) : tokens.length === 0 ? (
               <div className="flex flex-col items-center gap-4 py-8 text-center text-muted-foreground">
                 <Image className="h-12 w-12" />
                 <p className="text-sm">{t("nft.emptyGallery")}</p>
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3">
-                {tokenIds.map((tokenId) => (
+                {tokens.map((token) => (
                   <NFTGalleryItem
-                    key={tokenId}
+                    key={token.tokenId}
                     contractAddress={contractAddress}
-                    tokenId={tokenId}
+                    tokenId={token.tokenId}
                     collectionName={collectionName}
+                    standard={standard}
+                    balance={token.balance}
                   />
                 ))}
               </div>
