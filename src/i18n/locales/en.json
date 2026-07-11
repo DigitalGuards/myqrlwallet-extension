@@ -543,5 +543,6 @@
   "loader.phaseChain": "Loading chain settings",
   "loader.phaseNetwork": "Contacting the network",
   "loader.phaseAccounts": "Fetching balances",
-  "loader.phaseSession": "Restoring your session"
+  "loader.phaseSession": "Restoring your session",
+  "lock.unlock.togglePasswordVisibility": "Toggle password visibility"
 }

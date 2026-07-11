@@ -543,5 +543,6 @@
   "loader.phaseChain": "Chain-Einstellungen werden geladen",
   "loader.phaseNetwork": "Netzwerk wird kontaktiert",
   "loader.phaseAccounts": "Kontostände werden abgerufen",
-  "loader.phaseSession": "Sitzung wird wiederhergestellt"
+  "loader.phaseSession": "Sitzung wird wiederhergestellt",
+  "lock.unlock.togglePasswordVisibility": "Passwortanzeige umschalten"
 }
