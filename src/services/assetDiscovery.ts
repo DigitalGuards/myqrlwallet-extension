@@ -150,6 +150,7 @@ export async function discoverNftCollections(
   const rows = await fetchExplorerNfts(address, chainId);
 
   const collections = new Map<string, DiscoveredNFTCollection>();
+  const seenTokens = new Set<string>();
   for (const nft of rows) {
     if (!nft.contractAddress || !nft.tokenID) continue;
     const standard = toNftStandard(nft.tokenStandard);
@@ -157,6 +158,11 @@ export async function discoverNftCollections(
 
     const contractAddress = toQAddress(nft.contractAddress);
     const key = contractAddress.toLowerCase();
+    // The explorer can return duplicate (contract, tokenID) rows; count
+    // each token once so the picker's item count matches the gallery.
+    const tokenKey = `${key}:${nft.tokenID}`;
+    if (seenTokens.has(tokenKey)) continue;
+    seenTokens.add(tokenKey);
     const existing = collections.get(key);
     if (existing) {
       existing.tokenCount += 1;
@@ -188,13 +194,20 @@ export type DiscoveredNftToken = {
   balance?: string;
 };
 
+// Upper bound on token ids returned per collection. Every candidate costs
+// the caller one on-chain verification call (ownerOf / balanceOf), so an
+// unbounded (or hostile) explorer response must not be able to drive an
+// unbounded RPC loop.
+export const MAX_DISCOVERED_TOKEN_IDS = 50;
+
 /**
- * Discovers the token IDs an address owns inside one collection. This is
- * the detection fallback for contracts the wallet cannot enumerate on
- * chain: ZRC-721 without the Enumerable extension, and all of ZRC-1155
- * (the standard has no owner enumeration at all). Callers MUST re-verify
- * ownership on chain (ownerOf / balanceOf), because the explorer index
- * can lag a recent transfer.
+ * Discovers the token IDs an address owns inside one collection, capped
+ * at MAX_DISCOVERED_TOKEN_IDS. This is the detection fallback for
+ * contracts the wallet cannot enumerate on chain: ZRC-721 without the
+ * Enumerable extension, and all of ZRC-1155 (the standard has no owner
+ * enumeration at all). Callers MUST re-verify ownership on chain
+ * (ownerOf / balanceOf), because the explorer index can lag a recent
+ * transfer.
  */
 export async function discoverOwnedNftTokens(
   address: string,
@@ -208,6 +221,7 @@ export async function discoverOwnedNftTokens(
   const seen = new Set<string>();
   const out: DiscoveredNftToken[] = [];
   for (const nft of rows) {
+    if (out.length >= MAX_DISCOVERED_TOKEN_IDS) break;
     if (!nft.contractAddress || !nft.tokenID) continue;
     if (toQAddress(nft.contractAddress).toLowerCase() !== wanted) continue;
     const standard = toNftStandard(nft.tokenStandard);

@@ -115,6 +115,14 @@ describe("discoverNftCollections", () => {
           collectionSymbol: "DOO",
         },
         {
+          // duplicate (contract, tokenID) row must not inflate tokenCount
+          contractAddress: "Qdddddddddddddddddddddddddddddddddddddddd",
+          tokenID: "2",
+          tokenStandard: "ERC-721",
+          collectionName: "Doodles",
+          collectionSymbol: "DOO",
+        },
+        {
           contractAddress: "Qeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
           tokenID: "7",
           tokenStandard: "ERC-1155",
@@ -235,5 +243,23 @@ describe("discoverOwnedNftTokens", () => {
       ),
     ).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("caps the candidate list so a hostile response cannot drive an unbounded RPC loop", async () => {
+    mockFetchJson({
+      address: HOLDER,
+      count: 80,
+      nfts: Array.from({ length: 80 }, (_, i) => ({
+        contractAddress: "Qdddddddddddddddddddddddddddddddddddddddd",
+        tokenID: String(i + 1),
+        tokenStandard: "ERC-721",
+      })),
+    });
+    const tokens = await discoverOwnedNftTokens(
+      HOLDER,
+      TESTNET_CHAIN_ID,
+      "Qdddddddddddddddddddddddddddddddddddddddd",
+    );
+    expect(tokens).toHaveLength(50);
   });
 });

@@ -16,8 +16,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/UI/DropdownMenu";
+import { getExplorerApiBase } from "@/configuration/assetDiscoveryConfig";
 import { ROUTES } from "@/router/router";
-import { discoverOwnedNftTokens } from "@/services/assetDiscovery";
 import { useStore } from "@/stores/store";
 import type { NFTStandard } from "@/types/nft";
 import StorageUtil from "@/utilities/storageUtil";
@@ -51,8 +51,12 @@ const NFTCollectionItem = observer(
     const { t } = useTranslation();
     const navigate = useNavigate();
     const { qrlStore } = useStore();
-    const { qrlConnection, activeAccount, getNftCollectionDetails } =
-      qrlStore;
+    const {
+      qrlConnection,
+      activeAccount,
+      getNftCollectionDetails,
+      getOwnedNftTokens,
+    } = qrlStore;
     const { blockchain } = qrlConnection;
     const { accountAddress } = activeAccount;
 
@@ -73,14 +77,15 @@ const NFTCollectionItem = observer(
           setOwnedCount(details.collection.balance);
           return;
         }
-        // ZRC-1155 has no on-chain owner enumeration; count owned ids via
-        // the explorer (0 when the chain has no configured explorer).
-        const discovered = await discoverOwnedNftTokens(
-          accountAddress,
-          blockchain.chainId,
-          contractAddress,
-        );
-        if (!cancelled) setOwnedCount(discovered.length);
+        // ZRC-1155 has no on-chain owner enumeration. On chains with an
+        // explorer, count via the same chain-verified path the gallery
+        // uses (explorer candidates re-checked with balanceOf) so the
+        // row and the gallery can never disagree. Without an explorer
+        // the count is unknowable; leave it undefined rather than
+        // claiming "0 NFTs".
+        if (!getExplorerApiBase(blockchain.chainId)) return;
+        const owned = await getOwnedNftTokens(contractAddress, "ZRC1155");
+        if (!cancelled) setOwnedCount(owned.length);
       })();
       return () => {
         cancelled = true;
@@ -115,7 +120,10 @@ const NFTCollectionItem = observer(
             navigate(ROUTES.NFT_GALLERY, {
               state: {
                 contractAddress,
-                collectionName: collection.name,
+                // displayName, not the raw name: nameless 1155 contracts
+                // otherwise flow "" into the detail/transfer/history
+                // screens and render identity-less entries.
+                collectionName: displayName,
                 standard: collection.standard ?? storedStandard ?? "ZRC721",
               },
             })

@@ -108,6 +108,7 @@ class QrlStore {
       sendRawTransaction: action.bound,
       getNftCollectionDetails: action.bound,
       getOwnedNftTokens: action.bound,
+      getErc1155TokenBalance: action.bound,
       getNftTokenUri: action.bound,
       signNftTransfer: action.bound,
     });
@@ -623,6 +624,32 @@ class QrlStore {
       return tokens;
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * Live balanceOf(activeAccount, tokenId) for one ERC-1155 id, as a
+   * decimal string. Undefined on any failure so callers can keep their
+   * previous value instead of treating an RPC blip as a zero balance.
+   */
+  async getErc1155TokenBalance(
+    contractAddress: string,
+    tokenId: string,
+  ): Promise<string | undefined> {
+    if (!this.qrlInstance || !this.qrlInstance.Contract) return undefined;
+    const owner = this.activeAccount.accountAddress;
+    if (!owner) return undefined;
+    try {
+      const contract = new this.qrlInstance.Contract(
+        ZRC_1155_CONTRACT_ABI,
+        contractAddress,
+      );
+      const balance = (await contract.methods
+        .balanceOf(owner, BigInt(tokenId))
+        .call()) as bigint;
+      return balance.toString();
+    } catch {
+      return undefined;
     }
   }
 

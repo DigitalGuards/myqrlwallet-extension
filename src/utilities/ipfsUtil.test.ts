@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
   resolveIpfsUrl,
+  resolveIpfsFallbackUrl,
   fetchMetadata,
   substituteErc1155TokenId,
 } from "./ipfsUtil";
@@ -71,22 +72,71 @@ describe("fetchMetadata", () => {
     );
   });
 
-  it("should return null on non-ok response", async () => {
+  it("should fall back to the public gateway when the proxy fails", async () => {
+    const mockData = { name: "Rescued NFT" };
+    global.fetch = vi
+      .fn()
+      // Primary (proxy) throttled or rejecting the URI shape.
+      .mockResolvedValueOnce({ ok: false, status: 429 })
+      // Fallback (ipfs.io) succeeds.
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockData),
+      }) as any;
+
+    const result = await fetchMetadata("ipfs://QmMetadata");
+    expect(result).toEqual(mockData);
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      1,
+      "https://qrlwallet.com/api/ipfs/QmMetadata",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      2,
+      "https://ipfs.io/ipfs/QmMetadata",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("should not retry non-gateway URIs after a failure", async () => {
+    global.fetch = vi.fn(() => Promise.resolve({ ok: false })) as any;
+
+    const result = await fetchMetadata("https://example.com/meta.json");
+    expect(result).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("should return null when both gateways fail", async () => {
     global.fetch = vi.fn(() =>
       Promise.resolve({ ok: false }),
     ) as any;
 
     const result = await fetchMetadata("ipfs://QmBad");
     expect(result).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("should return null on fetch error", async () => {
+  it("should return null on fetch error for both gateways", async () => {
     global.fetch = vi.fn(() =>
       Promise.reject(new Error("Network error")),
     ) as any;
 
     const result = await fetchMetadata("ipfs://QmFail");
     expect(result).toBeNull();
+  });
+});
+
+describe("resolveIpfsFallbackUrl", () => {
+  it("returns the public gateway URL for ipfs URIs", () => {
+    expect(resolveIpfsFallbackUrl("ipfs://QmTest123")).toBe(
+      "https://ipfs.io/ipfs/QmTest123",
+    );
+  });
+
+  it("returns empty for URIs that never touch a gateway", () => {
+    expect(resolveIpfsFallbackUrl("https://example.com/a.png")).toBe("");
+    expect(resolveIpfsFallbackUrl("data:image/png;base64,abc")).toBe("");
+    expect(resolveIpfsFallbackUrl("")).toBe("");
   });
 });
 

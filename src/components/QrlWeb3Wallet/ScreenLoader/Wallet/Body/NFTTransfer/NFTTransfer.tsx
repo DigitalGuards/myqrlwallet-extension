@@ -78,6 +78,7 @@ const NFTTransfer = observer(() => {
   const {
     activeAccount,
     signNftTransfer,
+    getErc1155TokenBalance,
     fetchAccounts,
     sendRawTransaction,
   } = qrlStore;
@@ -89,8 +90,25 @@ const NFTTransfer = observer(() => {
   const nftImageUrl: string = state?.imageUrl ?? "";
   const nftName: string = state?.nftName ?? "";
   const standard: NFTStandard = state?.standard ?? "ZRC721";
-  const ownedBalance: string | undefined = state?.balance;
   const is1155 = standard === "ZRC1155";
+
+  // Route state carries the balance snapshotted at gallery time; re-read
+  // it live on mount so the max-amount validation can't let a stale
+  // snapshot sign a transfer that reverts on chain.
+  const [ownedBalance, setOwnedBalance] = useState<string | undefined>(
+    state?.balance,
+  );
+  useEffect(() => {
+    if (!is1155) return;
+    let cancelled = false;
+    (async () => {
+      const live = await getErc1155TokenBalance(contractAddress, tokenId);
+      if (!cancelled && live !== undefined) setOwnedBalance(live);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [contractAddress, tokenId, is1155]);
 
   const FormSchema = createFormSchema(t, is1155 ? ownedBalance : undefined);
 
@@ -115,8 +133,16 @@ const NFTTransfer = observer(() => {
     handleSubmit,
     control,
     watch,
+    trigger,
     formState: { isSubmitting, isValid },
   } = form;
+
+  // Re-validate the amount once the live balance lands: the resolver is
+  // recreated with the new max, but a value validated against the stale
+  // snapshot would otherwise keep its old verdict until the next edit.
+  useEffect(() => {
+    if (is1155 && ownedBalance !== undefined) void trigger("amount");
+  }, [ownedBalance, is1155, trigger]);
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     try {
