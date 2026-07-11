@@ -554,9 +554,11 @@ describe("TransactionHistoryStore", () => {
 
       const merged = store.mergedTransactions;
       expect(merged).toHaveLength(2);
-      expect(merged.map((tx) => tx.id).sort()).toEqual([
-        "0xclaim",
+      // Same block timestamp: the payout is the effect of the call, so it
+      // must render as the newer item, above the outer send.
+      expect(merged.map((tx) => tx.id)).toEqual([
         "0xclaim-internal-1",
+        "0xclaim",
       ]);
     });
 
