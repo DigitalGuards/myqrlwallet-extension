@@ -87,7 +87,14 @@ class TransactionHistoryStore {
         (tx) =>
           tx.isInternal || !localHashes.has(tx.transactionHash.toLowerCase()),
       ),
-    ].sort((a, b) => b.timestamp - a.timestamp);
+    ].sort(
+      // Newest first. An internal payout shares its block timestamp with
+      // the outer call that produced it, so on a tie the internal entry
+      // sorts as the newer item: it is the effect, the call is the cause.
+      (a, b) =>
+        b.timestamp - a.timestamp ||
+        Number(b.isInternal ?? false) - Number(a.isInternal ?? false),
+    );
   }
 
   get hasMoreOnChain(): boolean {
