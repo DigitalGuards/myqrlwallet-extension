@@ -71,6 +71,11 @@ export type InitProgressType = {
   phase: InitPhaseType;
 };
 
+/** Balance re-poll cadence. Blocks land roughly once a minute, so 15s keeps
+ *  incoming funds (plain receives and internal payouts alike) visible within
+ *  a block of arrival without meaningful RPC load. */
+export const BALANCE_POLL_INTERVAL_MS = 15000;
+
 class QrlStore {
   qrlInstance?: Web3QRLInterface;
   qrlConnection = {
@@ -81,6 +86,7 @@ class QrlStore {
   qrlAccounts: QrlAccountsType = { accounts: [], isLoading: false };
   activeAccount: ActiveAccountType = { accountAddress: "" };
   initProgress: InitProgressType = { active: true, fraction: 0, phase: "chain" };
+  private balancePollInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     makeAutoObservable(this, {
@@ -96,6 +102,9 @@ class QrlStore {
       setActiveAccount: action.bound,
       fetchQrlConnection: action.bound,
       fetchAccounts: action.bound,
+      refreshBalancesQuietly: action.bound,
+      startBalancePolling: action.bound,
+      stopBalancePolling: action.bound,
       getGasFeeData: action.bound,
       getAccountBalance: action.bound,
       getNativeTokenGas: action.bound,
@@ -131,6 +140,61 @@ class QrlStore {
     this.setInitProgress({ active: true, fraction: 0.94, phase: "session" });
     await this.validateActiveAccount();
     this.setInitProgress({ active: false, fraction: 1, phase: "session" });
+    // Balances only refreshed on init and after sends before this; funds
+    // arriving while the popup/side panel stays open (plain receives,
+    // internal payouts) never showed up. The interval dies with the
+    // document, so a closed popup costs nothing.
+    this.startBalancePolling();
+  }
+
+  startBalancePolling() {
+    this.stopBalancePolling();
+    this.balancePollInterval = setInterval(() => {
+      // A hidden side panel keeps its document alive; skip the tick
+      // instead of polling for pixels nobody sees.
+      if (typeof document !== "undefined" && document.hidden) return;
+      void this.refreshBalancesQuietly();
+    }, BALANCE_POLL_INTERVAL_MS);
+  }
+
+  stopBalancePolling() {
+    if (this.balancePollInterval) {
+      clearInterval(this.balancePollInterval);
+      this.balancePollInterval = null;
+    }
+  }
+
+  /** Re-fetch every account balance without touching isLoading or init
+   *  progress, so a background poll never flashes loading states. On RPC
+   *  failure the last known balances stay on screen (unlike fetchAccounts,
+   *  which zeroes them: acceptable at init, wrong mid-session). */
+  async refreshBalancesQuietly() {
+    if (!this.qrlInstance) return;
+    const storedAccountsList = await StorageUtil.getAllAccounts();
+    if (storedAccountsList.length === 0) return;
+    try {
+      const accountsWithBalance: QrlAccountsType["accounts"] =
+        await Promise.all(
+          storedAccountsList.map(async (account) => {
+            const accountBalance =
+              (await this.qrlInstance?.getBalance(account)) ?? BigInt(0);
+            return {
+              accountAddress: account,
+              accountBalance: getOptimalTokenBalance(
+                utils.fromPlanck(accountBalance, "quanta"),
+              ),
+            };
+          }),
+        );
+      runInAction(() => {
+        this.qrlAccounts = {
+          ...this.qrlAccounts,
+          accounts: accountsWithBalance,
+        };
+      });
+    } catch {
+      // Transient RPC failure: keep showing the last known balances.
+    }
   }
 
   setInitProgress(progress: InitProgressType) {
