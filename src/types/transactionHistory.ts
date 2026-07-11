@@ -26,6 +26,10 @@ export type TransactionHistoryEntry = {
   /** Explorer-sourced entries carry the fee pre-computed in QRL units;
    *  locally-sent entries derive it from gasUsed * effectiveGasPrice. */
   paidFeesQrl?: string;
+  /** Value moved by contract code inside another transaction (explorer
+   *  internal transaction), e.g. an HTLC claim payout. Shares its
+   *  transactionHash with the outer transaction but is a distinct entry. */
+  isInternal?: boolean;
   // Pending transaction support (all optional for backward compat)
   pendingStatus?: PendingStatus;
   nonce?: number;

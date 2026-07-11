@@ -525,6 +525,71 @@ describe("TransactionHistoryStore", () => {
       expect(store.hasMoreOnChain).toBe(false);
     });
 
+    it("should keep internal entries that share a hash with a local send", async () => {
+      // The HTLC-claim shape: this wallet sent the outer 0-value call, so
+      // it exists locally; the payout comes back as an internal entry with
+      // the same hash and must NOT be deduped away.
+      const localClaim = makeSampleEntry({
+        id: "0xclaim",
+        transactionHash: "0xclaim",
+        amount: 0,
+        timestamp: 1000,
+      });
+      const internalPayout = makeSampleEntry({
+        id: "0xclaim-internal-1",
+        transactionHash: "0xclaim",
+        amount: 43.05396,
+        isInternal: true,
+        timestamp: 1000,
+      });
+      mockGetTransactionHistory.mockResolvedValue([localClaim]);
+      mockFetchOnChainHistory.mockResolvedValue({
+        entries: [internalPayout],
+        totalCount: 1,
+      });
+
+      const store = new TransactionHistoryStore();
+      await store.loadHistory(ADDRESS);
+      await store.loadOnChainHistory(ADDRESS, CHAIN);
+
+      const merged = store.mergedTransactions;
+      expect(merged).toHaveLength(2);
+      expect(merged.map((tx) => tx.id).sort()).toEqual([
+        "0xclaim",
+        "0xclaim-internal-1",
+      ]);
+    });
+
+    it("should dedupe pages by id so internal entries survive next to their outer tx", async () => {
+      const outer = makeSampleEntry({
+        id: "0xswap",
+        transactionHash: "0xswap",
+        timestamp: 2,
+      });
+      const internal = makeSampleEntry({
+        id: "0xswap-internal-1",
+        transactionHash: "0xswap",
+        amount: 43.05396,
+        isInternal: true,
+        timestamp: 2,
+      });
+      mockFetchOnChainHistory.mockResolvedValue({
+        entries: [outer, internal],
+        totalCount: 12,
+      });
+
+      const store = new TransactionHistoryStore();
+      await store.loadOnChainHistory(ADDRESS, CHAIN);
+      expect(store.onChainTransactions).toHaveLength(2);
+
+      // Page 2 re-serves both rows (chain grew); neither may duplicate.
+      await store.loadMoreOnChain(ADDRESS, CHAIN);
+      expect(store.onChainTransactions.map((tx) => tx.id)).toEqual([
+        "0xswap",
+        "0xswap-internal-1",
+      ]);
+    });
+
     it("should ignore a stale response after the account switches", async () => {
       let resolveFirst: (value: any) => void = () => {};
       const firstCall = new Promise((resolve) => {

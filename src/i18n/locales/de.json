@@ -146,6 +146,7 @@
   "txHistory.empty": "Noch keine Transaktionen",
   "txHistory.typeSend": "Senden",
   "txHistory.typeReceive": "Empfangen",
+  "txHistory.typeContractTransfer": "Vertragsübertragung",
   "txHistory.loadMore": "Mehr laden",
   "txHistory.speedUp": "Beschleunigen",
   "txHistory.cancel": "Abbrechen",
