@@ -1,7 +1,7 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import DAppRequest from "./DAppRequest";
@@ -12,6 +12,8 @@ vi.mock(
 );
 
 describe("DAppRequest", () => {
+  afterEach(cleanup);
+
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
       <StoreProvider value={mockedStoreValues}>
@@ -42,5 +44,36 @@ describe("DAppRequest", () => {
     expect(yesButton).toBeInTheDocument();
     expect(noButton).toBeEnabled();
     expect(yesButton).toBeDisabled();
+  });
+
+  it("should show the branded boot loader with the phase label while connecting", () => {
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          qrlConnection: { isLoading: true },
+          initProgress: { active: true, fraction: 0.5, phase: "accounts" },
+        },
+      }),
+    );
+
+    expect(screen.getByTestId("loader-icon")).toBeInTheDocument();
+    expect(screen.getByText("Fetching balances")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Your permission required"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("should show the indeterminate branded loader when no boot progress is available", () => {
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          qrlConnection: { isLoading: true },
+          initProgress: { active: false, fraction: 1, phase: "session" },
+        },
+      }),
+    );
+
+    expect(screen.getByTestId("loader-icon")).toBeInTheDocument();
+    expect(screen.getByText("Connecting to the network")).toBeInTheDocument();
   });
 });
