@@ -106,21 +106,19 @@ const NFTGalleryItem = observer(
       });
     };
 
-    if (isLoading) {
-      return (
-        <Card className="flex aspect-square w-full animate-pulse flex-col overflow-hidden">
-          <div className="h-full w-full bg-accent" />
-        </Card>
-      );
-    }
-
+    // The card renders immediately with the token id; only the image area
+    // pulses while metadata resolves. Metadata for unpinned/slow IPFS
+    // content can take two gateway timeouts (~20s), and a full-tile
+    // skeleton for that long reads as a hang.
     return (
       <Card
         className="flex w-full cursor-pointer flex-col overflow-hidden transition-all hover:ring-2 hover:ring-secondary"
         onClick={handleClick}
       >
         <div className="relative aspect-square w-full bg-muted">
-          {imageUrl ? (
+          {isLoading ? (
+            <div className="h-full w-full animate-pulse bg-accent" />
+          ) : imageUrl ? (
             <img
               src={imageUrl}
               alt={metadata?.name || `#${tokenId}`}

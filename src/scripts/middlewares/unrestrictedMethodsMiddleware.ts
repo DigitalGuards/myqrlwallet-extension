@@ -1,10 +1,9 @@
 import { JsonRpcMiddleware } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
 import { providerErrors } from "@theqrl/qrl-wallet-provider/rpc-errors";
 import { Json, JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
-import browser from "webextension-polyfill";
 import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
-import { EXTENSION_MESSAGES } from "../constants/streamConstants";
 import { checkUrlOriginHasBeenConnected } from "../utils/restrictedMethodsMiddlewareUtils";
+import { executeUnrestrictedMethod } from "../utils/unrestrictedMethodExecutor";
 
 const QRL_WALLET_DAPP_CONNECTION_REQUIRED_METHODS: string[] = [
   UNRESTRICTED_METHODS.QRL_ACCOUNTS,
@@ -26,14 +25,17 @@ const checkRequestCanProceed = async (req: JsonRpcRequest<JsonRpcRequest>) => {
   };
 };
 
+// Executed directly in the service worker. The previous implementation
+// bounced these calls to the content script via browser.tabs.sendMessage,
+// where the RPC fetch ran in the page context and was therefore subject
+// to the dApp page's CORS: any origin the RPC endpoint didn't allowlist
+// got a 403 preflight and the provider broke with "Failed to get initial
+// state". Service-worker fetches carry the extension's own context and
+// bypass page CORS through host_permissions.
 const getUnrestrictedMethodResult = async (
   req: JsonRpcRequest<JsonRpcRequest>,
 ) => {
-  const tabId = req?.senderData?.tabId ?? 0;
-  return await browser.tabs.sendMessage(tabId, {
-    name: EXTENSION_MESSAGES.UNRESTRICTED_METHOD_CALLS,
-    data: req,
-  });
+  return (await executeUnrestrictedMethod(req)) as Json;
 };
 
 type UnrestrictedMethodValue =

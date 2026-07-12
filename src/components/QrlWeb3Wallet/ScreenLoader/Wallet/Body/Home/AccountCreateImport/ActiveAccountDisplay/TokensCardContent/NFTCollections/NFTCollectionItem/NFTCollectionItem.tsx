@@ -71,7 +71,19 @@ const NFTCollectionItem = observer(
       let cancelled = false;
       (async () => {
         const details = await getNftCollectionDetails(contractAddress);
-        if (cancelled || details.error || !details.collection) return;
+        if (cancelled) return;
+        if (details.error || !details.collection) {
+          // A failed details read (RPC blip, dead endpoint) must not leave
+          // the row as an eternal skeleton: fall back to the stored
+          // standard and the address-derived display name so the user can
+          // still open the gallery or remove the collection.
+          setCollection({
+            name: "",
+            symbol: "",
+            standard: storedStandard ?? "ZRC721",
+          });
+          return;
+        }
         setCollection(details.collection);
         if (details.collection.balance !== undefined) {
           setOwnedCount(details.collection.balance);
@@ -159,7 +171,14 @@ const NFTCollectionItem = observer(
                 <EllipsisVertical size="16" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
+            {/* The menu renders in a DOM portal, but React synthetic
+                events still bubble through the component tree to the
+                Card's navigate-onClick; without this, "Remove Collection"
+                opens the gallery and unmounts the confirm dialog. */}
+            <DropdownMenuContent
+              align="start"
+              onClick={(e) => e.stopPropagation()}
+            >
               <DropdownMenuGroup>
                 <DropdownMenuItem
                   className="cursor-pointer data-[highlighted]:text-secondary"
@@ -167,9 +186,7 @@ const NFTCollectionItem = observer(
                 >
                   <div className="flex gap-2">
                     <CircleMinus size="16" />
-                    <button aria-label={t("nft.removeCollection")}>
-                      {t("nft.removeCollection")}
-                    </button>
+                    <span>{t("nft.hideCollection")}</span>
                   </div>
                 </DropdownMenuItem>
               </DropdownMenuGroup>
@@ -179,9 +196,9 @@ const NFTCollectionItem = observer(
         <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
           <DialogContent className="w-80 rounded-md">
             <DialogHeader className="text-left">
-              <DialogTitle>{t("nft.removeCollection")}</DialogTitle>
+              <DialogTitle>{t("nft.hideCollection")}</DialogTitle>
               <DialogDescription>
-                {t("nft.removeConfirm", { name: displayName })}
+                {t("nft.hideConfirm", { name: displayName })}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="flex flex-row gap-4">
