@@ -71,7 +71,19 @@ const NFTCollectionItem = observer(
       let cancelled = false;
       (async () => {
         const details = await getNftCollectionDetails(contractAddress);
-        if (cancelled || details.error || !details.collection) return;
+        if (cancelled) return;
+        if (details.error || !details.collection) {
+          // A failed details read (RPC blip, dead endpoint) must not leave
+          // the row as an eternal skeleton: fall back to the stored
+          // standard and the address-derived display name so the user can
+          // still open the gallery or remove the collection.
+          setCollection({
+            name: "",
+            symbol: "",
+            standard: storedStandard ?? "ZRC721",
+          });
+          return;
+        }
         setCollection(details.collection);
         if (details.collection.balance !== undefined) {
           setOwnedCount(details.collection.balance);

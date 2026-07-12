@@ -10,7 +10,7 @@ import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
 import type { NFTStandard } from "@/types/nft";
 import StorageUtil from "@/utilities/storageUtil";
-import StringUtil from "@/utilities/stringUtil";
+import CopyableAddress from "../../../../Shared/CopyableAddress/CopyableAddress";
 import { getRandomTailwindTextColor } from "@/utilities/stylingUtil";
 import { Download, Image, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -46,9 +46,6 @@ const NFTCollectionImportSuccess = observer(
     const balance = collection?.balance;
     const standard = collection?.standard ?? "ZRC721";
 
-    const { prefix, addressSplit } =
-      StringUtil.getSplitAddress(contractAddress);
-
     const onConfirmImport = async () => {
       await StorageUtil.setNFTCollectionsList(accountAddress, {
         address: contractAddress,
@@ -73,9 +70,10 @@ const NFTCollectionImportSuccess = observer(
             />
             <div className="flex flex-col gap-1">
               <div>{t('nft.contractAddress')}</div>
-              <div className="flex flex-wrap gap-1 font-bold text-secondary">
-                {`${prefix} ${addressSplit.join(" ")}`}
-              </div>
+              <CopyableAddress
+                address={contractAddress}
+                className="font-bold text-secondary"
+              />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
