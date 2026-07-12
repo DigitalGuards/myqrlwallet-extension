@@ -21,7 +21,6 @@ import { useStore } from "@/stores/store";
 import type { NFTStandard } from "@/types/nft";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import StorageUtil from "@/utilities/storageUtil";
-import StringUtil from "@/utilities/stringUtil";
 import { isQrnsName, resolveQrnsName } from "@/utilities/qrnsResolver";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { validator } from "@theqrl/web3";
@@ -35,6 +34,7 @@ import type { TFunction } from "i18next";
 import { z } from "zod";
 import BackButton from "../../../Shared/BackButton/BackButton";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
+import CopyableAddress from "../../../Shared/CopyableAddress/CopyableAddress";
 import RecipientPicker from "../TokenTransfer/RecipientPicker/RecipientPicker";
 
 const createFormSchema = (t: TFunction, maxAmount?: string) =>
@@ -116,9 +116,6 @@ const NFTTransfer = observer(() => {
   const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
   const [qrnsResolving, setQrnsResolving] = useState(false);
   const [qrnsError, setQrnsError] = useState<string | null>(null);
-
-  const { prefix, addressSplit } =
-    StringUtil.getSplitAddress(contractAddress);
 
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
@@ -326,9 +323,10 @@ const NFTTransfer = observer(() => {
                 <div className="text-xs text-muted-foreground">
                   {t("nft.contractAddress")}
                 </div>
-                <div className="flex flex-wrap gap-1 text-xs font-bold text-secondary">
-                  {`${prefix} ${addressSplit.join(" ")}`}
-                </div>
+                <CopyableAddress
+                  address={contractAddress}
+                  className="text-xs font-bold text-secondary"
+                />
               </div>
 
               <FormField

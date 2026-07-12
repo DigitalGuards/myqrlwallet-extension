@@ -7,13 +7,13 @@ import {
   CardTitle,
 } from "@/components/UI/Card";
 import { ROUTES } from "@/router/router";
-import StringUtil from "@/utilities/stringUtil";
 import type { NFTMetadata, NFTStandard } from "@/types/nft";
 import { Image, Send } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import BackButton from "../../../Shared/BackButton/BackButton";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
+import CopyableAddress from "../../../Shared/CopyableAddress/CopyableAddress";
 import { useState } from "react";
 
 const NFTDetail = () => {
@@ -30,9 +30,6 @@ const NFTDetail = () => {
   const balance: string | undefined = state?.balance;
 
   const [imageError, setImageError] = useState(false);
-
-  const { prefix, addressSplit } =
-    StringUtil.getSplitAddress(contractAddress);
 
   return (
     <>
@@ -103,9 +100,10 @@ const NFTDetail = () => {
 
             <div className="flex flex-col gap-1">
               <div className="text-sm">{t("nft.contractAddress")}</div>
-              <div className="flex flex-wrap gap-1 text-sm font-bold text-secondary">
-                {`${prefix} ${addressSplit.join(" ")}`}
-              </div>
+              <CopyableAddress
+                address={contractAddress}
+                className="text-sm font-bold text-secondary"
+              />
             </div>
 
             {metadata?.attributes && metadata.attributes.length > 0 && (
