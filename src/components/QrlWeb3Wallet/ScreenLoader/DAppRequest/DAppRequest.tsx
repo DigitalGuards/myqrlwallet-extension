@@ -1,16 +1,18 @@
 import { DAPP_REQUEST_PORT_NAME } from "@/scripts/constants/streamConstants";
 import { useStore } from "@/stores/store";
-import { Loader } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import browser from "webextension-polyfill";
+import BrandedLoader from "../Shared/BrandedLoader/BrandedLoader";
 import CircuitBackground from "../Shared/CircuitBackground/CircuitBackground";
 import DAppRequestContentSelection from "./DAppRequestContentSelection/DAppRequestContentSelection";
 import PhishingWarning from "./PhishingWarning/PhishingWarning";
 
 const DAppRequest = observer(() => {
+  const { t } = useTranslation();
   const { qrlStore, dAppRequestStore, settingsStore } = useStore();
-  const { qrlConnection } = qrlStore;
+  const { qrlConnection, initProgress } = qrlStore;
   const { isLoading } = qrlConnection;
   const { dAppRequestData, approvalProcessingStatus, onPermission } =
     dAppRequestStore;
@@ -59,11 +61,29 @@ const DAppRequest = observer(() => {
     };
   }, []);
 
+  // Same branded boot loader as the wallet home screen: the dApp request
+  // popup is usually a cold start, so it hits this state on every spawn.
   if (isLoading) {
+    const phaseLabels = {
+      chain: t("loader.phaseChain"),
+      network: t("loader.phaseNetwork"),
+      accounts: t("loader.phaseAccounts"),
+      session: t("loader.phaseSession"),
+    } as const;
     return (
-      <div className="flex justify-center pt-48">
-        <Loader className="animate-spin" size={86} />
-      </div>
+      <>
+        <CircuitBackground />
+        <div className="relative z-10 flex w-full justify-center pt-24">
+          <BrandedLoader
+            progress={initProgress?.active ? initProgress.fraction : undefined}
+            label={
+              initProgress?.active
+                ? phaseLabels[initProgress.phase]
+                : t("home.connecting")
+            }
+          />
+        </div>
+      </>
     );
   }
 
