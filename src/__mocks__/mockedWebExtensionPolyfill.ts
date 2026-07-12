@@ -48,6 +48,20 @@ const mockedBrowser = {
     onClicked: {
       addListener: vi.fn(),
     },
+    openPopup: vi.fn().mockResolvedValue(undefined),
+    setBadgeText: vi.fn().mockResolvedValue(undefined),
+    setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
+  },
+  windows: {
+    create: vi.fn().mockResolvedValue({ id: 77 }),
+    update: vi.fn().mockResolvedValue({}),
+    getLastFocused: vi
+      .fn()
+      .mockResolvedValue({ left: 0, top: 0, width: 1280, height: 800 }),
+    onRemoved: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
   },
 };
 
