@@ -1,25 +1,25 @@
-import StorageUtil from "@/utilities/storageUtil";
-import Web3, { FMT_BYTES, FMT_NUMBER } from "@theqrl/web3";
-import { Web3RequestManager } from "@theqrl/web3-core";
-import { qrlRpcMethods } from "@theqrl/web3-rpc-methods";
 import {
   ObjectMultiplex,
   Substream,
 } from "@theqrl/qrl-wallet-provider/object-multiplex";
 import { WindowPostMessageStream } from "@theqrl/qrl-wallet-provider/post-message-stream";
-import { BaseProvider } from "@theqrl/qrl-wallet-provider/providers";
 import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
-import axios from "axios";
 import { ExtensionPortStream } from "extension-port-stream";
 import { pipeline } from "readable-stream";
 import browser from "webextension-polyfill";
-import { UNRESTRICTED_METHODS } from "./constants/requestConstants";
 import {
   EXTENSION_MESSAGES,
   QRL_POST_MESSAGE_STREAM,
   QRL_WALLET_PROVIDER_NAME,
 } from "./constants/streamConstants";
-import { checkForLastError, getSerializableObject } from "./utils/scriptUtils";
+import { checkForLastError } from "./utils/scriptUtils";
+
+// NOTE: this script deliberately performs NO RPC. Content-script fetches
+// run under the hosting page's CORS (Chrome 85+), so any network call
+// made here inherits the dApp page's Origin and fails against endpoints
+// that don't allowlist it. All provider RPC executes in the service
+// worker (see scripts/utils/unrestrictedMethodExecutor.ts); this file
+// only bridges the inpage <-> extension streams.
 
 type MessageType = {
   name: string;
@@ -36,14 +36,6 @@ let extensionChannel: Substream;
 
 // The field below is used to ensure that replay is done only once for each restart.
 let hasExtensionConnectSent = false;
-
-const getQrlProperties = async () => {
-  const { defaultRpcUrl, defaultWsRpcUrl } =
-    await StorageUtil.getActiveBlockChain();
-  const qrlHttpProvider = new Web3.providers.HttpProvider(defaultRpcUrl);
-  const { provider, qrl } = new Web3({ provider: qrlHttpProvider });
-  return { provider, qrl, defaultWsRpcUrl };
-};
 
 const setupPageStreams = () => {
   // the transport-specific streams for communication between inpage and background
@@ -191,217 +183,6 @@ const prepareListeners = () => {
         setupExtensionStreams();
       }
       return "QrlWeb3Wallet: handled service worker ready message";
-    } else if (message.name === EXTENSION_MESSAGES.UNRESTRICTED_METHOD_CALLS) {
-      const { provider, qrl, defaultWsRpcUrl } = await getQrlProperties();
-      const method = message.data.method;
-      if (method === UNRESTRICTED_METHODS.QRL_GET_BLOCK_BY_NUMBER) {
-        // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
-        const [block, hydrated] = message?.data?.params ?? [];
-        const blockInformation = await qrl.getBlock(block, hydrated);
-        return getSerializableObject(blockInformation);
-      } else if (
-        method ===
-          UNRESTRICTED_METHODS.QRL_GET_BLOCK_TRANSACTION_COUNT_BY_HASH ||
-        method ===
-          UNRESTRICTED_METHODS.QRL_GET_BLOCK_TRANSACTION_COUNT_BY_NUMBER
-      ) {
-        // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime
-        const [blockHashOrNumber] = message.data.params;
-        const transactionCount =
-          await qrl.getBlockTransactionCount(blockHashOrNumber);
-        return "0x".concat(transactionCount.toString(16));
-      } else if (
-        method === UNRESTRICTED_METHODS.QRL_WEB3_WALLET_GET_PROVIDER_STATE
-      ) {
-        const chainId = (await qrl?.getChainId())?.toString() ?? "";
-        const networkVersion = (await qrl?.net.getId())?.toString() ?? "";
-        return {
-          chainId: `0x${chainId}`,
-          networkVersion,
-          isUnlocked: false,
-          accounts: [],
-        } as Parameters<BaseProvider["_initializeState"]>[0];
-      } else if (method === UNRESTRICTED_METHODS.QRL_SYNCING) {
-        const isSyncing = await qrl.isSyncing();
-        return isSyncing;
-      } else if (method === UNRESTRICTED_METHODS.QRL_UNINSTALL_FILTER) {
-        const [filterIdentifier] = message?.data?.params ?? [];
-        const isSuccess = await qrlRpcMethods.uninstallFilter(
-          new Web3RequestManager(provider),
-          filterIdentifier,
-        );
-        return isSuccess;
-      } else if (method === UNRESTRICTED_METHODS.QRL_UNSUBSCRIBE) {
-        const params = message?.data?.params;
-        const response = await axios.post(
-          `${defaultWsRpcUrl}/qrl_unsubscribe`,
-          { params },
-        );
-        const unsubscribed = response?.data?.unsubscribed as boolean;
-        return unsubscribed;
-      } else if (method === UNRESTRICTED_METHODS.NET_VERSION) {
-        const networkId = await qrl.net.getId();
-        return "0x".concat(networkId.toString(16));
-      } else if (method === UNRESTRICTED_METHODS.QRL_ACCOUNTS) {
-        const connectedAccountsData =
-          await StorageUtil.getDAppsConnectedAccountsData(
-            new URL(message?.data?.senderData?.url ?? "").origin,
-          );
-        return connectedAccountsData?.accounts ?? [];
-      } else if (method === UNRESTRICTED_METHODS.WALLET_GET_PERMISSIONS) {
-        const dAppsConnectedAccountsData =
-          await StorageUtil.getDAppsConnectedAccountsData(
-            new URL(message?.data?.senderData?.url ?? "").origin,
-          );
-        return getSerializableObject(
-          dAppsConnectedAccountsData?.permissions ?? [],
-        );
-      } else if (method === UNRESTRICTED_METHODS.WALLET_REVOKE_PERMISSIONS) {
-        await StorageUtil.clearDAppsConnectedAccountsData(
-          new URL(message?.data?.senderData?.url ?? "").origin,
-        );
-        return null;
-      } else if (method === UNRESTRICTED_METHODS.WEB_3_CLIENT_VERSION) {
-        const currentVersion = await qrl?.getNodeInfo();
-        return currentVersion;
-      } else if (method === UNRESTRICTED_METHODS.QRL_GET_BALANCE) {
-        const [accountAddress, accountBlockNumber] = message.data.params;
-        const balance = await qrl?.getBalance(
-          accountAddress,
-          accountBlockNumber,
-        );
-        return "0x".concat(balance.toString(16));
-      } else if (method === UNRESTRICTED_METHODS.QRL_ESTIMATE_GAS) {
-        const [estimateGasParam] = message.data.params;
-        const estimatedGas = await qrl.estimateGas(estimateGasParam);
-        return "0x".concat(estimatedGas.toString(16));
-      } else if (method === UNRESTRICTED_METHODS.QRL_FEE_HISTORY) {
-        const [blockCount, newestBlock, rewardPercentiles] =
-          message.data.params;
-        const feeHistory = await qrl.getFeeHistory(
-          blockCount,
-          newestBlock,
-          rewardPercentiles,
-        );
-        return getSerializableObject(feeHistory);
-      } else if (method === UNRESTRICTED_METHODS.QRL_BLOCK_NUMBER) {
-        const qrlBlockNumber = await qrl.getBlockNumber();
-        return "0x".concat(qrlBlockNumber.toString(16));
-      } else if (method === UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_RECEIPT) {
-        const [txHashForTransactionReceipt] = message.data.params;
-        const transactionReceipt = await qrl.getTransactionReceipt(
-          txHashForTransactionReceipt,
-        );
-        return getSerializableObject(transactionReceipt);
-      } else if (method === UNRESTRICTED_METHODS.QRL_NEW_BLOCK_FILTER) {
-        const filterIdentifier = await qrlRpcMethods.newBlockFilter(
-          new Web3RequestManager(provider),
-        );
-        return filterIdentifier;
-      } else if (method === UNRESTRICTED_METHODS.QRL_NEW_FILTER) {
-        const [filter] = message?.data?.params ?? [];
-        const filterIdentifier = await qrlRpcMethods.newFilter(
-          new Web3RequestManager(provider),
-          filter,
-        );
-        return filterIdentifier;
-      } else if (
-        method === UNRESTRICTED_METHODS.QRL_NEW_PENDING_TRANSACTION_FILTER
-      ) {
-        const filterIdentifier =
-          await qrlRpcMethods.newPendingTransactionFilter(
-            new Web3RequestManager(provider),
-          );
-        return filterIdentifier;
-      } else if (method === UNRESTRICTED_METHODS.QRL_SEND_RAW_TRANSACTION) {
-        const [rawTransaction] = message?.data?.params ?? [];
-        const transactionHash = (
-          await qrl.sendSignedTransaction(rawTransaction)
-        )?.transactionHash;
-        return transactionHash;
-      } else if (method === UNRESTRICTED_METHODS.QRL_SUBSCRIBE) {
-        const params = message.data.params;
-        const response = await axios.post(`${defaultWsRpcUrl}/qrl_subscribe`, {
-          params,
-        });
-        const subscriptionId = response?.data?.subscriptionId as string;
-        return subscriptionId;
-      } else if (method === UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_BY_HASH) {
-        const [txHashForTransactionByHash] = message.data.params;
-        const transactionDetails = await qrl.getTransaction(
-          txHashForTransactionByHash,
-        );
-        return getSerializableObject(transactionDetails);
-      } else if (method === UNRESTRICTED_METHODS.QRL_CALL) {
-        const [transactionObj, blockParam] = message.data.params;
-        const qrlCallResponse = await qrl.call(transactionObj, blockParam);
-        return qrlCallResponse;
-      } else if (method === UNRESTRICTED_METHODS.QRL_GET_CODE) {
-        const [address, blockNumber] = message.data.params;
-        const byteCode = await qrl.getCode(address, blockNumber);
-        return byteCode;
-      } else if (method === UNRESTRICTED_METHODS.QRL_GET_FILTER_CHANGES) {
-        const [filterIdentifier] = message.data.params;
-        const logObjects = await qrlRpcMethods.getFilterChanges(
-          new Web3RequestManager(provider),
-          filterIdentifier,
-        );
-        return getSerializableObject(logObjects);
-      } else if (method === UNRESTRICTED_METHODS.QRL_GET_FILTER_LOGS) {
-        const [filterIdentifier] = message.data.params;
-        const logObjects = await qrlRpcMethods.getFilterLogs(
-          new Web3RequestManager(provider),
-          filterIdentifier,
-        );
-        return getSerializableObject(logObjects);
-      } else if (method === UNRESTRICTED_METHODS.QRL_GET_LOGS) {
-        const [filter] = message.data.params;
-        const logs = await qrl.getPastLogs(filter);
-        return getSerializableObject(logs);
-      } else if (method === UNRESTRICTED_METHODS.QRL_GET_PROOF) {
-        const [address, storageKeys, blockNumber] = message.data.params;
-        const proof = await qrl.getProof(address, storageKeys, blockNumber);
-        return getSerializableObject(proof);
-      } else if (method === UNRESTRICTED_METHODS.QRL_GET_STORAGE_AT) {
-        const [address, storageSlot, blockNumber] = message.data.params;
-        const storageAt = await qrl.getStorageAt(
-          address,
-          storageSlot,
-          blockNumber,
-        );
-        return storageAt;
-      } else if (
-        method ===
-          UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_BY_BLOCK_HASH_AND_INDEX ||
-        method ===
-          UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX
-      ) {
-        const [blockHashOrNumber, transactionIndex] = message?.data?.params ?? [];
-        const transactionInformation = qrl?.getTransactionFromBlock(
-          blockHashOrNumber,
-          transactionIndex,
-        );
-        return getSerializableObject(transactionInformation);
-      } else if (method === UNRESTRICTED_METHODS.QRL_CHAIN_ID) {
-        const chainId = await qrl.getChainId({
-          number: FMT_NUMBER.HEX,
-          bytes: FMT_BYTES.HEX,
-        });
-        return chainId;
-      } else if (method === UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_COUNT) {
-        const [address, block] = message.data.params;
-        const transactionCount = await qrl.getTransactionCount(address, block);
-        return "0x".concat(transactionCount.toString(16));
-      } else if (method === UNRESTRICTED_METHODS.QRL_GAS_PRICE) {
-        const gasPrice = await qrl.getGasPrice();
-        return "0x".concat(gasPrice.toString(16));
-      } else if (method === UNRESTRICTED_METHODS.QRL_GET_BLOCK_BY_HASH) {
-        const [blockHash, hydrated] = message.data.params;
-        const blockInformation = await qrl.getBlock(blockHash, hydrated);
-        return getSerializableObject(blockInformation);
-      } else {
-        return "";
-      }
     }
     return "";
   });
