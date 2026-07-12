@@ -186,7 +186,7 @@ const NFTCollectionItem = observer(
                 >
                   <div className="flex gap-2">
                     <CircleMinus size="16" />
-                    <span>{t("nft.removeCollection")}</span>
+                    <span>{t("nft.hideCollection")}</span>
                   </div>
                 </DropdownMenuItem>
               </DropdownMenuGroup>
@@ -196,9 +196,9 @@ const NFTCollectionItem = observer(
         <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
           <DialogContent className="w-80 rounded-md">
             <DialogHeader className="text-left">
-              <DialogTitle>{t("nft.removeCollection")}</DialogTitle>
+              <DialogTitle>{t("nft.hideCollection")}</DialogTitle>
               <DialogDescription>
-                {t("nft.removeConfirm", { name: displayName })}
+                {t("nft.hideConfirm", { name: displayName })}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="flex flex-row gap-4">

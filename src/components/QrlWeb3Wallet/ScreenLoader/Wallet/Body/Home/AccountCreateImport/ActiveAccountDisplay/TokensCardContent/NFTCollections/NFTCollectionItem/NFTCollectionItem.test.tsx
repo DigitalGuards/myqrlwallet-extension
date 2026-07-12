@@ -78,14 +78,14 @@ describe("NFTCollectionItem", () => {
     expect(await screen.findByText("Gallery route")).toBeInTheDocument();
   });
 
-  it("should open the remove confirmation instead of navigating when Remove Collection is clicked", async () => {
+  it("should open the hide confirmation instead of navigating when Hide Collection is clicked", async () => {
     const user = userEvent.setup();
     renderComponent();
 
     await screen.findByText("Test Collection");
     await user.click(screen.getByRole("button", { name: "More" }));
     await user.click(
-      await screen.findByRole("menuitem", { name: "Remove Collection" }),
+      await screen.findByRole("menuitem", { name: "Hide Collection" }),
     );
 
     // Regression: the menu click used to bubble to the card's onClick and
@@ -93,19 +93,19 @@ describe("NFTCollectionItem", () => {
     expect(screen.queryByText("Gallery route")).not.toBeInTheDocument();
     expect(
       await screen.findByText(
-        "Remove 'Test Collection' collection from wallet?",
+        "Do you want to hide the 'Test Collection' collection from wallet?",
       ),
     ).toBeInTheDocument();
   });
 
-  it("should remove the collection when the removal is confirmed", async () => {
+  it("should hide the collection when the action is confirmed", async () => {
     const user = userEvent.setup();
     const { triggerReRender } = renderComponent();
 
     await screen.findByText("Test Collection");
     await user.click(screen.getByRole("button", { name: "More" }));
     await user.click(
-      await screen.findByRole("menuitem", { name: "Remove Collection" }),
+      await screen.findByRole("menuitem", { name: "Hide Collection" }),
     );
     await user.click(await screen.findByRole("button", { name: "Yes" }));
 
