@@ -33,6 +33,7 @@ import NFTCollections from "./ActiveAccountDisplay/TokensCardContent/NFTCollecti
 import { useEffect, useState } from "react";
 import StorageUtil from "@/utilities/storageUtil";
 import { ZRC_20_ITEMS_DISPLAY_LIMIT } from "@/constants/zrc20Token";
+import { NFT_ITEMS_DISPLAY_LIMIT } from "@/constants/nftToken";
 
 const AccountCreateImport = observer(() => {
   const { t } = useTranslation();
@@ -44,6 +45,7 @@ const AccountCreateImport = observer(() => {
   const hasActiveAccount = !!accountAddress;
 
   const [tokenContractsList, setTokenContractsList] = useState<string[]>([]);
+  const [nftCollectionsCount, setNftCollectionsCount] = useState(0);
   const [discoveredTokenCount, setDiscoveredTokenCount] = useState(0);
   const [discoveredCollectionCount, setDiscoveredCollectionCount] =
     useState(0);
@@ -183,7 +185,7 @@ const AccountCreateImport = observer(() => {
               <CardTitle>{t('home.nftCollections')}</CardTitle>
             </CardHeader>
             <CardContent>
-              <NFTCollections />
+              <NFTCollections onCountChange={setNftCollectionsCount} />
             </CardContent>
             <CardFooter className="flex-col gap-4">
               {discoveredCollectionCount > 0 && (
@@ -209,6 +211,14 @@ const AccountCreateImport = observer(() => {
                   )}
                 </Button>
               </Link>
+              {nftCollectionsCount > NFT_ITEMS_DISPLAY_LIMIT && (
+                <Link className="w-full" to={ROUTES.ALL_NFT_COLLECTIONS}>
+                  <Button className="w-full" type="button" variant="outline">
+                    <Logs className="mr-2 h-4 w-4" />
+                    {t("home.viewAllNftCollections")}
+                  </Button>
+                </Link>
+              )}
             </CardFooter>
           </Card>
         </>

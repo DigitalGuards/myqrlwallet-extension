@@ -31,11 +31,17 @@ describe("NFTCollections", () => {
     mockGetNFTCollectionsList.mockReset();
   });
 
-  const renderComponent = (overrides = {}) =>
+  const renderComponent = (
+    shouldDisplayAllCollections = false,
+    onCountChange?: (count: number) => void,
+  ) =>
     render(
-      <StoreProvider value={mockedStore(overrides)}>
+      <StoreProvider value={mockedStore()}>
         <MemoryRouter>
-          <NFTCollections />
+          <NFTCollections
+            shouldDisplayAllCollections={shouldDisplayAllCollections}
+            onCountChange={onCountChange}
+          />
         </MemoryRouter>
       </StoreProvider>,
     );
@@ -93,6 +99,74 @@ describe("NFTCollections", () => {
       expect(
         container.querySelectorAll("[data-testid^='collection-']"),
       ).toHaveLength(4);
+    });
+  });
+
+  it("should display every collection when shouldDisplayAllCollections is set", async () => {
+    const collections = Array.from({ length: 6 }, (_, i) => ({
+      address: `0x${i}`,
+      name: `Col${i}`,
+      symbol: `C${i}`,
+      standard: "ZRC721" as const,
+      image: "",
+    }));
+    mockGetNFTCollectionsList.mockResolvedValue(collections);
+
+    const { container } = renderComponent(true);
+
+    await waitFor(() => {
+      expect(
+        container.querySelectorAll("[data-testid^='collection-']"),
+      ).toHaveLength(6);
+    });
+  });
+
+  it("should show an empty state on the all-collections view when none are stored", async () => {
+    mockGetNFTCollectionsList.mockResolvedValue([]);
+
+    renderComponent(true);
+
+    expect(
+      await screen.findByText("There are no NFT collections."),
+    ).toBeInTheDocument();
+  });
+
+  it("should not show the empty state before the storage read resolves", async () => {
+    let resolveStorage: (value: unknown[]) => void = () => {};
+    mockGetNFTCollectionsList.mockReturnValue(
+      new Promise((resolve) => {
+        resolveStorage = resolve;
+      }),
+    );
+
+    renderComponent(true);
+
+    expect(
+      screen.queryByText("There are no NFT collections."),
+    ).not.toBeInTheDocument();
+
+    resolveStorage([]);
+    expect(
+      await screen.findByText("There are no NFT collections."),
+    ).toBeInTheDocument();
+  });
+
+  it("should report the stored collection count after each fetch", async () => {
+    const onCountChange = vi.fn();
+    mockGetNFTCollectionsList.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) => ({
+        address: `0x${i}`,
+        name: `Col${i}`,
+        symbol: `C${i}`,
+        standard: "ZRC721" as const,
+        image: "",
+      })),
+    );
+
+    renderComponent(false, onCountChange);
+
+    await waitFor(() => {
+      expect(onCountChange).toHaveBeenCalledWith(6);
     });
   });
 });

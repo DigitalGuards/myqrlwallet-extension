@@ -171,7 +171,14 @@ const NFTCollectionItem = observer(
                 <EllipsisVertical size="16" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
+            {/* The menu renders in a DOM portal, but React synthetic
+                events still bubble through the component tree to the
+                Card's navigate-onClick; without this, "Remove Collection"
+                opens the gallery and unmounts the confirm dialog. */}
+            <DropdownMenuContent
+              align="start"
+              onClick={(e) => e.stopPropagation()}
+            >
               <DropdownMenuGroup>
                 <DropdownMenuItem
                   className="cursor-pointer data-[highlighted]:text-secondary"
@@ -179,9 +186,7 @@ const NFTCollectionItem = observer(
                 >
                   <div className="flex gap-2">
                     <CircleMinus size="16" />
-                    <button aria-label={t("nft.removeCollection")}>
-                      {t("nft.removeCollection")}
-                    </button>
+                    <span>{t("nft.removeCollection")}</span>
                   </div>
                 </DropdownMenuItem>
               </DropdownMenuGroup>

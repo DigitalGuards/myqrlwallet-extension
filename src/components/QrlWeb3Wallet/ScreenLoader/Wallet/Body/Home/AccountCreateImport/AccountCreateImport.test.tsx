@@ -1,30 +1,49 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import AccountCreateImport from "./AccountCreateImport";
 
-vi.mock("@/utilities/storageUtil", async () => {
-  const originalModule = await vi.importActual<
-    typeof import("@/utilities/storageUtil")
-  >("@/utilities/storageUtil");
-  return {
-    ...originalModule,
-    getTokenContractsList: vi.fn(async () => [
-      "Qd180388b9a863728fdc2e865d5fea87ce100eb2f",
+const { mockGetTokenContractsList, mockGetNFTCollectionsList } = vi.hoisted(
+  () => ({
+    mockGetTokenContractsList: vi.fn<any>().mockResolvedValue([
+      { address: "Qd180388b9a863728fdc2e865d5fea87ce100eb2f", image: "" },
     ]),
-    getNFTCollectionsList: vi.fn(async () => []),
-  };
-});
+    mockGetNFTCollectionsList: vi.fn<any>().mockResolvedValue([]),
+  }),
+);
+
+vi.mock("@/utilities/storageUtil", () => ({
+  __esModule: true,
+  default: {
+    getTokenContractsList: (...args: any[]) =>
+      mockGetTokenContractsList(...args),
+    getNFTCollectionsList: (...args: any[]) =>
+      mockGetNFTCollectionsList(...args),
+  },
+}));
+
+// Keep the suite hermetic: the discovery effect would otherwise fetch the
+// live explorer API for the fixture address on every active-account test.
+vi.mock("@/services/assetDiscovery", () => ({
+  discoverTokens: vi.fn(async () => []),
+  discoverNftCollections: vi.fn(async () => []),
+}));
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/ActiveAccountDisplay",
   () => ({ default: () => <div>Mocked Active Account Display</div> }),
 );
 
 describe("AccountCreateImport", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    mockGetTokenContractsList.mockResolvedValue([
+      { address: "Qd180388b9a863728fdc2e865d5fea87ce100eb2f", image: "" },
+    ]);
+    mockGetNFTCollectionsList.mockResolvedValue([]);
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -164,6 +183,63 @@ describe("AccountCreateImport", () => {
 
     expect(
       screen.queryByRole("button", { name: "History" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("should show the view-all NFT collections link when more collections are stored than the home list shows", async () => {
+    mockGetNFTCollectionsList.mockResolvedValue(
+      Array.from({ length: 7 }, (_, i) => ({
+        address: `Q${i}`,
+        name: `Col${i}`,
+        symbol: `C${i}`,
+        standard: "ZRC721",
+        image: "",
+      })),
+    );
+
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          activeAccount: {
+            accountAddress: "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1",
+          },
+        },
+      }),
+    );
+
+    const viewAllLink = await screen.findByRole("link", {
+      name: "View all NFT collections",
+    });
+    expect(viewAllLink).toHaveAttribute("href", "/all-nft-collections");
+  });
+
+  it("should not show the view-all NFT collections link when the stored collections fit the home list", async () => {
+    mockGetNFTCollectionsList.mockResolvedValue(
+      Array.from({ length: 4 }, (_, i) => ({
+        address: `Q${i}`,
+        name: `Col${i}`,
+        symbol: `C${i}`,
+        standard: "ZRC721",
+        image: "",
+      })),
+    );
+
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          activeAccount: {
+            accountAddress: "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1",
+          },
+        },
+      }),
+    );
+
+    // Wait for the storage read to settle before asserting absence.
+    await waitFor(() => {
+      expect(mockGetNFTCollectionsList).toHaveBeenCalled();
+    });
+    expect(
+      screen.queryByRole("link", { name: "View all NFT collections" }),
     ).not.toBeInTheDocument();
   });
 });
