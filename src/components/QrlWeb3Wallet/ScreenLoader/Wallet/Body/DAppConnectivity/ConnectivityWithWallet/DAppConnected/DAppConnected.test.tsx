@@ -45,6 +45,6 @@ describe("DAppConnected", () => {
     expect(screen.getByText("6df80")).toBeInTheDocument();
     expect(screen.getByText("563E1")).toBeInTheDocument();
     expect(screen.getByText("6722b")).toBeInTheDocument();
-    expect(screen.getByText("0.0 QRL")).toBeInTheDocument();
+    expect(screen.getByText("0.0 Quanta")).toBeInTheDocument();
   });
 });

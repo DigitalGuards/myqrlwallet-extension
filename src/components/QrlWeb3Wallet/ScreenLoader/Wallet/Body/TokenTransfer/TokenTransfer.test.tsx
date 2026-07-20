@@ -88,7 +88,7 @@ describe("TokenTransfer", () => {
       </StoreProvider>,
     );
 
-  const fillAndSubmitForm = async (buttonName = "Send QRL") => {
+  const fillAndSubmitForm = async (buttonName = "Send Quanta") => {
     const receiverAddressField = screen.getByRole("textbox", {
       name: "receiverAddress",
     });
@@ -119,7 +119,7 @@ describe("TokenTransfer", () => {
       screen.getByText("Q 20B71 4091c F2a62 DADda 28478 03e3f 1B9D2 D3779"),
     ).toBeInTheDocument();
     expect(screen.getByText("Balance")).toBeInTheDocument();
-    expect(screen.getByText("0.0 QRL")).toBeInTheDocument();
+    expect(screen.getByText("0.0 Quanta")).toBeInTheDocument();
     expect(screen.getByText("Make a transaction")).toBeInTheDocument();
     expect(screen.getByText("Send to")).toBeInTheDocument();
     const receiverAddressField = screen.getByRole("textbox", {
@@ -135,7 +135,7 @@ describe("TokenTransfer", () => {
     expect(cancelButton).toBeInTheDocument();
     expect(cancelButton).toBeEnabled();
     const sendQuantaButton = screen.getByRole("button", {
-      name: "Send QRL",
+      name: "Send Quanta",
     });
     expect(sendQuantaButton).toBeInTheDocument();
     expect(sendQuantaButton).toBeDisabled();
@@ -159,7 +159,7 @@ describe("TokenTransfer", () => {
       { timeout: 5000 },
     );
     const sendQuantaButton = screen.getByRole("button", {
-      name: "Send QRL",
+      name: "Send Quanta",
     });
     expect(sendQuantaButton).toBeInTheDocument();
     expect(sendQuantaButton).toBeEnabled();
@@ -206,7 +206,7 @@ describe("TokenTransfer", () => {
       expect.objectContaining({
         pendingStatus: "pending",
         status: false,
-        tokenSymbol: "QRL",
+        tokenSymbol: "Quanta",
       }),
     );
   });
@@ -280,7 +280,7 @@ describe("TokenTransfer", () => {
       expect.objectContaining({
         transactionHash: "0xtxhash",
         pendingStatus: "pending",
-        tokenSymbol: "QRL",
+        tokenSymbol: "Quanta",
         blockNumber: "",
         gasUsed: "",
       }),
@@ -402,11 +402,11 @@ describe("TokenTransfer", () => {
     });
   });
 
-  it("should display insufficient balance error when native QRL amount exceeds balance", async () => {
+  it("should display insufficient balance error when native Quanta amount exceeds balance", async () => {
     renderComponent(
       mockedStore({
         qrlStore: {
-          getAccountBalance: () => "5.0 QRL",
+          getAccountBalance: () => "5.0 Quanta",
           getNativeTokenGas: vi.fn(async () => "0.001"),
         },
       }),
@@ -431,14 +431,14 @@ describe("TokenTransfer", () => {
       () => {
         expect(
           screen.getByText(
-            "Insufficient QRL balance (amount + gas fee exceeds balance)",
+            "Insufficient Quanta balance (amount + gas fee exceeds balance)",
           ),
         ).toBeInTheDocument();
       },
       { timeout: 5000 },
     );
 
-    const sendButton = screen.getByRole("button", { name: "Send QRL" });
+    const sendButton = screen.getByRole("button", { name: "Send Quanta" });
     expect(sendButton).toBeDisabled();
   });
 
@@ -446,7 +446,7 @@ describe("TokenTransfer", () => {
     renderComponent(
       mockedStore({
         qrlStore: {
-          getAccountBalance: () => "100.0 QRL",
+          getAccountBalance: () => "100.0 Quanta",
           getNativeTokenGas: vi.fn(async () => "0.001"),
         },
       }),
@@ -478,7 +478,7 @@ describe("TokenTransfer", () => {
       screen.queryByText(/Insufficient/),
     ).not.toBeInTheDocument();
 
-    const sendButton = screen.getByRole("button", { name: "Send QRL" });
+    const sendButton = screen.getByRole("button", { name: "Send Quanta" });
     expect(sendButton).toBeEnabled();
   });
 
@@ -497,7 +497,7 @@ describe("TokenTransfer", () => {
       },
       mockedStore({
         qrlStore: {
-          getAccountBalance: () => "10.0 QRL",
+          getAccountBalance: () => "10.0 Quanta",
           getZrc20TokenGas: vi.fn(async () => "0.001"),
         },
       }),
@@ -547,7 +547,7 @@ describe("TokenTransfer", () => {
       },
       mockedStore({
         qrlStore: {
-          getAccountBalance: () => "0.0 QRL",
+          getAccountBalance: () => "0.0 Quanta",
           getZrc20TokenGas: vi.fn(async () => "0.001"),
         },
       }),
@@ -575,7 +575,7 @@ describe("TokenTransfer", () => {
     await waitFor(
       () => {
         expect(
-          screen.getByText("Insufficient QRL for gas fee"),
+          screen.getByText("Insufficient Quanta for gas fee"),
         ).toBeInTheDocument();
       },
       { timeout: 5000 },
@@ -587,7 +587,7 @@ describe("TokenTransfer", () => {
       renderComponent(
         mockedStore({
           qrlStore: {
-            getAccountBalance: () => "100.0 QRL",
+            getAccountBalance: () => "100.0 Quanta",
           },
         }),
       );
@@ -607,7 +607,7 @@ describe("TokenTransfer", () => {
       renderComponent(
         mockedStore({
           qrlStore: {
-            getAccountBalance: () => "10.0 QRL",
+            getAccountBalance: () => "10.0 Quanta",
             getNativeTokenGas: async () => "0.5",
           },
         }),
@@ -627,7 +627,7 @@ describe("TokenTransfer", () => {
       renderComponent(
         mockedStore({
           qrlStore: {
-            getAccountBalance: () => "100.0 QRL",
+            getAccountBalance: () => "100.0 Quanta",
           },
         }),
       );

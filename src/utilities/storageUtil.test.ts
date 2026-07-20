@@ -44,7 +44,7 @@ vi.mock("@/configuration/qrlBlockchainConfig", () => ({
     chainName: "Test Chain",
     rpcUrls: ["http://localhost:8545"],
     blockExplorerUrls: [""],
-    nativeCurrency: { name: "Quanta", symbol: "QRL", decimals: 18 },
+    nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
     iconUrls: [],
   },
   QRL_BLOCKCHAINS: [
@@ -53,7 +53,7 @@ vi.mock("@/configuration/qrlBlockchainConfig", () => ({
       chainName: "Test Chain",
       rpcUrls: ["http://localhost:8545"],
       blockExplorerUrls: [""],
-      nativeCurrency: { name: "Quanta", symbol: "QRL", decimals: 18 },
+      nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
       iconUrls: [],
     },
   ],
@@ -244,7 +244,7 @@ describe("StorageUtil", () => {
       chainName: "Chain 1",
       rpcUrls: ["http://localhost:8545"],
       blockExplorerUrls: [""],
-      nativeCurrency: { name: "Quanta", symbol: "QRL", decimals: 18 },
+      nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
       iconUrls: [],
     };
     const chain2 = {
@@ -252,7 +252,7 @@ describe("StorageUtil", () => {
       chainName: "Chain 2",
       rpcUrls: ["http://localhost:8546"],
       blockExplorerUrls: [""],
-      nativeCurrency: { name: "Quanta", symbol: "QRL", decimals: 18 },
+      nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
       iconUrls: [],
     };
 
@@ -260,6 +260,35 @@ describe("StorageUtil", () => {
       await StorageUtil.setAllBlockChains([chain1, chain2] as any);
       const result = await StorageUtil.getAllBlockChains();
       expect(result).toEqual([chain1, chain2]);
+    });
+
+    it("should migrate the stored builtin QRL symbol to Quanta on read", async () => {
+      const staleBuiltin = {
+        ...chain1,
+        isCustomChain: false,
+        nativeCurrency: { name: "QRL", symbol: "QRL", decimals: 18 },
+      };
+      const customWithQrlSymbol = {
+        ...chain2,
+        isCustomChain: true,
+        nativeCurrency: { name: "QRL", symbol: "QRL", decimals: 18 },
+      };
+      await StorageUtil.setAllBlockChains([
+        staleBuiltin,
+        customWithQrlSymbol,
+      ] as any);
+      const result = await StorageUtil.getAllBlockChains();
+      expect(result[0].nativeCurrency).toEqual({
+        name: "Quanta",
+        symbol: "Quanta",
+        decimals: 18,
+      });
+      // Custom chains keep whatever symbol the user or dApp provided.
+      expect(result[1].nativeCurrency).toEqual({
+        name: "QRL",
+        symbol: "QRL",
+        decimals: 18,
+      });
     });
 
     it("should return default blockchains when none stored", async () => {
