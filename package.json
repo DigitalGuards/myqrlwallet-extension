@@ -132,6 +132,7 @@
     "@radix-ui/react-slider": "1.4.3",
     "@theqrl/qrl-cryptography": "0.1.1",
     "eth-phishing-detect": "1.2.0",
+    "hash-wasm": "4.12.0",
     "i18next": "25.10.10",
     "qrcode.react": "4.2.0",
     "react-i18next": "16.6.6"
