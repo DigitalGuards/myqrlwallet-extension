@@ -44,7 +44,7 @@ describe("GasFeeNotice", () => {
       expect(screen.getByText("Estimating gas fee")).toBeInTheDocument();
     });
     expect(
-      screen.getByText("Estimated gas fee is 0.0 QRL"),
+      screen.getByText("Estimated gas fee is 0.0 Quanta"),
     ).toBeInTheDocument();
   });
 
@@ -53,7 +53,7 @@ describe("GasFeeNotice", () => {
 
     expect(screen.queryByText("Estimating gas fee")).not.toBeInTheDocument();
     expect(
-      screen.queryByText("Estimated gas fee is 0.0000 QRL"),
+      screen.queryByText("Estimated gas fee is 0.0000 Quanta"),
     ).not.toBeInTheDocument();
   });
 
@@ -81,7 +81,7 @@ describe("GasFeeNotice", () => {
       expect(screen.getByText("Estimating gas fee")).toBeInTheDocument();
     });
     expect(
-      screen.getByText("Estimated gas fee is 2.64 QRL"),
+      screen.getByText("Estimated gas fee is 2.64 Quanta"),
     ).toBeInTheDocument();
   });
 
@@ -145,7 +145,7 @@ describe("GasFeeNotice", () => {
       expect(screen.getByText("Estimating gas fee")).toBeInTheDocument();
     });
     expect(
-      screen.getByText("Estimated gas fee is 5.2564 QRL"),
+      screen.getByText("Estimated gas fee is 5.2564 Quanta"),
     ).toBeInTheDocument();
   });
 });

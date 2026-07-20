@@ -325,7 +325,7 @@ class QrlStore {
           ...this.qrlAccounts,
           accounts: storedAccountsList.map((account) => ({
             accountAddress: account,
-            accountBalance: "0.0 QRL",
+            accountBalance: "0.0 Quanta",
           })),
         };
       });
@@ -407,7 +407,7 @@ class QrlStore {
     return (
       this.qrlAccounts.accounts.find(
         (account) => account.accountAddress === accountAddress,
-      )?.accountBalance ?? "0.0 QRL"
+      )?.accountBalance ?? "0.0 Quanta"
     );
   }
 

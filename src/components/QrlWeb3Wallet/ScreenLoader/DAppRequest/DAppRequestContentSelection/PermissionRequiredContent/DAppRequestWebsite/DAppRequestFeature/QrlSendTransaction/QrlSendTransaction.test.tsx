@@ -92,7 +92,7 @@ describe("QrlSendTransaction", () => {
       }),
     );
 
-    expect(screen.getByText("Transfer QRL")).toBeInTheDocument();
-    expect(screen.getByText("This site wants to send QRL")).toBeInTheDocument();
+    expect(screen.getByText("Transfer Quanta")).toBeInTheDocument();
+    expect(screen.getByText("This site wants to send Quanta")).toBeInTheDocument();
   });
 });

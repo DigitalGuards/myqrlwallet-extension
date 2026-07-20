@@ -6,6 +6,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/UI/Tooltip";
+import { NATIVE_TOKEN } from "@/constants/nativeToken";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
@@ -113,7 +114,8 @@ const QrlSendTransactionForContent = observer(
       if (!transactionHash) return;
       try {
         const isSuccess = receipt.status?.toString() === "1";
-        const tokenSymbol = blockchain?.nativeCurrency?.symbol ?? "QRL";
+        const tokenSymbol =
+          blockchain?.nativeCurrency?.symbol ?? NATIVE_TOKEN.symbol;
         const tokenName = blockchain?.nativeCurrency?.name ?? tokenSymbol;
         const valueAsBigInt =
           value !== undefined && value !== null
@@ -408,7 +410,7 @@ const QrlSendTransactionForContent = observer(
               <div className="flex flex-col gap-1">
                 <div>{t('dapp.sendTransaction.value')}</div>
                 <div className="font-bold text-secondary">
-                  {utils.fromPlanck(value, "quanta")} QRL
+                  {utils.fromPlanck(value, "quanta")} Quanta
                 </div>
               </div>
             )}

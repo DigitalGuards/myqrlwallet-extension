@@ -82,7 +82,7 @@ describe("fetchOnChainHistory", () => {
     expect(entry.status).toBe(true);
     expect(entry.isZrc20Token).toBe(false);
     expect(entry.tokenContractAddress).toBe("");
-    expect(entry.tokenSymbol).toBe("QRL");
+    expect(entry.tokenSymbol).toBe("Quanta");
     expect(entry.gasUsed).toBe("");
     expect(entry.effectiveGasPrice).toBe("");
     expect(entry.chainId).toBe(CHAIN);
@@ -111,7 +111,7 @@ describe("fetchOnChainHistory", () => {
     expect(internal.amount).toBe(43.05396);
     expect(internal.timestamp).toBe(parseInt("0x6a5275c4", 16) * 1000);
     expect(internal.paidFeesQrl).toBe("0");
-    expect(internal.tokenSymbol).toBe("QRL");
+    expect(internal.tokenSymbol).toBe("Quanta");
     expect(internal.status).toBe(true);
   });
 

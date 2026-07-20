@@ -266,18 +266,35 @@ class StorageUtil {
     )?.[BLOCKCHAINS_IDENTIFIER];
     const chains = (storedBlockchains?.[ALL_BLOCKCHAINS_IDENTIFIER] ??
       QRL_BLOCKCHAINS) as BlockchainDataType[];
-    // Read-time migration: stored lists persisted before 0.4.10 still carry
-    // the cleartext builtin-testnet RPC. Rewrite only that exact default on
+    // Read-time migrations. Stored lists persisted before 0.4.10 still carry
+    // the cleartext builtin-testnet RPC: rewrite only that exact default on
     // non-custom chains; custom chains and user-edited URLs are untouched.
-    return chains.map((chain) =>
-      !chain.isCustomChain && chain.rpcUrls?.[0] === LEGACY_TESTNET_RPC
-        ? {
-            ...chain,
-            rpcUrls: [QRL_TESTNET_RPC_PROXY],
-            defaultRpcUrl: QRL_TESTNET_RPC_PROXY,
-          }
-        : chain,
-    );
+    // Stored lists persisted before the Quanta display-unit rename still
+    // carry the old "QRL" currency symbol on the builtin chains: the
+    // currency fields are not editable for non-custom chains, so rewriting
+    // the old default cannot clobber a user value. Custom chains keep
+    // whatever symbol the user or dApp provided.
+    return chains.map((chain) => {
+      let migrated = chain;
+      if (!migrated.isCustomChain && migrated.rpcUrls?.[0] === LEGACY_TESTNET_RPC) {
+        migrated = {
+          ...migrated,
+          rpcUrls: [QRL_TESTNET_RPC_PROXY],
+          defaultRpcUrl: QRL_TESTNET_RPC_PROXY,
+        };
+      }
+      if (!migrated.isCustomChain && migrated.nativeCurrency?.symbol === "QRL") {
+        migrated = {
+          ...migrated,
+          nativeCurrency: {
+            ...migrated.nativeCurrency,
+            name: "Quanta",
+            symbol: "Quanta",
+          },
+        };
+      }
+      return migrated;
+    });
   }
 
   /**

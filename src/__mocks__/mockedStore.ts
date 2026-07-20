@@ -55,7 +55,7 @@ const mockedStoreValues: StoreType = {
     fetchAccounts: async () => {},
     fetchQrlConnection: async () => {},
     getAccountBalance: (_accountAddress: string) => {
-      return "0.0 QRL";
+      return "0.0 Quanta";
     },
     initializeBlockchain: async () => {},
     selectBlockchain: async (_chainId: string) => {},
