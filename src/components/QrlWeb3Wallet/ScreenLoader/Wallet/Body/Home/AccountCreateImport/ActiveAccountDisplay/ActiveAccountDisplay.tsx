@@ -20,6 +20,15 @@ const ActiveAccountDisplay = observer(() => {
   const [copiedAddress, setCopiedAddress] = useState(false);
 
   const accountBalance = getAccountBalance(accountAddress);
+  // The store formats balances as "<amount> <unit>"; split them so the unit
+  // can sit on its own smaller line under the amount.
+  const balanceSpaceIdx = accountBalance.indexOf(" ");
+  const balanceAmount =
+    balanceSpaceIdx === -1
+      ? accountBalance
+      : accountBalance.slice(0, balanceSpaceIdx);
+  const balanceUnit =
+    balanceSpaceIdx === -1 ? "" : accountBalance.slice(balanceSpaceIdx + 1);
   const { prefix, addressSplit } = StringUtil.getSplitAddress(accountAddress);
   // Compact pill: full address lives on Receive and the account list.
   const abbreviatedAddress = `${prefix}${addressSplit[0]}...${addressSplit[addressSplit.length - 1]}`;
@@ -45,8 +54,15 @@ const ActiveAccountDisplay = observer(() => {
 
   return (
     <div className="flex flex-col items-center gap-2 text-center">
-      <div className="font-data animate-appear-in text-3xl font-bold tracking-tight text-foreground">
-        {accountBalance}
+      <div className="flex flex-col items-center">
+        <div className="font-data animate-appear-in text-3xl font-bold tracking-tight text-foreground">
+          {balanceAmount}
+        </div>
+        {balanceUnit && (
+          <div className="font-data text-sm font-medium text-muted-foreground">
+            {balanceUnit}
+          </div>
+        )}
       </div>
       {fiatDisplay && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">

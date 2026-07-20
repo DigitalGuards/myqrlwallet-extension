@@ -31,7 +31,8 @@ describe("ActiveAccountDisplay", () => {
       }),
     );
 
-    expect(screen.getByText("2.45 QRL")).toBeInTheDocument();
+    expect(screen.getByText("2.45")).toBeInTheDocument();
+    expect(screen.getByText("QRL")).toBeInTheDocument();
     expect(
       screen.getByText("Q20504...C80A1"),
     ).toBeInTheDocument();
