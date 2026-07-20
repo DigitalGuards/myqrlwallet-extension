@@ -42,7 +42,20 @@ export type UnlockWorkerResponse =
        */
       upgraded: (KeyStore | null)[];
     }
-  | { success: false };
+  | {
+      success: false;
+      /**
+       * true when the AES-GCM auth tag rejected (wrong password); false for
+       * infrastructure failures (e.g. the WASM memory allocation failed), so
+       * the popup can retry or surface a distinct error instead of telling
+       * the user their correct password is wrong.
+       */
+      wrongPassword: boolean;
+    };
+
+/** WebCrypto surfaces a failed GCM auth-tag check as an OperationError. */
+const isWrongPasswordError = (error: unknown): boolean =>
+  error instanceof DOMException && error.name === "OperationError";
 
 self.onmessage = async (event: MessageEvent<UnlockWorkerRequest>) => {
   const { keystores, password } = event.data;
@@ -72,8 +85,10 @@ self.onmessage = async (event: MessageEvent<UnlockWorkerRequest>) => {
       keys,
       upgraded,
     } satisfies UnlockWorkerResponse);
-  } catch {
-    // decryptKeystore throws when the password is wrong
-    self.postMessage({ success: false } satisfies UnlockWorkerResponse);
+  } catch (error) {
+    self.postMessage({
+      success: false,
+      wrongPassword: isWrongPasswordError(error),
+    } satisfies UnlockWorkerResponse);
   }
 };

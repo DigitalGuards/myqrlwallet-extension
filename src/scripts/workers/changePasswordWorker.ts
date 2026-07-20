@@ -31,7 +31,19 @@ export type DecryptedKey = {
 
 export type ChangePasswordWorkerResponse =
   | { success: true; newKeystores: KeyStore[]; newKeys: DecryptedKey[] }
-  | { success: false };
+  | {
+      success: false;
+      /**
+       * true when the AES-GCM auth tag rejected (wrong old password); false
+       * for infrastructure failures so the popup can retry sequentially
+       * instead of blaming the password.
+       */
+      wrongPassword: boolean;
+    };
+
+/** WebCrypto surfaces a failed GCM auth-tag check as an OperationError. */
+const isWrongPasswordError = (error: unknown): boolean =>
+  error instanceof DOMException && error.name === "OperationError";
 
 self.onmessage = async (
   event: MessageEvent<ChangePasswordWorkerRequest>,
@@ -60,8 +72,10 @@ self.onmessage = async (
       newKeystores,
       newKeys,
     } satisfies ChangePasswordWorkerResponse);
-  } catch {
-    // decryptKeystore throws when the old password is wrong
-    self.postMessage({ success: false } satisfies ChangePasswordWorkerResponse);
+  } catch (error) {
+    self.postMessage({
+      success: false,
+      wrongPassword: isWrongPasswordError(error),
+    } satisfies ChangePasswordWorkerResponse);
   }
 };

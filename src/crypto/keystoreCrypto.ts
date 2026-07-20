@@ -112,7 +112,14 @@ async function deriveArgon2idKey(
       hashLength: params.dklen,
       outputType: "binary",
     });
-  } catch {
+  } catch (error) {
+    // Loud on purpose: if this fires on every unlock the CSP is missing
+    // 'wasm-unsafe-eval' or hash-wasm regressed, and unlocks are silently
+    // ~10x slower than they should be.
+    console.warn(
+      "keystoreCrypto: WASM argon2id unavailable, falling back to pure-JS",
+      error,
+    );
     return argon2idJs(
       passwordBytes,
       saltBytes,

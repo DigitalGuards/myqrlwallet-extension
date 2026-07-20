@@ -228,23 +228,36 @@ class LockStore {
     // Fan the keystores out over several workers so the argon2id runs
     // execute concurrently (contiguous chunks keep the original order when
     // the per-chunk results are concatenated back together).
-    const chunks = splitIntoChunks(keyStores, kdfWorkerCount(keyStores.length));
-    const responses = await Promise.all(
-      chunks.map((chunk) =>
-        runWorkerJob<ChangePasswordWorkerRequest, ChangePasswordWorkerResponse>(
-          () =>
-            new Worker(
-              new URL(
-                "../scripts/workers/changePasswordWorker.ts",
-                import.meta.url,
+    const runChangeChunks = (chunks: (typeof keyStores)[]) =>
+      Promise.all(
+        chunks.map((chunk) =>
+          runWorkerJob<
+            ChangePasswordWorkerRequest,
+            ChangePasswordWorkerResponse
+          >(
+            () =>
+              new Worker(
+                new URL(
+                  "../scripts/workers/changePasswordWorker.ts",
+                  import.meta.url,
+                ),
+                { type: "module" },
               ),
-              { type: "module" },
-            ),
-          { keystores: chunk, oldPassword, newPassword },
-          { success: false },
+            { keystores: chunk, oldPassword, newPassword },
+            { success: false, wrongPassword: false },
+          ),
         ),
-      ),
+      );
+
+    let responses = await runChangeChunks(
+      splitIntoChunks(keyStores, kdfWorkerCount(keyStores.length)),
     );
+    if (responses.some((r) => !r.success && r.wrongPassword)) return false;
+    if (responses.some((r) => !r.success)) {
+      // Infrastructure failure, not a wrong password: retry sequentially in
+      // one worker (peak memory of the old single-worker path).
+      responses = await runChangeChunks([keyStores]);
+    }
 
     const succeeded = responses.filter(
       (r): r is Extract<ChangePasswordWorkerResponse, { success: true }> =>
@@ -378,26 +391,46 @@ class LockStore {
 
     // Contiguous chunks keep the original keystore order when the per-chunk
     // results are concatenated back together.
-    const chunks = splitIntoChunks(keyStores, kdfWorkerCount(keyStores.length));
-    const responses = await Promise.all(
-      chunks.map((chunk) =>
-        runWorkerJob<UnlockWorkerRequest, UnlockWorkerResponse>(
-          () =>
-            new Worker(
-              new URL("../scripts/workers/unlockWorker.ts", import.meta.url),
-              { type: "module" },
-            ),
-          { keystores: chunk, password },
-          { success: false },
+    const runUnlockChunks = (chunks: (typeof keyStores)[]) =>
+      Promise.all(
+        chunks.map((chunk) =>
+          runWorkerJob<UnlockWorkerRequest, UnlockWorkerResponse>(
+            () =>
+              new Worker(
+                new URL("../scripts/workers/unlockWorker.ts", import.meta.url),
+                { type: "module" },
+              ),
+            { keystores: chunk, password },
+            { success: false, wrongPassword: false },
+          ),
         ),
-      ),
+      );
+
+    let responses = await runUnlockChunks(
+      splitIntoChunks(keyStores, kdfWorkerCount(keyStores.length)),
     );
+    if (responses.some((r) => !r.success && r.wrongPassword)) {
+      return false;
+    }
+    if (responses.some((r) => !r.success)) {
+      // Infrastructure failure (e.g. concurrent WASM argon2id instances
+      // exhausted memory), NOT a wrong password. Retry everything in one
+      // sequential worker, whose peak memory matches the old single-worker
+      // path, before giving up.
+      responses = await runUnlockChunks([keyStores]);
+      const retry = responses[0];
+      if (retry && !retry.success) {
+        if (retry.wrongPassword) return false;
+        throw new Error(
+          "Unable to decrypt the wallet on this device right now. Close other tabs or apps to free memory and try again.",
+        );
+      }
+    }
 
     const succeeded = responses.filter(
       (r): r is Extract<UnlockWorkerResponse, { success: true }> => r.success,
     );
     if (succeeded.length !== responses.length) {
-      // Wrong password or worker error
       return false;
     }
     const decryptedKeys: DecryptedKeyType[] = succeeded.flatMap((r) => r.keys);
