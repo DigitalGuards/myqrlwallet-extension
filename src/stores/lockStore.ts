@@ -4,13 +4,23 @@ import {
   LOCK_MANAGER_MESSAGES,
 } from "@/scripts/lockManager/lockManager";
 import type {
+  ChangePasswordWorkerRequest,
   ChangePasswordWorkerResponse,
 } from "@/scripts/workers/changePasswordWorker";
+import type {
+  UnlockWorkerRequest,
+  UnlockWorkerResponse,
+} from "@/scripts/workers/unlockWorker";
+import {
+  kdfWorkerCount,
+  runWorkerJob,
+  splitIntoChunks,
+} from "@/scripts/workers/keystoreWorkerPool";
 import StorageUtil, {
   LockState,
   PRICE_CACHE_IDENTIFIER,
 } from "@/utilities/storageUtil";
-import { KeyStore, Web3BaseWalletAccount } from "@theqrl/web3";
+import { Web3BaseWalletAccount } from "@theqrl/web3";
 import { action, makeAutoObservable, runInAction } from "mobx";
 import browser from "webextension-polyfill";
 
@@ -215,30 +225,36 @@ class LockStore {
     const keyStores = await StorageUtil.getKeystores();
     if (!keyStores.length) return false;
 
-    const result = await new Promise<ChangePasswordWorkerResponse>(
-      (resolve) => {
-        const worker = new Worker(
-          new URL(
-            "../scripts/workers/changePasswordWorker.ts",
-            import.meta.url,
-          ),
-          { type: "module" },
-        );
-        worker.onmessage = (
-          event: MessageEvent<ChangePasswordWorkerResponse>,
-        ) => {
-          worker.terminate();
-          resolve(event.data);
-        };
-        worker.onerror = () => {
-          worker.terminate();
-          resolve({ success: false });
-        };
-        worker.postMessage({ keystores: keyStores, oldPassword, newPassword });
-      },
+    // Fan the keystores out over several workers so the argon2id runs
+    // execute concurrently (contiguous chunks keep the original order when
+    // the per-chunk results are concatenated back together).
+    const chunks = splitIntoChunks(keyStores, kdfWorkerCount(keyStores.length));
+    const responses = await Promise.all(
+      chunks.map((chunk) =>
+        runWorkerJob<ChangePasswordWorkerRequest, ChangePasswordWorkerResponse>(
+          () =>
+            new Worker(
+              new URL(
+                "../scripts/workers/changePasswordWorker.ts",
+                import.meta.url,
+              ),
+              { type: "module" },
+            ),
+          { keystores: chunk, oldPassword, newPassword },
+          { success: false },
+        ),
+      ),
     );
 
-    if (!result.success) return false;
+    const succeeded = responses.filter(
+      (r): r is Extract<ChangePasswordWorkerResponse, { success: true }> =>
+        r.success,
+    );
+    if (succeeded.length !== responses.length) return false;
+    const result = {
+      newKeystores: succeeded.flatMap((r) => r.newKeystores),
+      newKeys: succeeded.flatMap((r) => r.newKeys),
+    };
 
     // Persist re-encrypted keystores.
     await StorageUtil.setKeystores(result.newKeystores);
@@ -346,62 +362,57 @@ class LockStore {
   }
 
   /**
-   * Unlock the wallet.  The CPU-heavy scrypt decryption runs in a dedicated
-   * Web Worker thread so the popup UI stays fully responsive (spinner animates).
+   * Unlock the wallet.  The CPU-heavy argon2id decryption runs in dedicated
+   * Web Worker threads (one per keystore chunk, capped by
+   * keystoreWorkerPool) so the popup UI stays fully responsive and multiple
+   * keystores decrypt concurrently.
    * After decryption the keys are sent to the SW for in-memory storage.
    *
    * Returns true on success, false on wrong password.
    * Throws on communication errors so the UI can show a distinct message.
    */
   async unlock(password: string): Promise<boolean> {
-    // Read keystores and decrypt in a Web Worker (separate thread).
+    // Read keystores and decrypt in Web Workers (separate threads).
     const keyStores = await StorageUtil.getKeystores();
     if (!keyStores.length) return false;
 
-    const workerResult = await new Promise<{
-      keys: DecryptedKeyType[];
-      upgradedKeystores?: KeyStore[];
-    } | null>((resolve) => {
-      const worker = new Worker(
-        new URL("../scripts/workers/unlockWorker.ts", import.meta.url),
-        { type: "module" },
-      );
-      worker.onmessage = (
-        event: MessageEvent<{
-          success: boolean;
-          keys?: DecryptedKeyType[];
-          upgradedKeystores?: KeyStore[];
-        }>,
-      ) => {
-        worker.terminate();
-        if (event.data.success && event.data.keys) {
-          resolve({
-            keys: event.data.keys,
-            upgradedKeystores: event.data.upgradedKeystores,
-          });
-        } else {
-          resolve(null);
-        }
-      };
-      worker.onerror = () => {
-        worker.terminate();
-        resolve(null);
-      };
-      worker.postMessage({ keystores: keyStores, password });
-    });
+    // Contiguous chunks keep the original keystore order when the per-chunk
+    // results are concatenated back together.
+    const chunks = splitIntoChunks(keyStores, kdfWorkerCount(keyStores.length));
+    const responses = await Promise.all(
+      chunks.map((chunk) =>
+        runWorkerJob<UnlockWorkerRequest, UnlockWorkerResponse>(
+          () =>
+            new Worker(
+              new URL("../scripts/workers/unlockWorker.ts", import.meta.url),
+              { type: "module" },
+            ),
+          { keystores: chunk, password },
+          { success: false },
+        ),
+      ),
+    );
 
-    if (!workerResult) {
+    const succeeded = responses.filter(
+      (r): r is Extract<UnlockWorkerResponse, { success: true }> => r.success,
+    );
+    if (succeeded.length !== responses.length) {
       // Wrong password or worker error
       return false;
     }
-    const decryptedKeys = workerResult.keys;
+    const decryptedKeys: DecryptedKeyType[] = succeeded.flatMap((r) => r.keys);
 
-    // If the worker re-encrypted any keystores with stronger KDF parameters,
+    // If a worker re-encrypted any keystores with stronger KDF parameters,
     // persist them in place of the previous keystores so the user benefits
-    // automatically without re-entering their password.
-    if (workerResult.upgradedKeystores?.length) {
+    // automatically without re-entering their password. The flattened
+    // upgraded list is index-aligned with keyStores.
+    const upgradedFlat = succeeded.flatMap((r) => r.upgraded);
+    if (upgradedFlat.some((k) => k !== null)) {
+      const mergedKeystores = keyStores.map(
+        (original, index) => upgradedFlat[index] ?? original,
+      );
       try {
-        await StorageUtil.setKeystores(workerResult.upgradedKeystores);
+        await StorageUtil.setKeystores(mergedKeystores);
       } catch (error) {
         console.warn(
           "QrlWeb3Wallet: failed to persist upgraded keystores",

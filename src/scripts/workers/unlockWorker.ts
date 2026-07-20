@@ -1,17 +1,22 @@
 /**
- * Web Worker that performs the CPU-heavy keystore decryption (scrypt / argon2id).
+ * Web Worker that performs the CPU-heavy keystore decryption (argon2id).
  *
  * Running in a dedicated worker thread keeps the popup UI fully responsive
  * while the decryption is in progress AND avoids Chrome's MV3 service-worker
  * lifecycle issues (Chrome can't kill a worker that runs inside the popup).
+ *
+ * The popup fans the keystores out over several of these workers via
+ * keystoreWorkerPool, so each instance receives a contiguous chunk of the
+ * full keystore list and returns results aligned with its chunk order.
+ * The KDF itself runs via hash-wasm (see src/crypto/keystoreCrypto.ts).
  */
 
-import { decrypt, encrypt } from "@theqrl/web3-qrl-accounts";
-import { getMnemonicFromHexSeed } from "@/functions/getMnemonicFromHexSeed";
 import {
-  RECOMMENDED_KEYSTORE_KDF_PARAMS,
-  shouldUpgradeKeystoreParams,
-} from "@/scripts/lockManager/keystoreParams";
+  decryptKeystore,
+  encryptKeystore,
+} from "@/crypto/keystoreCrypto";
+import { getMnemonicFromHexSeed } from "@/functions/getMnemonicFromHexSeed";
+import { shouldUpgradeKeystoreParams } from "@/scripts/lockManager/keystoreParams";
 import type { KeyStore } from "@theqrl/web3";
 
 export type UnlockWorkerRequest = {
@@ -27,11 +32,15 @@ export type DecryptedKey = {
 export type UnlockWorkerResponse =
   | {
       success: true;
+      /** Aligned with the request's keystore order. */
       keys: DecryptedKey[];
-      // Populated when one or more keystores were re-encrypted with stronger
-      // KDF parameters. The popup-side persists these in place of the old
-      // keystores so the user does not need to take any explicit action.
-      upgradedKeystores?: KeyStore[];
+      /**
+       * Aligned with the request's keystore order; a non-null entry is that
+       * keystore re-encrypted with stronger KDF parameters. The popup-side
+       * persists these in place of the old keystores so the user does not
+       * need to take any explicit action.
+       */
+      upgraded: (KeyStore | null)[];
     }
   | { success: false };
 
@@ -42,33 +51,29 @@ self.onmessage = async (event: MessageEvent<UnlockWorkerRequest>) => {
   const normalisedPassword = password.normalize("NFC");
   try {
     const keys: DecryptedKey[] = [];
-    let upgradedKeystores: KeyStore[] | undefined;
+    const upgraded: (KeyStore | null)[] = [];
     for (const keyStore of keystores) {
-      const { address, seed } = await decrypt(keyStore, normalisedPassword);
+      const { address, seed } = await decryptKeystore(
+        keyStore,
+        normalisedPassword,
+      );
       keys.push({
         address,
         mnemonicPhrases: getMnemonicFromHexSeed(seed),
       });
-      if (shouldUpgradeKeystoreParams(keyStore)) {
-        if (!upgradedKeystores) {
-          upgradedKeystores = [...keystores];
-        }
-        const reEncrypted = await encrypt(seed, normalisedPassword);
-        const idx = upgradedKeystores.findIndex(
-          (k) => k.address?.toLowerCase() === keyStore.address?.toLowerCase(),
-        );
-        if (idx >= 0) upgradedKeystores[idx] = reEncrypted;
-      }
+      upgraded.push(
+        shouldUpgradeKeystoreParams(keyStore)
+          ? await encryptKeystore(seed, normalisedPassword)
+          : null,
+      );
     }
-    // Reference the constant so tree-shaking does not drop the import.
-    void RECOMMENDED_KEYSTORE_KDF_PARAMS;
     self.postMessage({
       success: true,
       keys,
-      upgradedKeystores,
+      upgraded,
     } satisfies UnlockWorkerResponse);
   } catch {
-    // decrypt() throws when the password is wrong
+    // decryptKeystore throws when the password is wrong
     self.postMessage({ success: false } satisfies UnlockWorkerResponse);
   }
 };

@@ -1,14 +1,20 @@
 /**
- * Web Worker that re-encrypts all keystores with a new password.
+ * Web Worker that re-encrypts keystores with a new password.
  *
- * 1. Decrypts each keystore with the old password (CPU-heavy scrypt).
+ * 1. Decrypts each keystore with the old password (CPU-heavy argon2id,
+ *    executed via hash-wasm, see src/crypto/keystoreCrypto.ts).
  * 2. Re-encrypts each seed with the new password.
- * 3. Returns the new keystores and decrypted key metadata.
+ * 3. Returns the new keystores and decrypted key metadata, aligned with the
+ *    request's keystore order.
  *
- * Runs in a dedicated thread so the popup UI stays responsive.
+ * Runs in a dedicated thread so the popup UI stays responsive; the popup
+ * fans keystores out over several instances via keystoreWorkerPool.
  */
 
-import { decrypt, encrypt } from "@theqrl/web3-qrl-accounts";
+import {
+  decryptKeystore,
+  encryptKeystore,
+} from "@/crypto/keystoreCrypto";
 import { getMnemonicFromHexSeed } from "@/functions/getMnemonicFromHexSeed";
 import type { KeyStore } from "@theqrl/web3";
 
@@ -40,8 +46,8 @@ self.onmessage = async (
     const newKeys: DecryptedKey[] = [];
 
     for (const keyStore of keystores) {
-      const { address, seed } = await decrypt(keyStore, normalisedOld);
-      const reEncrypted = await encrypt(seed, normalisedNew);
+      const { address, seed } = await decryptKeystore(keyStore, normalisedOld);
+      const reEncrypted = await encryptKeystore(seed, normalisedNew);
       newKeystores.push(reEncrypted);
       newKeys.push({
         address,
@@ -55,7 +61,7 @@ self.onmessage = async (
       newKeys,
     } satisfies ChangePasswordWorkerResponse);
   } catch {
-    // decrypt() throws when the old password is wrong
+    // decryptKeystore throws when the old password is wrong
     self.postMessage({ success: false } satisfies ChangePasswordWorkerResponse);
   }
 };
