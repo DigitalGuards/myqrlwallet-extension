@@ -25,6 +25,6 @@ describe("AccountAddressSection", () => {
       screen.getByText("Q 20B71 4091c F2a62 DADda 28478 03e3f 1B9D2 D3779"),
     ).toBeInTheDocument();
     expect(screen.getByText("Balance")).toBeInTheDocument();
-    expect(screen.getByText("0.0 QRL")).toBeInTheDocument();
+    expect(screen.getByText("0.0 Quanta")).toBeInTheDocument();
   });
 });

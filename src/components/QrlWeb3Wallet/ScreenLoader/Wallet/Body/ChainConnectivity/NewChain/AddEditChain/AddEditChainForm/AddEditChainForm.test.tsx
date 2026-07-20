@@ -76,7 +76,7 @@ describe("AddEditChainForm", () => {
     expect(currencyName).toBeInTheDocument();
     expect(currencyName).toBeEnabled();
     expect(currencyName).toHaveValue("");
-    expect(currencyName).toHaveAttribute("placeholder", "QRL");
+    expect(currencyName).toHaveAttribute("placeholder", "Quanta");
     expect(screen.getByText("Currency of this blockchain")).toBeInTheDocument();
 
     expect(screen.getByText("Symbol")).toBeInTheDocument();
@@ -86,7 +86,7 @@ describe("AddEditChainForm", () => {
     expect(currencySymbolField).toBeInTheDocument();
     expect(currencySymbolField).toBeEnabled();
     expect(currencySymbolField).toHaveValue("");
-    expect(currencySymbolField).toHaveAttribute("placeholder", "QRL");
+    expect(currencySymbolField).toHaveAttribute("placeholder", "Quanta");
     expect(screen.getByText("Currency symbol")).toBeInTheDocument();
 
     expect(screen.getByText("Decimals")).toBeInTheDocument();
@@ -157,7 +157,7 @@ describe("AddEditChainForm", () => {
     expect(currencyName).toBeInTheDocument();
     expect(currencyName).toBeEnabled();
     expect(currencyName).toHaveValue("Test native currency");
-    expect(currencyName).toHaveAttribute("placeholder", "QRL");
+    expect(currencyName).toHaveAttribute("placeholder", "Quanta");
     expect(screen.getByText("Currency of this blockchain")).toBeInTheDocument();
 
     expect(screen.getByText("Symbol")).toBeInTheDocument();
@@ -167,7 +167,7 @@ describe("AddEditChainForm", () => {
     expect(currencySymbolField).toBeInTheDocument();
     expect(currencySymbolField).toBeEnabled();
     expect(currencySymbolField).toHaveValue("TST");
-    expect(currencySymbolField).toHaveAttribute("placeholder", "QRL");
+    expect(currencySymbolField).toHaveAttribute("placeholder", "Quanta");
     expect(screen.getByText("Currency symbol")).toBeInTheDocument();
 
     expect(screen.getByText("Decimals")).toBeInTheDocument();

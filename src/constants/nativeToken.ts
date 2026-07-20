@@ -2,8 +2,8 @@ export const NATIVE_TOKEN = {
   // The QRL coin logo, NOT the extension's jar brand icon (icons/qrl/*
   // doubles as the toolbar icon set and must stay the jar).
   image: "icons/tokens/qrl.png",
-  name: "QRL",
-  symbol: "QRL",
+  name: "Quanta",
+  symbol: "Quanta",
   decimals: 8,
 };
 

@@ -206,7 +206,7 @@ describe("QrlSendTransactionForContent", () => {
     );
 
     expect(screen.getByText("Value")).toBeInTheDocument();
-    expect(screen.getByText("0.000000000000000048 QRL")).toBeInTheDocument();
+    expect(screen.getByText("0.000000000000000048 Quanta")).toBeInTheDocument();
   });
 
   it("should not render the Value row for contract interaction when value is zero", async () => {
@@ -241,7 +241,7 @@ describe("QrlSendTransactionForContent", () => {
     );
 
     expect(screen.getByText("Value")).toBeInTheDocument();
-    expect(screen.getByText("0.000000000000000048 QRL")).toBeInTheDocument();
+    expect(screen.getByText("0.000000000000000048 Quanta")).toBeInTheDocument();
   });
 
   it("should sign contract interaction with the value shown in the UI", async () => {
@@ -280,7 +280,7 @@ describe("QrlSendTransactionForContent", () => {
 
     // UI must show the value that will be signed.
     expect(screen.getByText("Value")).toBeInTheDocument();
-    expect(screen.getByText("0.000000000000000048 QRL")).toBeInTheDocument();
+    expect(screen.getByText("0.000000000000000048 Quanta")).toBeInTheDocument();
 
     await act(async () => {
       await capturedPermissionCallback!(true);
@@ -323,7 +323,7 @@ describe("QrlSendTransactionForContent", () => {
       screen.getByText("Q 20EE9 76078 6AD48 aB90E 326c5 cd78c 6269B a10AB"),
     ).toBeInTheDocument();
     expect(screen.getByText("Value")).toBeInTheDocument();
-    expect(screen.getByText("0.000000000000000048 QRL")).toBeInTheDocument();
+    expect(screen.getByText("0.000000000000000048 Quanta")).toBeInTheDocument();
     expect(screen.getByText("Gas Limit")).toBeInTheDocument();
     expect(screen.getByText("117589")).toBeInTheDocument();
   });
