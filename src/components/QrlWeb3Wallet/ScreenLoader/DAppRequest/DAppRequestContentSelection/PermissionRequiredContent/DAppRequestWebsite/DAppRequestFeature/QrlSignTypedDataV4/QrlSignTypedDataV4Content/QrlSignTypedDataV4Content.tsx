@@ -22,6 +22,7 @@ import { Copy } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { useEffect } from "react";
+import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 
 const MAX_INLINE_STRING_LEN = 200;
 
@@ -203,6 +204,13 @@ const QrlSignTypedDataV4Content = observer(() => {
     if (isConnected) {
       const onPermissionCallBack = async (hasApproved: boolean) => {
         if (hasApproved) {
+          const authorization = await revalidateAuthorizedDAppRequest(
+            dAppRequestData,
+          );
+          if (!authorization.canProceed) {
+            addToResponseData({ error: authorization.proceedError });
+            return;
+          }
           // Must await: onPermission reads responseData the moment this
           // resolves, so a bare call would send the dApp an empty result
           // before signing finishes.
@@ -211,7 +219,7 @@ const QrlSignTypedDataV4Content = observer(() => {
       };
       setOnPermissionCallBack(onPermissionCallBack);
     }
-  }, [isConnected]);
+  }, [isConnected, dAppRequestData]);
 
   const copyMessageData = () => {
     navigator.clipboard.writeText(JSON.stringify(typedData));
