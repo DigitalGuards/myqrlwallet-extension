@@ -16,6 +16,7 @@ import { Copy } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { useEffect } from "react";
+import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 
 const PersonalSign = observer(() => {
   const { t } = useTranslation();
@@ -52,6 +53,13 @@ const PersonalSign = observer(() => {
     if (isConnected) {
       const onPermissionCallBack = async (hasApproved: boolean) => {
         if (hasApproved) {
+          const authorization = await revalidateAuthorizedDAppRequest(
+            dAppRequestData,
+          );
+          if (!authorization.canProceed) {
+            addToResponseData({ error: authorization.proceedError });
+            return;
+          }
           // Must await: onPermission reads responseData the moment this
           // resolves, so a bare call would send the dApp an empty result
           // before signing finishes.
@@ -60,7 +68,7 @@ const PersonalSign = observer(() => {
       };
       setOnPermissionCallBack(onPermissionCallBack);
     }
-  }, [isConnected]);
+  }, [isConnected, dAppRequestData]);
 
   const copyMessage = () => {
     navigator.clipboard.writeText(challenge);
