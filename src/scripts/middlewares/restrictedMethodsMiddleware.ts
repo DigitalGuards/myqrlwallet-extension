@@ -452,7 +452,16 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
             case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA:
             case RESTRICTED_METHODS.PERSONAL_SIGN: {
               const signedData = restrictedMethodResult?.response;
-              if (signedData) {
+              // A rejected approval (e.g. the chain-authorization
+              // revalidation guard) stores { error } here. Surface it as a
+              // JSON-RPC error, otherwise the dApp resolves successfully with
+              // an error-shaped object and never learns the request failed.
+              if (signedData?.error) {
+                res.error = providerErrors.unsupportedMethod({
+                  message: signedData.error?.message,
+                  data: signedData.error,
+                });
+              } else if (signedData) {
                 res.result = signedData;
               } else {
                 res.error = providerErrors.unsupportedMethod({
