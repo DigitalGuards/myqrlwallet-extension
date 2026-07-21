@@ -12,6 +12,7 @@ import {
   type TypedDataPayload,
 } from "@/functions/pqSigning";
 import { RESTRICTED_METHODS } from "@/scripts/constants/requestConstants";
+import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import { useStore } from "@/stores/store";
 import StringUtil, { sanitizeForDisplay } from "@/utilities/stringUtil";
 import { Buffer } from "buffer";
@@ -77,11 +78,18 @@ const QrlPqSign = observer(() => {
     if (isConnected) {
       setOnPermissionCallBack(async (hasApproved: boolean) => {
         if (hasApproved) {
+          const authorization = await revalidateAuthorizedDAppRequest(
+            dAppRequestData,
+          );
+          if (!authorization.canProceed) {
+            addToResponseData({ error: authorization.proceedError });
+            return;
+          }
           await pqSign();
         }
       });
     }
-  }, [isConnected]);
+  }, [isConnected, dAppRequestData]);
 
   useEffect(() => {
     setCanProceed(true);
