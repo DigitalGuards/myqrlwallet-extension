@@ -5,8 +5,7 @@ import {
   QRL_BLOCKCHAINS,
   QRL_TESTNET_RPC_PROXY,
 } from "@/configuration/qrlBlockchainConfig";
-import {
-  CAVEAT_TYPES,
+import type {
   ConnectedAccountsDataType,
   DAppRequestType,
   TokenContractType,
@@ -34,6 +33,13 @@ const ACTIVE_BLOCKCHAIN_IDENTIFIER = "ACTIVE_BLOCKCHAIN";
 
 const DAPPS_IDENTIFIER = "DAPPS";
 const ALL_DAPPS_IDENTIFIER = "ALL_DAPPS";
+// Mirrors CAVEAT_TYPES.RESTRICT_RETURNED_ACCOUNTS in middlewareTypes, copied
+// rather than imported on purpose: that module has a runtime dependency on
+// @theqrl/qrl-wallet-provider, and importing a *value* from it (types are
+// erased at build) pulls the provider into every bundle that touches
+// storageUtil, including the popup, which has no Buffer polyfill and dies at
+// module init with "Buffer is not defined" before React can mount.
+const RESTRICT_RETURNED_ACCOUNTS_CAVEAT = "restrictReturnedAccounts";
 const DAPPS_REQUEST_DATA_IDENTIFIER = "DAPPS_REQUEST_DATA";
 
 const TOKENS_IDENTIFIER = "TOKENS";
@@ -647,7 +653,7 @@ class StorageUtil {
       data.permissions = (data.permissions ?? []).map((permission) => ({
         ...permission,
         caveats: (permission.caveats ?? []).map((caveat) =>
-          caveat.type === CAVEAT_TYPES.RESTRICT_RETURNED_ACCOUNTS &&
+          caveat.type === RESTRICT_RETURNED_ACCOUNTS_CAVEAT &&
           Array.isArray(caveat.value)
             ? {
                 ...caveat,
