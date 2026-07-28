@@ -34,6 +34,7 @@ import { useEffect, useState } from "react";
 import StorageUtil from "@/utilities/storageUtil";
 import { ZRC_20_ITEMS_DISPLAY_LIMIT } from "@/constants/zrc20Token";
 import { NFT_ITEMS_DISPLAY_LIMIT } from "@/constants/nftToken";
+import { cn } from "@/utilities/stylingUtil";
 
 const AccountCreateImport = observer(() => {
   const { t } = useTranslation();
@@ -143,7 +144,11 @@ const AccountCreateImport = observer(() => {
             <CardHeader>
               <CardTitle>{t('home.tokens')}</CardTitle>
             </CardHeader>
-            <CardContent>
+            {/* hidden (not unmounted) when empty so the list still fetches;
+                an empty CardContent otherwise doubles the header gap */}
+            <CardContent
+              className={cn(tokenContractsList.length === 0 && "hidden")}
+            >
               <TokensCardContent />
             </CardContent>
             <CardFooter className="flex-col gap-4">
@@ -184,7 +189,7 @@ const AccountCreateImport = observer(() => {
             <CardHeader>
               <CardTitle>{t('home.nftCollections')}</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className={cn(nftCollectionsCount === 0 && "hidden")}>
               <NFTCollections onCountChange={setNftCollectionsCount} />
             </CardContent>
             <CardFooter className="flex-col gap-4">

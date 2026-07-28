@@ -721,23 +721,25 @@ const TokenTransfer = observer(() => {
             </CardContent>
             <CardFooter className="gap-4">
               <Button
-                className="w-full"
+                className="w-full min-w-0"
                 type="button"
                 variant="outline"
                 onClick={() => cancelTransaction()}
               >
-                <X className="mr-2 h-4 w-4" />
+                <X className="mr-2 h-4 w-4 shrink-0" />
                 {t('transfer.cancelButton')}
               </Button>
-              <Button disabled={isSubmitting || !isValid || !!balanceError || qrnsResolving || (isQrnsName(watchedReceiver) && !resolvedAddress)} className="w-full">
+              <Button disabled={isSubmitting || !isValid || !!balanceError || qrnsResolving || (isQrnsName(watchedReceiver) && !resolvedAddress)} className="w-full min-w-0">
                 {isSubmitting ? (
-                  <Loader className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader className="mr-2 h-4 w-4 shrink-0 animate-spin" />
                 ) : (
-                  <Send className="mr-2 h-4 w-4" />
+                  <Send className="mr-2 h-4 w-4 shrink-0" />
                 )}
-                {isSubmitting
-                  ? t('transfer.sendingButton', { tokenSymbol })
-                  : t('transfer.sendButton', { tokenSymbol })}
+                <span className="truncate">
+                  {isSubmitting
+                    ? t('transfer.sendingButton', { tokenSymbol })
+                    : t('transfer.sendButton', { tokenSymbol })}
+                </span>
               </Button>
             </CardFooter>
           </Card>
