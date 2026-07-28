@@ -100,6 +100,7 @@ class QrlStore {
       refreshBlockchainData: action.bound,
       selectBlockchain: action.bound,
       setActiveAccount: action.bound,
+      clearAccountState: action.bound,
       assertAccountRemovable: action.bound,
       removeAccount: action.bound,
       fetchQrlConnection: action.bound,
@@ -322,6 +323,20 @@ class QrlStore {
     } else {
       await this.fetchAccounts();
     }
+  }
+
+  /**
+   * Forget the accounts held in memory, without touching storage.
+   *
+   * The stores are per-document singletons, so a wallet reset performed in
+   * another surface (or before this one reloads) leaves this document still
+   * holding the destroyed wallet: onboarding would then render its address
+   * and offer to continue with it. Onboarding only ever runs when no wallet
+   * exists, so clearing there is always correct.
+   */
+  clearAccountState() {
+    this.activeAccount = { accountAddress: "" };
+    this.qrlAccounts = { ...this.qrlAccounts, accounts: [], isLoading: false };
   }
 
   async fetchQrlConnection() {

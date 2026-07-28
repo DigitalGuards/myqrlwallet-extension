@@ -1,7 +1,7 @@
 import { useStore } from "@/stores/store";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
 import { observer } from "mobx-react-lite";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AddOrImportAccount from "./AddOrImportAccount/AddOrImportAccount";
 import LockPasswordSetup from "./LockPasswordSetup/LockPasswordSetup";
 import OnboardingCompleted from "./OnboardingCompleted/OnboardingCompleted";
@@ -26,6 +26,16 @@ const Onboarding = observer(() => {
     ONBOARDING_STEPS.WELCOME,
   );
   const [password, setPassword] = useState("");
+
+  // Onboarding only runs when the wallet has no accounts, so anything this
+  // document still holds in memory belongs to a wallet that was just reset
+  // (the stores are per-document singletons, and a reset performed in
+  // another surface never touches this one). Without this, the destroyed
+  // wallet's address renders here and its "continue with this account"
+  // path stays reachable.
+  useEffect(() => {
+    qrlStore.clearAccountState();
+  }, []);
 
   const selectStep = (step: OnboardingStepType) => {
     setStep(step);
