@@ -19,6 +19,7 @@ import { useStore } from "@/stores/store";
 import StringUtil from "@/utilities/stringUtil";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
+import ResetWalletDialog from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/ResetWalletDialog/ResetWalletDialog";
 
 const createFormSchema = (t: TFunction) =>
   z.object({
@@ -40,6 +41,7 @@ const LockPasswordCheck = observer(() => {
 
   const [unlockAttempt, setUnlockAttempt] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
 
   useEffect(() => {
     if (accountAddress) {
@@ -182,6 +184,20 @@ const LockPasswordCheck = observer(() => {
               ? t("lock.unlock.buttonLoading")
               : t("lock.unlock.button")}
           </Button>
+
+          {/* Escape hatch for a lost password: the seeds are unrecoverable
+              without it, so the only way forward is a full reset + re-import. */}
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+            onClick={() => setResetDialogOpen(true)}
+          >
+            {t("lock.unlock.forgotPassword")}
+          </button>
+          <ResetWalletDialog
+            open={resetDialogOpen}
+            onOpenChange={setResetDialogOpen}
+          />
         </div>
       </form>
     </Form>

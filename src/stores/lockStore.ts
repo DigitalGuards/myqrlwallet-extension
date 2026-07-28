@@ -55,6 +55,8 @@ class LockStore {
       readLockState: action.bound,
       lock: action.bound,
       unlock: action.bound,
+      removeAccountKey: action.bound,
+      resetWallet: action.bound,
     });
 
     this.connectKeepAlive();
@@ -340,6 +342,52 @@ class LockStore {
     } catch {
       // SW not reachable – will be retried via port reconnect or storage listener
     }
+  }
+
+  /**
+   * Scrub one account's decrypted key from the popup cache and the service
+   * worker after its keystore was removed. Best-effort on the SW side: if it
+   * is unreachable, the next lock/unlock cycle rebuilds its keys from the
+   * already-filtered keystores anyway.
+   */
+  async removeAccountKey(accountAddress: string) {
+    const target = accountAddress.toLowerCase();
+    if (this.cachedKeys) {
+      this.cachedKeys = this.cachedKeys.filter(
+        (key) => key?.address?.toLowerCase() !== target,
+      );
+    }
+    try {
+      const keys = (await browser.runtime.sendMessage({
+        name: LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS,
+      })) as DecryptedKeyType[] | undefined;
+      if (!Array.isArray(keys)) return;
+      await this.sendWithRetry({
+        name: LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
+        data: keys.filter((key) => key?.address?.toLowerCase() !== target),
+      });
+    } catch {
+      // Wallet locked or SW unreachable: no decrypted key to scrub.
+    }
+  }
+
+  /**
+   * Factory reset: lock the service worker (drops in-memory keys, the
+   * session-storage backup, and alarms), then wipe all extension-local
+   * storage. readLockState then reports hasPasswordSet=false, which routes
+   * the UI to onboarding.
+   */
+  async resetWallet() {
+    try {
+      await this.lock();
+    } catch {
+      // SW unreachable: the storage wipe below still removes everything
+      // persistent; in-memory SW keys die with its next restart.
+    }
+    this.cachedKeys = undefined;
+    this.cachedPassword = undefined;
+    await StorageUtil.clearAllData();
+    await this.readLockState();
   }
 
   async lock() {

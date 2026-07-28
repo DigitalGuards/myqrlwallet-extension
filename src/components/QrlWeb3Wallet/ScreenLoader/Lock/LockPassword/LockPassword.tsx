@@ -13,6 +13,8 @@ const LockPassword = observer(() => {
 
   const [isOnboarding, setIsOnboarding] = useState(false);
 
+  // Re-runs when hasPasswordSet flips false while this screen is mounted
+  // (a wallet reset from the lock screen), not just on first mount.
   useEffect(() => {
     if (!hasPasswordSet) {
       if (isPopupWindow) {
@@ -23,7 +25,7 @@ const LockPassword = observer(() => {
         setIsOnboarding(true);
       }
     }
-  }, []);
+  }, [hasPasswordSet, isPopupWindow]);
 
   if (isOnboarding) return <Onboarding />;
 

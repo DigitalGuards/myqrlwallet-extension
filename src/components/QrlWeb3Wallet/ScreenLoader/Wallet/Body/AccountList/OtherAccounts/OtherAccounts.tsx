@@ -1,6 +1,15 @@
 import { Button } from "@/components/UI/Button";
 import { Card } from "@/components/UI/Card";
 import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/UI/Dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -19,7 +28,9 @@ import {
   Download,
   EllipsisVertical,
   EyeOff,
+  Loader,
   Pencil,
+  Trash2,
   X,
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -34,15 +45,28 @@ type OtherAccountCardProps = {
   onCopy: (address: string) => void;
   onReceive: (address: string) => void;
   onHide: (address: string) => void;
+  onRemove: (address: string) => Promise<void>;
 };
 
 const OtherAccountCard = observer(
-  ({ accountAddress, onSwitch, onCopy, onReceive, onHide }: OtherAccountCardProps) => {
+  ({ accountAddress, onSwitch, onCopy, onReceive, onHide, onRemove }: OtherAccountCardProps) => {
     const { t } = useTranslation();
     const { accountLabelsStore } = useStore();
     const label = accountLabelsStore.getLabel(accountAddress);
     const [isEditing, setIsEditing] = useState(false);
     const [editValue, setEditValue] = useState("");
+    const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
+    const [isRemoving, setIsRemoving] = useState(false);
+
+    const confirmRemove = async () => {
+      setIsRemoving(true);
+      try {
+        await onRemove(accountAddress);
+        setRemoveDialogOpen(false);
+      } finally {
+        setIsRemoving(false);
+      }
+    };
 
     const startEdit = () => {
       setEditValue(label);
@@ -157,11 +181,60 @@ const OtherAccountCard = observer(
                     <span>{t('home.hide')}</span>
                   </div>
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="cursor-pointer text-destructive data-[highlighted]:text-destructive"
+                  onClick={() => setRemoveDialogOpen(true)}
+                >
+                  <div className="flex gap-2">
+                    <Trash2 size="16" />
+                    <span>{t('home.remove')}</span>
+                  </div>
+                </DropdownMenuItem>
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
           </div>
         </div>
+        <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
+          <DialogContent className="w-80 rounded-md">
+            <DialogHeader className="text-left">
+              <DialogTitle>{t("home.removeAccountTitle")}</DialogTitle>
+              <DialogDescription>
+                {t("home.removeAccountConfirm")}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="min-w-0">
+              <AccountId account={accountAddress} />
+            </div>
+            <DialogFooter className="flex flex-row gap-4">
+              <DialogClose asChild>
+                <Button
+                  className="w-full"
+                  type="button"
+                  variant="outline"
+                  disabled={isRemoving}
+                >
+                  <X className="mr-2 h-4 w-4" />
+                  {t("common.cancel")}
+                </Button>
+              </DialogClose>
+              <Button
+                className="w-full min-w-0"
+                type="button"
+                variant="destructive"
+                disabled={isRemoving}
+                onClick={confirmRemove}
+              >
+                {isRemoving ? (
+                  <Loader className="mr-2 h-4 w-4 shrink-0 animate-spin" />
+                ) : (
+                  <Trash2 className="mr-2 h-4 w-4 shrink-0" />
+                )}
+                <span className="truncate">{t("home.remove")}</span>
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </Card>
     );
   },
@@ -170,7 +243,13 @@ const OtherAccountCard = observer(
 const OtherAccounts = observer(() => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { qrlStore, hiddenAccountsStore } = useStore();
+  const {
+    qrlStore,
+    hiddenAccountsStore,
+    ledgerStore,
+    lockStore,
+    accountLabelsStore,
+  } = useStore();
   const { qrlAccounts, activeAccount, setActiveAccount } = qrlStore;
   const { accountAddress: activeAccountAddress } = activeAccount;
   const { accounts } = qrlAccounts;
@@ -202,6 +281,17 @@ const OtherAccounts = observer(() => {
     await hiddenAccountsStore.hideAccount(accountAddress);
   };
 
+  const onRemove = async (accountAddress: string) => {
+    // Ledger accounts have no keystore; drop their device metadata instead.
+    if (ledgerStore.isLedgerAccount(accountAddress)) {
+      await ledgerStore.removeAccount(accountAddress);
+    }
+    await lockStore.removeAccountKey(accountAddress);
+    await qrlStore.removeAccount(accountAddress);
+    await accountLabelsStore.removeLabel(accountAddress);
+    await hiddenAccountsStore.unhideAccount(accountAddress);
+  };
+
   return (
     !!otherAccounts.length && (
       <div className="flex flex-col gap-2">
@@ -214,6 +304,7 @@ const OtherAccounts = observer(() => {
             onCopy={copyAccount}
             onReceive={receiveAccount}
             onHide={onHide}
+            onRemove={onRemove}
           />
         ))}
       </div>

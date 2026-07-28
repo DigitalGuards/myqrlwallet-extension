@@ -100,6 +100,7 @@ class QrlStore {
       refreshBlockchainData: action.bound,
       selectBlockchain: action.bound,
       setActiveAccount: action.bound,
+      removeAccount: action.bound,
       fetchQrlConnection: action.bound,
       fetchAccounts: action.bound,
       refreshBalancesQuietly: action.bound,
@@ -256,6 +257,35 @@ class QrlStore {
       storedAccountList = [...new Set(storedAccountList)];
     } finally {
       await StorageUtil.setAllAccounts(storedAccountList);
+      await this.fetchAccounts();
+    }
+  }
+
+  /**
+   * Remove one account from the wallet: its encrypted keystore, its
+   * accounts-list entry, and its cached transaction history. Funds stay on
+   * chain; getting the account back requires re-importing its seed or a
+   * backup. If the removed account was active, the first remaining account
+   * becomes active.
+   */
+  async removeAccount(accountAddress: string) {
+    const target = accountAddress.toLowerCase();
+    const keystores = await StorageUtil.getKeystores();
+    await StorageUtil.setKeystores(
+      keystores.filter(
+        (keystore) => keystore.address.toLowerCase() !== target,
+      ),
+    );
+    const storedAccounts = await StorageUtil.getAllAccounts();
+    const remainingAccounts = storedAccounts.filter(
+      (account) => account.toLowerCase() !== target,
+    );
+    await StorageUtil.setAllAccounts(remainingAccounts);
+    await StorageUtil.clearTransactionHistory(accountAddress);
+    const storedActiveAccount = await StorageUtil.getActiveAccount();
+    if (storedActiveAccount?.toLowerCase() === target) {
+      await this.setActiveAccount(remainingAccounts[0]);
+    } else {
       await this.fetchAccounts();
     }
   }

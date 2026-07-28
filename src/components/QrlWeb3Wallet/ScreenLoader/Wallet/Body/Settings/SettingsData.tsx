@@ -6,13 +6,15 @@ import {
   CardTitle,
 } from "@/components/UI/Card";
 import { ROUTES } from "@/router/router";
+import { Separator } from "@/components/UI/Separator";
 import StorageUtil from "@/utilities/storageUtil";
-import { Download, MoveLeft } from "lucide-react";
+import { Download, MoveLeft, Trash2 } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
+import ResetWalletDialog from "../../../Shared/ResetWalletDialog/ResetWalletDialog";
 
 const WALLET_VERSION = "0.1.1";
 
@@ -20,6 +22,7 @@ const SettingsData = observer(() => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [exporting, setExporting] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
 
   const exportBackup = async () => {
     setExporting(true);
@@ -81,8 +84,24 @@ const SettingsData = observer(() => {
               <Download className="mr-1 h-3.5 w-3.5" />
               {exporting ? t("settings.data.exportingButton") : t("settings.data.exportButton")}
             </Button>
+            <Separator className="my-5" />
+            <p className="mb-3 text-xs text-muted-foreground">
+              {t("settings.data.resetDescription")}
+            </p>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setResetDialogOpen(true)}
+            >
+              <Trash2 className="mr-1 h-3.5 w-3.5" />
+              {t("settings.data.resetButton")}
+            </Button>
           </CardContent>
         </Card>
+        <ResetWalletDialog
+          open={resetDialogOpen}
+          onOpenChange={setResetDialogOpen}
+        />
       </div>
     </div>
   );
