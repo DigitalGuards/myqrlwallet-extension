@@ -21,6 +21,19 @@ type ResetWalletDialogProps = {
 };
 
 /**
+ * Restart the surface so no store keeps a reference to the wiped wallet.
+ * Isolated (and failure-tolerant) so a host that forbids navigation cannot
+ * turn a completed reset into a thrown error.
+ */
+const reloadSurface = () => {
+  try {
+    window.location.reload();
+  } catch {
+    // Reset already succeeded; a failed reload is cosmetic.
+  }
+};
+
+/**
  * Typed-confirmation factory reset. Shared between Settings > Data and the
  * lock screen's forgot-password escape hatch, so it must not assume the
  * wallet is unlocked. On confirm it wipes all local storage; the lock-state
@@ -50,8 +63,14 @@ const ResetWalletDialog = observer(
       setResetError("");
       try {
         await lockStore.resetWallet();
-        // No local cleanup needed: the reset flips hasPasswordSet, which
-        // unmounts this dialog together with the screen that opened it.
+        // Storage and the service worker are wiped, but this document's
+        // stores still hold the old wallet in memory (qrlStore's active
+        // account and balances, the account labels, and so on). Onboarding
+        // would then render the address of the wallet that was just
+        // destroyed until something happened to reload the surface.
+        // Reloading is the only way to guarantee no stale state survives
+        // anywhere in the document.
+        reloadSurface();
       } catch {
         // A partial wipe must not read as a completed one: keep the dialog
         // open and say so.

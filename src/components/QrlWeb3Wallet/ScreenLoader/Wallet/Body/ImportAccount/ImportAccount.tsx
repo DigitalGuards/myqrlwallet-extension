@@ -48,7 +48,7 @@ const ImportAccount = observer(() => {
   const [account, setAccount] = useState<Web3BaseWalletAccount>();
   const [hasAccountImported, setHasAccountImported] = useState(false);
   const [finalizeError, setFinalizeError] = useState("");
-  const { lockStore, qrlStore } = useStore();
+  const { lockStore, qrlStore, accountLabelsStore } = useStore();
   const { encryptAccount, getWalletPassword } = lockStore;
   const { setActiveAccount } = qrlStore;
 
@@ -69,6 +69,9 @@ const ImportAccount = observer(() => {
       setFinalizeError(t("account.passwordUnavailable"));
       return;
     }
+    // Name it now so the header reads "Account N" immediately rather than
+    // the raw address until some other screen happens to run syncLabels.
+    await accountLabelsStore.ensureLabel(importedAccount.address);
     setFinalizeError("");
     setHasAccountImported(true);
   };

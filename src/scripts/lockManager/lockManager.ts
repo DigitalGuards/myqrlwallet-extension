@@ -187,6 +187,12 @@ class LockManager {
   /**
    * Restore keys from session storage after SW restart.
    * Returns true if keys were restored.
+   *
+   * Refuses to restore into a wallet that no longer exists, and scrubs the
+   * backup when it finds one. Session storage outlives a factory reset by
+   * design (it is what survives service-worker restarts), so if anything
+   * re-armed the worker after the wipe, the keep-alive tick would otherwise
+   * keep reviving the destroyed wallet's plaintext mnemonics every ~24s.
    */
   static async restoreKeysFromSession(): Promise<boolean> {
     try {
@@ -195,6 +201,14 @@ class LockManager {
         | DecryptedKeyType[]
         | undefined;
       if (keys?.length) {
+        const [keyStores, accounts] = await Promise.all([
+          StorageUtil.getKeystores(),
+          StorageUtil.getAllAccounts(),
+        ]);
+        if (keyStores.length === 0 || accounts.length === 0) {
+          await this.clearSessionKeys();
+          return false;
+        }
         this.decryptedKeys = keys;
         return true;
       }
@@ -216,6 +230,10 @@ class LockManager {
       // wipes.
       this.clearDecryptedKeys();
       this.walletPassword = undefined;
+      // Drop the decrypted-key backup too. Clearing only the in-memory copy
+      // left plaintext mnemonics in session storage after a factory reset,
+      // ready for the next restore to pick back up.
+      await this.clearSessionKeys();
     }
     // If SW restarted (lost in-memory keys), try restoring from session backup.
     if (this.decryptedKeys === undefined && hasPasswordSet) {

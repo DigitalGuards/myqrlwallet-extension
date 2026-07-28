@@ -23,11 +23,12 @@ import {
   WalletFileFormatError,
 } from "@/functions/walletFileImport";
 import { useStore } from "@/stores/store";
+import { cn } from "@/utilities/stylingUtil";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
 import { Loader, Upload } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
@@ -48,6 +49,7 @@ const ImportEncryptedWallet = observer(
 
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [fileError, setFileError] = useState("");
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const form = useForm<z.infer<typeof FormSchema>>({
       resolver: zodResolver(FormSchema),
@@ -126,14 +128,48 @@ const ImportEncryptedWallet = observer(
                 <Label htmlFor="walletFile">
                   {t("importAccount.walletFileLabel")}
                 </Label>
+                {/* The native file control renders its own "Choose File /
+                    No file chosen" chrome, which no CSS can restyle. Keep
+                    the real input (accessible, still the form control) but
+                    visually hidden, and drive it from themed elements. */}
                 <Input
+                  ref={fileInputRef}
                   id="walletFile"
                   type="file"
                   accept="application/json,.json"
                   aria-label="walletFile"
                   disabled={isSubmitting}
                   onChange={handleFileChange}
+                  // sr-only clips rather than hiding, so the input would
+                  // otherwise stay in the tab order as an invisible stop
+                  // whose focus ring is clipped away. The themed button is
+                  // the keyboard path; the label still activates this input.
+                  tabIndex={-1}
+                  className="sr-only"
                 />
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isSubmitting}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload className="mr-2 h-3.5 w-3.5 shrink-0" />
+                    {t("importAccount.walletFileChoose")}
+                  </Button>
+                  <span
+                    className={cn(
+                      "min-w-0 flex-1 truncate text-sm",
+                      selectedFile
+                        ? "font-data text-foreground"
+                        : "text-muted-foreground",
+                    )}
+                    title={selectedFile?.name}
+                  >
+                    {selectedFile?.name ?? t("importAccount.walletFileNone")}
+                  </span>
+                </div>
                 {fileError ? (
                   <p className="text-sm font-medium text-destructive">
                     {fileError}

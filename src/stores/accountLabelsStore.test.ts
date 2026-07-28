@@ -240,6 +240,58 @@ describe("AccountLabelsStore", () => {
     });
   });
 
+  describe("ensureLabel", () => {
+    const ADDRESS = "Q20B714091cF2a62DADda2847803e3f1B9D2D3779";
+    const OTHER = "Q20fB08fF1f1376A14C055E9F56df80563E16722b";
+
+    it("names a brand-new account immediately", async () => {
+      // Without this the header falls back to the raw address until some
+      // other screen happens to run syncLabels.
+      await store.ensureLabel(ADDRESS);
+
+      expect(store.getLabel(ADDRESS)).toBe("Account 1");
+      expect(localStore["ACCOUNT_LABELS"][ADDRESS]).toBe("Account 1");
+    });
+
+    it("does not renumber an account that already has a label", async () => {
+      localStore["ACCOUNT_LABELS"] = { [ADDRESS]: "Savings" };
+
+      await store.ensureLabel(ADDRESS);
+
+      expect(store.getLabel(ADDRESS)).toBe("Savings");
+    });
+
+    it("picks the next free number alongside existing labels", async () => {
+      localStore["ACCOUNT_LABELS"] = { [OTHER]: "Account 1" };
+
+      await store.ensureLabel(ADDRESS);
+
+      expect(store.getLabel(ADDRESS)).toBe("Account 2");
+    });
+
+    it("does not collide with numbers syncLabels would hand out", async () => {
+      await store.ensureLabel(ADDRESS);
+      await store.syncLabels([{ accountAddress: OTHER }], noLedger);
+
+      expect(store.getLabel(ADDRESS)).toBe("Account 1");
+      expect(store.getLabel(OTHER)).toBe("Account 2");
+    });
+
+    it("uses the Ledger prefix and its own numbering", async () => {
+      localStore["ACCOUNT_LABELS"] = { [OTHER]: "Account 1" };
+
+      await store.ensureLabel(ADDRESS, true);
+
+      expect(store.getLabel(ADDRESS)).toBe("Ledger 1");
+    });
+
+    it("ignores an empty address", async () => {
+      await store.ensureLabel("");
+
+      expect(localStore["ACCOUNT_LABELS"]).toBeUndefined();
+    });
+  });
+
   describe("clearLabels", () => {
     it("should clear all labels from store and storage", async () => {
       store.labels = {
