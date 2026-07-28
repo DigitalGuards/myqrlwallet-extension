@@ -45,19 +45,11 @@ const AccountCreateImport = observer(() => {
 
   const hasActiveAccount = !!accountAddress;
 
-  const [tokenContractsList, setTokenContractsList] = useState<string[]>([]);
+  const [tokenCount, setTokenCount] = useState(0);
   const [nftCollectionsCount, setNftCollectionsCount] = useState(0);
   const [discoveredTokenCount, setDiscoveredTokenCount] = useState(0);
   const [discoveredCollectionCount, setDiscoveredCollectionCount] =
     useState(0);
-
-  useEffect(() => {
-    (async () => {
-      const storedTokens =
-        await StorageUtil.getTokenContractsList(accountAddress);
-      setTokenContractsList(storedTokens.map((token) => token?.address));
-    })();
-  }, [accountAddress]);
 
   // Explorer-side asset discovery: count what the explorer sees on this
   // address but the user has not imported yet, and surface a hint above
@@ -145,11 +137,12 @@ const AccountCreateImport = observer(() => {
               <CardTitle>{t('home.tokens')}</CardTitle>
             </CardHeader>
             {/* hidden (not unmounted) when empty so the list still fetches;
-                an empty CardContent otherwise doubles the header gap */}
-            <CardContent
-              className={cn(tokenContractsList.length === 0 && "hidden")}
-            >
-              <TokensCardContent />
+                an empty CardContent otherwise doubles the header gap.
+                The count comes from the list itself, which reloads on
+                in-place hides too: a snapshot taken here would go stale the
+                moment the user hid the last token from this card. */}
+            <CardContent className={cn(tokenCount === 0 && "hidden")}>
+              <TokensCardContent onCountChange={setTokenCount} />
             </CardContent>
             <CardFooter className="flex-col gap-4">
               {discoveredTokenCount > 0 && (
@@ -175,7 +168,7 @@ const AccountCreateImport = observer(() => {
                   )}
                 </Button>
               </Link>
-              {tokenContractsList.length > ZRC_20_ITEMS_DISPLAY_LIMIT && (
+              {tokenCount > ZRC_20_ITEMS_DISPLAY_LIMIT && (
                 <Link className="w-full" to={ROUTES.ALL_ZRC_20_TOKENS}>
                   <Button className="w-full" type="button" variant="outline">
                     <Logs className="mr-2 h-4 w-4" />
