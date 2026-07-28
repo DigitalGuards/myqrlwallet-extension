@@ -151,4 +151,23 @@ describe("ImportEncryptedWallet", () => {
     });
     expect(onImported).not.toHaveBeenCalled();
   });
+
+  it("shows the chosen filename instead of the native file control", async () => {
+    // The native "Choose File / No file chosen" chrome cannot be themed, so
+    // the real input is visually hidden and driven by our own button.
+    renderComponent();
+
+    expect(screen.getByText("No file selected")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Choose file/i }),
+    ).toBeInTheDocument();
+
+    const file = new File(["{}"], "my-backup.json", {
+      type: "application/json",
+    });
+    await userEvent.upload(screen.getByLabelText("walletFile"), file);
+
+    expect(screen.getByText("my-backup.json")).toBeInTheDocument();
+    expect(screen.queryByText("No file selected")).not.toBeInTheDocument();
+  });
 });

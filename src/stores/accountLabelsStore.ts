@@ -3,6 +3,26 @@ import { action, makeAutoObservable, observable, runInAction } from "mobx";
 
 type AccountLike = { accountAddress: string };
 
+/** Numbers already taken by default labels, so a new one never collides. */
+const collectUsedNumbers = (stored: Record<string, string>) => {
+  const usedAccountNums = new Set<number>();
+  const usedLedgerNums = new Set<number>();
+  for (const label of Object.values(stored)) {
+    const accountMatch = label.match(/^Account (\d+)$/);
+    if (accountMatch) usedAccountNums.add(Number(accountMatch[1]));
+    const ledgerMatch = label.match(/^Ledger (\d+)$/);
+    if (ledgerMatch) usedLedgerNums.add(Number(ledgerMatch[1]));
+  }
+  return { usedAccountNums, usedLedgerNums };
+};
+
+const nextAvailable = (used: Set<number>) => {
+  let n = 1;
+  while (used.has(n)) n++;
+  used.add(n);
+  return n;
+};
+
 class AccountLabelsStore {
   labels: Record<string, string> = {};
   isLoading = false;
@@ -13,6 +33,7 @@ class AccountLabelsStore {
       isLoading: observable,
       loadLabels: action.bound,
       syncLabels: action.bound,
+      ensureLabel: action.bound,
       setLabel: action.bound,
       removeLabel: action.bound,
       clearLabels: action.bound,
@@ -35,6 +56,38 @@ class AccountLabelsStore {
     }
   }
 
+  /**
+   * Give one account its default name straight away.
+   *
+   * Called the moment an account is created or imported, so the header
+   * shows "Account N" immediately instead of falling back to the raw
+   * address until something else happens to run syncLabels (previously
+   * only the account list and the recipient picker did, which is why a
+   * fresh account showed its address until you navigated around).
+   *
+   * Numbering comes from the same helper syncLabels uses, so the two
+   * paths cannot hand out the same number.
+   */
+  async ensureLabel(address: string, isLedger = false) {
+    if (!address) return;
+    const stored = await StorageUtil.getAccountLabels();
+    if (stored[address]) {
+      runInAction(() => {
+        this.labels = stored;
+      });
+      return;
+    }
+
+    const { usedAccountNums, usedLedgerNums } = collectUsedNumbers(stored);
+    const num = nextAvailable(isLedger ? usedLedgerNums : usedAccountNums);
+    stored[address] = isLedger ? `Ledger ${num}` : `Account ${num}`;
+
+    await StorageUtil.setAccountLabels(stored);
+    runInAction(() => {
+      this.labels = stored;
+    });
+  }
+
   async syncLabels(
     accounts: AccountLike[],
     isLedgerAccountFn: (address: string) => boolean,
@@ -42,21 +95,7 @@ class AccountLabelsStore {
     const stored = await StorageUtil.getAccountLabels();
     let changed = false;
 
-    const usedAccountNums = new Set<number>();
-    const usedLedgerNums = new Set<number>();
-    for (const label of Object.values(stored)) {
-      const accountMatch = label.match(/^Account (\d+)$/);
-      if (accountMatch) usedAccountNums.add(Number(accountMatch[1]));
-      const ledgerMatch = label.match(/^Ledger (\d+)$/);
-      if (ledgerMatch) usedLedgerNums.add(Number(ledgerMatch[1]));
-    }
-
-    const nextAvailable = (used: Set<number>) => {
-      let n = 1;
-      while (used.has(n)) n++;
-      used.add(n);
-      return n;
-    };
+    const { usedAccountNums, usedLedgerNums } = collectUsedNumbers(stored);
 
     for (const a of accounts) {
       if (!stored[a.accountAddress]) {

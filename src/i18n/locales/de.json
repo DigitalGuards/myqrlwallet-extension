@@ -340,6 +340,8 @@
   "importAccount.walletFilePasswordLabel": "Password",
   "importAccount.walletFilePasswordPlaceholder": "Enter the wallet file password",
   "importAccount.walletFileSelect": "Select a wallet file",
+  "importAccount.walletFileChoose": "Datei wählen",
+  "importAccount.walletFileNone": "Keine Datei ausgewählt",
   "importAccount.walletFileRequired": "Please select a wallet file",
   "importAccount.walletFilePasswordRequired": "Password is required",
   "importAccount.walletFileInvalid": "This is not a valid MyQRLWallet encrypted wallet file",

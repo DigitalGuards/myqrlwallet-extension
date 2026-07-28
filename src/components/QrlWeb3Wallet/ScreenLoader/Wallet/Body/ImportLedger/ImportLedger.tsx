@@ -45,7 +45,7 @@ const ACCOUNTS_PER_PAGE = 5;
 const ImportLedger = observer(() => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { ledgerStore, qrlStore } = useStore();
+  const { ledgerStore, qrlStore, accountLabelsStore } = useStore();
   const {
     connectionError,
     isConnected,
@@ -163,9 +163,12 @@ const ImportLedger = observer(() => {
     try {
       const newAccounts = Array.from(selectedAccountsMap.values());
 
-      // Add selected accounts to the main wallet account list
+      // Add selected accounts to the main wallet account list, naming each
+      // one straight away so the header and account list read "Ledger N"
+      // instead of the raw address until something runs syncLabels.
       for (const account of newAccounts) {
         await StorageUtil.addLedgerAccountToAllAccounts(account.address);
+        await accountLabelsStore.ensureLabel(account.address, true);
       }
 
       // Merge with existing stored Ledger accounts (not overwrite)
