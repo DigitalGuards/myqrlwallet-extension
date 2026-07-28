@@ -40,7 +40,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
 import { Loader, Upload } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
@@ -77,6 +77,17 @@ const ImportEncryptedWallet = observer(
     // Monotonic token so a slow read of a previous file cannot overwrite the
     // parse result of a newer selection.
     const parseTokenRef = useRef(0);
+    // A multi-second KDF can outlive the screen (Back button, dialog close).
+    // The worker cannot be aborted mid-derivation, but a canceled flow must
+    // never land the import: onImported mutates stores (active account,
+    // keystore persistence), which unmount does not neutralize.
+    const mountedRef = useRef(true);
+    useEffect(() => {
+      mountedRef.current = true;
+      return () => {
+        mountedRef.current = false;
+      };
+    }, []);
 
     const form = useForm<z.infer<typeof FormSchema>>({
       resolver: zodResolver(FormSchema),
@@ -149,6 +160,7 @@ const ImportEncryptedWallet = observer(
           hexSeed =
             decrypted.hexSeed || getHexSeedFromMnemonic(decrypted.mnemonic);
         }
+        if (!mountedRef.current) return;
         if (!hexSeed) {
           setFileError(t("importAccount.walletFileNoAccounts"));
           return;

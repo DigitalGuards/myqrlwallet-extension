@@ -152,9 +152,32 @@ describe("parseKeystoreBackup validation", () => {
     });
     expect(() => parseWalletImportFile(badIv)).toThrow(WalletFileFormatError);
     const badCiphertext = mutateFirstKeystore(text, (ks) => {
-      (ks.crypto as Record<string, unknown>).ciphertext = "zz" + "00".repeat(20);
+      (ks.crypto as Record<string, unknown>).ciphertext = "zz" + "00".repeat(66);
     });
     expect(() => parseWalletImportFile(badCiphertext)).toThrow(WalletFileFormatError);
+  });
+
+  it("rejects a ciphertext that is not exactly seed+tag sized", async () => {
+    // 51-byte seed + 16-byte GCM tag = 67 bytes; anything else is a
+    // wrong-era or corrupt file and must fail at selection, not after a
+    // correct password.
+    const { text } = await makeBackupFile(1, PASSWORD);
+    for (const bytes of [66, 68, 80]) {
+      const mutated = mutateFirstKeystore(text, (ks) => {
+        (ks.crypto as Record<string, unknown>).ciphertext = "00".repeat(bytes);
+      });
+      expect(() => parseWalletImportFile(mutated)).toThrow(WalletFileFormatError);
+    }
+  });
+
+  it("rejects a salt below argon2's 8-byte minimum at parse time", async () => {
+    const { text } = await makeBackupFile(1, PASSWORD);
+    const mutated = mutateFirstKeystore(text, (ks) => {
+      (
+        (ks.crypto as Record<string, Record<string, unknown>>).kdfparams
+      ).salt = "abcd";
+    });
+    expect(() => parseWalletImportFile(mutated)).toThrow(WalletFileFormatError);
   });
 
   it("defaults missing id/address instead of rejecting", async () => {

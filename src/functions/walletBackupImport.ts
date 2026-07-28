@@ -47,7 +47,15 @@ const KDF_BOUNDS: Record<"m" | "t" | "p" | "dklen", [number, number]> = {
   dklen: [16, 64],
 };
 const IV_HEX_CHARS = 24; // 12 bytes
-const MIN_CIPHERTEXT_HEX_CHARS = (16 + 1) * 2; // GCM tag + at least one byte
+// Exactly one 51-byte extended seed + the 16-byte GCM tag. Pinning the
+// length here (rather than post-decrypt like the frontend) rejects
+// wrong-era files (e.g. future 64-byte QIP-55 seeds) at selection time as a
+// format error instead of a confusing failure after a correct password.
+const CIPHERTEXT_HEX_CHARS = (51 + 16) * 2;
+// argon2 implementations reject salts under 8 bytes; catching it here keeps
+// a bad file from burning a KDF attempt and firing the misleading
+// WASM-unavailable fallback warning in keystoreCrypto.
+const MIN_SALT_HEX_CHARS = 8 * 2;
 
 const isHexString = (value: unknown): value is string =>
   typeof value === "string" &&
@@ -89,7 +97,7 @@ function validateKeystore(candidate: unknown, index: number): KeyStore {
     throw new WalletFileFormatError(`Invalid IV in ${label}`);
   }
   const ciphertext = c.ciphertext;
-  if (!isHexString(ciphertext) || ciphertext.length < MIN_CIPHERTEXT_HEX_CHARS) {
+  if (!isHexString(ciphertext) || ciphertext.length !== CIPHERTEXT_HEX_CHARS) {
     throw new WalletFileFormatError(`Invalid ciphertext in ${label}`);
   }
   const kdfparams = c.kdfparams;
@@ -108,7 +116,7 @@ function validateKeystore(candidate: unknown, index: number): KeyStore {
     );
   }
   const salt = kp.salt;
-  if (!isHexString(salt) || salt.length === 0) {
+  if (!isHexString(salt) || salt.length < MIN_SALT_HEX_CHARS) {
     throw new WalletFileFormatError(`Invalid salt in ${label}`);
   }
   return {
