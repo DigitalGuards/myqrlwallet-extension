@@ -83,18 +83,18 @@ const ActiveAccountDisplay = observer(() => {
       )}
       <button
         type="button"
-        className="mt-1 inline-flex items-center gap-2 rounded-full border border-blue-accent/30 bg-blue-accent/[0.08] px-3 py-1.5 transition-colors hover:bg-blue-accent/[0.14]"
+        className="mt-1 inline-flex items-center gap-2 rounded-full border border-identity-accent/30 bg-identity-accent/[0.08] px-3 py-1.5 transition-colors hover:bg-identity-accent/[0.14]"
         aria-label="Copy address"
         title={accountAddress}
         onClick={() => void handleCopyAddress()}
       >
-        <span className="font-data text-xs text-blue-accent">
+        <span className="font-data text-xs text-identity-accent">
           {abbreviatedAddress}
         </span>
         {copiedAddress ? (
           <Check className="h-3.5 w-3.5 shrink-0 text-success" />
         ) : (
-          <Copy className="h-3.5 w-3.5 shrink-0 text-blue-accent/60" />
+          <Copy className="h-3.5 w-3.5 shrink-0 text-identity-accent/60" />
         )}
       </button>
     </div>

@@ -36,9 +36,9 @@ module.exports = {
   				DEFAULT: 'hsl(var(--secondary))',
   				foreground: 'hsl(var(--secondary-foreground))'
   			},
-  			'blue-accent': {
-  				DEFAULT: 'hsl(var(--blue-accent))',
-  				foreground: 'hsl(var(--blue-accent-foreground))'
+  			'identity-accent': {
+  				DEFAULT: 'hsl(var(--identity-accent))',
+  				foreground: 'hsl(var(--identity-accent-foreground))'
   			},
   			constructive: {
   				DEFAULT: 'hsl(var(--constructive))',
