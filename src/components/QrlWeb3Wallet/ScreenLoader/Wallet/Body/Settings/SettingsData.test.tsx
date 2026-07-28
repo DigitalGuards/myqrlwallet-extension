@@ -101,4 +101,71 @@ describe("SettingsData", () => {
       screen.queryByRole("button", { name: "Reset wallet" }),
     ).not.toBeInTheDocument();
   });
+
+  it("restarts the surface after a successful reset", async () => {
+    // Storage and the service worker are wiped, but this document's stores
+    // still hold the destroyed wallet: without a reload, onboarding renders
+    // the old account's address.
+    const reload = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, reload },
+    });
+
+    try {
+      const resetWallet = vi.fn<() => Promise<void>>(() => Promise.resolve());
+      renderComponent(mockedStore({ lockStore: { resetWallet } }));
+
+      await userEvent.click(
+        screen.getByRole("button", { name: /Reset Wallet/i }),
+      );
+      await userEvent.type(screen.getByPlaceholderText("RESET"), "RESET");
+      await userEvent.click(
+        screen.getByRole("button", { name: "Reset wallet" }),
+      );
+
+      expect(resetWallet).toHaveBeenCalledTimes(1);
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
+  });
+
+  it("does not restart the surface when the reset fails", async () => {
+    const reload = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, reload },
+    });
+
+    try {
+      const resetWallet = vi.fn<() => Promise<void>>(() =>
+        Promise.reject(new Error("storage unavailable")),
+      );
+      renderComponent(mockedStore({ lockStore: { resetWallet } }));
+
+      await userEvent.click(
+        screen.getByRole("button", { name: /Reset Wallet/i }),
+      );
+      await userEvent.type(screen.getByPlaceholderText("RESET"), "RESET");
+      await userEvent.click(
+        screen.getByRole("button", { name: "Reset wallet" }),
+      );
+
+      expect(reload).not.toHaveBeenCalled();
+      expect(
+        screen.getByText(/The reset did not complete/),
+      ).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
+  });
 });
