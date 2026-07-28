@@ -21,7 +21,7 @@ const MnemonicDisplay = withSuspense(
 
 const CreateAccount = observer(() => {
   const { t } = useTranslation();
-  const { lockStore, qrlStore } = useStore();
+  const { lockStore, qrlStore, accountLabelsStore } = useStore();
   const { encryptAccount, getWalletPassword } = lockStore;
   const { setActiveAccount } = qrlStore;
 
@@ -44,6 +44,9 @@ const CreateAccount = observer(() => {
         setFinalizeError(t("account.passwordUnavailable"));
         return;
       }
+      // Name it now so the header reads "Account N" immediately rather than
+      // the raw address until some other screen happens to run syncLabels.
+      await accountLabelsStore.ensureLabel(account.address);
       setFinalizeError("");
       setHasAccountCreated(true);
     }

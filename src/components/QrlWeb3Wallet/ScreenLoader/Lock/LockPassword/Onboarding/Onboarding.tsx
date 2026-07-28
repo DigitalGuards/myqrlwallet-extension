@@ -18,7 +18,7 @@ export type OnboardingStepType =
   (typeof ONBOARDING_STEPS)[keyof typeof ONBOARDING_STEPS];
 
 const Onboarding = observer(() => {
-  const { lockStore, qrlStore } = useStore();
+  const { lockStore, qrlStore, accountLabelsStore } = useStore();
   const { encryptAccount } = lockStore;
   const { setActiveAccount } = qrlStore;
 
@@ -48,6 +48,11 @@ const Onboarding = observer(() => {
   const addAnAccountToWallet = async (account: Web3BaseWalletAccount) => {
     setActiveAccount(account.address);
     await encryptAccount(account, password);
+    // Name it now so the header reads "Account N" immediately rather than
+    // the raw address until some other screen happens to run syncLabels.
+    // Never let a naming failure strand onboarding after the keystore is
+    // already persisted: syncLabels backstops the label later.
+    await accountLabelsStore.ensureLabel(account.address).catch(() => {});
   };
 
   if (step === ONBOARDING_STEPS.WELCOME)
