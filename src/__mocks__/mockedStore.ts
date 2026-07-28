@@ -65,6 +65,7 @@ const mockedStoreValues: StoreType = {
       remainingAccounts: [],
     }),
     removeAccount: async (_accountAddress: string) => {},
+    clearAccountState: () => {},
     getNativeTokenGas: async () => {
       return "";
     },

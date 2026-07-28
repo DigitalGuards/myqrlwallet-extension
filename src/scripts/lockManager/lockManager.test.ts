@@ -129,14 +129,17 @@ describe("LockManager – keep-alive & auto-lock", () => {
     });
 
     it("should restore keys from session if SW restarted", async () => {
-      // Simulate: keys backed up in session, but in-memory is empty (SW restart)
+      // Simulate: a wallet exists, keys backed up in session, in-memory is
+      // empty (SW restart). The wallet has to be in storage BEFORE the tick:
+      // restoring keys for a wallet that is not there is exactly what the
+      // post-reset scrub refuses to do.
+      localStore["KEYSTORES"] = JSON.stringify([{ address: "0x123" }]);
+      localStore["ACCOUNTS"] = { ALL_ACCOUNTS: ["0x123"] };
       sessionStore["_LM_CACHED_KEYS"] = MOCK_KEYS;
 
       await LockManager.handleKeepAliveAlarm();
 
       // Keys should be restored — wallet unlocked
-      localStore["KEYSTORES"] = JSON.stringify([{ address: "0x123" }]);
-      localStore["ACCOUNTS"] = { ALL_ACCOUNTS: ["0x123"] };
       const { isLocked } = await LockManager.isLocked();
       expect(isLocked).toBe(false);
 
@@ -404,6 +407,15 @@ describe("LockManager – account removal & factory reset", () => {
       // popup-side get-filter-set cannot reach them (getDecryptedKeys
       // throws), so the removed account's mnemonic would survive and the
       // next keep-alive tick would load it straight back into memory.
+      // The wallet itself is still present: this is an account removal,
+      // not a reset.
+      localStore["KEYSTORES"] = JSON.stringify([
+        { address: KEY_A.address.toLowerCase() },
+        { address: KEY_B.address.toLowerCase() },
+      ]);
+      localStore["ACCOUNTS"] = {
+        ALL_ACCOUNTS: [KEY_A.address, KEY_B.address],
+      };
       sessionStore[SESSION_KEYS_KEY] = [KEY_A, KEY_B];
 
       await LockManager.removeAccountKey(KEY_B.address);
@@ -475,5 +487,58 @@ describe("LockManager – account removal & factory reset", () => {
       expect(after.isLocked).toBe(true);
       expect(after.hasPasswordSet).toBe(false);
     });
+  });
+});
+
+describe("LockManager – session backup cannot outlive the wallet", () => {
+  const SESSION_KEYS_KEY = "_LM_CACHED_KEYS";
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    clearStore(localStore);
+    clearStore(sessionStore);
+    clearStore(alarmsStore);
+    await LockManager.lock();
+  });
+
+  it("refuses to restore keys for a wallet that no longer exists, and scrubs the backup", async () => {
+    // Anything that re-armed the worker after a factory reset would
+    // otherwise have the keep-alive tick revive the destroyed wallet's
+    // plaintext mnemonics from session storage every ~24s.
+    sessionStore[SESSION_KEYS_KEY] = MOCK_KEYS;
+
+    const restored = await LockManager.restoreKeysFromSession();
+
+    expect(restored).toBe(false);
+    expect(sessionStore[SESSION_KEYS_KEY]).toBeUndefined();
+  });
+
+  it("still restores when the wallet is intact", async () => {
+    localStore["KEYSTORES"] = JSON.stringify([{ address: "qaaa" }]);
+    localStore["ACCOUNTS"] = { ALL_ACCOUNTS: [MOCK_KEYS[0].address] };
+    sessionStore[SESSION_KEYS_KEY] = MOCK_KEYS;
+
+    const restored = await LockManager.restoreKeysFromSession();
+
+    expect(restored).toBe(true);
+    expect(LockManager.getDecryptedKeys()).toEqual(MOCK_KEYS);
+  });
+
+  it("scrubs the backup when isLocked sees a wiped wallet", async () => {
+    sessionStore[SESSION_KEYS_KEY] = MOCK_KEYS;
+
+    const { hasPasswordSet } = await LockManager.isLocked();
+
+    expect(hasPasswordSet).toBe(false);
+    expect(sessionStore[SESSION_KEYS_KEY]).toBeUndefined();
+  });
+
+  it("keeps the keep-alive tick from reviving a wiped wallet", async () => {
+    sessionStore[SESSION_KEYS_KEY] = MOCK_KEYS;
+
+    await LockManager.handleKeepAliveAlarm();
+
+    expect(() => LockManager.getDecryptedKeys()).toThrow();
+    expect(sessionStore[SESSION_KEYS_KEY]).toBeUndefined();
   });
 });
