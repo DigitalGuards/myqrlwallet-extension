@@ -399,7 +399,7 @@ const QrlSendTransactionForContent = observer(
           <div className="flex flex-col gap-2">
             <div className="flex flex-col gap-1">
               <div>{t('dapp.sendTransaction.fromAddress')}</div>
-              <div className="font-data w-64 font-bold text-blue-accent">{`${prefixFrom} ${addressSplitFrom.join(" ")}`}</div>
+              <div className="font-data w-64 font-bold text-identity-accent">{`${prefixFrom} ${addressSplitFrom.join(" ")}`}</div>
             </div>
             {(transactionType === SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION ||
               transactionType === SEND_TRANSACTION_TYPES.QRL_TRANSFER) && (
@@ -410,7 +410,7 @@ const QrlSendTransactionForContent = observer(
                     ? t('dapp.sendTransaction.contractAddress')
                     : t('dapp.sendTransaction.toAddress')}
                 </div>
-                <div className="font-data w-64 font-bold text-blue-accent">{`${prefixTo} ${addressSplitTo.join(" ")}`}</div>
+                <div className="font-data w-64 font-bold text-identity-accent">{`${prefixTo} ${addressSplitTo.join(" ")}`}</div>
               </div>
             )}
             {(transactionType === SEND_TRANSACTION_TYPES.QRL_TRANSFER ||

@@ -6,10 +6,10 @@
   /*
    * MyQRLWallet design tokens: "Obsidian & Ember", ported from the web
    * wallet system (myqrlwallet-frontend/src/index.css). One deep warm-ink
-   * surface family, ember orange as the single action color, QRL battery
-   * blue as the identity color (addresses, account markers): orange acts,
-   * blue identifies. Tailwind v3 here, so the tokens live in this CSS
-   * variable layer and are wired through tailwind.config.js.
+   * surface family, ember orange as the single action color, champagne as
+   * the identity color (addresses, account markers): orange acts,
+   * champagne identifies. Tailwind v3 here, so the tokens live in this
+   * CSS variable layer and are wired through tailwind.config.js.
    *
    * The rest of the product family (web, desktop, mobile) is dark-only;
    * the extension keeps its light preference, so :root carries a warm
@@ -33,9 +33,10 @@
     --secondary: 25 95% 48%;
     --secondary-foreground: 24 90% 97%;
 
-    /* QRL battery blue, darkened for light surfaces */
-    --blue-accent: 199 89% 38%;
-    --blue-accent-foreground: 200 90% 97%;
+    /* Champagne identity color (addresses, account markers), deepened
+       to bronze so it keeps contrast on light surfaces */
+    --identity-accent: 38 45% 34%;
+    --identity-accent-foreground: 38 60% 97%;
 
     --success: 152 55% 34%;
     --success-foreground: 152 80% 97%;
@@ -84,8 +85,10 @@
     --secondary: 25 95% 53%;
     --secondary-foreground: 24 90% 6%;
 
-    --blue-accent: 199 89% 64%;
-    --blue-accent-foreground: 200 90% 8%;
+    /* Champagne: the identity color (addresses, account markers) and
+       informational states. Orange acts, champagne identifies. */
+    --identity-accent: 38 45% 76%;
+    --identity-accent-foreground: 38 60% 8%;
 
     --success: 152 55% 48%;
     --success-foreground: 152 80% 8%;
@@ -261,7 +264,7 @@
       transparent,
       hsl(var(--primary) / 0.7) 30%,
       hsl(var(--primary)) 78%,
-      hsl(var(--blue-accent) / 0.9)
+      hsl(var(--identity-accent) / 0.9)
     );
     box-shadow: 0 0 12px hsl(var(--primary) / 0.5);
     animation: loader-sweep 1.15s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
@@ -275,7 +278,7 @@
       90deg,
       hsl(var(--primary) / 0.75),
       hsl(var(--primary)) 78%,
-      hsl(var(--blue-accent) / 0.9)
+      hsl(var(--identity-accent) / 0.9)
     );
     box-shadow: 0 0 12px hsl(var(--primary) / 0.5);
     transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1);

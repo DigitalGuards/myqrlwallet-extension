@@ -48,7 +48,7 @@ const AccountId = observer(({ account, hideLabel }: AccountIdType) => {
       )}
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-1">
-          <div className="font-data flex flex-wrap gap-1 text-blue-accent">
+          <div className="font-data flex flex-wrap gap-1 text-identity-accent">
             <div className="text-xs">
               {prefix}
               {addressSplit[0]}
