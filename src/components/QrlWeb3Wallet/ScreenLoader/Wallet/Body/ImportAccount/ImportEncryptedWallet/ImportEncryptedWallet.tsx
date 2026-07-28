@@ -140,6 +140,11 @@ const ImportEncryptedWallet = observer(
                   aria-label="walletFile"
                   disabled={isSubmitting}
                   onChange={handleFileChange}
+                  // sr-only clips rather than hiding, so the input would
+                  // otherwise stay in the tab order as an invisible stop
+                  // whose focus ring is clipped away. The themed button is
+                  // the keyboard path; the label still activates this input.
+                  tabIndex={-1}
                   className="sr-only"
                 />
                 <div className="flex items-center gap-3">

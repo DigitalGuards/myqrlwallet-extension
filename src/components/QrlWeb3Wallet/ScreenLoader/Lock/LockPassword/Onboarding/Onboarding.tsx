@@ -40,7 +40,9 @@ const Onboarding = observer(() => {
     await encryptAccount(account, password);
     // Name it now so the header reads "Account N" immediately rather than
     // the raw address until some other screen happens to run syncLabels.
-    await accountLabelsStore.ensureLabel(account.address);
+    // Never let a naming failure strand onboarding after the keystore is
+    // already persisted: syncLabels backstops the label later.
+    await accountLabelsStore.ensureLabel(account.address).catch(() => {});
   };
 
   if (step === ONBOARDING_STEPS.WELCOME)

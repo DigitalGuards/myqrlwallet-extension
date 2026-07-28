@@ -170,4 +170,30 @@ describe("ImportEncryptedWallet", () => {
     expect(screen.getByText("my-backup.json")).toBeInTheDocument();
     expect(screen.queryByText("No file selected")).not.toBeInTheDocument();
   });
+
+  it("opens the file dialog from the themed button", async () => {
+    // The filename test drives the hidden input directly, so it would stay
+    // green even if the button were wired to nothing. Assert the actual
+    // button -> fileInputRef.click() path.
+    renderComponent();
+
+    const input = screen.getByLabelText("walletFile");
+    const click = vi.spyOn(input, "click").mockImplementation(() => {});
+
+    await userEvent.click(screen.getByRole("button", { name: /Choose file/i }));
+
+    expect(click).toHaveBeenCalledTimes(1);
+    click.mockRestore();
+  });
+
+  it("keeps the hidden input out of the tab order", () => {
+    // sr-only clips instead of hiding, so without this the input is a
+    // focusable stop with no visible focus ring.
+    renderComponent();
+
+    expect(screen.getByLabelText("walletFile")).toHaveAttribute(
+      "tabindex",
+      "-1",
+    );
+  });
 });
