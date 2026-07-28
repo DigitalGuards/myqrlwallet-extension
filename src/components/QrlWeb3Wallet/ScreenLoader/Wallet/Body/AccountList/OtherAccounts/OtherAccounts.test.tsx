@@ -301,6 +301,77 @@ describe("OtherAccounts", () => {
     );
   });
 
+  it("should show Remove menu item", async () => {
+    renderComponent(twoAccountStore());
+
+    await openMenu();
+    expect(
+      screen.getByRole("menuitem", { name: "Remove" }),
+    ).toBeInTheDocument();
+  });
+
+  it("should remove the account only after confirming the dialog", async () => {
+    const removeAccount = vi.fn<any>(() => Promise.resolve());
+    const removeAccountKey = vi.fn<any>(() => Promise.resolve());
+    const removeLabel = vi.fn<any>(() => Promise.resolve());
+    const unhideAccount = vi.fn<any>(() => Promise.resolve());
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          activeAccount: {
+            accountAddress: "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1",
+          },
+          qrlAccounts: {
+            isLoading: false,
+            accounts: [
+              {
+                accountAddress: "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1",
+                accountBalance: "2.4568 QRL",
+              },
+              {
+                accountAddress: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+                accountBalance: "0.3695 QRL",
+              },
+            ],
+          },
+          removeAccount,
+        },
+        lockStore: { removeAccountKey },
+        accountLabelsStore: { removeLabel },
+        hiddenAccountsStore: { unhideAccount },
+      }),
+    );
+
+    await openMenu();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
+
+    // The menu item only opens the confirm dialog.
+    expect(removeAccount).not.toHaveBeenCalled();
+    expect(screen.getByText("Remove account")).toBeInTheDocument();
+
+    await act(async () => {
+      await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
+
+    const removedAddress = "Q20fB08fF1f1376A14C055E9F56df80563E16722b";
+    expect(removeAccount).toHaveBeenCalledWith(removedAddress);
+    expect(removeAccountKey).toHaveBeenCalledWith(removedAddress);
+    expect(removeLabel).toHaveBeenCalledWith(removedAddress);
+    expect(unhideAccount).toHaveBeenCalledWith(removedAddress);
+  });
+
+  it("should not remove the account when the dialog is cancelled", async () => {
+    const removeAccount = vi.fn<any>(() => Promise.resolve());
+    renderComponent(twoAccountStore({ removeAccount }));
+
+    await openMenu();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(removeAccount).not.toHaveBeenCalled();
+    expect(screen.queryByText("Remove account")).not.toBeInTheDocument();
+  });
+
   it("should not show hidden accounts in the list", () => {
     const hidden: Record<string, boolean> = {
       Q20fB08fF1f1376A14C055E9F56df80563E16722b: true,

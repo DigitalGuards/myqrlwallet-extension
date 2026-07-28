@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Plain object stores (hoisting-safe) ────────────────────────────
 const localStore: Record<string, any> = {};
+const sessionStore: Record<string, any> = {};
 
 const { mockSendMessage } = vi.hoisted(() => ({
   mockSendMessage: vi.fn(() => Promise.resolve({} as any)),
@@ -31,8 +32,23 @@ vi.mock("webextension-polyfill", () => ({
         }),
       },
       session: {
-        get: vi.fn(() => Promise.resolve({})),
-        set: vi.fn(() => Promise.resolve()),
+        get: vi.fn((key: string) =>
+          Promise.resolve(
+            key in sessionStore ? { [key]: sessionStore[key] } : {},
+          ),
+        ),
+        set: vi.fn((data: Record<string, any>) => {
+          Object.assign(sessionStore, data);
+          return Promise.resolve();
+        }),
+        remove: vi.fn((key: string) => {
+          delete sessionStore[key];
+          return Promise.resolve();
+        }),
+        clear: vi.fn(() => {
+          for (const k of Object.keys(sessionStore)) delete sessionStore[k];
+          return Promise.resolve();
+        }),
       },
       onChanged: { addListener: vi.fn() },
     },
@@ -202,6 +218,127 @@ describe("LockStore – readLockState timestamp check", () => {
       await store.readLockState();
 
       expect(store.isLocked).toBe(true);
+    });
+  });
+});
+
+describe("LockStore – destructive paths", () => {
+  const SESSION_KEYS_KEY = "_LM_CACHED_KEYS";
+  const OTHER_KEY: DecryptedKeyType = {
+    address: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+    mnemonicPhrases: "second mnemonic",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearStore(localStore);
+    clearStore(sessionStore);
+  });
+
+  async function createLockStore() {
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+    const module = await import("./lockStore");
+    const store = new module.default();
+    await new Promise((r) => setTimeout(r, 300));
+    return store;
+  }
+
+  const namesSent = () =>
+    mockSendMessage.mock.calls.map((call: any) => call[0]?.name);
+
+  describe("resetWallet", () => {
+    it("delegates the wipe to the service worker", async () => {
+      const store = await createLockStore();
+      (store as any).cachedKeys = MOCK_KEYS;
+      (store as any).cachedPassword = "pw";
+      mockSendMessage.mockResolvedValue({ success: true });
+
+      await store.resetWallet();
+
+      expect(namesSent()).toContain("LOCK_MANAGER_RESET_WALLET");
+      expect((store as any).cachedKeys).toBeUndefined();
+      expect((store as any).cachedPassword).toBeUndefined();
+    });
+
+    it("wipes session storage itself when the service worker is unreachable", async () => {
+      // The session area holds the decrypted-key backup, which by design
+      // survives SW restarts: a reset that cleared only local storage would
+      // leave every account's plaintext mnemonic on the device.
+      const store = await createLockStore();
+      sessionStore[SESSION_KEYS_KEY] = MOCK_KEYS;
+      localStore["KEYSTORES"] = JSON.stringify([{ address: "qaaa" }]);
+      mockSendMessage.mockRejectedValue(new Error("SW not reachable"));
+
+      await store.resetWallet();
+
+      expect(sessionStore[SESSION_KEYS_KEY]).toBeUndefined();
+      expect(localStore["KEYSTORES"]).toBeUndefined();
+    });
+
+    it("writes the LOCKED timestamp after the wipe, not before", async () => {
+      // readLockState tells an intentional lock from an SW restart by
+      // comparing these timestamps. Written before the wipe, the marker
+      // would be erased and peer surfaces would "recover" the reset wallet.
+      const store = await createLockStore();
+      mockSendMessage.mockRejectedValue(new Error("SW not reachable"));
+
+      await store.resetWallet();
+
+      expect(typeof localStore["LOCK_MANAGER_LOCKED_TIMESTAMP"]).toBe("number");
+    });
+  });
+
+  describe("readLockState after a reset", () => {
+    it("never re-arms the service worker once the wallet has no keystores", async () => {
+      // A second surface (side panel, tab) still holds keys from before
+      // another surface reset the wallet. Re-sending them would put the
+      // wiped wallet's mnemonics back into the SW and its session backup.
+      const store = await createLockStore();
+      (store as any).cachedKeys = MOCK_KEYS;
+      (store as any).cachedPassword = "pw";
+      vi.clearAllMocks();
+      mockSendMessage.mockResolvedValue({
+        isLocked: true,
+        hasPasswordSet: false,
+      });
+
+      await store.readLockState();
+
+      expect(namesSent()).not.toContain("SET_DECRYPTED_KEYS");
+      expect((store as any).cachedKeys).toBeUndefined();
+      expect((store as any).cachedPassword).toBeUndefined();
+    });
+  });
+
+  describe("removeAccountKey", () => {
+    it("asks the service worker to scrub the key and drops its own copy", async () => {
+      const store = await createLockStore();
+      (store as any).cachedKeys = [...MOCK_KEYS, OTHER_KEY];
+      vi.clearAllMocks();
+      mockSendMessage.mockResolvedValue({ success: true });
+
+      await store.removeAccountKey(OTHER_KEY.address);
+
+      const scrub: any = mockSendMessage.mock.calls.find(
+        (call: any) => call[0]?.name === "LOCK_MANAGER_REMOVE_ACCOUNT_KEY",
+      );
+      expect(scrub?.[0]?.data).toBe(OTHER_KEY.address);
+      expect((store as any).cachedKeys).toEqual(MOCK_KEYS);
+    });
+
+    it("throws when the service worker cannot be reached", async () => {
+      // The caller deletes the keystore next; failing loudly is what stops
+      // it doing that while the SW still holds the plaintext mnemonic.
+      const store = await createLockStore();
+      (store as any).cachedKeys = [...MOCK_KEYS, OTHER_KEY];
+      mockSendMessage.mockRejectedValue(new Error("SW not reachable"));
+
+      await expect(
+        store.removeAccountKey(OTHER_KEY.address),
+      ).rejects.toThrow();
     });
   });
 });
