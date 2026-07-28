@@ -1,6 +1,8 @@
-// Buffer polyfill for browser environment (required by Ledger libraries)
-import { Buffer } from 'buffer';
-globalThis.Buffer = Buffer;
+// Buffer polyfill for the browser (required by the Ledger libraries).
+// MUST stay the first import: imports are hoisted above the module body,
+// so assigning the global here instead would run after the whole app
+// graph below has already been evaluated. See src/bufferPolyfill.ts.
+import './bufferPolyfill'
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
