@@ -100,6 +100,7 @@ class QrlStore {
       refreshBlockchainData: action.bound,
       selectBlockchain: action.bound,
       setActiveAccount: action.bound,
+      assertAccountRemovable: action.bound,
       removeAccount: action.bound,
       fetchQrlConnection: action.bound,
       fetchAccounts: action.bound,
@@ -268,20 +269,53 @@ class QrlStore {
    * backup. If the removed account was active, the first remaining account
    * becomes active.
    */
-  async removeAccount(accountAddress: string) {
+  /**
+   * Throws REMOVE_LAST_KEYSTORE_BLOCKED when removing this account would
+   * leave the wallet with zero keystores but accounts still listed (only
+   * reachable with Ledger accounts, which live in the accounts list without
+   * a keystore).
+   *
+   * The service worker derives "this wallet has been set up" from keystores
+   * AND accounts both being non-empty, so that state drops the wallet to a
+   * first-run screen: onboarding, with no password gate, while it still
+   * holds usable accounts.
+   *
+   * Callable on its own so the UI can bail out before any destructive step
+   * (notably before the decrypted key is scrubbed).
+   */
+  async assertAccountRemovable(accountAddress: string) {
     const target = accountAddress.toLowerCase();
-    const keystores = await StorageUtil.getKeystores();
-    await StorageUtil.setKeystores(
-      keystores.filter(
-        (keystore) => keystore.address.toLowerCase() !== target,
-      ),
+    const [keystores, storedAccounts] = await Promise.all([
+      StorageUtil.getKeystores(),
+      StorageUtil.getAllAccounts(),
+    ]);
+    const remainingKeystores = keystores.filter(
+      (keystore) => keystore.address.toLowerCase() !== target,
     );
-    const storedAccounts = await StorageUtil.getAllAccounts();
     const remainingAccounts = storedAccounts.filter(
       (account) => account.toLowerCase() !== target,
     );
+    if (remainingKeystores.length === 0 && remainingAccounts.length > 0) {
+      throw new Error("REMOVE_LAST_KEYSTORE_BLOCKED");
+    }
+    return { remainingKeystores, remainingAccounts };
+  }
+
+  async removeAccount(accountAddress: string) {
+    const target = accountAddress.toLowerCase();
+    const { remainingKeystores, remainingAccounts } =
+      await this.assertAccountRemovable(accountAddress);
+
+    // Order matters: everything before setKeystores is recoverable, the
+    // keystore delete is not. Dropping the accounts-list entry first means
+    // an interrupted removal (the popup is destroyed the moment it loses
+    // focus) leaves an orphaned keystore, not a listed account whose seed
+    // is gone.
     await StorageUtil.setAllAccounts(remainingAccounts);
-    await StorageUtil.clearTransactionHistory(accountAddress);
+    await StorageUtil.removeAccountFromAllDApps(accountAddress);
+    await StorageUtil.clearAllAccountData(accountAddress);
+    await StorageUtil.setKeystores(remainingKeystores);
+
     const storedActiveAccount = await StorageUtil.getActiveAccount();
     if (storedActiveAccount?.toLowerCase() === target) {
       await this.setActiveAccount(remainingAccounts[0]);

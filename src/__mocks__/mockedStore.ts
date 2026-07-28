@@ -60,6 +60,10 @@ const mockedStoreValues: StoreType = {
     initializeBlockchain: async () => {},
     selectBlockchain: async (_chainId: string) => {},
     setActiveAccount: async () => {},
+    assertAccountRemovable: async (_accountAddress: string) => ({
+      remainingKeystores: [],
+      remainingAccounts: [],
+    }),
     removeAccount: async (_accountAddress: string) => {},
     getNativeTokenGas: async () => {
       return "";

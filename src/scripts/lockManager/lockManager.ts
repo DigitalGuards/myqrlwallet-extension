@@ -39,6 +39,8 @@ export const LOCK_MANAGER_MESSAGES = {
   GET_DECRYPTED_KEYS: "GET_DECRYPTED_KEYS",
   GET_WALLET_PASSWORD: "GET_WALLET_PASSWORD",
   SET_DECRYPTED_KEYS: "SET_DECRYPTED_KEYS",
+  REMOVE_ACCOUNT_KEY: "LOCK_MANAGER_REMOVE_ACCOUNT_KEY",
+  RESET_WALLET: "LOCK_MANAGER_RESET_WALLET",
   UPDATE_AUTO_LOCK: "LOCK_MANAGER_UPDATE_AUTO_LOCK",
   SEND_TX_NOTIFICATION: "SEND_TX_NOTIFICATION",
 } as const;
@@ -69,6 +71,56 @@ class LockManager {
     await this.clearSessionKeys();
     await this.stopKeepAlive();
     await this.clearAutoLockAlarm();
+  }
+
+  /**
+   * Drop one account's decrypted key. Runs here rather than as a popup-side
+   * get-filter-set because the session backup must be rewritten too: after a
+   * service-worker restart the popup cannot read the keys (getDecryptedKeys
+   * throws) yet `_LM_CACHED_KEYS` still holds the removed account's
+   * mnemonic, which the next keep-alive tick would load straight back into
+   * memory. Restoring from session first makes the scrub authoritative in
+   * every state.
+   */
+  static async removeAccountKey(accountAddress: string) {
+    const target = accountAddress.toLowerCase();
+    if (this.decryptedKeys === undefined) {
+      await this.restoreKeysFromSession();
+    }
+    if (this.decryptedKeys === undefined) {
+      // Nothing in memory and nothing backed up: no plaintext to scrub.
+      await this.clearSessionKeys();
+      return { success: true };
+    }
+    this.setDecryptedKeys(
+      this.decryptedKeys.filter(
+        (key) => key?.address?.toLowerCase() !== target,
+      ),
+    );
+    return { success: true };
+  }
+
+  /**
+   * Factory reset, authoritative in the worker: in-memory keys, the wallet
+   * password, the whole of session storage (the decrypted-key backup lives
+   * there, as does pending dApp-request data), both alarms, and finally all
+   * local storage.
+   *
+   * The LOCKED timestamp is written *after* the wipe. readLockState uses
+   * locked-vs-unlocked timestamps to tell an intentional lock from a
+   * service-worker restart; if the wipe erased that marker, both would read
+   * 0 and every other open surface would "recover" the wallet by re-sending
+   * its cached keys.
+   */
+  static async resetWallet() {
+    this.clearDecryptedKeys();
+    this.walletPassword = undefined;
+    await browser.storage.session.clear();
+    await this.stopKeepAlive();
+    await this.clearAutoLockAlarm();
+    await StorageUtil.clearAllData();
+    await StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
+    return { success: true };
   }
 
   static async startKeepAlive() {
@@ -299,6 +351,12 @@ class LockManager {
       await LockManager.startKeepAlive();
       await LockManager.setupAutoLockAlarm();
       result = { success: true };
+    } else if (message.name === LOCK_MANAGER_MESSAGES.REMOVE_ACCOUNT_KEY) {
+      result = await LockManager.removeAccountKey(
+        typeof message?.data === "string" ? message.data : "",
+      );
+    } else if (message.name === LOCK_MANAGER_MESSAGES.RESET_WALLET) {
+      result = await LockManager.resetWallet();
     } else if (message.name === LOCK_MANAGER_MESSAGES.LOCK) {
       result = await LockManager.lock();
     } else if (message.name === LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK) {

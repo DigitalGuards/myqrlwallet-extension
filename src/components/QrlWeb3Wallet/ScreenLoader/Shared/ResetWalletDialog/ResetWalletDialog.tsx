@@ -32,6 +32,7 @@ const ResetWalletDialog = observer(
     const { lockStore } = useStore();
     const [confirmText, setConfirmText] = useState("");
     const [isResetting, setIsResetting] = useState(false);
+    const [resetError, setResetError] = useState("");
 
     const confirmWord = t("resetWallet.confirmWord");
     const isConfirmed = confirmText.trim() === confirmWord;
@@ -39,16 +40,22 @@ const ResetWalletDialog = observer(
     const handleOpenChange = (nextOpen: boolean) => {
       if (isResetting) return;
       setConfirmText("");
+      setResetError("");
       onOpenChange(nextOpen);
     };
 
     const onReset = async () => {
       if (!isConfirmed || isResetting) return;
       setIsResetting(true);
+      setResetError("");
       try {
         await lockStore.resetWallet();
         // No local cleanup needed: the reset flips hasPasswordSet, which
         // unmounts this dialog together with the screen that opened it.
+      } catch {
+        // A partial wipe must not read as a completed one: keep the dialog
+        // open and say so.
+        setResetError(t("resetWallet.failed"));
       } finally {
         setIsResetting(false);
         setConfirmText("");
@@ -77,6 +84,11 @@ const ResetWalletDialog = observer(
                 word: confirmWord,
               })}
             />
+            {!!resetError && (
+              <p className="text-sm font-medium text-destructive">
+                {resetError}
+              </p>
+            )}
           </div>
           <DialogFooter className="flex flex-row gap-4">
             <DialogClose asChild>

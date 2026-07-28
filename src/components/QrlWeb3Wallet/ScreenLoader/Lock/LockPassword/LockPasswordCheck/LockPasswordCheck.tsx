@@ -186,10 +186,14 @@ const LockPasswordCheck = observer(() => {
           </Button>
 
           {/* Escape hatch for a lost password: the seeds are unrecoverable
-              without it, so the only way forward is a full reset + re-import. */}
+              without it, so the only way forward is a full reset + re-import.
+              Disabled while an unlock is in flight: that path can persist
+              re-encrypted keystores when it completes, which would write
+              seed ciphertext back to disk after the wipe. */}
           <button
             type="button"
-            className="text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+            disabled={isSubmitting}
+            className="text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-50"
             onClick={() => setResetDialogOpen(true)}
           >
             {t("lock.unlock.forgotPassword")}

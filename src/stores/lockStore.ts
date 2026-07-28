@@ -299,10 +299,20 @@ class LockStore {
         name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
       });
 
+      // A wallet that no longer has keystores + accounts cannot be recovered
+      // by re-sending keys, and doing so would resurrect a wallet another
+      // surface just reset (this store's cache is per-document, so the
+      // surface that ran the reset is not the only one holding keys). Drop
+      // the cache instead.
+      if (!hasPasswordSet && this.cachedKeys) {
+        this.cachedKeys = undefined;
+        this.cachedPassword = undefined;
+      }
+
       // If the SW lost its in-memory keys (e.g. Chrome restarted it) but we
       // still have a cached copy from the last successful unlock, re-send them
       // so the wallet stays unlocked while the popup is open.
-      if (isLocked && this.cachedKeys) {
+      if (isLocked && hasPasswordSet && this.cachedKeys) {
         const lockedTs = await StorageUtil.getLockStateTimeStamp(
           LockState.LOCKED,
         );
@@ -345,10 +355,14 @@ class LockStore {
   }
 
   /**
-   * Scrub one account's decrypted key from the popup cache and the service
-   * worker after its keystore was removed. Best-effort on the SW side: if it
-   * is unreachable, the next lock/unlock cycle rebuilds its keys from the
-   * already-filtered keystores anyway.
+   * Scrub one account's decrypted key after its keystore was removed. The
+   * service worker owns the scrub (it is the only context that can rewrite
+   * the session-storage key backup); this side only drops its own cached
+   * copy, which would otherwise be re-sent to the SW on the next restart
+   * recovery and resurrect the removed account's mnemonic.
+   *
+   * Throws if the SW cannot be reached, so callers can abort before
+   * deleting the keystore rather than leaving plaintext behind.
    */
   async removeAccountKey(accountAddress: string) {
     const target = accountAddress.toLowerCase();
@@ -357,36 +371,35 @@ class LockStore {
         (key) => key?.address?.toLowerCase() !== target,
       );
     }
-    try {
-      const keys = (await browser.runtime.sendMessage({
-        name: LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS,
-      })) as DecryptedKeyType[] | undefined;
-      if (!Array.isArray(keys)) return;
-      await this.sendWithRetry({
-        name: LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
-        data: keys.filter((key) => key?.address?.toLowerCase() !== target),
-      });
-    } catch {
-      // Wallet locked or SW unreachable: no decrypted key to scrub.
-    }
+    await this.sendWithRetry({
+      name: LOCK_MANAGER_MESSAGES.REMOVE_ACCOUNT_KEY,
+      data: accountAddress,
+    });
   }
 
   /**
-   * Factory reset: lock the service worker (drops in-memory keys, the
-   * session-storage backup, and alarms), then wipe all extension-local
-   * storage. readLockState then reports hasPasswordSet=false, which routes
-   * the UI to onboarding.
+   * Factory reset. The wipe runs in the service worker so that in-memory
+   * keys, the session-storage key backup, the alarms, and local storage all
+   * go in one authoritative step; doing it from here would leave the
+   * session backup (which survives SW restarts by design) holding every
+   * account's plaintext mnemonic.
+   *
+   * If the SW cannot be reached at all we still wipe what this context can
+   * (session + local storage) rather than leaving the user with a wallet
+   * they believe is gone.
    */
   async resetWallet() {
-    try {
-      await this.lock();
-    } catch {
-      // SW unreachable: the storage wipe below still removes everything
-      // persistent; in-memory SW keys die with its next restart.
-    }
     this.cachedKeys = undefined;
     this.cachedPassword = undefined;
-    await StorageUtil.clearAllData();
+    try {
+      await this.sendWithRetry({
+        name: LOCK_MANAGER_MESSAGES.RESET_WALLET,
+      });
+    } catch {
+      await browser.storage.session.clear();
+      await StorageUtil.clearAllData();
+      await StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
+    }
     await this.readLockState();
   }
 

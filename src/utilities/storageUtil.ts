@@ -6,6 +6,7 @@ import {
   QRL_TESTNET_RPC_PROXY,
 } from "@/configuration/qrlBlockchainConfig";
 import {
+  CAVEAT_TYPES,
   ConnectedAccountsDataType,
   DAppRequestType,
   TokenContractType,
@@ -580,6 +581,88 @@ class StorageUtil {
     const storageData = await browser.storage.local.get(DAPPS_IDENTIFIER);
     delete storageData[DAPPS_IDENTIFIER]?.[ALL_DAPPS_IDENTIFIER]?.[urlOrigin];
     await browser.storage.local.set(storageData);
+  }
+
+  /**
+   * Erase everything stored per-account for a removed address: transaction
+   * history, imported token contracts, and NFT collections, on *every*
+   * chain rather than only the active one.
+   *
+   * All three maps key by account address at the same level, with chain IDs
+   * nested underneath, so dropping the address key clears every chain at
+   * once. Leaving these behind would keep a full record of the account and
+   * its activity after the user removed it.
+   */
+  static async clearAllAccountData(accountAddress: string) {
+    const maps: Array<[string, string]> = [
+      [TX_HISTORY_IDENTIFIER, ALL_TX_HISTORY_IDENTIFIER],
+      [TOKENS_IDENTIFIER, ALL_TOKENS_IDENTIFIER],
+      [NFT_COLLECTIONS_IDENTIFIER, ALL_NFT_COLLECTIONS_IDENTIFIER],
+    ];
+    for (const [identifier, allIdentifier] of maps) {
+      const storageData = await browser.storage.local.get(identifier);
+      const byAccount = storageData?.[identifier]?.[allIdentifier] as
+        | Record<string, unknown>
+        | undefined;
+      if (!byAccount) continue;
+      const match = Object.keys(byAccount).find(
+        (address) => address.toLowerCase() === accountAddress.toLowerCase(),
+      );
+      if (!match) continue;
+      delete byAccount[match];
+      await browser.storage.local.set(storageData);
+    }
+  }
+
+  /**
+   * Revoke a removed account across every connected dApp: drop it from each
+   * origin's account list and from the returned-accounts caveat that gates
+   * authorization, and disconnect origins left with no accounts.
+   *
+   * Without this, qrl_accounts keeps advertising an address the wallet can
+   * no longer sign for, and a transaction request naming it still passes
+   * the authorization check and opens a full approval screen.
+   */
+  static async removeAccountFromAllDApps(accountAddress: string) {
+    const target = accountAddress.toLowerCase();
+    const storageData = await browser.storage.local.get(DAPPS_IDENTIFIER);
+    const allDApps = storageData?.[DAPPS_IDENTIFIER]?.[ALL_DAPPS_IDENTIFIER] as
+      | Record<string, ConnectedAccountsDataType>
+      | undefined;
+    if (!allDApps) return;
+
+    let changed = false;
+    for (const [origin, data] of Object.entries(allDApps)) {
+      const accounts = data?.accounts ?? [];
+      const remaining = accounts.filter(
+        (address) => address?.toLowerCase() !== target,
+      );
+      if (remaining.length === accounts.length) continue;
+      changed = true;
+      if (remaining.length === 0) {
+        delete allDApps[origin];
+        continue;
+      }
+      data.accounts = remaining;
+      data.permissions = (data.permissions ?? []).map((permission) => ({
+        ...permission,
+        caveats: (permission.caveats ?? []).map((caveat) =>
+          caveat.type === CAVEAT_TYPES.RESTRICT_RETURNED_ACCOUNTS &&
+          Array.isArray(caveat.value)
+            ? {
+                ...caveat,
+                value: (caveat.value as string[]).filter(
+                  (address) => address?.toLowerCase() !== target,
+                ),
+              }
+            : caveat,
+        ),
+      }));
+    }
+
+    if (changed) {
+      await browser.storage.local.set(storageData);
+    }
   }
 
   static async setContacts(contacts: Contact[]) {

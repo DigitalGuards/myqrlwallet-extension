@@ -57,12 +57,23 @@ const OtherAccountCard = observer(
     const [editValue, setEditValue] = useState("");
     const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
     const [isRemoving, setIsRemoving] = useState(false);
+    const [removeError, setRemoveError] = useState("");
 
     const confirmRemove = async () => {
       setIsRemoving(true);
+      setRemoveError("");
       try {
         await onRemove(accountAddress);
         setRemoveDialogOpen(false);
+      } catch (error) {
+        // Keep the dialog open on failure: a partially applied removal must
+        // not look like a completed one.
+        setRemoveError(
+          error instanceof Error &&
+            error.message === "REMOVE_LAST_KEYSTORE_BLOCKED"
+            ? t("home.removeLastKeystoreBlocked")
+            : t("home.removeAccountFailed"),
+        );
       } finally {
         setIsRemoving(false);
       }
@@ -195,7 +206,16 @@ const OtherAccountCard = observer(
           </DropdownMenu>
           </div>
         </div>
-        <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
+        <Dialog
+          open={removeDialogOpen}
+          onOpenChange={(nextOpen) => {
+            // Escape / overlay / X must not dismiss mid-removal: the
+            // operation keeps running and a closed dialog reads as done.
+            if (isRemoving) return;
+            setRemoveError("");
+            setRemoveDialogOpen(nextOpen);
+          }}
+        >
           <DialogContent className="w-80 rounded-md">
             <DialogHeader className="text-left">
               <DialogTitle>{t("home.removeAccountTitle")}</DialogTitle>
@@ -206,6 +226,11 @@ const OtherAccountCard = observer(
             <div className="min-w-0">
               <AccountId account={accountAddress} />
             </div>
+            {!!removeError && (
+              <p className="text-sm font-medium text-destructive">
+                {removeError}
+              </p>
+            )}
             <DialogFooter className="flex flex-row gap-4">
               <DialogClose asChild>
                 <Button
@@ -282,11 +307,17 @@ const OtherAccounts = observer(() => {
   };
 
   const onRemove = async (accountAddress: string) => {
+    // Bail out before anything destructive if this removal is not allowed.
+    await qrlStore.assertAccountRemovable(accountAddress);
+    // Scrub the decrypted key first and let a failure abort the removal:
+    // deleting the keystore while the service worker still holds (and
+    // session-backs-up) the plaintext mnemonic is the one ordering that
+    // leaves secret material behind.
+    await lockStore.removeAccountKey(accountAddress);
     // Ledger accounts have no keystore; drop their device metadata instead.
     if (ledgerStore.isLedgerAccount(accountAddress)) {
       await ledgerStore.removeAccount(accountAddress);
     }
-    await lockStore.removeAccountKey(accountAddress);
     await qrlStore.removeAccount(accountAddress);
     await accountLabelsStore.removeLabel(accountAddress);
     await hiddenAccountsStore.unhideAccount(accountAddress);
