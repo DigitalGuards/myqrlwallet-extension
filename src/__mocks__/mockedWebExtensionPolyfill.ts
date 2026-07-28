@@ -11,6 +11,8 @@ const mockedBrowser = {
     session: {
       get: vi.fn().mockResolvedValue({}),
       set: vi.fn().mockResolvedValue(undefined),
+      remove: vi.fn().mockResolvedValue(undefined),
+      clear: vi.fn().mockResolvedValue(undefined),
     },
     onChanged: {
       addListener: vi.fn(),

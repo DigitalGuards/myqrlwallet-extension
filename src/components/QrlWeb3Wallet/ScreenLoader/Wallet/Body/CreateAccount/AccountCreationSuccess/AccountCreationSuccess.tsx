@@ -52,7 +52,7 @@ const AccountCreationSuccess = ({ account }: AccountCreationSuccessProps) => {
       <CardContent className="space-y-8">
         <div className="flex flex-col gap-2">
           <div>{t('account.publicAddress')}</div>
-          <div className="font-data font-bold text-blue-accent">{`${prefix} ${spacedAccountAddress}`}</div>
+          <div className="font-data font-bold text-identity-accent">{`${prefix} ${spacedAccountAddress}`}</div>
           <div>
             {t('account.shareInfo')}
           </div>

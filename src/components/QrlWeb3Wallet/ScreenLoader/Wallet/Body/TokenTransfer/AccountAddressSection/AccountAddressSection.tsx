@@ -23,7 +23,7 @@ const AccountAddressSection = observer(
       <div className="flex flex-col gap-2">
         <div className="flex flex-col gap-1">
           <div>{t('transfer.accountAddress')}</div>
-          <div className="font-data font-bold text-blue-accent">{`${prefix} ${addressSplit.join(" ")}`}</div>
+          <div className="font-data font-bold text-identity-accent">{`${prefix} ${addressSplit.join(" ")}`}</div>
         </div>
         <div className="flex flex-col gap-1">
           <div>{t('transfer.balance')}</div>

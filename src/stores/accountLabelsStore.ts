@@ -14,6 +14,7 @@ class AccountLabelsStore {
       loadLabels: action.bound,
       syncLabels: action.bound,
       setLabel: action.bound,
+      removeLabel: action.bound,
       clearLabels: action.bound,
     });
   }
@@ -86,6 +87,16 @@ class AccountLabelsStore {
 
   getLabel(address: string): string {
     return this.labels[address] ?? "";
+  }
+
+  async removeLabel(address: string) {
+    if (!(address in this.labels)) return;
+    const updated = { ...this.labels };
+    delete updated[address];
+    await StorageUtil.setAccountLabels(updated);
+    runInAction(() => {
+      this.labels = updated;
+    });
   }
 
   async clearLabels() {

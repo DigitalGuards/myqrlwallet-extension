@@ -264,7 +264,7 @@ const QrlSignTypedDataV4Content = observer(() => {
       <div className="flex flex-col rounded-md p-2">
         <div className="flex flex-col gap-1">
           <div>{t('dapp.signature.fromAddress')}</div>
-          <div className="font-data w-64 font-bold text-blue-accent">{`${prefixFromAddress} ${addressSplitFromAddress.join(" ")}`}</div>
+          <div className="font-data w-64 font-bold text-identity-accent">{`${prefixFromAddress} ${addressSplitFromAddress.join(" ")}`}</div>
         </div>
       </div>
       <div className="rounded-md bg-muted/50 p-2 text-xs">

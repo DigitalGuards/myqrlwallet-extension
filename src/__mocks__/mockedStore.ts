@@ -60,6 +60,11 @@ const mockedStoreValues: StoreType = {
     initializeBlockchain: async () => {},
     selectBlockchain: async (_chainId: string) => {},
     setActiveAccount: async () => {},
+    assertAccountRemovable: async (_accountAddress: string) => ({
+      remainingKeystores: [],
+      remainingAccounts: [],
+    }),
+    removeAccount: async (_accountAddress: string) => {},
     getNativeTokenGas: async () => {
       return "";
     },
@@ -193,6 +198,8 @@ const mockedStoreValues: StoreType = {
     changePassword: async () => {
       return true;
     },
+    removeAccountKey: async (_accountAddress: string) => {},
+    resetWallet: async () => {},
   } as unknown as LockStore,
   ledgerStore: {
     connectionState: "disconnected",
@@ -271,6 +278,7 @@ const mockedStoreValues: StoreType = {
     syncLabels: async () => {},
     setLabel: async () => {},
     getLabel: () => "",
+    removeLabel: async () => {},
     clearLabels: async () => {},
   },
   hiddenAccountsStore: {

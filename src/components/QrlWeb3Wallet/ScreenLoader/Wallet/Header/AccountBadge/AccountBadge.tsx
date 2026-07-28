@@ -15,13 +15,13 @@ import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 
-// Blue identifies: the account marker wears the QRL battery blue.
+// Champagne identifies: the account marker wears the identity color.
 const badgeButtonClasses = cva(
-  "font-data flex items-center gap-1 rounded-full border-blue-accent/30 text-xs text-blue-accent hover:text-blue-accent",
+  "font-data flex items-center gap-1 rounded-full border-identity-accent/30 text-xs text-identity-accent hover:text-identity-accent",
   {
     variants: {
       isActive: {
-        true: ["bg-blue-accent/10"],
+        true: ["bg-identity-accent/10"],
       },
     },
     defaultVariants: {

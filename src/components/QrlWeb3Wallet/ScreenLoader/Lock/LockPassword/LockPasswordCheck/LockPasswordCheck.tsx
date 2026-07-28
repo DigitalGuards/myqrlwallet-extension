@@ -19,6 +19,7 @@ import { useStore } from "@/stores/store";
 import StringUtil from "@/utilities/stringUtil";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
+import ResetWalletDialog from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/ResetWalletDialog/ResetWalletDialog";
 
 const createFormSchema = (t: TFunction) =>
   z.object({
@@ -40,6 +41,7 @@ const LockPasswordCheck = observer(() => {
 
   const [unlockAttempt, setUnlockAttempt] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
 
   useEffect(() => {
     if (accountAddress) {
@@ -114,12 +116,12 @@ const LockPasswordCheck = observer(() => {
           <div className="flex min-h-[2.125rem] w-full items-center justify-center">
             {!!accountAddress && (
               <div
-                className="inline-flex max-w-full items-center gap-2 rounded-full border border-blue-accent/30 bg-blue-accent/[0.08] px-4 py-1.5"
+                className="inline-flex max-w-full items-center gap-2 rounded-full border border-identity-accent/30 bg-identity-accent/[0.08] px-4 py-1.5"
                 title={accountAddress}
               >
                 {/* text-primary so the glow-dot halo (currentColor) pulses ember, not foreground */}
                 <span className="glow-dot h-2 w-2 shrink-0 rounded-full bg-primary text-primary" />
-                <span className="font-data truncate text-xs text-blue-accent">
+                <span className="font-data truncate text-xs text-identity-accent">
                   {label || abbreviatedAddress}
                 </span>
               </div>
@@ -182,6 +184,24 @@ const LockPasswordCheck = observer(() => {
               ? t("lock.unlock.buttonLoading")
               : t("lock.unlock.button")}
           </Button>
+
+          {/* Escape hatch for a lost password: the seeds are unrecoverable
+              without it, so the only way forward is a full reset + re-import.
+              Disabled while an unlock is in flight: that path can persist
+              re-encrypted keystores when it completes, which would write
+              seed ciphertext back to disk after the wipe. */}
+          <button
+            type="button"
+            disabled={isSubmitting}
+            className="text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-50"
+            onClick={() => setResetDialogOpen(true)}
+          >
+            {t("lock.unlock.forgotPassword")}
+          </button>
+          <ResetWalletDialog
+            open={resetDialogOpen}
+            onOpenChange={setResetDialogOpen}
+          />
         </div>
       </form>
     </Form>

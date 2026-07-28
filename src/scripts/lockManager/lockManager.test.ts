@@ -42,6 +42,10 @@ vi.mock("webextension-polyfill", () => ({
           delete sessionStore[key];
           return Promise.resolve();
         }),
+        clear: vi.fn(() => {
+          for (const k of Object.keys(sessionStore)) delete sessionStore[k];
+          return Promise.resolve();
+        }),
       },
     },
     alarms: {
@@ -362,6 +366,114 @@ describe("LockManager – keep-alive & auto-lock", () => {
       expect(LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK).toBe(
         "LOCK_MANAGER_UPDATE_AUTO_LOCK",
       );
+    });
+  });
+});
+
+describe("LockManager – account removal & factory reset", () => {
+  const SESSION_KEYS_KEY = "_LM_CACHED_KEYS";
+  const KEY_A = MOCK_KEYS[0];
+  const KEY_B: DecryptedKeyType = {
+    address: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+    mnemonicPhrases: "second mnemonic",
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    clearStore(localStore);
+    clearStore(sessionStore);
+    clearStore(alarmsStore);
+    await LockManager.lock();
+  });
+
+  describe("removeAccountKey", () => {
+    it("drops the key from memory and rewrites the session backup", async () => {
+      LockManager.setDecryptedKeysFromPopup({
+        keys: [KEY_A, KEY_B],
+        walletPassword: "pw",
+      });
+
+      await LockManager.removeAccountKey(KEY_B.address);
+
+      expect(LockManager.getDecryptedKeys()).toEqual([KEY_A]);
+      expect(sessionStore[SESSION_KEYS_KEY]).toEqual([KEY_A]);
+    });
+
+    it("scrubs the session backup even when the worker restarted and holds no keys", async () => {
+      // After an SW restart the keys live only in the session backup. A
+      // popup-side get-filter-set cannot reach them (getDecryptedKeys
+      // throws), so the removed account's mnemonic would survive and the
+      // next keep-alive tick would load it straight back into memory.
+      sessionStore[SESSION_KEYS_KEY] = [KEY_A, KEY_B];
+
+      await LockManager.removeAccountKey(KEY_B.address);
+
+      expect(sessionStore[SESSION_KEYS_KEY]).toEqual([KEY_A]);
+      expect(LockManager.getDecryptedKeys()).toEqual([KEY_A]);
+    });
+
+    it("is case-insensitive about the address", async () => {
+      LockManager.setDecryptedKeysFromPopup({
+        keys: [KEY_A, KEY_B],
+        walletPassword: "pw",
+      });
+
+      await LockManager.removeAccountKey(KEY_B.address.toLowerCase());
+
+      expect(LockManager.getDecryptedKeys()).toEqual([KEY_A]);
+    });
+  });
+
+  describe("resetWallet", () => {
+    beforeEach(() => {
+      LockManager.setDecryptedKeysFromPopup({
+        keys: [KEY_A, KEY_B],
+        walletPassword: "pw",
+      });
+      // Both are required for isLocked() to consider the wallet set up.
+      localStore["KEYSTORES"] = JSON.stringify([{ address: "qaaa" }]);
+      localStore["ACCOUNTS"] = { ALL_ACCOUNTS: [KEY_A.address] };
+    });
+
+    it("clears in-memory keys, the session backup, local storage and both alarms", async () => {
+      await LockManager.startKeepAlive();
+      await LockManager.setupAutoLockAlarm();
+
+      await LockManager.resetWallet();
+
+      expect(() => LockManager.getDecryptedKeys()).toThrow();
+      expect(sessionStore[SESSION_KEYS_KEY]).toBeUndefined();
+      expect(localStore["KEYSTORES"]).toBeUndefined();
+      expect(alarmsStore[LockManager.KEEP_ALIVE_ALARM]).toBeUndefined();
+      expect(alarmsStore[LockManager.AUTO_LOCK_ALARM]).toBeUndefined();
+    });
+
+    it("leaves the wallet password unavailable", async () => {
+      await LockManager.resetWallet();
+
+      expect(() => LockManager.getWalletPassword()).toThrow();
+    });
+
+    it("keeps a LOCKED timestamp that survives the wipe", async () => {
+      // Written after clearAllData: readLockState compares locked-vs-
+      // unlocked timestamps to tell an intentional lock from an SW restart,
+      // and a wiped marker makes peer surfaces re-arm the reset wallet.
+      await LockManager.resetWallet();
+
+      expect(typeof localStore["LOCK_MANAGER_LOCKED_TIMESTAMP"]).toBe("number");
+    });
+
+    it("reports a first-run wallet afterwards", async () => {
+      // Before: a set-up, unlocked wallet.
+      const { isLocked, hasPasswordSet } = await LockManager.isLocked();
+      expect(isLocked).toBe(false);
+      expect(hasPasswordSet).toBe(true);
+
+      await LockManager.resetWallet();
+
+      const after = await LockManager.isLocked();
+      expect(after.isLocked).toBe(true);
+      expect(after.hasPasswordSet).toBe(false);
     });
   });
 });

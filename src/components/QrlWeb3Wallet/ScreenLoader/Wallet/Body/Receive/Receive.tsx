@@ -45,7 +45,7 @@ const Receive = observer(() => {
               <QRCodeSVG value={accountAddress} size={150} />
             </div>
             <div className="flex items-start gap-2">
-              <span className="font-data break-all text-center text-sm text-blue-accent">
+              <span className="font-data break-all text-center text-sm text-identity-accent">
                 {`${prefix} ${addressSplit.join(" ")}`}
               </span>
               <button

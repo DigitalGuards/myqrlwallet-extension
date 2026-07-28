@@ -968,3 +968,42 @@ describe("StorageUtil", () => {
     });
   });
 });
+
+describe("storageUtil module boundary", () => {
+  // storageUtil deliberately copies the returned-accounts caveat literal
+  // instead of importing CAVEAT_TYPES. middlewareTypes has a runtime
+  // dependency on @theqrl/qrl-wallet-provider, and importing a *value* from
+  // it (type-only imports are erased at build) pulls that provider into every
+  // bundle touching storageUtil, including the popup, which has no Buffer
+  // polyfill: the page then dies at module init with "Buffer is not defined"
+  // and renders blank. These are the tripwires for both halves of that.
+  const readSource = async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    return readFileSync(
+      resolve(process.cwd(), "src/utilities/storageUtil.ts"),
+      "utf8",
+    );
+  };
+
+  it("imports middlewareTypes as types only", async () => {
+    const raw = await readSource();
+    // The import spans several lines, so match the whole statement.
+    const statement = raw.match(
+      /import\s+(type\s+)?\{[^}]*\}\s+from\s+"@\/scripts\/middlewares\/middlewareTypes"/,
+    );
+    expect(statement).not.toBeNull();
+    expect(statement?.[1], "must be a type-only import").toBeTruthy();
+  });
+
+  it("keeps the copied caveat literal in sync with CAVEAT_TYPES", async () => {
+    const raw = await readSource();
+    const { CAVEAT_TYPES } = await import(
+      "@/scripts/middlewares/middlewareTypes"
+    );
+    const match = raw.match(
+      /const RESTRICT_RETURNED_ACCOUNTS_CAVEAT = "([^"]+)"/,
+    );
+    expect(match?.[1]).toBe(CAVEAT_TYPES.RESTRICT_RETURNED_ACCOUNTS);
+  });
+});

@@ -114,7 +114,7 @@ const PersonalSign = observer(() => {
     <div className="flex flex-col gap-2 rounded-md p-2">
       <div className="flex flex-col gap-1">
         <div>{t('dapp.signature.fromAddress')}</div>
-        <div className="font-data w-64 font-bold text-blue-accent">{`${prefixFromAddress} ${addressSplitFromAddress.join(" ")}`}</div>
+        <div className="font-data w-64 font-bold text-identity-accent">{`${prefixFromAddress} ${addressSplitFromAddress.join(" ")}`}</div>
       </div>
       <div className="flex flex-col gap-1">
         <div>{t('dapp.signature.message')}</div>

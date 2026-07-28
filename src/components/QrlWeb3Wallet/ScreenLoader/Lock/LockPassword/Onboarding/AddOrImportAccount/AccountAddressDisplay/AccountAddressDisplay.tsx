@@ -14,7 +14,7 @@ const AccountAddressDisplay = observer(() => {
   return (
     <div className="flex flex-col gap-1">
       <div className="text-xs uppercase tracking-widest text-muted-foreground">{t("onboarding.account.addressLabel")}</div>
-      <div className="font-data font-bold text-blue-accent">
+      <div className="font-data font-bold text-identity-accent">
         {prefix} {addressSplit.join(" ")}
       </div>
     </div>
