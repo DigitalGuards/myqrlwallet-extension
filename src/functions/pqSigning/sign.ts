@@ -41,6 +41,7 @@ export interface SignWithSchemeParams {
 export interface SignWithSchemeResult {
   signature: Uint8Array;
   publicKey: Uint8Array;
+  descriptor: Uint8Array;
   signer: string;
 }
 
@@ -57,7 +58,9 @@ function ensureDigest(digest: Uint8Array): Uint8Array {
 /**
  * Shared signing core: derive the ML-DSA-87 keypair from the hex seed,
  * produce a signature over `digest` with the per-scheme `ctx`, and return
- * everything a stateless verifier needs (signature, public key, signer).
+ * everything a stateless verifier needs (signature, public key, descriptor,
+ * signer). The descriptor is required to bind the public key to the claimed
+ * Q-address.
  * The secret key buffer is zeroized on every exit path.
  */
 export function signWithScheme({
@@ -91,6 +94,7 @@ export function signWithScheme({
     return {
       signature: sigBuf,
       publicKey: new Uint8Array(wallet.getPK()),
+      descriptor: new Uint8Array(wallet.getDescriptor().toBytes()),
       signer,
     };
   } finally {
@@ -103,6 +107,7 @@ export function signWithScheme({
 export interface SignMessageResult {
   signature: string;
   publicKey: string;
+  descriptor: string;
   signer: string;
   digest: string;
   schemeVersion: typeof SCHEME_VERSION_MSG;
@@ -115,7 +120,7 @@ export function signMessage(
 ): SignMessageResult {
   const messageBytes = hexToBytes(messageHex);
   const digest = computeMessageDigest(messageBytes);
-  const { signature, publicKey, signer } = signWithScheme({
+  const { signature, publicKey, descriptor, signer } = signWithScheme({
     digest,
     ctx: SCHEME_TAG_MSG,
     hexSeed,
@@ -124,6 +129,7 @@ export function signMessage(
   return {
     signature: bytesToHex(signature),
     publicKey: bytesToHex(publicKey),
+    descriptor: bytesToHex(descriptor),
     signer,
     digest: bytesToHex(digest),
     schemeVersion: SCHEME_VERSION_MSG,
@@ -134,6 +140,7 @@ export function signMessage(
 export interface SignTypedDataResult {
   signature: string;
   publicKey: string;
+  descriptor: string;
   signer: string;
   digest: string;
   schemeVersion: typeof SCHEME_VERSION_TYPED;
@@ -146,7 +153,7 @@ export function signTypedData(
   opts?: { randomized?: boolean },
 ): SignTypedDataResult {
   const digest = computeTypedDataDigest(payload);
-  const { signature, publicKey, signer } = signWithScheme({
+  const { signature, publicKey, descriptor, signer } = signWithScheme({
     digest,
     ctx: SCHEME_TAG_TYPED,
     hexSeed,
@@ -155,6 +162,7 @@ export function signTypedData(
   return {
     signature: bytesToHex(signature),
     publicKey: bytesToHex(publicKey),
+    descriptor: bytesToHex(descriptor),
     signer,
     digest: bytesToHex(digest),
     schemeVersion: SCHEME_VERSION_TYPED,
