@@ -25,8 +25,9 @@ import { useEffect } from "react";
  * Post-quantum dApp signing screen for `qrl_signMessage` and
  * `qrl_signTypedData` (ML-DSA-87 over a SHAKE256 digest). Both take
  * params `[signerQAddress, messageHexOrPayload]`; on approval the seed is
- * unlocked and pqSigning produces the rich `{ signature, publicKey, signer,
- * digest, schemeVersion }` object the SDK verifiers consume.
+ * unlocked and pqSigning produces the rich `{ signature, publicKey,
+ * descriptor, signer, digest, schemeVersion }` object the SDK verifiers
+ * consume. The descriptor lets the verifier bind the public key to signer.
  */
 const QrlPqSign = observer(() => {
   const { t } = useTranslation();
@@ -34,8 +35,12 @@ const QrlPqSign = observer(() => {
   const { getMnemonicPhrases } = lockStore;
   const { qrlInstance, qrlConnection } = qrlStore;
   const { isConnected } = qrlConnection;
-  const { dAppRequestData, setOnPermissionCallBack, setCanProceed, addToResponseData } =
-    dAppRequestStore;
+  const {
+    dAppRequestData,
+    setOnPermissionCallBack,
+    setCanProceed,
+    addToResponseData,
+  } = dAppRequestStore;
 
   const method = dAppRequestData?.method;
   const isTypedData = method === RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA;
@@ -43,22 +48,32 @@ const QrlPqSign = observer(() => {
   const fromAddress: string = params?.[0] ?? "";
   const payload: unknown = params?.[1];
 
-  const { prefix: prefixFromAddress, addressSplit } = StringUtil.getSplitAddress(fromAddress);
+  const { prefix: prefixFromAddress, addressSplit } =
+    StringUtil.getSplitAddress(fromAddress);
 
   // Message-mode display: decode the hex payload to UTF-8 when possible.
-  const rawMessage: string = isTypedData ? "" : (typeof payload === "string" ? payload : "");
+  const rawMessage: string = isTypedData
+    ? ""
+    : typeof payload === "string"
+      ? payload
+      : "";
   const messageWithoutPrefix =
-    rawMessage.startsWith("0x") || rawMessage.startsWith("0X") ? rawMessage.slice(2) : rawMessage;
+    rawMessage.startsWith("0x") || rawMessage.startsWith("0X")
+      ? rawMessage.slice(2)
+      : rawMessage;
   const isHexEncoded =
-    /^[0-9a-f]*$/i.test(messageWithoutPrefix) && messageWithoutPrefix.length % 2 === 0;
+    /^[0-9a-f]*$/i.test(messageWithoutPrefix) &&
+    messageWithoutPrefix.length % 2 === 0;
   const decodedChallenge = isHexEncoded
     ? Buffer.from(messageWithoutPrefix, "hex").toString("utf8")
     : rawMessage;
-  const { sanitized: challenge, hadHidden: hasHiddenChars } = sanitizeForDisplay(decodedChallenge);
+  const { sanitized: challenge, hadHidden: hasHiddenChars } =
+    sanitizeForDisplay(decodedChallenge);
 
-  const typedPayload = isTypedData && payload && typeof payload === "object"
-    ? (payload as TypedDataPayload)
-    : null;
+  const typedPayload =
+    isTypedData && payload && typeof payload === "object"
+      ? (payload as TypedDataPayload)
+      : null;
 
   // The ML-DSA digest binds the whole QRLDomain (hashStruct("QRLDomain",
   // ...)), so surface the fields that decide WHICH contract/chain the
@@ -78,9 +93,8 @@ const QrlPqSign = observer(() => {
     if (isConnected) {
       setOnPermissionCallBack(async (hasApproved: boolean) => {
         if (hasApproved) {
-          const authorization = await revalidateAuthorizedDAppRequest(
-            dAppRequestData,
-          );
+          const authorization =
+            await revalidateAuthorizedDAppRequest(dAppRequestData);
           if (!authorization.canProceed) {
             addToResponseData({ error: authorization.proceedError });
             return;
@@ -103,7 +117,8 @@ const QrlPqSign = observer(() => {
     try {
       const mnemonicPhrases = await getMnemonicPhrases(fromAddress);
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
-      const addressFromMnemonic = qrlInstance?.accounts.seedToAccount(seed)?.address;
+      const addressFromMnemonic =
+        qrlInstance?.accounts.seedToAccount(seed)?.address;
       if (fromAddress !== addressFromMnemonic) {
         throw new Error("Mnemonic phrases did not match with the address");
       }
@@ -128,17 +143,22 @@ const QrlPqSign = observer(() => {
       {isTypedData ? (
         <div className="flex flex-col gap-1">
           <div>{t("dapp.pqSignature.typedData")}</div>
-          <div className="text-xs text-amber-600 dark:text-amber-300">{t("dapp.pqSignature.typedWarning")}</div>
+          <div className="text-xs text-amber-600 dark:text-amber-300">
+            {t("dapp.pqSignature.typedWarning")}
+          </div>
           <div className="flex flex-col gap-1 rounded bg-muted/40 p-2 text-xs">
             <div className="font-semibold text-secondary">
-              {String(typedPayload?.domain?.name ?? "")} · {typedPayload?.primaryType}
+              {String(typedPayload?.domain?.name ?? "")} ·{" "}
+              {typedPayload?.primaryType}
             </div>
             {verifyingContract && (
               <div className="break-all">
                 <span className="text-muted-foreground">
                   {t("dapp.pqSignature.verifyingContract")}:
                 </span>{" "}
-                <span className="font-mono text-secondary">{verifyingContract}</span>
+                <span className="font-mono text-secondary">
+                  {verifyingContract}
+                </span>
               </div>
             )}
             {hasChainId && (
@@ -146,7 +166,9 @@ const QrlPqSign = observer(() => {
                 <span className="text-muted-foreground">
                   {t("dapp.pqSignature.chainId")}:
                 </span>{" "}
-                <span className="font-mono text-secondary">{domainChainId}</span>
+                <span className="font-mono text-secondary">
+                  {domainChainId}
+                </span>
               </div>
             )}
           </div>
@@ -165,10 +187,14 @@ const QrlPqSign = observer(() => {
         <div className="flex flex-col gap-1">
           <div>{t("dapp.signature.message")}</div>
           {!isHexEncoded && (
-            <div className="text-xs text-amber-600 dark:text-amber-300">{t("dapp.pqSignature.notHex")}</div>
+            <div className="text-xs text-amber-600 dark:text-amber-300">
+              {t("dapp.pqSignature.notHex")}
+            </div>
           )}
           {hasHiddenChars && (
-            <div className="text-xs text-red-600">{t("dapp.pqSignature.hiddenChars")}</div>
+            <div className="text-xs text-red-600">
+              {t("dapp.pqSignature.hiddenChars")}
+            </div>
           )}
           <div className="flex justify-between gap-2">
             <div className="max-h-[8rem] w-full overflow-auto break-words font-bold text-secondary">

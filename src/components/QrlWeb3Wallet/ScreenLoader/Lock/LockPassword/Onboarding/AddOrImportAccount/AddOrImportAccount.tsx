@@ -268,7 +268,11 @@ const AddOrImportAccount = observer(
                       {t("onboarding.account.importDialogTitle")}
                     </DialogTitle>
                   </DialogHeader>
-                  <Tabs defaultValue="mnemonic" className="w-full">
+                  {/* min-w-0: DialogContent is a grid, and grid items default
+                      to min-width:auto, so without this the tab panel refuses
+                      to shrink below its content's intrinsic width (a long
+                      wallet filename) and bursts out of the dialog. */}
+                  <Tabs defaultValue="mnemonic" className="w-full min-w-0">
                     <TabsList className="grid w-full grid-cols-3">
                       <TabsTrigger value="mnemonic">
                         {t("importAccount.tabMnemonic")}
