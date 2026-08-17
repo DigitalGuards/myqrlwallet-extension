@@ -33,9 +33,9 @@ vi.mock(
           <div>
             <h3>Keep this safe</h3>
             <p>
-              {"Don't"} lose this mnemonic phrases. Download it right now. You may
-              need this someday to import or recover your new account Q20504 ...
-              C80A1
+              {"Don't"} lose this mnemonic phrases. Download it right now. You
+              may need this someday to import or recover your new account Q20504
+              ... C80A1
             </p>
             <button onClick={() => {}}>Download</button>
             <button onClick={() => setShowConfirm(true)}>Continue</button>
@@ -61,13 +61,15 @@ describe("CreateAccount", () => {
   it("should render the account creation form for creating account if the account is not yet created", async () => {
     renderComponent();
 
-    waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
         "Create a new account",
       );
-      expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
-        "You can add a new account to this wallet. After creating the account, ensure you keep the account recovery phrases safe.",
-      );
+      expect(
+        screen.getByText(
+          "You can add a new account to this wallet. After creating the account, ensure you keep the account recovery phrases safe.",
+        ),
+      ).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Create account" }),
       ).toBeInTheDocument();

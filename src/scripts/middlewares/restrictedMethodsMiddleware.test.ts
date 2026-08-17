@@ -108,6 +108,25 @@ describe("qrl_requestAccounts silent reconnect", () => {
     expect(browser.storage.session.set).not.toHaveBeenCalled();
   });
 
+  it.each([undefined, "null", "not an origin"])(
+    "rejects a missing or opaque requester origin immediately (%s)",
+    async (url) => {
+      setupStorage({ connectedAccounts: undefined });
+      const req = buildRequest();
+      req.senderData = { url };
+      const res = {} as { result?: unknown; error?: { code?: number } };
+      const end = vi.fn();
+
+      await restrictedMethodsMiddleware(req, res as never, vi.fn(), end);
+
+      expect(res.error?.code).toBe(4100);
+      expect(end).toHaveBeenCalledTimes(1);
+      expect(browser.storage.session.set).not.toHaveBeenCalled();
+      expect(browser.action.openPopup).not.toHaveBeenCalled();
+      expect(browser.windows.create).not.toHaveBeenCalled();
+    },
+  );
+
   it("prompts when the origin has no stored connection", async () => {
     setupStorage({ connectedAccounts: undefined });
 

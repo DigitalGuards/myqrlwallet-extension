@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import StorageUtil from "@/utilities/storageUtil";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import {
+  checkAccountHasBeenAuthorized,
   checkAccountAndChainHaveBeenAuthorized,
   normalizeChainId,
   revalidateAuthorizedDAppRequest,
@@ -50,6 +51,31 @@ describe("dApp chain authorization", () => {
     expect(result).toMatchObject({ authorizedChainId: "0x539" });
   });
 
+  it("accepts checksum-case variants of an authorized signing account", async () => {
+    const result = await checkAccountAndChainHaveBeenAuthorized(
+      request(RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4, [
+        ACCOUNT.toLowerCase(),
+        { domain: { chainId: "0x539" } },
+      ]),
+    );
+
+    expect(result.canProceed).toBe(true);
+    expect(result).toMatchObject({ authorizedChainId: "0x539" });
+  });
+
+  it("rejects a signing account with one different nibble", async () => {
+    const differentAccount = `${ACCOUNT.slice(0, -1)}8`.toLowerCase();
+    const result = await checkAccountHasBeenAuthorized(
+      request(RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4, [
+        differentAccount,
+        { domain: { chainId: "0x539" } },
+      ]),
+    );
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("has not been authorized");
+  });
+
   it("rejects before approval when the active chain was not granted", async () => {
     vi.mocked(StorageUtil.getActiveBlockChain).mockResolvedValue({
       chainId: "0x1",
@@ -72,7 +98,9 @@ describe("dApp chain authorization", () => {
     );
 
     expect(result.canProceed).toBe(false);
-    expect(result.proceedError?.message).toContain("not the active wallet chain");
+    expect(result.proceedError?.message).toContain(
+      "not the active wallet chain",
+    );
   });
 
   it("rejects malformed serialized typed data", async () => {
@@ -98,7 +126,9 @@ describe("dApp chain authorization", () => {
     });
 
     expect(result.canProceed).toBe(false);
-    expect(result.proceedError?.message).toContain("not the active wallet chain");
+    expect(result.proceedError?.message).toContain(
+      "not the active wallet chain",
+    );
   });
 });
 
@@ -129,7 +159,9 @@ describe("dApp chain authorization for PQ signing methods", () => {
     );
 
     expect(result.canProceed).toBe(false);
-    expect(result.proceedError?.message).toContain("not the active wallet chain");
+    expect(result.proceedError?.message).toContain(
+      "not the active wallet chain",
+    );
   });
 
   it("allows qrl_signTypedData whose decimal declared chain matches the active chain", async () => {
@@ -192,7 +224,9 @@ describe("dApp chain authorization for PQ signing methods", () => {
     });
 
     expect(result.canProceed).toBe(false);
-    expect(result.proceedError?.message).toContain("not the active wallet chain");
+    expect(result.proceedError?.message).toContain(
+      "not the active wallet chain",
+    );
   });
 
   it("revalidation rejects a stored request missing its authorized chain", async () => {

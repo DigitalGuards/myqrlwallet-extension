@@ -8,9 +8,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, dev]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, dev]
   workflow_dispatch:
 
 permissions:
@@ -29,16 +29,24 @@ jobs:
         # actions/checkout v4 (resolved 2026-05-07). Mutable tags are not
         # used: any future bump must update the SHA explicitly so that a
         # tag-rewrite cannot inject untrusted code.
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Checkout tested QuantaSwap frontend
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: DigitalGuards/QuantaSwap
+          # Immutable origin/dev commit tested by this extension composition.
+          ref: 46a8c7b43dd47f65049d1e663b9775e6f7c2cc62
+          path: quantaswap
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '22.x'
-          cache: 'npm'
+          node-version: "22.x"
+          cache: "npm"
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Lint
         run: npm run lint
@@ -48,3 +56,19 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Install QuantaSwap frontend dependencies
+        working-directory: quantaswap/frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build QuantaSwap frontend
+        working-directory: quantaswap/frontend
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser integration
+        run: npx playwright test
+        env:
+          QUANTASWAP_FRONTEND_DIR: ${{ github.workspace }}/quantaswap/frontend

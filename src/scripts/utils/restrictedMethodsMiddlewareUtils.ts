@@ -7,6 +7,7 @@ import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import StorageUtil from "@/utilities/storageUtil";
 import { MAX_SAFE_CHAIN_ID } from "@/constants/blockchain";
 import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
+import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import {
   CAVEAT_TYPES,
   DAppRequestType,
@@ -39,7 +40,9 @@ export const checkAccountHasBeenAuthorized = async (
   const connectedAccounts =
     await StorageUtil.getDAppsConnectedAccountsData(urlOrigin);
   const hasAddressConnected =
-    connectedAccounts?.accounts.includes(fromAddress) ?? false;
+    connectedAccounts?.accounts.some((address) =>
+      areAddressesEquivalent(address, fromAddress),
+    ) ?? false;
   return {
     canProceed: hasAddressConnected,
     proceedError: providerErrors.unauthorized({
@@ -50,7 +53,8 @@ export const checkAccountHasBeenAuthorized = async (
 
 export const normalizeChainId = (chainId: unknown): string | undefined => {
   if (
-    (typeof chainId !== "string" && typeof chainId !== "number" &&
+    (typeof chainId !== "string" &&
+      typeof chainId !== "number" &&
       typeof chainId !== "bigint") ||
     (typeof chainId === "number" && !Number.isSafeInteger(chainId))
   ) {
@@ -71,7 +75,10 @@ const getTypedDataChainId = (req: JsonRpcRequest<JsonRpcRequest>) => {
   const rawTypedData = req.params?.[1];
   if (typeof rawTypedData === "string") {
     try {
-      return { isValid: true, chainId: JSON.parse(rawTypedData)?.domain?.chainId };
+      return {
+        isValid: true,
+        chainId: JSON.parse(rawTypedData)?.domain?.chainId,
+      };
     } catch {
       return { isValid: false, chainId: undefined };
     }
@@ -166,7 +173,8 @@ export const revalidateAuthorizedDAppRequest = async (
     return {
       canProceed: false,
       proceedError: providerErrors.unauthorized({
-        message: "The approval request is missing its authorized chain context.",
+        message:
+          "The approval request is missing its authorized chain context.",
       }),
     };
   }

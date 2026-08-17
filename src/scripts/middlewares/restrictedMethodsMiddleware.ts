@@ -15,6 +15,7 @@ import {
 import LockManager from "../lockManager/lockManager";
 import { checkDomain } from "../phishing/phishingDetector";
 import { openApprovalSurface } from "../utils/approvalSurface";
+import { resolveTrustedSenderOrigin } from "../utils/dAppAccountNotifications";
 import {
   checkAccountHasBeenAuthorized,
   checkAccountAndChainHaveBeenAuthorized,
@@ -37,14 +38,14 @@ export const checkRequestCanCompleteSilently = async (
   req: JsonRpcRequest<JsonRpcRequest>,
 ) => {
   if (req.method === RESTRICTED_METHODS.WALLET_ADD_QRL_CHAIN) {
-    const [chainData] = (req.params as unknown) as { chainId: string }[];
+    const [chainData] = req.params as unknown as { chainId: string }[];
     const chainId = chainData?.chainId;
     const blockchains = await StorageUtil.getAllBlockChains();
     const chainFound = !!blockchains.find(
       (chain) => chain.chainId.toLowerCase() === chainId.toLowerCase(),
     );
     if (chainFound) {
-      // Chain is already known to the wallet — acknowledge per EIP-3085 but do
+      // Chain is already known to the wallet. Acknowledge per EIP-3085 but do
       // NOT silently flip the globally-active chain. The dApp must call
       // wallet_switchQRLChain explicitly (which surfaces to the user). F-2.
       return {
@@ -56,14 +57,14 @@ export const checkRequestCanCompleteSilently = async (
       hasCompleted: false,
     };
   } else if (req.method === RESTRICTED_METHODS.WALLET_SWITCH_QRL_CHAIN) {
-    const [chainData] = (req.params as unknown) as { chainId: string }[];
+    const [chainData] = req.params as unknown as { chainId: string }[];
     const chainId = chainData?.chainId;
 
     const currentChainId = (await StorageUtil.getActiveBlockChain())?.chainId;
     const isAlreadyCurrentChain =
       chainId?.toLowerCase() === currentChainId?.toLowerCase();
     if (isAlreadyCurrentChain) {
-      // No-op switch — permitted per EIP-3326 / MetaMask. Any other target
+      // No-op switch: permitted per EIP-3326 / MetaMask. Any other target
       // (including a chain already in this dApp's permission list) must open
       // the popup so the user authorises the global active-chain change. F-1.
       return {
@@ -79,7 +80,9 @@ export const checkRequestCanCompleteSilently = async (
     try {
       // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
       const chains: string[] = req?.params?.[1] ?? [];
-      const capabilities: { [k: string]: { atomic: { status: "ready" | "supported" } } } = {};
+      const capabilities: {
+        [k: string]: { atomic: { status: "ready" | "supported" } };
+      } = {};
       // EIP-5792 wallet_sendCalls is not implemented in this wallet; advertise
       // atomic as "supported" (the weaker tier) rather than "ready" so dApps
       // do not dispatch wallet_sendCalls expecting it to succeed. Promote to
@@ -350,6 +353,15 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
       requestedMethod as RestrictedMethodValue,
     )
   ) {
+    const requesterOrigin = resolveTrustedSenderOrigin({
+      origin: req.senderData?.url,
+    });
+    if (!requesterOrigin) {
+      res.error = providerErrors.unauthorized({
+        message: "The requesting origin is unavailable.",
+      });
+      return end();
+    }
     if (isRequestPending) {
       try {
         await openApprovalSurface();
