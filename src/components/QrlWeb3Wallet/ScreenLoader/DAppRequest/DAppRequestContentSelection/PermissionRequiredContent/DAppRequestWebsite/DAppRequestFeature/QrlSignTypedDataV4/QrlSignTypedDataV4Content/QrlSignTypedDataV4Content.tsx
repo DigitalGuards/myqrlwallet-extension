@@ -13,6 +13,7 @@ import {
 } from "@/components/UI/Tooltip";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
+import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import StringUtil, { sanitizeForDisplay } from "@/utilities/stringUtil";
 import { MLDSA87, ExtendedSeed } from "@theqrl/wallet.js";
 import { bytesToHex } from "@theqrl/web3-utils";
@@ -41,12 +42,16 @@ const tryDecimalAndHex = (v: string | number | bigint): string => {
 };
 
 const renderPrimitive = (v: unknown): { text: string; hadHidden: boolean } => {
-  if (v === null || v === undefined) return { text: String(v), hadHidden: false };
-  if (typeof v === "boolean") return { text: v ? "true" : "false", hadHidden: false };
-  if (typeof v === "bigint") return { text: tryDecimalAndHex(v), hadHidden: false };
-  if (typeof v === "number") return { text: tryDecimalAndHex(v), hadHidden: false };
+  if (v === null || v === undefined)
+    return { text: String(v), hadHidden: false };
+  if (typeof v === "boolean")
+    return { text: v ? "true" : "false", hadHidden: false };
+  if (typeof v === "bigint")
+    return { text: tryDecimalAndHex(v), hadHidden: false };
+  if (typeof v === "number")
+    return { text: tryDecimalAndHex(v), hadHidden: false };
   if (typeof v === "string") {
-    // Numeric strings (decimal or 0x-hex) — render both forms.
+    // Numeric strings (decimal or 0x-hex): render both forms.
     if (/^-?\d+$/.test(v) || /^0x[0-9a-fA-F]+$/.test(v)) {
       return { text: tryDecimalAndHex(v), hadHidden: false };
     }
@@ -204,9 +209,8 @@ const QrlSignTypedDataV4Content = observer(() => {
     if (isConnected) {
       const onPermissionCallBack = async (hasApproved: boolean) => {
         if (hasApproved) {
-          const authorization = await revalidateAuthorizedDAppRequest(
-            dAppRequestData,
-          );
+          const authorization =
+            await revalidateAuthorizedDAppRequest(dAppRequestData);
           if (!authorization.canProceed) {
             addToResponseData({ error: authorization.proceedError });
             return;
@@ -231,7 +235,7 @@ const QrlSignTypedDataV4Content = observer(() => {
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
       const addressFromMnemonic =
         qrlInstance?.accounts.seedToAccount(seed)?.address;
-      if (fromAddress !== addressFromMnemonic) {
+      if (!areAddressesEquivalent(fromAddress, addressFromMnemonic)) {
         throw new Error("Mnemonic phrases did not match with the address");
       }
       const messageHash = getEncodedEip712Data(typedData, true);
@@ -263,19 +267,25 @@ const QrlSignTypedDataV4Content = observer(() => {
     <div className="flex flex-col gap-6">
       <div className="flex flex-col rounded-md p-2">
         <div className="flex flex-col gap-1">
-          <div>{t('dapp.signature.fromAddress')}</div>
+          <div>{t("dapp.signature.fromAddress")}</div>
           <div className="font-data w-64 font-bold text-identity-accent">{`${prefixFromAddress} ${addressSplitFromAddress.join(" ")}`}</div>
         </div>
       </div>
       <div className="rounded-md bg-muted/50 p-2 text-xs">
-        <div className="font-semibold">Structured-data signature ({primaryType})</div>
+        <div className="font-semibold">
+          Structured-data signature ({primaryType})
+        </div>
         <div className="text-muted-foreground">
-          This is an EIP-712 signature, distinct from a transaction. Review every field carefully — a signature here may authorise token transfers or contract actions on your behalf.
+          This is an EIP-712 signature, distinct from a transaction. Review
+          every field carefully; a signature here may authorise token transfers
+          or contract actions on your behalf.
         </div>
       </div>
       {isApprovalSignature && (
         <div className="rounded-md border border-destructive/60 bg-destructive/10 p-2 text-xs text-destructive dark:text-red-200">
-          <strong>Token approval:</strong> this signature ({primaryType}) authorises the spender below to move tokens from your account once submitted on-chain. Verify each field carefully before approving.
+          <strong>Token approval:</strong> this signature ({primaryType})
+          authorises the spender below to move tokens from your account once
+          submitted on-chain. Verify each field carefully before approving.
           <div className="mt-1 flex flex-col gap-1">
             {approvalSpender && (
               <div>
@@ -299,12 +309,17 @@ const QrlSignTypedDataV4Content = observer(() => {
       )}
       {chainIdMissing && (
         <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
-          <strong>Warning:</strong> the dApp did not declare a chainId in the EIP-712 domain. This signature is not bound to any chain and could be replayed on any chain hosting the verifying contract.
+          <strong>Warning:</strong> the dApp did not declare a chainId in the
+          EIP-712 domain. This signature is not bound to any chain and could be
+          replayed on any chain hosting the verifying contract.
         </div>
       )}
       {chainIdMismatch && (
         <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
-          <strong>Warning:</strong> the EIP-712 domain chainId ({declaredChainId}) does not match the wallet&apos;s active chain ({activeChainId}). The signature will be valid on the declared chain only.
+          <strong>Warning:</strong> the EIP-712 domain chainId (
+          {declaredChainId}) does not match the wallet&apos;s active chain (
+          {activeChainId}). The signature will be valid on the declared chain
+          only.
         </div>
       )}
       <Accordion
@@ -321,13 +336,17 @@ const QrlSignTypedDataV4Content = observer(() => {
               {domain?.name !== undefined && (
                 <div className="flex flex-col gap-1">
                   <div>Name</div>
-                  <div className="font-bold text-secondary">{String(domain.name)}</div>
+                  <div className="font-bold text-secondary">
+                    {String(domain.name)}
+                  </div>
                 </div>
               )}
               {domain?.version !== undefined && (
                 <div className="flex flex-col gap-1">
                   <div>Version</div>
-                  <div className="font-bold text-secondary">{String(domain.version)}</div>
+                  <div className="font-bold text-secondary">
+                    {String(domain.version)}
+                  </div>
                 </div>
               )}
               <div className="flex flex-col gap-1">
@@ -379,7 +398,7 @@ const QrlSignTypedDataV4Content = observer(() => {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left">
-                    <Label>{t('dapp.signature.copyMessage')}</Label>
+                    <Label>{t("dapp.signature.copyMessage")}</Label>
                   </TooltipContent>
                 </Tooltip>
               </div>

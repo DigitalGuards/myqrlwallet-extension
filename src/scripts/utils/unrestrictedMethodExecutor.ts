@@ -66,13 +66,19 @@ export const executeUnrestrictedMethod = async (
   } else if (
     method === UNRESTRICTED_METHODS.QRL_WEB3_WALLET_GET_PROVIDER_STATE
   ) {
-    const chainId = (await qrl?.getChainId())?.toString() ?? "";
+    const urlOrigin = new URL(req?.senderData?.url ?? "").origin;
+    const chainId = await qrl.getChainId();
     const networkVersion = (await qrl?.net.getId())?.toString() ?? "";
+    // Read accounts after the network calls so a revoke that arrives while
+    // provider initialization is pending cannot be overwritten by a stale
+    // initial-state response.
+    const connectedAccountsData =
+      await StorageUtil.getDAppsConnectedAccountsData(urlOrigin);
     return {
-      chainId: `0x${chainId}`,
+      chainId: `0x${chainId.toString(16)}`,
       networkVersion,
       isUnlocked: false,
-      accounts: [],
+      accounts: connectedAccountsData?.accounts ?? [],
     } as Parameters<BaseProvider["_initializeState"]>[0];
   } else if (method === UNRESTRICTED_METHODS.QRL_SYNCING) {
     const isSyncing = await qrl.isSyncing();
@@ -213,7 +219,8 @@ export const executeUnrestrictedMethod = async (
   } else if (
     method ===
       UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_BY_BLOCK_HASH_AND_INDEX ||
-    method === UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX
+    method ===
+      UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX
   ) {
     const [blockHashOrNumber, transactionIndex] = req?.params ?? [];
     const transactionInformation = qrl?.getTransactionFromBlock(

@@ -1,6 +1,6 @@
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 
@@ -11,7 +11,7 @@ export default defineConfig({
   },
   resolve: {
     alias: [
-      // Test-specific aliases — order matters, more specific first
+      // Test-specific aliases: order matters, more specific first
       {
         find: /^@\/stores\/store$/,
         replacement: path.resolve(__dirname, "src/__mocks__/mockedStore.ts"),
@@ -25,10 +25,7 @@ export default defineConfig({
       },
       {
         find: /^@\/i18n$/,
-        replacement: path.resolve(
-          __dirname,
-          "src/__mocks__/i18nTestSetup.ts",
-        ),
+        replacement: path.resolve(__dirname, "src/__mocks__/i18nTestSetup.ts"),
       },
       // Base aliases from vite.config
       { find: "@", replacement: path.resolve(__dirname, "src") },
@@ -44,6 +41,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    exclude: [...configDefaults.exclude, "e2e/**"],
     clearMocks: true,
     globals: false,
     setupFiles: ["src/__mocks__/i18nTestSetup.ts", "vitest.setup.ts"],

@@ -17,7 +17,19 @@ type CurrentTabData = {
   connectedBlockchains: BlockchainDataType[];
 };
 
+const originFromTabUrl = (url?: string): string => {
+  if (!url) return "";
+  try {
+    const origin = new URL(url).origin;
+    return origin === "null" ? "" : origin;
+  } catch {
+    return "";
+  }
+};
+
 class DAppRequestStore {
+  private currentTabFetchGeneration = 0;
+  private dAppRequestReadGeneration = 0;
   currentTabData?: CurrentTabData;
   dAppRequestData?: DAppRequestType;
   responseData: Record<string, unknown> = {};
@@ -45,6 +57,25 @@ class DAppRequestStore {
     });
     this.fetchCurrentTabData();
     this.subscribeToRequestStorage();
+    this.subscribeToActiveTab();
+  }
+
+  private subscribeToActiveTab() {
+    try {
+      browser.tabs.onActivated.addListener(() => {
+        void this.fetchCurrentTabData();
+      });
+      browser.tabs.onUpdated.addListener((_, changeInfo, tab) => {
+        if (
+          tab.active &&
+          (changeInfo.url !== undefined || changeInfo.status === "complete")
+        ) {
+          void this.fetchCurrentTabData();
+        }
+      });
+    } catch {
+      // Tab events are unavailable in popup-only test contexts.
+    }
   }
 
   private subscribeToRequestStorage() {
@@ -56,6 +87,8 @@ class DAppRequestStore {
       browser.storage.onChanged.addListener((changes, areaName) => {
         if (areaName === "session" && "DAPPS" in changes) {
           this.responseData = {};
+          this.canProceed = false;
+          this.onPermissionCallBack = async () => undefined;
           this.approvalProcessingStatus = {
             isProcessing: false,
             hasApproved: false,
@@ -63,9 +96,12 @@ class DAppRequestStore {
           };
           void this.readDAppRequestData();
         }
+        if (areaName === "local" && "DAPPS" in changes) {
+          void this.fetchCurrentTabData();
+        }
       });
     } catch {
-      // storage.onChanged unavailable — popup-only contexts work fine
+      // storage.onChanged unavailable. Popup-only contexts work fine
       // without it because the popup is recreated on each open.
     }
   }
@@ -79,22 +115,23 @@ class DAppRequestStore {
   }
 
   async fetchCurrentTabData() {
+    const generation = ++this.currentTabFetchGeneration;
     const tabs = await browser.tabs.query({
       active: true,
       currentWindow: true,
     });
     const currentTab = tabs[0];
-    const urlOrigin = new URL(currentTab?.url ?? "").origin;
+    const urlOrigin = originFromTabUrl(currentTab?.url);
+    const connectedDApp = urlOrigin
+      ? await StorageUtil.getDAppsConnectedAccountsData(urlOrigin)
+      : undefined;
+    if (generation !== this.currentTabFetchGeneration) return;
     this.currentTabData = {
       favIconUrl: currentTab?.favIconUrl ?? "",
       title: currentTab?.title ?? "",
       urlOrigin,
-      connectedAccounts:
-        (await StorageUtil.getDAppsConnectedAccountsData(urlOrigin))
-          ?.accounts ?? [],
-      connectedBlockchains:
-        (await StorageUtil.getDAppsConnectedAccountsData(urlOrigin))
-          ?.blockchains ?? [],
+      connectedAccounts: connectedDApp?.accounts ?? [],
+      connectedBlockchains: connectedDApp?.blockchains ?? [],
     };
   }
 
@@ -106,7 +143,9 @@ class DAppRequestStore {
   }
 
   async readDAppRequestData() {
+    const generation = ++this.dAppRequestReadGeneration;
     const storedDAppRequestData = await StorageUtil.getDAppsRequestData();
+    if (generation !== this.dAppRequestReadGeneration) return;
     this.dAppRequestData = storedDAppRequestData;
   }
 

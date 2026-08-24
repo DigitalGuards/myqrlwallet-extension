@@ -22,6 +22,11 @@ import {
 } from "./phishing/phishingDetector";
 import { checkForLastError } from "./utils/scriptUtils";
 import { setupMultiplex } from "./utils/streamUtils";
+import {
+  notifyDAppAccountsChanged,
+  registerDAppAccountNotificationStream,
+} from "./utils/dAppAccountNotifications";
+import { initializeContentScriptProviderConnection } from "./utils/providerConnectionLifecycle";
 
 type ContentScriptType = browser.Scripting.RegisteredContentScript;
 
@@ -54,7 +59,10 @@ const registerScripts = async () => {
 
 const prepareListeners = () => {
   // Listening to storage for displaying the badge in the extension.
-  browser.storage.onChanged.addListener(async () => {
+  browser.storage.onChanged.addListener(async (changes, areaName) => {
+    if (areaName === "local") {
+      notifyDAppAccountsChanged(changes.DAPPS);
+    }
     const storedDAppRequestData = await StorageUtil.getDAppsRequestData();
     if (storedDAppRequestData) {
       // If there is a pending request, the badge with 1 notification will be displayed.
@@ -67,7 +75,7 @@ const prepareListeners = () => {
   // Listening for messages related to the wallet locking.
   browser.runtime.onMessage.addListener(LockManager.lockManagerListener);
   // Listening for transaction notification requests from the popup.
-  // IMPORTANT: Must NOT be async — returning a Promise from onMessage claims the
+  // IMPORTANT: Must NOT be async. Returning a Promise from onMessage claims the
   // message channel and prevents lockManagerListener from responding.
   browser.runtime.onMessage.addListener((message) => {
     if (message.name !== LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION) {
@@ -75,12 +83,17 @@ const prepareListeners = () => {
     }
     (async () => {
       const settings = await StorageUtil.getSettings();
-      if (!settings.notificationsEnabled && settings.notificationsEnabled !== undefined) {
+      if (
+        !settings.notificationsEnabled &&
+        settings.notificationsEnabled !== undefined
+      ) {
         return;
       }
       const { status, amount, tokenSymbol, txHash } = message.data ?? {};
       const isConfirmed = status === "confirmed";
-      const title = isConfirmed ? "Transaction Confirmed" : "Transaction Failed";
+      const title = isConfirmed
+        ? "Transaction Confirmed"
+        : "Transaction Failed";
       const body =
         amount !== undefined && tokenSymbol
           ? `Your transaction of ${amount} ${tokenSymbol} ${isConfirmed ? "was confirmed" : "failed"}.`
@@ -166,6 +179,11 @@ const setupProviderConnectionEip1193 = async (port: browser.Runtime.Port) => {
   const mux = setupMultiplex(portStream);
   const outStream = mux.createStream(QRL_WALLET_PROVIDER_NAME);
   const sender = port.sender;
+  const unregisterAccountNotifications = registerDAppAccountNotificationStream(
+    sender ?? {},
+    outStream,
+  );
+  port.onDisconnect.addListener(unregisterAccountNotifications);
 
   // messages between inpage and background
   const engine = setupProviderEngineEip1193({
@@ -176,6 +194,7 @@ const setupProviderConnectionEip1193 = async (port: browser.Runtime.Port) => {
   const providerStream = createEngineStream({ engine });
 
   pipeline(outStream, providerStream, outStream, (err) => {
+    unregisterAccountNotifications();
     console.warn("QrlWeb3Wallet: Error in stream pipeline\n", err);
     // handle any middleware cleanup
     // @ts-expect-error - _middleware is a private property on JsonRpcEngine not exposed in type definitions
@@ -185,14 +204,19 @@ const setupProviderConnectionEip1193 = async (port: browser.Runtime.Port) => {
       }
     });
   });
+
+  port.postMessage({ name: EXTENSION_MESSAGES.CONNECTION_READY });
 };
 
 const establishContenScriptConnection = () => {
   browser.runtime.onConnect.addListener(async (port) => {
     // Ensuring the port connected to is the content script
     if (port.name === QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT) {
-      await announceServiceWorkerReady();
-      await setupProviderConnectionEip1193(port);
+      await initializeContentScriptProviderConnection(
+        port,
+        setupProviderConnectionEip1193,
+        announceServiceWorkerReady,
+      );
     }
   });
 };
@@ -246,10 +270,7 @@ const initializeServiceWorker = async () => {
   try {
     await registerScripts();
   } catch (error) {
-    console.warn(
-      "QrlWeb3Wallet: Failed to register content scripts\n",
-      error,
-    );
+    console.warn("QrlWeb3Wallet: Failed to register content scripts\n", error);
   }
 
   await applySidePanelPreference();

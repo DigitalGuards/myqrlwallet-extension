@@ -7,6 +7,7 @@ import {
 } from "@/components/UI/Tooltip";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
+import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import StringUtil, { sanitizeForDisplay } from "@/utilities/stringUtil";
 import { MLDSA87, ExtendedSeed } from "@theqrl/wallet.js";
 import { bytesToHex } from "@theqrl/web3-utils";
@@ -53,9 +54,8 @@ const PersonalSign = observer(() => {
     if (isConnected) {
       const onPermissionCallBack = async (hasApproved: boolean) => {
         if (hasApproved) {
-          const authorization = await revalidateAuthorizedDAppRequest(
-            dAppRequestData,
-          );
+          const authorization =
+            await revalidateAuthorizedDAppRequest(dAppRequestData);
           if (!authorization.canProceed) {
             addToResponseData({ error: authorization.proceedError });
             return;
@@ -80,7 +80,7 @@ const PersonalSign = observer(() => {
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
       const addressFromMnemonic =
         qrlInstance?.accounts.seedToAccount(seed)?.address;
-      if (fromAddress !== addressFromMnemonic) {
+      if (!areAddressesEquivalent(fromAddress, addressFromMnemonic)) {
         throw new Error("Mnemonic phrases did not match with the address");
       }
       const signature = qrlInstance?.accounts.sign(
@@ -113,11 +113,11 @@ const PersonalSign = observer(() => {
   return (
     <div className="flex flex-col gap-2 rounded-md p-2">
       <div className="flex flex-col gap-1">
-        <div>{t('dapp.signature.fromAddress')}</div>
+        <div>{t("dapp.signature.fromAddress")}</div>
         <div className="font-data w-64 font-bold text-identity-accent">{`${prefixFromAddress} ${addressSplitFromAddress.join(" ")}`}</div>
       </div>
       <div className="flex flex-col gap-1">
-        <div>{t('dapp.signature.message')}</div>
+        <div>{t("dapp.signature.message")}</div>
         {!isHexEncoded && (
           <div className="text-xs text-amber-600 dark:text-amber-300">
             Message is not hex-encoded; displaying raw input.
@@ -126,8 +126,8 @@ const PersonalSign = observer(() => {
         {hasHiddenChars && (
           <div className="text-xs text-red-600">
             Warning: this message contained hidden formatting characters
-            (bidirectional, zero-width, or control); they have been removed
-            from the display. The bytes signed will still include them.
+            (bidirectional, zero-width, or control); they have been removed from
+            the display. The bytes signed will still include them.
           </div>
         )}
         <div className="flex justify-between gap-2">
@@ -147,7 +147,7 @@ const PersonalSign = observer(() => {
               </Button>
             </TooltipTrigger>
             <TooltipContent side="left">
-              <Label>{t('dapp.signature.copyMessage')}</Label>
+              <Label>{t("dapp.signature.copyMessage")}</Label>
             </TooltipContent>
           </Tooltip>
         </div>
