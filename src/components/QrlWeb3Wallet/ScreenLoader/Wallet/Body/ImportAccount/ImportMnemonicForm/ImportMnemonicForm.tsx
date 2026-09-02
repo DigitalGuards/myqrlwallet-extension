@@ -1,12 +1,5 @@
 import { Button } from "@/components/UI/Button";
 import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/UI/Card";
-import {
   Form,
   FormControl,
   FormDescription,
@@ -19,7 +12,7 @@ import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import withSuspense from "@/functions/withSuspense";
 import { useStore } from "@/stores/store";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Web3BaseWalletAccount } from "@theqrl/web3";
+import Web3, { Web3BaseWalletAccount } from "@theqrl/web3";
 import { Download, Loader } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { lazy } from "react";
@@ -30,9 +23,7 @@ import { z } from "zod";
 const MnemonicWordListing = withSuspense(
   lazy(
     () =>
-      import(
-        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/CreateAccount/MnemonicDisplay/MnemonicWordListing/MnemonicWordListing"
-      ),
+      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/CreateAccount/MnemonicDisplay/MnemonicWordListing/MnemonicWordListing"),
   ),
 );
 
@@ -44,58 +35,56 @@ interface ImportMnemonicFormProps {
   onImported: (account: Web3BaseWalletAccount) => Promise<void>;
 }
 
-const ImportMnemonicForm = observer(({ onImported }: ImportMnemonicFormProps) => {
-  const { t } = useTranslation();
-  const { qrlStore } = useStore();
-  const { qrlInstance } = qrlStore;
+const ImportMnemonicForm = observer(
+  ({ onImported }: ImportMnemonicFormProps) => {
+    const { t } = useTranslation();
+    const { qrlStore } = useStore();
+    const { qrlInstance } = qrlStore;
 
-  const form = useForm<z.infer<typeof FormSchema>>({
-    resolver: zodResolver(FormSchema),
-    mode: "onChange",
-    reValidateMode: "onSubmit",
-    defaultValues: {
-      mnemonicPhrases: "",
-    },
-  });
-  const {
-    handleSubmit,
-    watch,
-    control,
-    formState: { isSubmitting, isValid },
-  } = form;
+    const form = useForm<z.infer<typeof FormSchema>>({
+      resolver: zodResolver(FormSchema),
+      mode: "onChange",
+      reValidateMode: "onSubmit",
+      defaultValues: {
+        mnemonicPhrases: "",
+      },
+    });
+    const {
+      handleSubmit,
+      watch,
+      control,
+      formState: { isSubmitting, isValid },
+    } = form;
 
-  async function onSubmit(formData: z.infer<typeof FormSchema>) {
-    try {
-      const account = qrlInstance?.accounts.seedToAccount(
-        getHexSeedFromMnemonic(formData.mnemonicPhrases.trim()),
-      );
-      if (account) {
-        await onImported(account);
-      } else {
+    async function onSubmit(formData: z.infer<typeof FormSchema>) {
+      try {
+        const accounts = qrlInstance?.accounts ?? new Web3().qrl.accounts;
+        const account = accounts.seedToAccount(
+          getHexSeedFromMnemonic(formData.mnemonicPhrases.trim()),
+        );
+        if (account) {
+          await onImported(account);
+        } else {
+          control.setError("mnemonicPhrases", {
+            message: t("importAccount.importFailed"),
+          });
+        }
+      } catch (error) {
         control.setError("mnemonicPhrases", {
-          message: t("importAccount.importFailed"),
+          message: `${t("importAccount.readError")} ${error}`,
         });
       }
-    } catch (error) {
-      control.setError("mnemonicPhrases", {
-        message: `${t("importAccount.readError")} ${error}`,
-      });
     }
-  }
 
-  return (
-    <Form {...form}>
-      <form
-        name="importAccount"
-        aria-label="importAccount"
-        className="w-full"
-        onSubmit={handleSubmit(onSubmit)}
-      >
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("importAccount.title")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+    return (
+      <Form {...form}>
+        <form
+          name="importAccount"
+          aria-label="importAccount"
+          className="w-full"
+          onSubmit={handleSubmit(onSubmit)}
+        >
+          <div className="space-y-4">
             <FormField
               control={control}
               name="mnemonicPhrases"
@@ -118,27 +107,25 @@ const ImportMnemonicForm = observer(({ onImported }: ImportMnemonicFormProps) =>
               )}
             />
             <MnemonicWordListing mnemonic={watch().mnemonicPhrases} />
-          </CardContent>
-          <CardFooter>
-            <Button
-              disabled={isSubmitting || !isValid}
-              className="w-full"
-              type="submit"
-            >
-              {isSubmitting ? (
-                <Loader className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
-              {isSubmitting
-                ? t("importAccount.importing")
-                : t("importAccount.button")}
-            </Button>
-          </CardFooter>
-        </Card>
-      </form>
-    </Form>
-  );
-});
+          </div>
+          <Button
+            disabled={isSubmitting || !isValid}
+            className="mt-6 w-full"
+            type="submit"
+          >
+            {isSubmitting ? (
+              <Loader className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
+            {isSubmitting
+              ? t("importAccount.importing")
+              : t("importAccount.button")}
+          </Button>
+        </form>
+      </Form>
+    );
+  },
+);
 
 export default ImportMnemonicForm;

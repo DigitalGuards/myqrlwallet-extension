@@ -1,12 +1,5 @@
 import { Button } from "@/components/UI/Button";
 import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/UI/Card";
-import {
   Form,
   FormControl,
   FormDescription,
@@ -17,7 +10,7 @@ import {
 import { Input } from "@/components/UI/Input";
 import { useStore } from "@/stores/store";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Web3BaseWalletAccount } from "@theqrl/web3";
+import Web3, { Web3BaseWalletAccount } from "@theqrl/web3";
 import { Download, Loader } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useForm } from "react-hook-form";
@@ -62,9 +55,8 @@ const ImportHexSeedForm = observer(({ onImported }: ImportHexSeedFormProps) => {
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     try {
-      const account = qrlInstance?.accounts.seedToAccount(
-        formData.hexSeed.trim(),
-      );
+      const accounts = qrlInstance?.accounts ?? new Web3().qrl.accounts;
+      const account = accounts.seedToAccount(formData.hexSeed.trim());
       if (account) {
         await onImported(account);
       } else {
@@ -87,50 +79,43 @@ const ImportHexSeedForm = observer(({ onImported }: ImportHexSeedFormProps) => {
         className="w-full"
         onSubmit={handleSubmit(onSubmit)}
       >
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("importAccount.hexSeedTitle")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <FormField
-              control={control}
-              name="hexSeed"
-              render={({ field }) => (
-                <FormItem>
-                  <FormControl>
-                    <Input
-                      {...field}
-                      aria-label={field.name}
-                      autoComplete="off"
-                      disabled={isSubmitting}
-                      placeholder={t("importAccount.hexSeedPlaceholder")}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    {t("importAccount.pasteHexSeed")}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </CardContent>
-          <CardFooter>
-            <Button
-              disabled={isSubmitting || !isValid}
-              className="w-full"
-              type="submit"
-            >
-              {isSubmitting ? (
-                <Loader className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
-              {isSubmitting
-                ? t("importAccount.importing")
-                : t("importAccount.button")}
-            </Button>
-          </CardFooter>
-        </Card>
+        <div className="space-y-4">
+          <FormField
+            control={control}
+            name="hexSeed"
+            render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input
+                    {...field}
+                    aria-label={field.name}
+                    autoComplete="off"
+                    disabled={isSubmitting}
+                    placeholder={t("importAccount.hexSeedPlaceholder")}
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t("importAccount.pasteHexSeed")}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+        <Button
+          disabled={isSubmitting || !isValid}
+          className="mt-6 w-full"
+          type="submit"
+        >
+          {isSubmitting ? (
+            <Loader className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="mr-2 h-4 w-4" />
+          )}
+          {isSubmitting
+            ? t("importAccount.importing")
+            : t("importAccount.button")}
+        </Button>
       </form>
     </Form>
   );

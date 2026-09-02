@@ -10,15 +10,19 @@ import StartAccountCreation from "./StartAccountCreation/StartAccountCreation";
 import AccountCreationSuccess from "./AccountCreationSuccess/AccountCreationSuccess";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
 
-const MnemonicDisplay = withSuspense(
+const SeedBackup = withSuspense(
   lazy(
     () =>
-      import(
-        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/CreateAccount/MnemonicDisplay/MnemonicDisplay"
-      ),
+      import("@/components/QrlWeb3Wallet/ScreenLoader/Shared/SeedBackup/SeedBackup"),
   ),
 );
 
+/**
+ * In-wallet account creation: generate, back up (reveal + confirm), then
+ * persist. Nothing reaches the keystore until the backup is confirmed, so
+ * leaving the screen early discards the account. No account whose seed
+ * was never shown can reach the keystore.
+ */
 const CreateAccount = observer(() => {
   const { t } = useTranslation();
   const { lockStore, qrlStore, accountLabelsStore } = useStore();
@@ -26,55 +30,64 @@ const CreateAccount = observer(() => {
   const { setActiveAccount } = qrlStore;
 
   const [account, setAccount] = useState<Web3BaseWalletAccount>();
-  const [hasAccountCreated, setHasAccountCreated] = useState(false);
-  const [hasMnemonicNoted, setHasMnemonicNoted] = useState(false);
-  const [finalizeError, setFinalizeError] = useState("");
+  const [isPersisted, setIsPersisted] = useState(false);
+  const [startError, setStartError] = useState("");
+  const [persistError, setPersistError] = useState("");
 
-  const onAccountCreated = async (account?: Web3BaseWalletAccount) => {
+  const onAccountCreated = async (created?: Web3BaseWalletAccount) => {
     scrollShellToTop();
-    if (account) {
-      setAccount(account);
-      await setActiveAccount(account?.address);
-      try {
-        // Fail closed if the password is unavailable (SW restarted, no cached
-        // password): never persist the keystore under an empty password.
-        const password = await getWalletPassword();
-        await encryptAccount(account, password);
-      } catch {
-        setFinalizeError(t("account.passwordUnavailable"));
-        return;
-      }
-      // Name it now so the header reads "Account N" immediately rather than
-      // the raw address until some other screen happens to run syncLabels.
-      await accountLabelsStore.ensureLabel(account.address);
-      setFinalizeError("");
-      setHasAccountCreated(true);
+    if (!created) return;
+    // Fail closed before showing anything: with no cached password (SW
+    // restarted) the account could never be stored, so do not walk the
+    // user through a backup that ends in an error.
+    try {
+      await getWalletPassword();
+    } catch {
+      setStartError(t("account.passwordUnavailable"));
+      return;
     }
+    setStartError("");
+    setAccount(created);
   };
 
-  const onMnemonicNoted = () => {
+  const onBackupConfirmed = async () => {
+    if (!account) return;
+    try {
+      const password = await getWalletPassword();
+      await encryptAccount(account, password);
+    } catch {
+      setPersistError(t("account.passwordUnavailable"));
+      return;
+    }
     scrollShellToTop();
-    setHasMnemonicNoted(true);
+    await setActiveAccount(account.address);
+    // Name it now so the header reads "Account N" immediately. Otherwise it
+    // shows the raw address until some other screen happens to run syncLabels.
+    await accountLabelsStore.ensureLabel(account.address);
+    setPersistError("");
+    setIsPersisted(true);
   };
 
   return (
     <>
       <CircuitBackground />
       <div className="relative z-10 w-full p-8">
-        {hasAccountCreated ? (
-          hasMnemonicNoted ? (
+        {account ? (
+          isPersisted ? (
             <AccountCreationSuccess account={account} />
           ) : (
-            <MnemonicDisplay
+            <SeedBackup
               account={account}
-              onMnemonicNoted={onMnemonicNoted}
+              onConfirmed={onBackupConfirmed}
+              onBack={() => setAccount(undefined)}
+              error={persistError}
             />
           )
         ) : (
           <>
-            {finalizeError && (
+            {startError && (
               <Alert variant="destructive" className="mb-4">
-                <AlertDescription>{finalizeError}</AlertDescription>
+                <AlertDescription>{startError}</AlertDescription>
               </Alert>
             )}
             <StartAccountCreation onAccountCreated={onAccountCreated} />
