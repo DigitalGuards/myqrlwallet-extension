@@ -86,6 +86,23 @@ const AddOrImportAccount = observer(
       setMode("choose");
     };
 
+    // Before the "account ready" card: persisting sets the active account
+    // first and finishes the keystore write afterwards, and the backup card
+    // (busy, or showing the persist error) must stay up until that resolves.
+    if (mode === "create" && createdAccount) {
+      return (
+        <SeedBackup
+          account={createdAccount}
+          onConfirmed={onBackupConfirmed}
+          onBack={() => {
+            setCreatedAccount(undefined);
+            setMode("choose");
+          }}
+          error={persistError}
+        />
+      );
+    }
+
     if (hasAccount) {
       return (
         <Card className="animate-appear-in">
@@ -108,20 +125,6 @@ const AddOrImportAccount = observer(
             </Button>
           </CardFooter>
         </Card>
-      );
-    }
-
-    if (mode === "create" && createdAccount) {
-      return (
-        <SeedBackup
-          account={createdAccount}
-          onConfirmed={onBackupConfirmed}
-          onBack={() => {
-            setCreatedAccount(undefined);
-            setMode("choose");
-          }}
-          error={persistError}
-        />
       );
     }
 

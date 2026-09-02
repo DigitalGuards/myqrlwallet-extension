@@ -159,6 +159,27 @@ describe("SeedBackup", () => {
     ).toBeInTheDocument();
   });
 
+  it("warns before skipping the check and persists only on explicit skip", async () => {
+    const { onConfirmed } = renderComponent();
+    await goToConfirm();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Skip confirmation" }),
+    );
+    expect(
+      screen.getByRole("alertdialog", { name: "Skip the backup check?" }),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(onConfirmed).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Skip confirmation" }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Skip anyway" }));
+    expect(onConfirmed).toHaveBeenCalledTimes(1);
+  });
+
   it("offers a back action only when the caller provides one", async () => {
     const onBack = vi.fn();
     renderComponent({ onBack });

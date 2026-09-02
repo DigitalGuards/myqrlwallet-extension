@@ -1,4 +1,14 @@
 import { Alert, AlertDescription } from "@/components/UI/Alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/UI/AlertDialog";
 import { Button } from "@/components/UI/Button";
 import {
   Card,
@@ -20,6 +30,7 @@ import {
   ChevronUp,
   HardDriveDownload,
   Loader,
+  TriangleAlert,
   Undo,
 } from "lucide-react";
 import { FormEvent, useId, useMemo, useState } from "react";
@@ -83,6 +94,7 @@ const SeedBackup = ({
   );
   const [mismatched, setMismatched] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [skipDialogOpen, setSkipDialogOpen] = useState(false);
 
   const { prefix, addressSplit } = StringUtil.getSplitAddress(account.address);
   const hexSeed = StringUtil.getSplitAddress(account.seed ?? "", 8);
@@ -108,12 +120,23 @@ const SeedBackup = ({
       setMismatched(wrong);
       return;
     }
+    await persist();
+  };
+
+  const persist = async () => {
     setBusy(true);
     try {
       await onConfirmed();
     } finally {
       setBusy(false);
     }
+  };
+
+  // The escape hatch persists through the same path as a passed check; the
+  // dialog exists so nobody lands here by accident.
+  const onSkip = async () => {
+    setSkipDialogOpen(false);
+    await persist();
   };
 
   if (step === "confirm") {
@@ -196,8 +219,42 @@ const SeedBackup = ({
               <Undo className="mr-2 h-4 w-4" />
               {t("seedBackup.showAgain")}
             </Button>
+            <Button
+              className="w-full border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setSkipDialogOpen(true)}
+            >
+              <TriangleAlert className="mr-2 h-4 w-4" />
+              {t("seedBackup.skipButton")}
+            </Button>
           </CardFooter>
         </Card>
+        <AlertDialog open={skipDialogOpen} onOpenChange={setSkipDialogOpen}>
+          <AlertDialogContent className="w-80 rounded-md">
+            <AlertDialogHeader className="text-left">
+              <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+                <TriangleAlert className="h-5 w-5 shrink-0" />
+                {t("seedBackup.skipTitle")}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("seedBackup.skipDescription")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="flex-col gap-2 sm:flex-col sm:space-x-0">
+              <AlertDialogCancel className="w-full">
+                {t("seedBackup.skipCancel")}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className="w-full bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => void onSkip()}
+              >
+                {t("seedBackup.skipConfirm")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </form>
     );
   }
