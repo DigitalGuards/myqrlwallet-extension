@@ -4,7 +4,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import StorageUtil from "@/utilities/storageUtil";
 import Onboarding from "./Onboarding";
+
+vi.mock("@/utilities/storageUtil", () => ({
+  default: {
+    getAllAccounts: vi.fn().mockResolvedValue(["QExisting"]),
+    setAllAccounts: vi.fn().mockResolvedValue(undefined),
+    clearActiveAccount: vi.fn().mockResolvedValue(undefined),
+  },
+}));
 
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/Lock/LockPassword/Onboarding/Welcome/Welcome",
@@ -72,7 +81,7 @@ describe("Onboarding", () => {
     expect(screen.getByText("Mocked Welcome")).toBeInTheDocument();
   });
 
-  it("writes the keystore before pointing the active account at it", async () => {
+  it("points the active account before the keystore write, so the service worker never sees keystores without an account", async () => {
     const calls: string[] = [];
     const encryptAccount = vi.fn(async () => {
       calls.push("encrypt");
@@ -92,11 +101,12 @@ describe("Onboarding", () => {
     await userEvent.click(screen.getByText("add account"));
 
     await waitFor(() => expect(setActiveAccount).toHaveBeenCalledWith("QNew"));
-    expect(calls).toEqual(["encrypt", "activate"]);
+    expect(calls).toEqual(["activate", "encrypt"]);
   });
 
-  it("leaves the active account untouched when the keystore write fails", async () => {
+  it("rolls the account pointer back when the keystore write fails", async () => {
     const setActiveAccount = vi.fn(async () => {});
+    const clearAccountState = vi.fn();
     renderComponent(
       mockedStore({
         lockStore: {
@@ -104,16 +114,16 @@ describe("Onboarding", () => {
             throw new Error("service worker unreachable");
           },
         },
-        qrlStore: { setActiveAccount, clearAccountState: () => {} },
+        qrlStore: { setActiveAccount, clearAccountState },
       }),
     );
 
     await userEvent.click(screen.getByText("skip to accounts"));
     await userEvent.click(screen.getByText("add account"));
 
-    await waitFor(() =>
-      expect(screen.getByText("add account")).toBeInTheDocument(),
-    );
-    expect(setActiveAccount).not.toHaveBeenCalled();
+    await waitFor(() => expect(clearAccountState).toHaveBeenCalled());
+    expect(setActiveAccount).toHaveBeenCalledWith("QNew");
+    expect(StorageUtil.setAllAccounts).toHaveBeenCalledWith(["QExisting"]);
+    expect(StorageUtil.clearActiveAccount).toHaveBeenCalled();
   });
 });
