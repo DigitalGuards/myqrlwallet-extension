@@ -15,6 +15,7 @@ import {
   FormMessage,
 } from "@/components/UI/Form";
 import { Input } from "@/components/UI/Input";
+import type { DiscoveredToken } from "@/services/assetDiscovery";
 import { useStore } from "@/stores/store";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader, RefreshCw } from "lucide-react";
@@ -39,22 +40,13 @@ const ImportToken = observer(() => {
 
   const [token, setToken] =
     useState<Awaited<ReturnType<typeof getZrc20TokenDetails>>["token"]>();
-  const [hasTokenImported, setHasTokenImported] = useState(false);
-
-  async function onSubmit(formData: z.infer<typeof FormSchema>) {
-    const tokenDetails = await getZrc20TokenDetails(formData.contractAddress);
-    if (tokenDetails.error) {
-      control.setError("contractAddress", { message: tokenDetails.error });
-    } else {
-      setToken(tokenDetails.token);
-      setHasTokenImported(true);
-    }
-  }
-
-  const onCancelImport = () => {
-    reset({ contractAddress: "" });
-    setHasTokenImported(false);
-  };
+  // The address under review. Fed by the manual form or a discovered-token
+  // pick; both land on the same review screen before anything is stored.
+  const [reviewAddress, setReviewAddress] = useState("");
+  // Chain-read failure for a discovered token. Kept outside react-hook-form
+  // on purpose: setError flips isValid false and would leave the fetch
+  // button disabled until the user edits the (already correct) address.
+  const [discoveredError, setDiscoveredError] = useState("");
 
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
@@ -67,25 +59,62 @@ const ImportToken = observer(() => {
   const {
     handleSubmit,
     control,
-    watch,
+    setValue,
     formState: { isSubmitting, isValid },
     reset,
   } = form;
+
+  async function onSubmit(formData: z.infer<typeof FormSchema>) {
+    setDiscoveredError("");
+    const tokenDetails = await getZrc20TokenDetails(formData.contractAddress);
+    if (tokenDetails.error) {
+      control.setError("contractAddress", { message: tokenDetails.error });
+    } else {
+      setToken(tokenDetails.token);
+      setReviewAddress(formData.contractAddress);
+    }
+  }
+
+  const onReviewDiscovered = async (discovered: DiscoveredToken) => {
+    const tokenDetails = await getZrc20TokenDetails(discovered.address);
+    if (tokenDetails.error) {
+      // Surface the chain-read failure on the manual field, prefilled with
+      // the address, so the user can see what failed and retry from there.
+      setValue("contractAddress", discovered.address, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+      setDiscoveredError(tokenDetails.error);
+      return;
+    }
+    setToken(tokenDetails.token);
+    setReviewAddress(discovered.address);
+  };
+
+  const onCancelImport = () => {
+    reset({ contractAddress: "" });
+    setDiscoveredError("");
+    setToken(undefined);
+    setReviewAddress("");
+  };
 
   return (
     <>
       <CircuitBackground />
       <div className="page-enter relative z-10 p-8">
-        {hasTokenImported ? (
+        {reviewAddress && (
           <TokenImportSuccess
             token={token}
             onCancelImport={onCancelImport}
-            contractAddress={watch().contractAddress}
+            contractAddress={reviewAddress}
           />
-        ) : (
+        )}
+        {/* Hidden, not unmounted, while reviewing: the discovered picker
+            would otherwise refetch the explorer on every Cancel. */}
+        <div hidden={!!reviewAddress}>
           <Form {...form}>
             <BackButton />
-            <DiscoveredTokens />
+            <DiscoveredTokens onReview={onReviewDiscovered} />
             <form
               name="importAccount"
               aria-label="importAccount"
@@ -94,7 +123,7 @@ const ImportToken = observer(() => {
             >
               <Card>
                 <CardHeader>
-                  <CardTitle>{t('importToken.title')}</CardTitle>
+                  <CardTitle>{t("importToken.title")}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-8">
                   <FormField
@@ -108,13 +137,23 @@ const ImportToken = observer(() => {
                             aria-label={field.name}
                             autoComplete="off"
                             disabled={isSubmitting}
-                            placeholder={t('importToken.contractAddressPlaceholder')}
+                            placeholder={t(
+                              "importToken.contractAddressPlaceholder",
+                            )}
                           />
                         </FormControl>
                         <FormDescription>
-                          {t('importToken.contractAddressDescription')}
+                          {t("importToken.contractAddressDescription")}
                         </FormDescription>
                         <FormMessage />
+                        {discoveredError && (
+                          <p
+                            className="text-sm font-medium text-destructive"
+                            role="alert"
+                          >
+                            {discoveredError}
+                          </p>
+                        )}
                       </FormItem>
                     )}
                   />
@@ -131,14 +170,14 @@ const ImportToken = observer(() => {
                       <RefreshCw className="mr-2 h-4 w-4" />
                     )}
                     {isSubmitting
-                      ? t('importToken.importingButton')
-                      : t('importToken.importButton')}
+                      ? t("importToken.importingButton")
+                      : t("importToken.importButton")}
                   </Button>
                 </CardFooter>
               </Card>
             </form>
           </Form>
-        )}
+        </div>
       </div>
     </>
   );

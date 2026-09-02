@@ -34,9 +34,9 @@ describe("ImportAccount", () => {
       expect(
         screen.getByRole("textbox", { name: "mnemonicPhrases" }),
       ).toBeInTheDocument();
-      expect(screen.getByRole("paragraph")).toHaveTextContent(
-        "Paste the mnemonic phrases",
-      );
+      expect(
+        screen.getByText("Paste the mnemonic phrases"),
+      ).toBeInTheDocument();
       expect(
         screen.getByPlaceholderText("Mnemonic Phrases"),
       ).toBeInTheDocument();

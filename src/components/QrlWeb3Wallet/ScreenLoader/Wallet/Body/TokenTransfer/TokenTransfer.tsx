@@ -629,7 +629,7 @@ const TokenTransfer = observer(() => {
                               {...field}
                               aria-label={field.name}
                               autoComplete="off"
-                              className="pr-16"
+                              className="pr-28"
                               disabled={isSubmitting}
                               placeholder={t('transfer.amountPlaceholder')}
                               type="number"
@@ -637,7 +637,10 @@ const TokenTransfer = observer(() => {
                               onWheel={(e) => (e.target as HTMLInputElement).blur()}
                             />
                           </FormControl>
-                          <span className="pointer-events-none absolute right-3 top-1/2 max-w-14 -translate-y-1/2 truncate text-sm text-muted-foreground">
+                          <span
+                            className="pointer-events-none absolute right-3 top-1/2 max-w-24 -translate-y-1/2 truncate text-sm text-muted-foreground"
+                            title={tokenSymbol}
+                          >
                             {tokenSymbol}
                           </span>
                         </div>

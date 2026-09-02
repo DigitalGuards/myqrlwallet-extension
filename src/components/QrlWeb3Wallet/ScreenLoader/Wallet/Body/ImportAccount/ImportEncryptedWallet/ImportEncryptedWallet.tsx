@@ -1,12 +1,5 @@
 import { Button } from "@/components/UI/Button";
 import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/UI/Card";
-import {
   Form,
   FormControl,
   FormField,
@@ -205,161 +198,155 @@ const ImportEncryptedWallet = observer(
           className="w-full min-w-0"
           onSubmit={handleSubmit(onSubmit)}
         >
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("importAccount.walletFileTitle")}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="walletFile">
-                  {t("importAccount.walletFileLabel")}
-                </Label>
-                {/* The native file control renders its own "Choose File /
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="walletFile">
+                {t("importAccount.walletFileLabel")}
+              </Label>
+              {/* The native file control renders its own "Choose File /
                     No file chosen" chrome, which no CSS can restyle. Keep
                     the real input (accessible, still the form control) but
                     visually hidden, and drive it from themed elements. */}
-                <Input
-                  ref={fileInputRef}
-                  id="walletFile"
-                  type="file"
-                  accept="application/json,.json"
-                  aria-label="walletFile"
+              <Input
+                ref={fileInputRef}
+                id="walletFile"
+                type="file"
+                accept="application/json,.json"
+                aria-label="walletFile"
+                disabled={busy}
+                onChange={handleFileChange}
+                // sr-only only clips the element, so the input would
+                // otherwise stay in the tab order as an invisible stop
+                // whose focus ring is clipped away. The themed button is
+                // the keyboard path; the label still activates this input.
+                tabIndex={-1}
+                className="sr-only"
+              />
+              <div className="flex min-w-0 items-center gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
                   disabled={busy}
-                  onChange={handleFileChange}
-                  // sr-only clips rather than hiding, so the input would
-                  // otherwise stay in the tab order as an invisible stop
-                  // whose focus ring is clipped away. The themed button is
-                  // the keyboard path; the label still activates this input.
-                  tabIndex={-1}
-                  className="sr-only"
-                />
-                <div className="flex min-w-0 items-center gap-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Upload className="mr-2 h-3.5 w-3.5 shrink-0" />
-                    {t("importAccount.walletFileChoose")}
-                  </Button>
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate text-sm",
-                      selectedFile
-                        ? "font-data text-foreground"
-                        : "text-muted-foreground",
-                    )}
-                    title={selectedFile?.name}
-                  >
-                    {selectedFile?.name ?? t("importAccount.walletFileNone")}
-                  </span>
-                </div>
-                {fileError ? (
-                  <p className="text-sm font-medium text-destructive">
-                    {fileError}
-                  </p>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {t("importAccount.walletFileDescription")}
-                  </p>
-                )}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="mr-2 h-3.5 w-3.5 shrink-0" />
+                  {t("importAccount.walletFileChoose")}
+                </Button>
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate text-sm",
+                    selectedFile
+                      ? "font-data text-foreground"
+                      : "text-muted-foreground",
+                  )}
+                  title={selectedFile?.name}
+                >
+                  {selectedFile?.name ?? t("importAccount.walletFileNone")}
+                </span>
               </div>
-              {isBackup && keystores.length > 1 && (
-                <div className="space-y-2">
-                  <Label htmlFor="walletFileAccount">
-                    {t("importAccount.walletFileAccountLabel")}
-                  </Label>
-                  <Select
-                    value={selectedKeystore}
-                    onValueChange={setSelectedKeystore}
-                    disabled={busy}
-                  >
-                    <SelectTrigger
-                      id="walletFileAccount"
-                      aria-label="walletFileAccount"
-                      className="w-full font-data"
-                    >
-                      <SelectValue
-                        placeholder={t(
-                          "importAccount.walletFileAccountPlaceholder",
-                        )}
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {keystores.map((ks, i) => (
-                        <SelectItem
-                          key={ks.id || i}
-                          value={String(i)}
-                          className="font-data"
-                        >
-                          {shortAddress(ks.address, i)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-sm text-muted-foreground">
-                    {t("importAccount.walletFileMultiAccountNote", {
-                      count: keystores.length,
-                    })}
-                  </p>
-                </div>
+              {fileError ? (
+                <p className="text-sm font-medium text-destructive">
+                  {fileError}
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {t("importAccount.walletFileDescription")}
+                </p>
               )}
-              <FormField
-                control={control}
-                name="password"
-                render={({ field }) => (
-                  <FormItem>
-                    <Label htmlFor="walletFilePassword">
-                      {t("importAccount.walletFilePasswordLabel")}
-                    </Label>
-                    <FormControl>
-                      <Input
-                        {...field}
-                        id="walletFilePassword"
-                        type="password"
-                        aria-label="walletFilePassword"
-                        autoComplete="off"
-                        disabled={busy}
-                        placeholder={t(
-                          "importAccount.walletFilePasswordPlaceholder",
-                        )}
-                      />
-                    </FormControl>
-                    {isBackup && (
-                      <p className="text-sm text-muted-foreground">
-                        {t("importAccount.walletFileBackupPasswordHint")}
+            </div>
+            {isBackup && keystores.length > 1 && (
+              <div className="space-y-2">
+                <Label htmlFor="walletFileAccount">
+                  {t("importAccount.walletFileAccountLabel")}
+                </Label>
+                <Select
+                  value={selectedKeystore}
+                  onValueChange={setSelectedKeystore}
+                  disabled={busy}
+                >
+                  <SelectTrigger
+                    id="walletFileAccount"
+                    aria-label="walletFileAccount"
+                    className="font-data w-full"
+                  >
+                    <SelectValue
+                      placeholder={t(
+                        "importAccount.walletFileAccountPlaceholder",
+                      )}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {keystores.map((ks, i) => (
+                      <SelectItem
+                        key={ks.id || i}
+                        value={String(i)}
+                        className="font-data"
+                      >
+                        {shortAddress(ks.address, i)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  {t("importAccount.walletFileMultiAccountNote", {
+                    count: keystores.length,
+                  })}
+                </p>
+              </div>
+            )}
+            <FormField
+              control={control}
+              name="password"
+              render={({ field }) => (
+                <FormItem>
+                  <Label htmlFor="walletFilePassword">
+                    {t("importAccount.walletFilePasswordLabel")}
+                  </Label>
+                  <FormControl>
+                    <Input
+                      {...field}
+                      id="walletFilePassword"
+                      type="password"
+                      aria-label="walletFilePassword"
+                      autoComplete="off"
+                      disabled={busy}
+                      placeholder={t(
+                        "importAccount.walletFilePasswordPlaceholder",
+                      )}
+                    />
+                  </FormControl>
+                  {isBackup && (
+                    <p className="text-sm text-muted-foreground">
+                      {t("importAccount.walletFileBackupPasswordHint")}
+                    </p>
+                  )}
+                  {activeKeystore &&
+                    activeKeystore.crypto.kdfparams.m >
+                      HEAVY_KDF_MEMORY_KIB && (
+                      <p className="text-sm text-yellow-400">
+                        {t("importAccount.walletFileHeavyKdf")}
                       </p>
                     )}
-                    {activeKeystore &&
-                      activeKeystore.crypto.kdfparams.m > HEAVY_KDF_MEMORY_KIB && (
-                        <p className="text-sm text-yellow-400">
-                          {t("importAccount.walletFileHeavyKdf")}
-                        </p>
-                      )}
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </CardContent>
-            <CardFooter>
-              <Button
-                disabled={busy || !isValid || !selectedFile || !parsed}
-                className="w-full"
-                type="submit"
-              >
-                {isSubmitting ? (
-                  <Loader className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="mr-2 h-4 w-4" />
-                )}
-                {isSubmitting
-                  ? t("importAccount.importing")
-                  : t("importAccount.button")}
-              </Button>
-            </CardFooter>
-          </Card>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+          <Button
+            disabled={busy || !isValid || !selectedFile || !parsed}
+            className="mt-6 w-full"
+            type="submit"
+          >
+            {isSubmitting ? (
+              <Loader className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="mr-2 h-4 w-4" />
+            )}
+            {isSubmitting
+              ? t("importAccount.importing")
+              : t("importAccount.button")}
+          </Button>
         </form>
       </Form>
     );

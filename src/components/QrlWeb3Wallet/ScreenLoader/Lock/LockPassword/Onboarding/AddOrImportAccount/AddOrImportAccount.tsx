@@ -7,355 +7,199 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/UI/Card";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/UI/Dialog";
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormMessage,
-} from "@/components/UI/Form";
-import { Input } from "@/components/UI/Input";
-import { Label } from "@/components/UI/Label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/UI/tabs";
-import MnemonicWordListing from "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/CreateAccount/MnemonicDisplay/MnemonicWordListing/MnemonicWordListing";
-import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
+import SeedBackup from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/SeedBackup/SeedBackup";
 import withSuspense from "@/functions/withSuspense";
 import { useStore } from "@/stores/store";
-import StringUtil from "@/utilities/stringUtil";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { TFunction } from "i18next";
 import Web3, { Web3BaseWalletAccount } from "@theqrl/web3";
-import {
-  Download,
-  HardDriveDownload,
-  MoveRight,
-  Plus,
-  Undo,
-  X,
-} from "lucide-react";
+import { Download, MoveRight, Plus, Undo } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { lazy, useState } from "react";
-import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { z } from "zod";
 import { ONBOARDING_STEPS, OnboardingStepType } from "../Onboarding";
 import AccountAddressDisplay from "./AccountAddressDisplay/AccountAddressDisplay";
 
+const ImportMnemonicForm = withSuspense(
+  lazy(
+    () =>
+      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportMnemonicForm/ImportMnemonicForm"),
+  ),
+);
 const ImportHexSeedForm = withSuspense(
   lazy(
     () =>
-      import(
-        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportHexSeedForm/ImportHexSeedForm"
-      ),
+      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportHexSeedForm/ImportHexSeedForm"),
   ),
 );
 const ImportEncryptedWallet = withSuspense(
   lazy(
     () =>
-      import(
-        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportEncryptedWallet/ImportEncryptedWallet"
-      ),
+      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportEncryptedWallet/ImportEncryptedWallet"),
   ),
 );
-
-const createFormSchema = (t: TFunction) =>
-  z.object({
-    mnemonicPhrases: z.string().min(1, t("validation.mnemonicRequired")),
-  });
 
 type AddOrImportAccountProps = {
   selectStep: (step: OnboardingStepType) => void;
   addAnAccountToWallet: (account: Web3BaseWalletAccount) => Promise<void>;
 };
 
+type Mode = "choose" | "create" | "import";
+
+/**
+ * First-account step of onboarding. A new account goes through the seed
+ * backup (reveal, then confirm) before it is persisted; an import lands
+ * straight on the address confirmation.
+ */
 const AddOrImportAccount = observer(
   ({ selectStep, addAnAccountToWallet }: AddOrImportAccountProps) => {
+    const { t } = useTranslation();
     const { qrlStore } = useStore();
     const { activeAccount } = qrlStore;
     const { accountAddress } = activeAccount;
     const hasAccount = !!accountAddress;
-    const { t } = useTranslation();
-    const FormSchema = createFormSchema(t);
 
-    const [open, setOpen] = useState(false);
-    const [addedAccount, setAddedAccount] = useState<
-      Web3BaseWalletAccount | undefined
-    >();
+    const [mode, setMode] = useState<Mode>("choose");
+    const [createdAccount, setCreatedAccount] =
+      useState<Web3BaseWalletAccount>();
+    const [persistError, setPersistError] = useState("");
 
-    const onDownload = () => {
-      if (addedAccount) StringUtil.downloadRecoveryPhrases(addedAccount);
-    };
-
-    const form = useForm<z.infer<typeof FormSchema>>({
-      resolver: zodResolver(FormSchema),
-      mode: "onChange",
-      reValidateMode: "onSubmit",
-      defaultValues: {
-        mnemonicPhrases: "",
-      },
-    });
-
-    const {
-      handleSubmit,
-      control,
-      watch,
-      formState: { isSubmitting, isValid },
-    } = form;
-
-    const onAddAccount = async () => {
+    const onCreate = () => {
       const { qrl } = new Web3();
-      const account = qrl?.accounts?.create();
-      setAddedAccount(account);
-      await addAnAccountToWallet(account);
+      setCreatedAccount(qrl?.accounts?.create());
+      setPersistError("");
+      setMode("create");
     };
 
-    const onImportAccount = async (account: Web3BaseWalletAccount) => {
-      await addAnAccountToWallet(account);
-    };
-
-    // Shared success handler for the hex-seed and wallet-file tabs: each sub
-    // form only produces the account, then we close the dialog and hand it to
-    // the same onboarding persistence path the mnemonic tab uses.
-    const onImported = async (account: Web3BaseWalletAccount) => {
-      setOpen(false);
-      await onImportAccount(account);
-    };
-
-    async function onSubmit(formData: z.infer<typeof FormSchema>) {
+    const onBackupConfirmed = async () => {
+      if (!createdAccount) return;
       try {
-        const { qrl } = new Web3();
-        const account = qrl.accounts.seedToAccount(
-          getHexSeedFromMnemonic(formData.mnemonicPhrases.trim()),
-        );
-        if (account) {
-          setOpen(false);
-          form.reset();
-          onImportAccount(account);
-        } else {
-          control.setError("mnemonicPhrases", {
-            message: t("onboarding.account.importError"),
-          });
-        }
+        await addAnAccountToWallet(createdAccount);
       } catch (error) {
-        control.setError("mnemonicPhrases", {
-          message: t("onboarding.account.importMnemonicError", {
-            error: String(error),
-          }),
-        });
+        setPersistError(`${t("onboarding.account.persistError")} ${error}`);
+        return;
       }
+      selectStep(ONBOARDING_STEPS.COMPLETED);
+    };
+
+    const onImported = async (account: Web3BaseWalletAccount) => {
+      await addAnAccountToWallet(account);
+      setMode("choose");
+    };
+
+    // Before the "account ready" card: persisting sets the active account
+    // first and finishes the keystore write afterwards, and the backup card
+    // (busy, or showing the persist error) must stay up until that resolves.
+    if (mode === "create" && createdAccount) {
+      return (
+        <SeedBackup
+          account={createdAccount}
+          onConfirmed={onBackupConfirmed}
+          onBack={() => {
+            setCreatedAccount(undefined);
+            setMode("choose");
+          }}
+          error={persistError}
+        />
+      );
     }
 
-    const revoceryPhrasesDescription = t(
-      "onboarding.account.recoveryDescription",
-    );
-    const continueWarning = t("onboarding.account.continueDialogWarning");
-
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("onboarding.account.title")}</CardTitle>
-          <CardDescription>
-            {t("onboarding.account.description")}
-          </CardDescription>
-        </CardHeader>
-        {hasAccount && (
+    if (hasAccount) {
+      return (
+        <Card className="animate-appear-in">
+          <CardHeader>
+            <CardTitle>{t("onboarding.account.readyTitle")}</CardTitle>
+            <CardDescription className="break-words">
+              {t("onboarding.account.readyDescription")}
+            </CardDescription>
+          </CardHeader>
           <CardContent>
             <AccountAddressDisplay />
           </CardContent>
-        )}
-        <CardFooter className="flex-col gap-4">
-          {hasAccount ? (
-            <>
-              {addedAccount ? (
-                <div className="flex w-full flex-col gap-4">
-                  <div className="flex flex-col gap-2">
-                    <div>{revoceryPhrasesDescription}</div>
-                    <Button
-                      className="w-full"
-                      type="button"
-                      variant="constructive"
-                      onClick={onDownload}
-                    >
-                      <HardDriveDownload className="mr-2 h-4 w-4" />
-                      {t("onboarding.account.downloadButton")}
-                    </Button>
-                  </div>
-                  <Dialog>
-                    <DialogTrigger asChild>
-                      <Button className="w-full" type="button">
-                        <MoveRight className="mr-2 h-4 w-4" />
-                        {t("onboarding.account.continueButton")}
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="w-80 rounded-md">
-                      <DialogHeader className="text-left">
-                        <DialogTitle>
-                          {t("onboarding.account.continueDialogTitle")}
-                        </DialogTitle>
-                        <DialogDescription>{continueWarning}</DialogDescription>
-                      </DialogHeader>
-                      <DialogFooter className="flex flex-row gap-4">
-                        <DialogClose asChild>
-                          <Button
-                            className="w-full"
-                            type="button"
-                            variant="outline"
-                          >
-                            <Undo className="mr-2 h-4 w-4" />
-                            {t("onboarding.account.goBack")}
-                          </Button>
-                        </DialogClose>
-                        <Button
-                          className="w-full"
-                          type="button"
-                          onClick={() => {
-                            selectStep(ONBOARDING_STEPS.COMPLETED);
-                          }}
-                        >
-                          <MoveRight className="mr-2 h-4 w-4" />
-                          {t("onboarding.account.continueButton")}
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-              ) : (
-                <Button
-                  className="w-full"
-                  onClick={() => {
-                    selectStep(ONBOARDING_STEPS.COMPLETED);
-                  }}
-                >
-                  <MoveRight className="mr-2 h-4 w-4" />
-                  {t("onboarding.account.continueButton")}
-                </Button>
-              )}
-            </>
-          ) : (
-            <>
-              <Button className="w-full" onClick={onAddAccount}>
-                <Plus className="mr-2 h-4 w-4" />
-                {t("onboarding.account.createButton")}
-              </Button>
-              <Dialog open={open} onOpenChange={setOpen}>
-                <DialogTrigger asChild>
-                  <Button
-                    className="w-full"
-                    type="button"
-                    onClick={() => {
-                      form.reset();
-                      setOpen(true);
-                    }}
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    {t("onboarding.account.importButton")}
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="w-80 rounded-md">
-                  <DialogHeader className="text-left">
-                    <DialogTitle>
-                      {t("onboarding.account.importDialogTitle")}
-                    </DialogTitle>
-                  </DialogHeader>
-                  {/* min-w-0: DialogContent is a grid, and grid items default
-                      to min-width:auto, so without this the tab panel refuses
-                      to shrink below its content's intrinsic width (a long
-                      wallet filename) and bursts out of the dialog. */}
-                  <Tabs defaultValue="mnemonic" className="w-full min-w-0">
-                    <TabsList className="grid w-full grid-cols-3">
-                      <TabsTrigger value="mnemonic">
-                        {t("importAccount.tabMnemonic")}
-                      </TabsTrigger>
-                      <TabsTrigger value="hexSeed">
-                        {t("importAccount.tabHexSeed")}
-                      </TabsTrigger>
-                      <TabsTrigger value="walletFile">
-                        {t("importAccount.tabWalletFile")}
-                      </TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="mnemonic">
-                      <Form {...form}>
-                        <form
-                          className="w-full"
-                          name="importAccountForm"
-                          aria-label="importAccountForm"
-                        >
-                          <FormField
-                            control={control}
-                            name="mnemonicPhrases"
-                            render={({ field }) => (
-                              <FormItem>
-                                <Label></Label>
-                                <FormControl>
-                                  <Input
-                                    {...field}
-                                    aria-label={field.name}
-                                    autoComplete="off"
-                                    disabled={isSubmitting}
-                                    placeholder={t(
-                                      "onboarding.account.importPlaceholder",
-                                    )}
-                                    type="text"
-                                  />
-                                </FormControl>
-                                <FormDescription>
-                                  {t("onboarding.account.importDescription")}
-                                </FormDescription>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <MnemonicWordListing
-                            mnemonic={watch().mnemonicPhrases}
-                          />
-                          <div className="mt-4 flex flex-row gap-2">
-                            <DialogClose asChild>
-                              <Button
-                                className="w-full"
-                                type="button"
-                                variant="outline"
-                                aria-label="Cancel"
-                              >
-                                <X className="mr-2 h-4 w-4" />
-                                {t("onboarding.account.importCancel")}
-                              </Button>
-                            </DialogClose>
-                            <Button
-                              className="w-full"
-                              type="button"
-                              disabled={isSubmitting || !isValid}
-                              aria-label="Import"
-                              onClick={handleSubmit(onSubmit)}
-                            >
-                              <Download className="mr-2 h-4 w-4" />
-                              {t("onboarding.account.importSubmit")}
-                            </Button>
-                          </div>
-                        </form>
-                      </Form>
-                    </TabsContent>
-                    <TabsContent value="hexSeed">
-                      <ImportHexSeedForm onImported={onImported} />
-                    </TabsContent>
-                    <TabsContent value="walletFile">
-                      <ImportEncryptedWallet onImported={onImported} />
-                    </TabsContent>
-                  </Tabs>
-                </DialogContent>
-              </Dialog>
-            </>
-          )}
+          <CardFooter>
+            <Button
+              className="w-full"
+              onClick={() => selectStep(ONBOARDING_STEPS.COMPLETED)}
+            >
+              <MoveRight className="mr-2 h-4 w-4" />
+              {t("onboarding.account.continueButton")}
+            </Button>
+          </CardFooter>
+        </Card>
+      );
+    }
+
+    if (mode === "import") {
+      return (
+        <Card className="animate-appear-in">
+          <CardHeader>
+            <CardTitle>{t("importAccount.title")}</CardTitle>
+            <CardDescription className="break-words">
+              {t("importAccount.description")}
+            </CardDescription>
+          </CardHeader>
+          {/* min-w-0 on the panel: a long wallet filename must truncate
+              inside the card. Without it the panel widens past the popup. */}
+          <CardContent className="min-w-0">
+            <Tabs defaultValue="mnemonic" className="w-full min-w-0">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="mnemonic">
+                  {t("importAccount.tabMnemonic")}
+                </TabsTrigger>
+                <TabsTrigger value="hexSeed">
+                  {t("importAccount.tabHexSeed")}
+                </TabsTrigger>
+                <TabsTrigger value="walletFile">
+                  {t("importAccount.tabWalletFile")}
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="mnemonic" className="mt-4">
+                <ImportMnemonicForm onImported={onImported} />
+              </TabsContent>
+              <TabsContent value="hexSeed" className="mt-4">
+                <ImportHexSeedForm onImported={onImported} />
+              </TabsContent>
+              <TabsContent value="walletFile" className="mt-4">
+                <ImportEncryptedWallet onImported={onImported} />
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+          <CardFooter>
+            <Button
+              className="w-full"
+              type="button"
+              variant="ghost"
+              onClick={() => setMode("choose")}
+            >
+              <Undo className="mr-2 h-4 w-4" />
+              {t("onboarding.account.back")}
+            </Button>
+          </CardFooter>
+        </Card>
+      );
+    }
+
+    return (
+      <Card className="animate-appear-in">
+        <CardHeader>
+          <CardTitle>{t("onboarding.account.title")}</CardTitle>
+          <CardDescription className="break-words">
+            {t("onboarding.account.description")}
+          </CardDescription>
+        </CardHeader>
+        <CardFooter className="flex-col gap-3">
+          <Button className="w-full" onClick={onCreate}>
+            <Plus className="mr-2 h-4 w-4" />
+            {t("onboarding.account.createButton")}
+          </Button>
+          <Button
+            className="w-full"
+            type="button"
+            variant="outline"
+            onClick={() => setMode("import")}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            {t("onboarding.account.importButton")}
+          </Button>
         </CardFooter>
       </Card>
     );

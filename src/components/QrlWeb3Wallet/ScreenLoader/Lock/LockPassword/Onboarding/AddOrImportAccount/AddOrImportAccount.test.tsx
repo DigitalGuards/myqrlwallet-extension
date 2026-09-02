@@ -1,7 +1,7 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
@@ -30,6 +30,31 @@ vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/Lock/LockPassword/Onboarding/AddOrImportAccount/AccountAddressDisplay/AccountAddressDisplay",
   () => ({ default: () => <div>Mocked Account Address Display</div> }),
 );
+// The real backup flow is covered by SeedBackup.test; here it is a stub
+// that exposes the confirm and back callbacks plus the persist error.
+vi.mock(
+  "@/components/QrlWeb3Wallet/ScreenLoader/Shared/SeedBackup/SeedBackup",
+  () => ({
+    default: ({
+      account,
+      onConfirmed,
+      onBack,
+      error,
+    }: {
+      account: Web3BaseWalletAccount;
+      onConfirmed: () => void;
+      onBack?: () => void;
+      error?: string;
+    }) => (
+      <div>
+        <div>Mocked Seed Backup for {account.address}</div>
+        {error && <div>{error}</div>}
+        <button onClick={onConfirmed}>Confirm backup</button>
+        <button onClick={onBack}>Back</button>
+      </div>
+    ),
+  }),
+);
 
 describe("AddOrImportAccount", () => {
   afterEach(cleanup);
@@ -49,114 +74,154 @@ describe("AddOrImportAccount", () => {
       </StoreProvider>,
     );
 
-  it("should render the add or import account component", () => {
-    renderComponent(
-      mockedStore({ qrlStore: { activeAccount: { accountAddress: "" } } }),
-    );
+  const noAccountStore = () =>
+    mockedStore({ qrlStore: { activeAccount: { accountAddress: "" } } });
+
+  it("should render the choose screen when the wallet has no account", () => {
+    renderComponent(noAccountStore());
 
     expect(
-      screen.getByRole("heading", { level: 3, name: "Add/Import account" }),
+      screen.getByRole("heading", { level: 3, name: "Add your first account" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "You can either add a new account, or import an existing account using your mnemonic phrases.",
-      ),
-    ).toBeInTheDocument();
-    const addAccountButton = screen.getByRole("button", {
-      name: "Create a new account",
-    });
-    expect(addAccountButton).toBeInTheDocument();
-    expect(addAccountButton).toBeEnabled();
-    const importAccountButton = screen.getByRole("button", {
-      name: "Import an existing account",
-    });
-    expect(importAccountButton).toBeInTheDocument();
-    expect(importAccountButton).toBeEnabled();
+      screen.getByRole("button", { name: "Create a new account" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Import an existing account" }),
+    ).toBeEnabled();
     expect(
       screen.queryByRole("button", { name: "Continue" }),
     ).not.toBeInTheDocument();
   });
 
-  it("should add a new account on clicking the create a new account button", async () => {
+  it("should persist a new account only after the backup is confirmed", async () => {
     const mockedSelectStep = vi.fn();
     const mockedAddAnAccountToWallet = vi.fn(async () => {});
-    renderComponent(
-      mockedStore({
-        qrlStore: {
-          activeAccount: {
-            accountAddress: "",
-          },
-        },
-      }),
-      {
-        selectStep: mockedSelectStep,
-        addAnAccountToWallet: mockedAddAnAccountToWallet,
-      },
+    renderComponent(noAccountStore(), {
+      selectStep: mockedSelectStep,
+      addAnAccountToWallet: mockedAddAnAccountToWallet,
+    });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Create a new account" }),
     );
 
-    const addAccountButton = screen.getByRole("button", {
-      name: "Create a new account",
-    });
-    expect(addAccountButton).toBeInTheDocument();
-    expect(addAccountButton).toBeEnabled();
-    const continueButton = screen.queryByRole("button", { name: "Continue" });
-    expect(continueButton).not.toBeInTheDocument();
-    await userEvent.click(addAccountButton);
-    expect(mockedAddAnAccountToWallet).toHaveBeenCalledTimes(1);
-    expect(mockedAddAnAccountToWallet).toBeCalledWith({
-      address: "MockedNewAddress",
-      seed: "MockedNewSeed",
-    });
+    expect(
+      screen.getByText("Mocked Seed Backup for MockedNewAddress"),
+    ).toBeInTheDocument();
+    expect(mockedAddAnAccountToWallet).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Confirm backup" }),
+    );
+
+    await waitFor(() =>
+      expect(mockedAddAnAccountToWallet).toHaveBeenCalledWith({
+        address: "MockedNewAddress",
+        seed: "MockedNewSeed",
+      }),
+    );
+    expect(mockedSelectStep).toHaveBeenCalledWith(ONBOARDING_STEPS.COMPLETED);
   });
 
-  it("should import the account on clicking the import account button", async () => {
-    const mockedSelectStep = vi.fn();
+  it("should discard the new account when backing out of the backup", async () => {
     const mockedAddAnAccountToWallet = vi.fn(async () => {});
-    renderComponent(
-      mockedStore({ qrlStore: { activeAccount: { accountAddress: "" } } }),
-      {
-        selectStep: mockedSelectStep,
-        addAnAccountToWallet: mockedAddAnAccountToWallet,
-      },
+    renderComponent(noAccountStore(), {
+      selectStep: () => {},
+      addAnAccountToWallet: mockedAddAnAccountToWallet,
+    });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Create a new account" }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(
+      screen.getByRole("heading", { level: 3, name: "Add your first account" }),
+    ).toBeInTheDocument();
+    expect(mockedAddAnAccountToWallet).not.toHaveBeenCalled();
+  });
+
+  it("should surface a persist failure on the backup step and stay there", async () => {
+    const mockedSelectStep = vi.fn();
+    renderComponent(noAccountStore(), {
+      selectStep: mockedSelectStep,
+      addAnAccountToWallet: vi.fn(async () => {
+        throw new Error("storage full");
+      }),
+    });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Create a new account" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Confirm backup" }),
     );
 
-    const importAccountButton = screen.getByRole("button", {
-      name: "Import an existing account",
-    });
-    expect(importAccountButton).toBeInTheDocument();
-    expect(importAccountButton).toBeEnabled();
-    const continueButton = screen.queryByRole("button", { name: "Continue" });
-    expect(continueButton).not.toBeInTheDocument();
-    await userEvent.click(importAccountButton);
     expect(
-      screen.getByRole("heading", { level: 2, name: "Import account" }),
+      await screen.findByText(/The account could not be saved\./),
     ).toBeInTheDocument();
-    const mnemonicPhrasesField = screen.getByRole("textbox", {
+    expect(mockedSelectStep).not.toHaveBeenCalled();
+  });
+
+  it("should import an account from a mnemonic inline", async () => {
+    const mockedAddAnAccountToWallet = vi.fn(async () => {});
+    renderComponent(noAccountStore(), {
+      selectStep: () => {},
+      addAnAccountToWallet: mockedAddAnAccountToWallet,
+    });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Import an existing account" }),
+    );
+
+    expect(
+      screen.getByRole("heading", {
+        level: 3,
+        name: "Import an existing account",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Mnemonic" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Hex seed" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Wallet file" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    const mnemonicPhrasesField = await screen.findByRole("textbox", {
       name: "mnemonicPhrases",
     });
-    expect(mnemonicPhrasesField).toBeInTheDocument();
-    expect(mnemonicPhrasesField).toBeEnabled();
-    const cancelButton = screen.getByRole("button", { name: "Cancel" });
-    expect(cancelButton).toBeInTheDocument();
-    expect(cancelButton).toBeEnabled();
-    const importButton = screen.getByRole("button", { name: "Import" });
-    expect(importButton).toBeInTheDocument();
+    const importButton = screen.getByRole("button", { name: "Import account" });
     expect(importButton).toBeDisabled();
     await userEvent.type(
       mnemonicPhrasesField,
       "harsh altar congo heater chilly spade buy pore money swiss trendy stable decade bosom ironic maxim slab grill chosen text pouch recent eric text injury cheese trek tsar fish rogue tempo differ",
     );
     await userEvent.click(importButton);
-    expect(mockedAddAnAccountToWallet).toHaveBeenCalledTimes(1);
-    expect(mockedAddAnAccountToWallet).toBeCalledWith({
-      address: "MockedAddress",
-      seed: "MockedSeed",
-    });
+
+    await waitFor(() =>
+      expect(mockedAddAnAccountToWallet).toHaveBeenCalledWith({
+        address: "MockedAddress",
+        seed: "MockedSeed",
+      }),
+    );
+  });
+
+  it("should return from the import card to the choose screen", async () => {
+    renderComponent(noAccountStore());
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Import an existing account" }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(
+      screen.getByRole("heading", { level: 3, name: "Add your first account" }),
+    ).toBeInTheDocument();
   });
 
   it("should display the account address if account is available", async () => {
     const mockedSelectStep = vi.fn();
-    const mockedAddAnAccountToWallet = vi.fn(async () => {});
     renderComponent(
       mockedStore({
         qrlStore: {
@@ -167,18 +232,17 @@ describe("AddOrImportAccount", () => {
       }),
       {
         selectStep: mockedSelectStep,
-        addAnAccountToWallet: mockedAddAnAccountToWallet,
+        addAnAccountToWallet: async () => {},
       },
     );
 
     expect(
+      screen.getByRole("heading", { level: 3, name: "Account ready" }),
+    ).toBeInTheDocument();
+    expect(
       screen.getByText("Mocked Account Address Display"),
     ).toBeInTheDocument();
-    const continueButton = screen.getByRole("button", { name: "Continue" });
-    expect(continueButton).toBeInTheDocument();
-    expect(continueButton).toBeEnabled();
-    await userEvent.click(continueButton);
-    expect(mockedSelectStep).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
     expect(mockedSelectStep).toHaveBeenCalledWith(ONBOARDING_STEPS.COMPLETED);
   });
 });
