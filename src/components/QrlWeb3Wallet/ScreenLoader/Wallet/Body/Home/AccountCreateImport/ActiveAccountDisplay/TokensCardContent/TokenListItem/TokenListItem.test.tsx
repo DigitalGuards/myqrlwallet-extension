@@ -1,8 +1,8 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import userEvent from "@testing-library/user-event";
 import { ComponentProps } from "react";
@@ -44,7 +44,13 @@ describe("TokenListItem", () => {
       <StoreProvider value={mockedStoreValues}>
         <MemoryRouter>
           <TooltipProvider>
-            <TokenListItem {...mockedProps} />
+            <Routes>
+              <Route path="/" element={<TokenListItem {...mockedProps} />} />
+              <Route
+                path="/token-transfer"
+                element={<div>Token transfer page</div>}
+              />
+            </Routes>
           </TooltipProvider>
         </MemoryRouter>
       </StoreProvider>,
@@ -109,5 +115,63 @@ describe("TokenListItem", () => {
     expect(yesButton).toBeEnabled();
     await userEvent.click(yesButton);
     expect(mockedTriggerReRender).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the send page when the row itself is clicked", async () => {
+    renderComponent();
+
+    await userEvent.click(screen.getByRole("button", { name: /QRL TOKEN/ }));
+
+    expect(screen.getByText("Token transfer page")).toBeInTheDocument();
+  });
+
+  it("keeps the more menu from opening the send page", async () => {
+    renderComponent();
+
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+
+    expect(
+      screen.getByRole("button", { name: "Hide Token" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Token transfer page")).not.toBeInTheDocument();
+  });
+
+  it("copies the contract address of a ZRC-20 token from the more menu", async () => {
+    const contractAddress = `Q${"0123456789abcdef".repeat(8)}`;
+    renderComponent(mockedStore(), {
+      isZrc20Token: true,
+      contractAddress,
+      decimals: 18,
+      image: "",
+      balance: "1 TST",
+      name: "Test Token",
+      symbol: "TST",
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy contract address" }),
+    );
+
+    expect(writeText).toHaveBeenCalledWith(contractAddress);
+    expect(
+      await screen.findByText("Contract address copied"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Token transfer page")).not.toBeInTheDocument();
+  });
+
+  it("offers no contract address copy for the native token", async () => {
+    renderComponent();
+
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+
+    expect(
+      screen.queryByRole("button", { name: "Copy contract address" }),
+    ).not.toBeInTheDocument();
   });
 });
