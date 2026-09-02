@@ -59,11 +59,17 @@ const CreateAccount = observer(() => {
       setPersistError(t("account.passwordUnavailable"));
       return;
     }
+    try {
+      await setActiveAccount(account.address);
+      // Name it now so the header reads "Account N" immediately. Otherwise it
+      // shows the raw address until some other screen happens to run
+      // syncLabels.
+      await accountLabelsStore.ensureLabel(account.address);
+    } catch {
+      setPersistError(t("onboarding.account.persistError"));
+      return;
+    }
     scrollShellToTop();
-    await setActiveAccount(account.address);
-    // Name it now so the header reads "Account N" immediately. Otherwise it
-    // shows the raw address until some other screen happens to run syncLabels.
-    await accountLabelsStore.ensureLabel(account.address);
     setPersistError("");
     setIsPersisted(true);
   };

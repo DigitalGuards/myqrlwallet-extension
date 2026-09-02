@@ -43,6 +43,10 @@ const ImportToken = observer(() => {
   // The address under review. Fed by the manual form or a discovered-token
   // pick; both land on the same review screen before anything is stored.
   const [reviewAddress, setReviewAddress] = useState("");
+  // Chain-read failure for a discovered token. Kept outside react-hook-form
+  // on purpose: setError flips isValid false and would leave the fetch
+  // button disabled until the user edits the (already correct) address.
+  const [discoveredError, setDiscoveredError] = useState("");
 
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
@@ -61,6 +65,7 @@ const ImportToken = observer(() => {
   } = form;
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
+    setDiscoveredError("");
     const tokenDetails = await getZrc20TokenDetails(formData.contractAddress);
     if (tokenDetails.error) {
       control.setError("contractAddress", { message: tokenDetails.error });
@@ -75,8 +80,11 @@ const ImportToken = observer(() => {
     if (tokenDetails.error) {
       // Surface the chain-read failure on the manual field, prefilled with
       // the address, so the user can see what failed and retry from there.
-      setValue("contractAddress", discovered.address);
-      control.setError("contractAddress", { message: tokenDetails.error });
+      setValue("contractAddress", discovered.address, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+      setDiscoveredError(tokenDetails.error);
       return;
     }
     setToken(tokenDetails.token);
@@ -85,6 +93,7 @@ const ImportToken = observer(() => {
 
   const onCancelImport = () => {
     reset({ contractAddress: "" });
+    setDiscoveredError("");
     setToken(undefined);
     setReviewAddress("");
   };
@@ -93,13 +102,16 @@ const ImportToken = observer(() => {
     <>
       <CircuitBackground />
       <div className="page-enter relative z-10 p-8">
-        {reviewAddress ? (
+        {reviewAddress && (
           <TokenImportSuccess
             token={token}
             onCancelImport={onCancelImport}
             contractAddress={reviewAddress}
           />
-        ) : (
+        )}
+        {/* Hidden, not unmounted, while reviewing: the discovered picker
+            would otherwise refetch the explorer on every Cancel. */}
+        <div hidden={!!reviewAddress}>
           <Form {...form}>
             <BackButton />
             <DiscoveredTokens onReview={onReviewDiscovered} />
@@ -134,6 +146,14 @@ const ImportToken = observer(() => {
                           {t("importToken.contractAddressDescription")}
                         </FormDescription>
                         <FormMessage />
+                        {discoveredError && (
+                          <p
+                            className="text-sm font-medium text-destructive"
+                            role="alert"
+                          >
+                            {discoveredError}
+                          </p>
+                        )}
                       </FormItem>
                     )}
                   />
@@ -157,7 +177,7 @@ const ImportToken = observer(() => {
               </Card>
             </form>
           </Form>
-        )}
+        </div>
       </div>
     </>
   );

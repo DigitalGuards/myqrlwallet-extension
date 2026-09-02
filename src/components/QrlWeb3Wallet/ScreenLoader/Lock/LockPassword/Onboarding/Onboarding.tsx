@@ -46,8 +46,12 @@ const Onboarding = observer(() => {
   };
 
   const addAnAccountToWallet = async (account: Web3BaseWalletAccount) => {
-    setActiveAccount(account.address);
+    // Keystore first: the active-account pointer is persisted, so writing it
+    // before a failed encrypt left the wallet pointing at an address with no
+    // keystore (and flipped the onboarding card while the import form's
+    // decrypt was still in flight).
     await encryptAccount(account, password);
+    await setActiveAccount(account.address);
     // Name it now so the header reads "Account N" immediately rather than
     // the raw address until some other screen happens to run syncLabels.
     // Never let a naming failure strand onboarding after the keystore is

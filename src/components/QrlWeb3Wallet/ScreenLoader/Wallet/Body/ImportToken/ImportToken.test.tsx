@@ -100,7 +100,10 @@ describe("ImportToken", () => {
       await screen.findByRole("button", { name: "Import" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
-    expect(screen.getByText("Discovered Token")).toBeInTheDocument();
+    // The picker stays mounted but hidden behind the review card.
+    expect(
+      screen.getByText("Discovered Token", { ignore: "[hidden] *" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("42.0 DSC")).toBeInTheDocument();
     expect(
       screen.queryByRole("textbox", { name: "contractAddress" }),
@@ -138,6 +141,10 @@ describe("ImportToken", () => {
     expect(
       screen.getByRole("textbox", { name: "contractAddress" }),
     ).toHaveValue(DISCOVERED_ADDRESS);
+    // The prefilled address is valid input, so a retry is one click away.
+    expect(
+      screen.getByRole("button", { name: "Fetch token details" }),
+    ).toBeEnabled();
     expect(
       screen.queryByRole("button", { name: "Import" }),
     ).not.toBeInTheDocument();

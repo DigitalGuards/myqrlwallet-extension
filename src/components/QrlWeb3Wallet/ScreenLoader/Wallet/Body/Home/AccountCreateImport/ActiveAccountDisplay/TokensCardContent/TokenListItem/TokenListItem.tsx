@@ -64,7 +64,14 @@ const TokenListItem = observer(
     const [hideDialogOpen, setHideDialogOpen] = useState(false);
     const [copied, setCopied] = useState(false);
     const copiedResetRef = useRef<ReturnType<typeof setTimeout>>();
-    useEffect(() => () => clearTimeout(copiedResetRef.current), []);
+    const mountedRef = useRef(true);
+    useEffect(() => {
+      mountedRef.current = true;
+      return () => {
+        mountedRef.current = false;
+        clearTimeout(copiedResetRef.current);
+      };
+    }, []);
 
     const onSend = () => {
       navigate(ROUTES.TOKEN_TRANSFER, {
@@ -86,6 +93,7 @@ const TokenListItem = observer(
       if (!contractAddress) return;
       try {
         await navigator.clipboard.writeText(contractAddress);
+        if (!mountedRef.current) return;
         setCopied(true);
         clearTimeout(copiedResetRef.current);
         copiedResetRef.current = setTimeout(() => setCopied(false), 1500);
@@ -105,26 +113,27 @@ const TokenListItem = observer(
 
     return (
       <>
+        {/* The row body is a real button (keyboard reachable, no interactive
+            control nested inside another one); the Card onClick only
+            catches pointer clicks on the padding around it. */}
         <Card
-          role="button"
-          tabIndex={0}
-          className="flex h-16 w-full animate-appear-in cursor-pointer items-center justify-between gap-4 p-4 text-foreground hover:ring-1 hover:ring-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-secondary"
+          className="flex h-16 w-full animate-appear-in cursor-pointer items-center justify-between gap-4 p-4 text-foreground hover:ring-1 hover:ring-secondary"
           onClick={onSend}
-          onKeyDown={(e) => {
-            if (e.target !== e.currentTarget) return;
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              onSend();
-            }
-          }}
         >
-          <div className="flex min-w-0 items-center gap-4">
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-4 rounded-md text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-secondary"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSend();
+            }}
+          >
             <TokenListItemIcon icon={image ?? ""} symbol={symbol} />
-            <div className="flex w-full min-w-0 flex-col gap-1">
-              <div className="truncate text-xs font-bold">{balance}</div>
-              <div className="truncate text-xs">{name}</div>
-            </div>
-          </div>
+            <span className="flex w-full min-w-0 flex-col gap-1">
+              <span className="truncate text-xs font-bold">{balance}</span>
+              <span className="truncate text-xs">{name}</span>
+            </span>
+          </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
               <Button
