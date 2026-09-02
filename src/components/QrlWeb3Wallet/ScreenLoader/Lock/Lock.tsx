@@ -10,7 +10,11 @@ const Lock = observer(() => {
   const { t } = useTranslation();
 
   return (
-    <div className="relative flex min-h-full w-full flex-1 flex-col items-center justify-center gap-10 overflow-hidden p-8">
+    // shrink-0 with min-h-full, and no flex-1: a flex-1 item never grows past
+    // the region for tall content (the seed backup), and overflow-hidden then
+    // clips it with no way to scroll. Sized by content, the ScrollRegion
+    // above owns the scrolling and short screens still center vertically.
+    <div className="relative flex min-h-full w-full shrink-0 flex-col items-center justify-center gap-10 overflow-hidden p-8">
       <div
         aria-hidden
         className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-primary/20 blur-3xl"
@@ -25,7 +29,9 @@ const Lock = observer(() => {
           {t("lock.title")}
         </h1>
       </div>
-      <div className="relative z-10 w-full max-w-sm">
+      {/* max-w-md: the tab and side panel shell is 32rem, and the seed
+          backup grid needs the extra width for four readable columns. */}
+      <div className="relative z-10 w-full max-w-md">
         {isLoading ? (
           <div className="flex justify-center">
             <BrandedLoader

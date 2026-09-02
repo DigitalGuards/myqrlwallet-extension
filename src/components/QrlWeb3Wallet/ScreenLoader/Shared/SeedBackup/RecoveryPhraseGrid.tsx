@@ -26,7 +26,9 @@ const RecoveryPhraseGrid = ({
     <div className="relative">
       <ol
         className={cn(
-          "grid grid-cols-2 gap-1.5",
+          // Two columns in the popup (248px of content), four in the tab and side
+          // panel shell; the longest wordlist entry is six letters.
+          "grid grid-cols-2 gap-1.5 sm:grid-cols-4",
           !revealed && "select-none opacity-40",
         )}
         aria-label={t("seedBackup.phraseLabel")}
