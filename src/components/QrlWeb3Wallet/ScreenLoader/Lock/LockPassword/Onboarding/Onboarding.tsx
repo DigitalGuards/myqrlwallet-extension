@@ -1,4 +1,5 @@
 import { useStore } from "@/stores/store";
+import StorageUtil from "@/utilities/storageUtil";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
@@ -46,8 +47,22 @@ const Onboarding = observer(() => {
   };
 
   const addAnAccountToWallet = async (account: Web3BaseWalletAccount) => {
-    setActiveAccount(account.address);
-    await encryptAccount(account, password);
+    // Order matters: the service worker reads "keystores but no account
+    // entry" as a first-run state and drops its in-memory keys, so the
+    // account pointer has to exist before the keystore lands or the wallet
+    // ends onboarding locked. A failed keystore write then rolls the
+    // pointer back, so the wallet never points at an address with no
+    // keystore.
+    const previousAccounts = await StorageUtil.getAllAccounts();
+    await setActiveAccount(account.address);
+    try {
+      await encryptAccount(account, password);
+    } catch (error) {
+      await StorageUtil.setAllAccounts(previousAccounts).catch(() => {});
+      await StorageUtil.clearActiveAccount().catch(() => {});
+      qrlStore.clearAccountState();
+      throw error;
+    }
     // Name it now so the header reads "Account N" immediately rather than
     // the raw address until some other screen happens to run syncLabels.
     // Never let a naming failure strand onboarding after the keystore is

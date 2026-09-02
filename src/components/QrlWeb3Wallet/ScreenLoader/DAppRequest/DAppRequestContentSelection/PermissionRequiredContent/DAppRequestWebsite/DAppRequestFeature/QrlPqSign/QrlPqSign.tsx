@@ -14,6 +14,7 @@ import {
 import { RESTRICTED_METHODS } from "@/scripts/constants/requestConstants";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import { useStore } from "@/stores/store";
+import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import StringUtil, { sanitizeForDisplay } from "@/utilities/stringUtil";
 import { Buffer } from "buffer";
 import { Copy } from "lucide-react";
@@ -119,7 +120,7 @@ const QrlPqSign = observer(() => {
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
       const addressFromMnemonic =
         qrlInstance?.accounts.seedToAccount(seed)?.address;
-      if (fromAddress !== addressFromMnemonic) {
+      if (!areAddressesEquivalent(fromAddress, addressFromMnemonic)) {
         throw new Error("Mnemonic phrases did not match with the address");
       }
       const result = isTypedData

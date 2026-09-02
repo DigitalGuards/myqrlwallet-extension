@@ -1,7 +1,10 @@
 import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
-import { appendSenderDataMiddleware } from "./appendSenderDataMiddleware";
+import {
+  appendSenderDataMiddleware,
+  MessageSenderWithOrigin,
+} from "./appendSenderDataMiddleware";
 
 const buildReq = (): JsonRpcRequest => ({
   id: 1,
@@ -11,8 +14,9 @@ const buildReq = (): JsonRpcRequest => ({
 });
 
 const buildSender = (
-  overrides: Partial<browser.Runtime.MessageSender> = {},
-): browser.Runtime.MessageSender => ({
+  overrides: Partial<MessageSenderWithOrigin> = {},
+): MessageSenderWithOrigin => ({
+  origin: "https://attacker.example",
   url: "https://attacker.example/iframe.html",
   tab: {
     id: 42,
@@ -34,9 +38,14 @@ describe("appendSenderDataMiddleware", () => {
     const next = vi.fn();
     const sender = buildSender();
 
-    appendSenderDataMiddleware({ sender })(req as never, {} as never, next, () => {});
+    appendSenderDataMiddleware({ sender })(
+      req as never,
+      {} as never,
+      next,
+      () => {},
+    );
 
-    expect(req.senderData?.url).toBe("https://attacker.example/iframe.html");
+    expect(req.senderData?.url).toBe("https://attacker.example");
     expect(req.senderData?.url).not.toBe(sender.tab?.url);
     expect(next).toHaveBeenCalledTimes(1);
   });
@@ -45,32 +54,62 @@ describe("appendSenderDataMiddleware", () => {
     const req = buildReq();
     const sender = buildSender();
 
-    appendSenderDataMiddleware({ sender })(req as never, {} as never, () => {}, () => {});
+    appendSenderDataMiddleware({ sender })(
+      req as never,
+      {} as never,
+      () => {},
+      () => {},
+    );
 
     expect(req.senderData?.tabId).toBe(42);
     expect(req.senderData?.title).toBe("Trusted DApp");
-    expect(req.senderData?.favIconUrl).toBe("https://trusted.example/favicon.ico");
+    expect(req.senderData?.favIconUrl).toBe(
+      "https://trusted.example/favicon.ico",
+    );
   });
 
-  it("leaves url undefined when the sender has no frame URL (fail closed)", () => {
+  it("falls back to the frame URL when sender.origin is unavailable", () => {
     const req = buildReq();
-    const sender = buildSender({ url: undefined });
+    const sender = buildSender({ origin: undefined });
 
-    appendSenderDataMiddleware({ sender })(req as never, {} as never, () => {}, () => {});
+    appendSenderDataMiddleware({ sender })(
+      req as never,
+      {} as never,
+      () => {},
+      () => {},
+    );
 
-    // Downstream consumers read senderData.url through `new URL(... ?? "").origin`,
-    // which throws for an empty/undefined URL and fails the request closed.
+    expect(req.senderData?.url).toBe("https://attacker.example");
+  });
+
+  it("fails closed for an opaque sender even when its frame URL is present", () => {
+    const req = buildReq();
+    const sender = buildSender({ origin: "null" });
+
+    appendSenderDataMiddleware({ sender })(
+      req as never,
+      {} as never,
+      () => {},
+      () => {},
+    );
+
     expect(req.senderData?.url).toBeUndefined();
   });
 
   it("uses the top-level frame URL when the request originates from the top frame", () => {
     const req = buildReq();
     const sender = buildSender({
+      origin: "https://trusted.example",
       url: "https://trusted.example/app",
     });
 
-    appendSenderDataMiddleware({ sender })(req as never, {} as never, () => {}, () => {});
+    appendSenderDataMiddleware({ sender })(
+      req as never,
+      {} as never,
+      () => {},
+      () => {},
+    );
 
-    expect(req.senderData?.url).toBe("https://trusted.example/app");
+    expect(req.senderData?.url).toBe("https://trusted.example");
   });
 });

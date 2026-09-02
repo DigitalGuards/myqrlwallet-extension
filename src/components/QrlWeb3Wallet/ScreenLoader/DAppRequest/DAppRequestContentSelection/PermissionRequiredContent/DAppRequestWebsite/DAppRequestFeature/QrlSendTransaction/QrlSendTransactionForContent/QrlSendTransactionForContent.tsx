@@ -10,6 +10,7 @@ import { NATIVE_TOKEN } from "@/constants/nativeToken";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
+import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import StringUtil from "@/utilities/stringUtil";
 import { Copy } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -81,9 +82,8 @@ const QrlSendTransactionForContent = observer(
       if (isConnected) {
         const onPermissionCallBack = async (hasApproved: boolean) => {
           if (hasApproved) {
-            const authorization = await revalidateAuthorizedDAppRequest(
-              dAppRequestData,
-            );
+            const authorization =
+              await revalidateAuthorizedDAppRequest(dAppRequestData);
             if (!authorization.canProceed) {
               addToResponseData({ error: authorization.proceedError });
               return;
@@ -198,7 +198,9 @@ const QrlSendTransactionForContent = observer(
             nonce: `0x${transactionObject.nonce?.toString(16)}`,
             gasLimit: transactionObject.gas,
             data: transactionObject.data || "0x",
-            value: transactionObject.value ? `0x${BigInt(transactionObject.value).toString(16)}` : "0x0",
+            value: transactionObject.value
+              ? `0x${BigInt(transactionObject.value).toString(16)}`
+              : "0x0",
           };
 
           if (transactionObject.to) {
@@ -206,13 +208,18 @@ const QrlSendTransactionForContent = observer(
           }
 
           if (transactionObject.type === "0x2") {
-            txData.maxPriorityFeePerGas = transactionObject.maxPriorityFeePerGas;
+            txData.maxPriorityFeePerGas =
+              transactionObject.maxPriorityFeePerGas;
             txData.maxFeePerGas = transactionObject.maxFeePerGas;
           } else {
             txData.gasPrice = `0x${BigInt(transactionObject.gasPrice ?? 0).toString(16)}`;
           }
 
-          rawTransactionToSend = await ledgerStore.signAndSerializeTransaction(from ?? "", txData, common);
+          rawTransactionToSend = await ledgerStore.signAndSerializeTransaction(
+            from ?? "",
+            txData,
+            common,
+          );
         } else {
           // Regular account - use mnemonic-based signing
           const mnemonicPhrases = await getMnemonicPhrases(from ?? "");
@@ -223,7 +230,7 @@ const QrlSendTransactionForContent = observer(
           // empty seed into signTransaction.
           const addressFromMnemonic =
             qrlInstance?.accounts.seedToAccount(seed)?.address;
-          if ((from ?? "") !== addressFromMnemonic) {
+          if (!areAddressesEquivalent(from, addressFromMnemonic)) {
             throw new Error(
               "Signing account does not match the requested sender",
             );
@@ -236,9 +243,8 @@ const QrlSendTransactionForContent = observer(
         }
 
         if (rawTransactionToSend) {
-          const transactionReceipt = await qrlInstance?.sendSignedTransaction(
-            rawTransactionToSend,
-          );
+          const transactionReceipt =
+            await qrlInstance?.sendSignedTransaction(rawTransactionToSend);
           addToResponseData({
             transactionHash: transactionReceipt?.transactionHash,
           });
@@ -326,7 +332,11 @@ const QrlSendTransactionForContent = observer(
             data: "0x",
           };
 
-          rawTransactionToSend = await ledgerStore.signAndSerializeTransaction(from, txData, common);
+          rawTransactionToSend = await ledgerStore.signAndSerializeTransaction(
+            from,
+            txData,
+            common,
+          );
         } else {
           // Regular account - use mnemonic-based signing
           const mnemonicPhrases = await getMnemonicPhrases(from ?? "");
@@ -337,7 +347,7 @@ const QrlSendTransactionForContent = observer(
           // empty seed into signTransaction.
           const addressFromMnemonic =
             qrlInstance?.accounts.seedToAccount(seed)?.address;
-          if ((from ?? "") !== addressFromMnemonic) {
+          if (!areAddressesEquivalent(from, addressFromMnemonic)) {
             throw new Error(
               "Signing account does not match the requested sender",
             );
@@ -350,9 +360,8 @@ const QrlSendTransactionForContent = observer(
         }
 
         if (rawTransactionToSend) {
-          const transactionReceipt = await qrlInstance?.sendSignedTransaction(
-            rawTransactionToSend,
-          );
+          const transactionReceipt =
+            await qrlInstance?.sendSignedTransaction(rawTransactionToSend);
           addToResponseData({
             transactionHash: transactionReceipt?.transactionHash,
           });
@@ -384,21 +393,21 @@ const QrlSendTransactionForContent = observer(
             value="details"
             className="w-full data-[state=active]:text-secondary"
           >
-            {t('dapp.sendTransaction.tabDetails')}
+            {t("dapp.sendTransaction.tabDetails")}
           </TabsTrigger>
           {transactionType !== SEND_TRANSACTION_TYPES.QRL_TRANSFER && (
             <TabsTrigger
               value="data"
               className="w-full data-[state=active]:text-secondary"
             >
-              {t('dapp.sendTransaction.tabData')}
+              {t("dapp.sendTransaction.tabData")}
             </TabsTrigger>
           )}
         </TabsList>
         <TabsContent value="details" className="rounded-md p-2">
           <div className="flex flex-col gap-2">
             <div className="flex flex-col gap-1">
-              <div>{t('dapp.sendTransaction.fromAddress')}</div>
+              <div>{t("dapp.sendTransaction.fromAddress")}</div>
               <div className="font-data w-64 font-bold text-identity-accent">{`${prefixFrom} ${addressSplitFrom.join(" ")}`}</div>
             </div>
             {(transactionType === SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION ||
@@ -407,8 +416,8 @@ const QrlSendTransactionForContent = observer(
                 <div>
                   {transactionType ===
                   SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION
-                    ? t('dapp.sendTransaction.contractAddress')
-                    : t('dapp.sendTransaction.toAddress')}
+                    ? t("dapp.sendTransaction.contractAddress")
+                    : t("dapp.sendTransaction.toAddress")}
                 </div>
                 <div className="font-data w-64 font-bold text-identity-accent">{`${prefixTo} ${addressSplitTo.join(" ")}`}</div>
               </div>
@@ -416,14 +425,14 @@ const QrlSendTransactionForContent = observer(
             {(transactionType === SEND_TRANSACTION_TYPES.QRL_TRANSFER ||
               value > 0n) && (
               <div className="flex flex-col gap-1">
-                <div>{t('dapp.sendTransaction.value')}</div>
+                <div>{t("dapp.sendTransaction.value")}</div>
                 <div className="font-bold text-secondary">
                   {utils.fromPlanck(value, "quanta")} Quanta
                 </div>
               </div>
             )}
             <div className="flex flex-col gap-1">
-              <div>{t('dapp.sendTransaction.gasLimit')}</div>
+              <div>{t("dapp.sendTransaction.gasLimit")}</div>
               <div className="font-bold text-secondary">
                 {gasLimit.toString()}
               </div>
@@ -433,7 +442,7 @@ const QrlSendTransactionForContent = observer(
         {transactionType !== SEND_TRANSACTION_TYPES.QRL_TRANSFER && (
           <TabsContent value="data" className="rounded-md p-2">
             <div className="flex flex-col gap-1">
-              <div>{t('dapp.sendTransaction.data')}</div>
+              <div>{t("dapp.sendTransaction.data")}</div>
               <div className="flex gap-2">
                 <div className="max-h-[8rem] w-full overflow-auto break-words font-bold text-secondary">
                   {data}
@@ -450,7 +459,7 @@ const QrlSendTransactionForContent = observer(
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left">
-                    <Label>{t('dapp.sendTransaction.copyData')}</Label>
+                    <Label>{t("dapp.sendTransaction.copyData")}</Label>
                   </TooltipContent>
                 </Tooltip>
               </div>

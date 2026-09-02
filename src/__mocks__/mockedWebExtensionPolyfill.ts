@@ -20,9 +20,21 @@ const mockedBrowser = {
     },
   },
   tabs: {
-    query: vi.fn().mockResolvedValue([{ url: "https://example.com", title: "Example", favIconUrl: "" }]),
+    query: vi
+      .fn()
+      .mockResolvedValue([
+        { url: "https://example.com", title: "Example", favIconUrl: "" },
+      ]),
     create: vi.fn().mockResolvedValue({}),
     sendMessage: vi.fn().mockResolvedValue(undefined),
+    onActivated: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
+    onUpdated: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
   },
   runtime: {
     sendMessage: vi.fn().mockResolvedValue(undefined),

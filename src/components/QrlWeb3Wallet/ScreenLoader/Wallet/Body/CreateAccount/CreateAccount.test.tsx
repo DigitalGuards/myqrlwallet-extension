@@ -4,47 +4,56 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import type { Web3BaseWalletAccount } from "@theqrl/web3";
 import CreateAccount from "./CreateAccount";
 
-const { mockedUseState } = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { useState } = require("react") as typeof import("react");
-  return { mockedUseState: useState };
-});
+// The real backup flow is covered by SeedBackup.test; here it is a stub
+// that exposes the confirm and back callbacks plus the persist error.
 vi.mock(
-  "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/CreateAccount/MnemonicDisplay/MnemonicDisplay",
-  () => {
-    return {
-      default: ({ onMnemonicNoted }: { onMnemonicNoted: () => void }) => {
-        const [showConfirm, setShowConfirm] = mockedUseState(false);
-        if (showConfirm) {
-          return (
-            <div>
-              <h2>Important!</h2>
-              <p>
-                It is highly recommended that you continue after downloading the
-                recovery mnemonic phrases. If you already have, please continue.
-              </p>
-              <button onClick={onMnemonicNoted}>Continue</button>
-            </div>
-          );
-        }
-        return (
-          <div>
-            <h3>Keep this safe</h3>
-            <p>
-              {"Don't"} lose this mnemonic phrases. Download it right now. You may
-              need this someday to import or recover your new account Q20504 ...
-              C80A1
-            </p>
-            <button onClick={() => {}}>Download</button>
-            <button onClick={() => setShowConfirm(true)}>Continue</button>
-          </div>
-        );
-      },
-    };
-  },
+  "@/components/QrlWeb3Wallet/ScreenLoader/Shared/SeedBackup/SeedBackup",
+  () => ({
+    default: ({
+      account,
+      onConfirmed,
+      onBack,
+      error,
+    }: {
+      account: Web3BaseWalletAccount;
+      onConfirmed: () => void;
+      onBack?: () => void;
+      error?: string;
+    }) => (
+      <div>
+        <h3>Mocked Seed Backup</h3>
+        <div>{account.address}</div>
+        {error && <div>{error}</div>}
+        <button onClick={onConfirmed}>Confirm backup</button>
+        <button onClick={onBack}>Back</button>
+      </div>
+    ),
+  }),
 );
+
+const ADDRESS = "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1";
+const createdAccount = () => ({
+  address: ADDRESS,
+  seed: "",
+  sign: () => ({ messageHash: "", signature: "", message: "" }),
+  signTransaction: async () => ({
+    messageHash: "",
+    rawTransaction: "",
+    signature: "",
+    transactionHash: "",
+  }),
+  encrypt: async () => {
+    throw new Error("Not implemented");
+  },
+});
+const storeWithCreate = (overrides = {}) =>
+  mockedStore({
+    qrlStore: { qrlInstance: { accounts: { create: createdAccount } } },
+    ...overrides,
+  });
 
 describe("CreateAccount", () => {
   afterEach(cleanup);
@@ -58,104 +67,129 @@ describe("CreateAccount", () => {
       </StoreProvider>,
     );
 
+  const clickCreate = async () => {
+    await act(async () => {
+      await userEvent.click(
+        screen.getByRole("button", { name: "Create account" }),
+      );
+    });
+  };
+
   it("should render the account creation form for creating account if the account is not yet created", async () => {
     renderComponent();
 
-    waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
         "Create a new account",
       );
-      expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
-        "You can add a new account to this wallet. After creating the account, ensure you keep the account recovery phrases safe.",
-      );
+      expect(
+        screen.getByText(
+          "You can add a new account to this wallet. After creating the account, ensure you keep the account recovery phrases safe.",
+        ),
+      ).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Create account" }),
       ).toBeInTheDocument();
     });
   });
 
-  it("should render the mnemonic display component once the account is created", async () => {
-    renderComponent(
-      mockedStore({
-        qrlStore: {
-          qrlInstance: {
-            accounts: {
-              create: () => ({
-                address: "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1",
-                seed: "",
-                sign: (_data: Record<string, unknown> | string) => {
-                  return { messageHash: "", signature: "", message: "" };
-                },
-                signTransaction: async () => ({
-                  messageHash: "",
-                  rawTransaction: "",
-                  signature: "",
-                  transactionHash: "",
-                }),
-                encrypt: async () => {
-                  throw new Error("Not implemented");
-                },
-              }),
-            },
-          },
-        },
-      }),
-    );
+  it("should show the seed backup once the account is created, without persisting it yet", async () => {
+    const encryptAccount = vi.fn(async () => {});
+    renderComponent(storeWithCreate({ lockStore: { encryptAccount } }));
 
-    const createAccountButton = screen.getByRole("button", {
-      name: "Create account",
-    });
-    await act(async () => {
-      await userEvent.click(createAccountButton);
-    });
-    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
-      "Keep this safe",
-    );
-    expect(screen.getByRole("paragraph")).toHaveTextContent(
-      "Don't lose this mnemonic phrases. Download it right now. You may need this someday to import or recover your new account Q20504 ... C80A1",
-    );
-    const downloadButton = screen.getByRole("button", { name: "Download" });
-    const continueButton = screen.getByRole("button", { name: "Continue" });
-    expect(downloadButton).toBeInTheDocument();
-    expect(downloadButton).toBeEnabled();
-    expect(continueButton).toBeInTheDocument();
-    expect(continueButton).toBeEnabled();
+    await clickCreate();
+
+    expect(
+      await screen.findByRole("heading", {
+        level: 3,
+        name: "Mocked Seed Backup",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(ADDRESS)).toBeInTheDocument();
+    expect(encryptAccount).not.toHaveBeenCalled();
   });
 
-  it("should show an error and not reveal the mnemonic when the password is unavailable", async () => {
+  it("should show an error and not reveal the seed when the password is unavailable", async () => {
     renderComponent(
-      mockedStore({
+      storeWithCreate({
         lockStore: {
           getWalletPassword: async () => {
             throw new Error("WALLET_PASSWORD_UNAVAILABLE");
           },
         },
+      }),
+    );
+
+    await clickCreate();
+
+    expect(
+      await screen.findByText(
+        "Your unlocked session expired. Lock the wallet and unlock it again, then retry.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Mocked Seed Backup")).not.toBeInTheDocument();
+  });
+
+  it("should discard the account when backing out of the seed backup", async () => {
+    const encryptAccount = vi.fn(async () => {});
+    renderComponent(storeWithCreate({ lockStore: { encryptAccount } }));
+
+    await clickCreate();
+    await userEvent.click(await screen.findByRole("button", { name: "Back" }));
+
+    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
+      "Create a new account",
+    );
+    expect(encryptAccount).not.toHaveBeenCalled();
+  });
+
+  it("should persist the account and show the success screen once the backup is confirmed", async () => {
+    const encryptAccount = vi.fn(async () => {});
+    const setActiveAccount = vi.fn(async () => {});
+    renderComponent(
+      storeWithCreate({
+        lockStore: { encryptAccount },
         qrlStore: {
-          qrlInstance: {
-            accounts: {
-              create: () => ({
-                address: "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1",
-                seed: "",
-                sign: () => ({ messageHash: "", signature: "", message: "" }),
-                signTransaction: async () => ({
-                  messageHash: "",
-                  rawTransaction: "",
-                  signature: "",
-                  transactionHash: "",
-                }),
-                encrypt: async () => {
-                  throw new Error("Not implemented");
-                },
-              }),
-            },
-          },
+          qrlInstance: { accounts: { create: createdAccount } },
+          setActiveAccount,
         },
       }),
     );
 
+    await clickCreate();
     await act(async () => {
       await userEvent.click(
-        screen.getByRole("button", { name: "Create account" }),
+        await screen.findByRole("button", { name: "Confirm backup" }),
+      );
+    });
+
+    expect(encryptAccount).toHaveBeenCalledTimes(1);
+    expect(setActiveAccount).toHaveBeenCalledWith(ADDRESS);
+    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
+      "Account created",
+    );
+    expect(screen.getByText("Account public address:")).toBeInTheDocument();
+    expect(
+      screen.getByText("Q 20504 6e6A6 E159e D6ACe dE46A 36CAD 6D449 C80A1"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Done" })).toBeEnabled();
+  });
+
+  it("should stay on the backup with an error when persisting fails at confirm time", async () => {
+    const getWalletPassword = vi
+      .fn()
+      .mockResolvedValueOnce("password")
+      .mockRejectedValueOnce(new Error("WALLET_PASSWORD_UNAVAILABLE"));
+    const encryptAccount = vi.fn(async () => {});
+    renderComponent(
+      storeWithCreate({ lockStore: { getWalletPassword, encryptAccount } }),
+    );
+
+    await clickCreate();
+    await act(async () => {
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Confirm backup" }),
       );
     });
 
@@ -164,79 +198,8 @@ describe("CreateAccount", () => {
         "Your unlocked session expired. Lock the wallet and unlock it again, then retry.",
       ),
     ).toBeInTheDocument();
-    // The seed must not be persisted or revealed on the failure path.
-    expect(screen.queryByText("Keep this safe")).not.toBeInTheDocument();
-  });
-
-  it("should render the account creation success component once the mnemonic phrases are downloaded and confirmed", async () => {
-    renderComponent(
-      mockedStore({
-        qrlStore: {
-          qrlInstance: {
-            accounts: {
-              create: () => ({
-                address: "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1",
-                seed: "",
-                sign: (_data: Record<string, unknown> | string) => {
-                  return { messageHash: "", signature: "", message: "" };
-                },
-                signTransaction: async () => ({
-                  messageHash: "",
-                  rawTransaction: "",
-                  signature: "",
-                  transactionHash: "",
-                }),
-                encrypt: async () => {
-                  throw new Error("Not implemented");
-                },
-              }),
-            },
-          },
-        },
-      }),
-    );
-
-    const createAccountButton = screen.getByRole("button", {
-      name: "Create account",
-    });
-    await act(async () => {
-      await userEvent.click(createAccountButton);
-    });
-    const continueButton = screen.getByRole("button", { name: "Continue" });
-    await act(async () => {
-      await userEvent.click(continueButton);
-    });
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "Important!",
-    );
-    expect(screen.getByRole("paragraph")).toHaveTextContent(
-      "It is highly recommended that you continue after downloading the recovery mnemonic phrases. If you already have, please continue.",
-    );
-    const continueConfirmButton = screen.getByRole("button", {
-      name: "Continue",
-    });
-    await act(async () => {
-      await userEvent.click(continueConfirmButton);
-    });
-    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
-      "Account created",
-    );
-    expect(screen.getByText("Account public address:")).toBeInTheDocument();
-    expect(
-      screen.getByText("Q 20504 6e6A6 E159e D6ACe dE46A 36CAD 6D449 C80A1"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "You can share this account public address with anyone. Others need it to interact with you.",
-      ),
-    ).toBeInTheDocument();
-    const accountCopyButton = screen.getByRole("button", { name: "Copy" });
-    const accountCreationDoneButton = screen.getByRole("button", {
-      name: "Done",
-    });
-    expect(accountCopyButton).toBeInTheDocument();
-    expect(accountCopyButton).toBeEnabled();
-    expect(accountCreationDoneButton).toBeInTheDocument();
-    expect(accountCreationDoneButton).toBeEnabled();
+    expect(screen.getByText("Mocked Seed Backup")).toBeInTheDocument();
+    expect(encryptAccount).not.toHaveBeenCalled();
+    expect(screen.queryByText("Account created")).not.toBeInTheDocument();
   });
 });

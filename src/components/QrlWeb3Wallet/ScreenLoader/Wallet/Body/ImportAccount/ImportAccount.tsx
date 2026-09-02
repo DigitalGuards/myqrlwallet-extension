@@ -1,4 +1,11 @@
 import { Alert, AlertDescription } from "@/components/UI/Alert";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/UI/Card";
 import { scrollShellToTop } from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/UI/tabs";
 import withSuspense from "@/functions/withSuspense";
@@ -13,33 +20,25 @@ import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackgrou
 const AccountImportSuccess = withSuspense(
   lazy(
     () =>
-      import(
-        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/AccountImportSuccess/AccountImportSuccess"
-      ),
+      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/AccountImportSuccess/AccountImportSuccess"),
   ),
 );
 const ImportMnemonicForm = withSuspense(
   lazy(
     () =>
-      import(
-        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportMnemonicForm/ImportMnemonicForm"
-      ),
+      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportMnemonicForm/ImportMnemonicForm"),
   ),
 );
 const ImportHexSeedForm = withSuspense(
   lazy(
     () =>
-      import(
-        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportHexSeedForm/ImportHexSeedForm"
-      ),
+      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportHexSeedForm/ImportHexSeedForm"),
   ),
 );
 const ImportEncryptedWallet = withSuspense(
   lazy(
     () =>
-      import(
-        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportEncryptedWallet/ImportEncryptedWallet"
-      ),
+      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportEncryptedWallet/ImportEncryptedWallet"),
   ),
 );
 
@@ -90,28 +89,38 @@ const ImportAccount = observer(() => {
                 <AlertDescription>{finalizeError}</AlertDescription>
               </Alert>
             )}
-            <Tabs defaultValue="mnemonic" className="w-full">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="mnemonic">
-                  {t("importAccount.tabMnemonic")}
-                </TabsTrigger>
-                <TabsTrigger value="hexSeed">
-                  {t("importAccount.tabHexSeed")}
-                </TabsTrigger>
-                <TabsTrigger value="walletFile">
-                  {t("importAccount.tabWalletFile")}
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent value="mnemonic">
-                <ImportMnemonicForm onImported={finalizeImport} />
-              </TabsContent>
-              <TabsContent value="hexSeed">
-                <ImportHexSeedForm onImported={finalizeImport} />
-              </TabsContent>
-              <TabsContent value="walletFile">
-                <ImportEncryptedWallet onImported={finalizeImport} />
-              </TabsContent>
-            </Tabs>
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("importAccount.title")}</CardTitle>
+                <CardDescription className="break-words">
+                  {t("importAccount.description")}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="min-w-0">
+                <Tabs defaultValue="mnemonic" className="w-full min-w-0">
+                  <TabsList className="grid w-full grid-cols-3">
+                    <TabsTrigger value="mnemonic">
+                      {t("importAccount.tabMnemonic")}
+                    </TabsTrigger>
+                    <TabsTrigger value="hexSeed">
+                      {t("importAccount.tabHexSeed")}
+                    </TabsTrigger>
+                    <TabsTrigger value="walletFile">
+                      {t("importAccount.tabWalletFile")}
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="mnemonic" className="mt-4">
+                    <ImportMnemonicForm onImported={finalizeImport} />
+                  </TabsContent>
+                  <TabsContent value="hexSeed" className="mt-4">
+                    <ImportHexSeedForm onImported={finalizeImport} />
+                  </TabsContent>
+                  <TabsContent value="walletFile" className="mt-4">
+                    <ImportEncryptedWallet onImported={finalizeImport} />
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
           </>
         )}
       </div>
