@@ -4,6 +4,7 @@ vi.mock("@/configuration/releaseProfile", async (importOriginal) => ({
 }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toChecksumAddress } from "@theqrl/wallet.js";
+import { assertV3Network } from "@/configuration/releaseProfile";
 import StorageUtil from "@/utilities/storageUtil";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import {
@@ -61,6 +62,78 @@ describe("dApp chain authorization", () => {
 
     expect(result.canProceed).toBe(true);
     expect(result).toMatchObject({ authorizedChainId: "0x301825" });
+  });
+
+  it.each(["0x301825", "3151909", 3151909])(
+    "accepts an explicit SDK transaction chain matching the wallet (%s)",
+    async (chainId) => {
+      const result = await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [
+          { from: ACCOUNT, to: CHECKSUM_ACCOUNT, chainId, value: "0x0" },
+        ]),
+      );
+      expect(result).toMatchObject({
+        canProceed: true,
+        authorizedChainId: "0x301825",
+      });
+    },
+  );
+
+  it.each(["0x539", "0x1"])(
+    "rejects a different explicit transaction chain before approval (%s)",
+    async (chainId) => {
+      const result = await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [
+          { from: ACCOUNT, chainId },
+        ]),
+      );
+      expect(result.canProceed).toBe(false);
+      expect(result.proceedError?.message).toContain(
+        "does not match the active, authorized wallet chain",
+      );
+    },
+  );
+
+  it.each([null, undefined, "", "0x0", "invalid", -1, 1.5, {}])(
+    "rejects a malformed explicit transaction chain (%s)",
+    async (chainId) => {
+      const result = await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [
+          { from: ACCOUNT, chainId },
+        ]),
+      );
+      expect(result.canProceed).toBe(false);
+      expect(result.proceedError?.message).toContain("invalid chain ID");
+    },
+  );
+
+  it("rechecks the declared transaction chain against its approval context", async () => {
+    const result = await revalidateAuthorizedDAppRequest({
+      method: RESTRICTED_METHODS.QRL_SEND_TRANSACTION,
+      params: [{ from: ACCOUNT, chainId: "0x539" }],
+      requestId: "request-id",
+      authorizedChainId: "0x301825",
+      requestData: { senderData: { url: `${ORIGIN}/request` } },
+    });
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain(
+      "does not match the active, authorized wallet chain",
+    );
+  });
+
+  it("checks pinned RPC identity even for an explicitly matching transaction chain", async () => {
+    vi.mocked(assertV3Network).mockRejectedValueOnce(
+      new Error("The RPC does not match the pinned v3 Private network."),
+    );
+    const result = await revalidateAuthorizedDAppRequest({
+      method: RESTRICTED_METHODS.QRL_SEND_TRANSACTION,
+      params: [{ from: ACCOUNT, chainId: "0x301825" }],
+      requestId: "request-id",
+      authorizedChainId: "0x301825",
+      requestData: { senderData: { url: `${ORIGIN}/request` } },
+    });
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("pinned v3 Private network");
   });
 
   it.each([

@@ -593,6 +593,46 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
       fixture.origin,
     );
     expect(storedConnection?.accounts).toEqual([CHECKSUM_ACCOUNT]);
+
+    await beginRequest(dAppPage, "qrl_sendTransaction", [
+      {
+        from: CHECKSUM_ACCOUNT,
+        to: CHECKSUM_ACCOUNT,
+        chainId: "0x301825",
+        value: "0x0",
+        gas: "0x5208",
+        data: "0x01",
+      },
+    ]);
+    await expect(
+      extensionPage.getByRole("button", { name: "Yes" }),
+    ).toBeEnabled();
+    const transactionChain = await extensionPage.evaluate(async () => {
+      const key =
+        "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS";
+      return (await chrome.storage.session.get(key))[key]?.DAPPS_REQUEST_DATA
+        ?.params?.[0]?.chainId;
+    });
+    expect(transactionChain).toBe("0x301825");
+    await extensionPage
+      .getByRole("button", { name: "No", exact: true })
+      .click();
+    await expect(requestResult(dAppPage)).rejects.toThrow(/4001|reject/i);
+
+    await beginRequest(dAppPage, "qrl_sendTransaction", [
+      {
+        from: CHECKSUM_ACCOUNT,
+        to: CHECKSUM_ACCOUNT,
+        chainId: "0x539",
+        value: "0x0",
+        gas: "0x5208",
+      },
+    ]);
+    await expect(requestResult(dAppPage)).rejects.toThrow(
+      "does not match the active, authorized wallet chain",
+    );
+    expect(fixture.rpcMethods).not.toContain("qrl_sendRawTransaction");
+
     const chainIdCallsBeforeReload = fixture.rpcMethods.filter(
       (method) => method === "qrl_chainId",
     ).length;

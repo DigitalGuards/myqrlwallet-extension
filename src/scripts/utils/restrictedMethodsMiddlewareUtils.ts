@@ -93,8 +93,8 @@ const getTypedDataChainId = (req: JsonRpcRequest<JsonRpcRequest>) => {
 
 /**
  * Enforce the account and chain capability granted to a dApp origin.
- * Typed-data requests are bound to domain.chainId when present; all other
- * sensitive requests are bound to the active chain.
+ * Transactions and typed-data requests honor their explicit chain IDs.
+ * Sensitive requests without a declared chain are bound to the active chain.
  */
 export const checkAccountAndChainHaveBeenAuthorized = async (
   req: JsonRpcRequest<JsonRpcRequest>,
@@ -124,6 +124,38 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
   const activeChainId = normalizeChainId(
     (await StorageUtil.getActiveBlockChain())?.chainId,
   );
+  if (req.method === RESTRICTED_METHODS.QRL_SEND_TRANSACTION) {
+    const transaction = (
+      req.params as unknown as Array<Record<string, unknown>>
+    )?.[0];
+    if (
+      transaction &&
+      Object.prototype.hasOwnProperty.call(transaction, "chainId")
+    ) {
+      const declaredChainId = normalizeChainId(transaction.chainId);
+      if (!declaredChainId) {
+        return {
+          canProceed: false,
+          proceedError: rpcErrors.invalidParams({
+            message: "The transaction contains an invalid chain ID.",
+          }),
+        };
+      }
+      if (
+        declaredChainId !== activeChainId ||
+        (expectedChainId !== undefined &&
+          declaredChainId !== normalizeChainId(expectedChainId))
+      ) {
+        return {
+          canProceed: false,
+          proceedError: providerErrors.unauthorized({
+            message:
+              "The transaction chain does not match the active, authorized wallet chain.",
+          }),
+        };
+      }
+    }
+  }
   const typedDataChain =
     req.method === RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4 ||
     req.method === RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA
