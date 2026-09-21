@@ -1,3 +1,5 @@
+import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
+const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Plain object stores (hoisting-safe) ────────────────────────────
@@ -13,17 +15,22 @@ vi.mock("webextension-polyfill", () => ({
   default: {
     storage: {
       local: {
-        get: vi.fn((key: string) =>
+        get: vi.fn((key: string | null) =>
           Promise.resolve(
-            key in localStore ? { [key]: localStore[key] } : {},
+            key === null
+              ? { ...localStore }
+              : key in localStore
+                ? { [key]: localStore[key] }
+                : {},
           ),
         ),
         set: vi.fn((data: Record<string, any>) => {
           Object.assign(localStore, data);
           return Promise.resolve();
         }),
-        remove: vi.fn((key: string) => {
-          delete localStore[key];
+        remove: vi.fn((key: string | string[]) => {
+          for (const item of Array.isArray(key) ? key : [key])
+            delete localStore[item];
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
@@ -32,17 +39,22 @@ vi.mock("webextension-polyfill", () => ({
         }),
       },
       session: {
-        get: vi.fn((key: string) =>
+        get: vi.fn((key: string | null) =>
           Promise.resolve(
-            key in sessionStore ? { [key]: sessionStore[key] } : {},
+            key === null
+              ? { ...sessionStore }
+              : key in sessionStore
+                ? { [key]: sessionStore[key] }
+                : {},
           ),
         ),
         set: vi.fn((data: Record<string, any>) => {
           Object.assign(sessionStore, data);
           return Promise.resolve();
         }),
-        remove: vi.fn((key: string) => {
-          delete sessionStore[key];
+        remove: vi.fn((key: string | string[]) => {
+          for (const item of Array.isArray(key) ? key : [key])
+            delete sessionStore[item];
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
@@ -71,10 +83,11 @@ const clearStore = (store: Record<string, any>) => {
 };
 
 import type { DecryptedKeyType } from "@/scripts/lockManager/lockManager";
+import { LEGACY_QRL_ADDRESS_MIGRATION_ERROR } from "@/utilities/addressUtil";
 
 const MOCK_KEYS: DecryptedKeyType[] = [
   {
-    address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+    address: `Q${"a".repeat(128)}`,
     mnemonicPhrases: "mocked mnemonic",
   },
 ];
@@ -109,8 +122,8 @@ describe("LockStore – readLockState timestamp check", () => {
       (store as any).cachedKeys = MOCK_KEYS;
 
       // Set timestamps: locked AFTER unlocked = intentional lock
-      localStore["LOCK_MANAGER_UNLOCKED_TIMESTAMP"] = 1000;
-      localStore["LOCK_MANAGER_LOCKED_TIMESTAMP"] = 2000;
+      localStore[profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP")] = 1000;
+      localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")] = 2000;
 
       // SW reports locked
       mockSendMessage.mockResolvedValueOnce({
@@ -137,8 +150,8 @@ describe("LockStore – readLockState timestamp check", () => {
       (store as any).cachedKeys = MOCK_KEYS;
 
       // Set timestamps: unlocked AFTER locked = SW restart
-      localStore["LOCK_MANAGER_UNLOCKED_TIMESTAMP"] = 2000;
-      localStore["LOCK_MANAGER_LOCKED_TIMESTAMP"] = 1000;
+      localStore[profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP")] = 2000;
+      localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")] = 1000;
 
       // First call: IS_LOCKED returns locked
       // Second call: SET_DECRYPTED_KEYS succeeds
@@ -166,7 +179,7 @@ describe("LockStore – readLockState timestamp check", () => {
 
       (store as any).cachedKeys = MOCK_KEYS;
 
-      // No timestamps in storage — both default to 0
+      // No timestamps in storage - both default to 0
       // lockedTs (0) is NOT > unlockedTs (0), so keys should be re-sent
 
       mockSendMessage
@@ -207,8 +220,8 @@ describe("LockStore – readLockState timestamp check", () => {
       (store as any).cachedKeys = MOCK_KEYS;
 
       // Timestamps indicate SW restart
-      localStore["LOCK_MANAGER_UNLOCKED_TIMESTAMP"] = 2000;
-      localStore["LOCK_MANAGER_LOCKED_TIMESTAMP"] = 1000;
+      localStore[profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP")] = 2000;
+      localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")] = 1000;
 
       // IS_LOCKED returns locked, SET_DECRYPTED_KEYS fails
       mockSendMessage
@@ -223,9 +236,9 @@ describe("LockStore – readLockState timestamp check", () => {
 });
 
 describe("LockStore – destructive paths", () => {
-  const SESSION_KEYS_KEY = "_LM_CACHED_KEYS";
+  const SESSION_KEYS_KEY = profileStorageKey("_LM_CACHED_KEYS");
   const OTHER_KEY: DecryptedKeyType = {
-    address: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+    address: `Q${"b".repeat(128)}`,
     mnemonicPhrases: "second mnemonic",
   };
 
@@ -269,13 +282,15 @@ describe("LockStore – destructive paths", () => {
       // leave every account's plaintext mnemonic on the device.
       const store = await createLockStore();
       sessionStore[SESSION_KEYS_KEY] = MOCK_KEYS;
-      localStore["KEYSTORES"] = JSON.stringify([{ address: "qaaa" }]);
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "qaaa" },
+      ]);
       mockSendMessage.mockRejectedValue(new Error("SW not reachable"));
 
       await store.resetWallet();
 
       expect(sessionStore[SESSION_KEYS_KEY]).toBeUndefined();
-      expect(localStore["KEYSTORES"]).toBeUndefined();
+      expect(localStore[profileStorageKey("KEYSTORES")]).toBeUndefined();
     });
 
     it("writes the LOCKED timestamp after the wipe, not before", async () => {
@@ -287,7 +302,9 @@ describe("LockStore – destructive paths", () => {
 
       await store.resetWallet();
 
-      expect(typeof localStore["LOCK_MANAGER_LOCKED_TIMESTAMP"]).toBe("number");
+      expect(
+        typeof localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")],
+      ).toBe("number");
     });
   });
 
@@ -336,9 +353,7 @@ describe("LockStore – destructive paths", () => {
       (store as any).cachedKeys = [...MOCK_KEYS, OTHER_KEY];
       mockSendMessage.mockRejectedValue(new Error("SW not reachable"));
 
-      await expect(
-        store.removeAccountKey(OTHER_KEY.address),
-      ).rejects.toThrow();
+      await expect(store.removeAccountKey(OTHER_KEY.address)).rejects.toThrow();
     });
   });
 });
@@ -379,10 +394,16 @@ describe("LockStore – unlock worker fan-out", () => {
     terminate() {}
   }
 
-  const KEYSTORE_A = { address: "qaaa", crypto: {} };
-  const KEYSTORE_B = { address: "qbbb", crypto: {} };
-  const KEY_A = { address: "Qaaa", mnemonicPhrases: "mnemonic a" };
-  const KEY_B = { address: "Qbbb", mnemonicPhrases: "mnemonic b" };
+  const KEYSTORE_A = { address: `Q${"a".repeat(128)}`, crypto: {} };
+  const KEYSTORE_B = { address: `Q${"b".repeat(128)}`, crypto: {} };
+  const KEY_A = {
+    address: KEYSTORE_A.address,
+    mnemonicPhrases: "mnemonic a",
+  };
+  const KEY_B = {
+    address: KEYSTORE_B.address,
+    mnemonicPhrases: "mnemonic b",
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -394,11 +415,17 @@ describe("LockStore – unlock worker fan-out", () => {
       value: 4,
       configurable: true,
     });
-    localStore["KEYSTORES"] = JSON.stringify([KEYSTORE_A, KEYSTORE_B]);
+    localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+      KEYSTORE_A,
+      KEYSTORE_B,
+    ]);
   });
 
   async function createLockStore() {
-    mockSendMessage.mockResolvedValue({ isLocked: false, hasPasswordSet: true });
+    mockSendMessage.mockResolvedValue({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
     const module = await import("./lockStore");
     const store = new module.default();
     await new Promise((r) => setTimeout(r, 300));
@@ -439,6 +466,18 @@ describe("LockStore – unlock worker fan-out", () => {
     expect(setKeysCalls).toHaveLength(0);
   });
 
+  it("requires explicit migration before decrypting a legacy-address keystore", async () => {
+    localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+      { ...KEYSTORE_A, address: `Q${"c".repeat(40)}` },
+    ]);
+    const store = await createLockStore();
+
+    await expect(store.unlock("pw")).rejects.toThrow(
+      LEGACY_QRL_ADDRESS_MIGRATION_ERROR,
+    );
+    expect(spawned).toBe(0);
+  });
+
   it("retries sequentially after an infrastructure failure and succeeds", async () => {
     const store = await createLockStore();
     behaviors = [
@@ -476,7 +515,10 @@ describe("LockStore – unlock worker fan-out", () => {
 
   it("persists upgraded keystores index-aligned with the original list", async () => {
     const store = await createLockStore();
-    const upgradedB = { address: "qbbb", crypto: { upgraded: true } };
+    const upgradedB = {
+      address: KEYSTORE_B.address,
+      crypto: { upgraded: true },
+    };
     behaviors = [
       () => ({ success: true, keys: [KEY_A], upgraded: [null] }),
       () => ({ success: true, keys: [KEY_B], upgraded: [upgradedB] }),
@@ -485,7 +527,7 @@ describe("LockStore – unlock worker fan-out", () => {
     const unlocked = await store.unlock("pw");
 
     expect(unlocked).toBe(true);
-    expect(JSON.parse(localStore["KEYSTORES"])).toEqual([
+    expect(JSON.parse(localStore[profileStorageKey("KEYSTORES")])).toEqual([
       KEYSTORE_A,
       upgradedB,
     ]);

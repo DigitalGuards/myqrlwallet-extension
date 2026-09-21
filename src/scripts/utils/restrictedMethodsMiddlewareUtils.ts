@@ -5,9 +5,14 @@ import {
 } from "@theqrl/qrl-wallet-provider";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import StorageUtil from "@/utilities/storageUtil";
+import { assertV3Network, V3_CHAIN_ID } from "@/configuration/releaseProfile";
 import { MAX_SAFE_CHAIN_ID } from "@/constants/blockchain";
 import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
-import { areAddressesEquivalent } from "@/utilities/addressUtil";
+import {
+  areAddressesEquivalent,
+  isCanonicalQrlAddress,
+  isQrlAddress,
+} from "@/utilities/addressUtil";
 import {
   CAVEAT_TYPES,
   DAppRequestType,
@@ -98,6 +103,22 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
   const accountResult = await checkAccountHasBeenAuthorized(req);
   if (!accountResult.canProceed) return accountResult;
 
+  if (req.method === RESTRICTED_METHODS.QRL_SEND_TRANSACTION) {
+    const transaction = (
+      req.params as unknown as Array<Record<string, unknown>>
+    )?.[0];
+    const to = transaction?.to;
+    if (to !== undefined && to !== null && to !== "" && !isQrlAddress(to)) {
+      return {
+        canProceed: false,
+        proceedError: rpcErrors.invalidParams({
+          message:
+            "Transaction recipients must use an uppercase-Q QIP-55 address with 128 hexadecimal characters and a valid checksum.",
+        }),
+      };
+    }
+  }
+
   const origin = new URL(req?.senderData?.url ?? "").origin;
   const connectedData = await StorageUtil.getDAppsConnectedAccountsData(origin);
   const activeChainId = normalizeChainId(
@@ -169,6 +190,18 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
 export const revalidateAuthorizedDAppRequest = async (
   request: DAppRequestType | undefined,
 ) => {
+  if (
+    request?.method === RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4 ||
+    request?.method === RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA
+  ) {
+    return {
+      canProceed: false,
+      proceedError: providerErrors.unsupportedMethod({
+        message:
+          "Typed-data signing is unavailable for QIP-55 until a versioned 64-byte address layout is defined.",
+      }),
+    };
+  }
   if (!request?.authorizedChainId || !request.requestData?.senderData) {
     return {
       canProceed: false,
@@ -179,6 +212,38 @@ export const revalidateAuthorizedDAppRequest = async (
     };
   }
 
+  const authorization = await checkAccountAndChainHaveBeenAuthorized(
+    {
+      id: request.requestId,
+      jsonrpc: "2.0",
+      method: request.method,
+      params: request.params,
+      senderData: request.requestData.senderData,
+    } as JsonRpcRequest<JsonRpcRequest>,
+    request.authorizedChainId,
+  );
+  if (!authorization.canProceed) return authorization;
+  try {
+    const chain = await StorageUtil.getActiveBlockChain();
+    if (chain.chainId.toLowerCase() !== V3_CHAIN_ID) {
+      throw new Error("Select the v3 Private network.");
+    }
+    await assertV3Network(chain.defaultRpcUrl);
+    const currentChain = await StorageUtil.getActiveBlockChain();
+    if (
+      currentChain.chainId !== chain.chainId ||
+      currentChain.defaultRpcUrl !== chain.defaultRpcUrl
+    ) {
+      throw new Error("The network changed. Review the request again.");
+    }
+  } catch (error) {
+    return {
+      canProceed: false,
+      proceedError: providerErrors.disconnected({
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    };
+  }
   return checkAccountAndChainHaveBeenAuthorized(
     {
       id: request.requestId,
@@ -346,6 +411,23 @@ export const checkWalletAddQrlChainParams = async (
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
         message: `Expected 1-6 character string 'nativeCurrency.symbol'. Received: ${ticker}`,
+      }),
+    };
+  }
+
+  const qrnsRegistryAddress = chainData.qrnsRegistryAddress as unknown;
+  if (
+    hasInternalKeys &&
+    qrnsRegistryAddress !== undefined &&
+    qrnsRegistryAddress !== null &&
+    qrnsRegistryAddress !== "" &&
+    !isCanonicalQrlAddress(qrnsRegistryAddress)
+  ) {
+    return {
+      canProceed: false,
+      proceedError: rpcErrors.invalidParams({
+        message:
+          "Expected 'qrnsRegistryAddress' to be empty or an uppercase-Q QIP-55 address with 128 hexadecimal characters and a valid checksum.",
       }),
     };
   }

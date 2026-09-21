@@ -47,10 +47,9 @@ const KDF_BOUNDS: Record<"m" | "t" | "p" | "dklen", [number, number]> = {
   dklen: [16, 64],
 };
 const IV_HEX_CHARS = 24; // 12 bytes
-// Exactly one 51-byte extended seed + the 16-byte GCM tag. Pinning the
-// length here (rather than post-decrypt like the frontend) rejects
-// wrong-era files (e.g. future 64-byte QIP-55 seeds) at selection time as a
-// format error instead of a confusing failure after a correct password.
+// Exactly one 51-byte extended seed + the 16-byte GCM tag. QIP-55 changes
+// the derived address width; the extended seed remains 51 bytes. Pinning the
+// ciphertext length rejects other seed formats at selection time.
 const CIPHERTEXT_HEX_CHARS = (51 + 16) * 2;
 // argon2 implementations reject salts under 8 bytes; catching it here keeps
 // a bad file from burning a KDF attempt and firing the misleading
@@ -62,7 +61,10 @@ const isHexString = (value: unknown): value is string =>
   value.length % 2 === 0 &&
   !/[^0-9a-fA-F]/.test(value);
 
-const inBounds = (value: unknown, [min, max]: [number, number]): value is number =>
+const inBounds = (
+  value: unknown,
+  [min, max]: [number, number],
+): value is number =>
   typeof value === "number" &&
   Number.isInteger(value) &&
   value >= min &&
@@ -141,7 +143,9 @@ export function looksLikeKeystoreBackup(parsed: unknown): boolean {
   if (!parsed || typeof parsed !== "object") return false;
   const obj = parsed as Record<string, unknown>;
   if (Array.isArray(obj.keystores)) return true;
-  return obj.version === 1 && typeof obj.crypto === "object" && obj.crypto !== null;
+  return (
+    obj.version === 1 && typeof obj.crypto === "object" && obj.crypto !== null
+  );
 }
 
 /**

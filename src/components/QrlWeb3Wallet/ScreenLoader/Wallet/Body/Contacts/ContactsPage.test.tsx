@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { toChecksumAddress } from "@theqrl/wallet.js";
 import ContactsPage from "./ContactsPage";
+
+const ALICE_ADDRESS = toChecksumAddress(`Q${"a".repeat(128)}`);
+const BOB_ADDRESS = toChecksumAddress(`Q${"b".repeat(128)}`);
 
 vi.mock("@theqrl/web3", () => ({
   validator: {
@@ -65,7 +69,7 @@ describe("ContactsPage", () => {
           contacts: [
             {
               name: "Alice",
-              address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+              address: ALICE_ADDRESS,
             },
           ],
         },
@@ -82,7 +86,7 @@ describe("ContactsPage", () => {
           contacts: [
             {
               name: "Alice",
-              address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+              address: ALICE_ADDRESS,
             },
           ],
         },
@@ -95,14 +99,14 @@ describe("ContactsPage", () => {
   });
 
   it("should call removeContact when delete button is clicked", async () => {
-    const removeContact = vi.fn<any>(() => Promise.resolve());
+    const removeContact = vi.fn(() => Promise.resolve());
     renderComponent(
       mockedStore({
         contactsStore: {
           contacts: [
             {
               name: "Alice",
-              address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+              address: ALICE_ADDRESS,
             },
           ],
           removeContact,
@@ -112,13 +116,11 @@ describe("ContactsPage", () => {
 
     await userEvent.click(screen.getByLabelText("Delete contact"));
 
-    expect(removeContact).toHaveBeenCalledWith(
-      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
-    );
+    expect(removeContact).toHaveBeenCalledWith(ALICE_ADDRESS);
   });
 
   it("should call addContact when saving a new contact", async () => {
-    const addContact = vi.fn<any>(() => Promise.resolve());
+    const addContact = vi.fn(() => Promise.resolve());
     renderComponent(
       mockedStore({
         contactsStore: {
@@ -129,42 +131,41 @@ describe("ContactsPage", () => {
 
     await userEvent.click(screen.getByText("Add"));
 
-    await userEvent.type(
-      screen.getByPlaceholderText("Contact name"),
-      "Bob",
-    );
-    await userEvent.type(
-      screen.getByPlaceholderText("Q address"),
-      "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
-    );
+    await userEvent.type(screen.getByPlaceholderText("Contact name"), "Bob");
+    await userEvent.type(screen.getByPlaceholderText("Q address"), BOB_ADDRESS);
 
     const saveButton = screen.getByRole("button", { name: /Save/i });
-    await waitFor(() => {
-      expect(saveButton).toBeEnabled();
-    }, { timeout: 3000 });
+    await waitFor(
+      () => {
+        expect(saveButton).toBeEnabled();
+      },
+      { timeout: 3000 },
+    );
 
     await userEvent.click(saveButton);
 
     await waitFor(() => {
       expect(addContact).toHaveBeenCalledWith({
         name: "Bob",
-        address: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+        address: BOB_ADDRESS,
       });
     });
 
     // Form should be hidden after save
-    expect(screen.queryByPlaceholderText("Contact name")).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("Contact name"),
+    ).not.toBeInTheDocument();
   });
 
   it("should call updateContact when saving an edited contact", async () => {
-    const updateContact = vi.fn<any>(() => Promise.resolve());
+    const updateContact = vi.fn(() => Promise.resolve());
     renderComponent(
       mockedStore({
         contactsStore: {
           contacts: [
             {
               name: "Alice",
-              address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+              address: ALICE_ADDRESS,
             },
           ],
           updateContact,
@@ -179,20 +180,20 @@ describe("ContactsPage", () => {
     await userEvent.type(nameInput, "Alice Updated");
 
     const saveButton = screen.getByRole("button", { name: /Save/i });
-    await waitFor(() => {
-      expect(saveButton).toBeEnabled();
-    }, { timeout: 3000 });
+    await waitFor(
+      () => {
+        expect(saveButton).toBeEnabled();
+      },
+      { timeout: 3000 },
+    );
 
     await userEvent.click(saveButton);
 
     await waitFor(() => {
-      expect(updateContact).toHaveBeenCalledWith(
-        "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
-        {
-          name: "Alice Updated",
-          address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
-        },
-      );
+      expect(updateContact).toHaveBeenCalledWith(ALICE_ADDRESS, {
+        name: "Alice Updated",
+        address: ALICE_ADDRESS,
+      });
     });
   });
 
@@ -204,7 +205,9 @@ describe("ContactsPage", () => {
 
     await userEvent.click(screen.getByText("Cancel"));
 
-    expect(screen.queryByPlaceholderText("Contact name")).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("Contact name"),
+    ).not.toBeInTheDocument();
     // Add button should be visible again
     expect(screen.getByText("Add")).toBeInTheDocument();
   });

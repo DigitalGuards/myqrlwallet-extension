@@ -9,8 +9,12 @@ import {
 import { Input } from "@/components/UI/Input";
 import { Label } from "@/components/UI/Label";
 import type { Contact } from "@/types/contact";
+import {
+  areAddressesEquivalent,
+  isQrlAddress,
+  toCanonicalQrlAddress,
+} from "@/utilities/addressUtil";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { validator } from "@theqrl/web3";
 import { Save, X } from "lucide-react";
 import { useMemo } from "react";
 import { useForm } from "react-hook-form";
@@ -26,14 +30,14 @@ const createContactFormSchema = (existingAddresses: string[]) =>
         .max(50, "Name must be 50 characters or less"),
       address: z.string().min(1, "Address is required"),
     })
-    .refine((fields) => validator.isAddressString(fields.address), {
+    .refine((fields) => isQrlAddress(fields.address), {
       message: "Address is invalid",
       path: ["address"],
     })
     .refine(
       (fields) =>
-        !existingAddresses.some(
-          (a) => a.toLowerCase() === fields.address.toLowerCase(),
+        !existingAddresses.some((address) =>
+          areAddressesEquivalent(address, fields.address),
         ),
       {
         message: "Contact with this address already exists",
@@ -60,8 +64,7 @@ const ContactForm = ({
     () =>
       initialContact
         ? existingAddresses.filter(
-            (a) =>
-              a.toLowerCase() !== initialContact.address.toLowerCase(),
+            (a) => a.toLowerCase() !== initialContact.address.toLowerCase(),
           )
         : existingAddresses,
     [existingAddresses, initialContact],
@@ -88,7 +91,7 @@ const ContactForm = ({
   } = form;
 
   const onSubmit = (data: z.infer<typeof schema>) => {
-    onSave({ name: data.name, address: data.address });
+    onSave({ name: data.name, address: toCanonicalQrlAddress(data.address) });
   };
 
   return (
@@ -99,7 +102,7 @@ const ContactForm = ({
           name="name"
           render={({ field }) => (
             <FormItem>
-              <Label>{t('contacts.nameLabel')}</Label>
+              <Label>{t("contacts.nameLabel")}</Label>
               <FormControl>
                 <Input
                   {...field}
@@ -116,7 +119,7 @@ const ContactForm = ({
           name="address"
           render={({ field }) => (
             <FormItem>
-              <Label>{t('contacts.addressLabel')}</Label>
+              <Label>{t("contacts.addressLabel")}</Label>
               <FormControl>
                 <Input
                   {...field}
@@ -137,11 +140,11 @@ const ContactForm = ({
             onClick={onCancel}
           >
             <X className="mr-2 h-4 w-4" />
-            {t('contacts.cancelButton')}
+            {t("contacts.cancelButton")}
           </Button>
           <Button type="submit" disabled={!isValid} className="flex-1">
             <Save className="mr-2 h-4 w-4" />
-            {t('contacts.saveButton')}
+            {t("contacts.saveButton")}
           </Button>
         </div>
       </form>

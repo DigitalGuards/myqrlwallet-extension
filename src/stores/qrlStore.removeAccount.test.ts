@@ -1,8 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { toChecksumAddress } from "@theqrl/wallet.js";
 
 const { mockGetBalance, mockIsListening } = vi.hoisted(() => ({
-  mockGetBalance: vi.fn<any>().mockResolvedValue(BigInt(0)),
-  mockIsListening: vi.fn<any>().mockResolvedValue(true),
+  mockGetBalance: vi.fn().mockResolvedValue(BigInt(0)),
+  mockIsListening: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("@theqrl/web3", () => {
@@ -20,18 +21,18 @@ vi.mock("@theqrl/web3", () => {
 
 const { mockStorage } = vi.hoisted(() => ({
   mockStorage: {
-    getAllAccounts: vi.fn<any>().mockResolvedValue([]),
-    setAllAccounts: vi.fn<any>().mockResolvedValue(undefined),
-    getKeystores: vi.fn<any>().mockResolvedValue([]),
-    setKeystores: vi.fn<any>().mockResolvedValue(undefined),
-    getAllBlockChains: vi.fn<any>().mockResolvedValue([]),
-    getActiveBlockChain: vi.fn<any>().mockResolvedValue(""),
-    setActiveBlockChain: vi.fn<any>().mockResolvedValue(undefined),
-    getActiveAccount: vi.fn<any>().mockResolvedValue(""),
-    setActiveAccount: vi.fn<any>().mockResolvedValue(undefined),
-    clearActiveAccount: vi.fn<any>().mockResolvedValue(undefined),
-    clearAllAccountData: vi.fn<any>().mockResolvedValue(undefined),
-    removeAccountFromAllDApps: vi.fn<any>().mockResolvedValue(undefined),
+    getAllAccounts: vi.fn().mockResolvedValue([]),
+    setAllAccounts: vi.fn().mockResolvedValue(undefined),
+    getKeystores: vi.fn().mockResolvedValue([]),
+    setKeystores: vi.fn().mockResolvedValue(undefined),
+    getAllBlockChains: vi.fn().mockResolvedValue([]),
+    getActiveBlockChain: vi.fn().mockResolvedValue(""),
+    setActiveBlockChain: vi.fn().mockResolvedValue(undefined),
+    getActiveAccount: vi.fn().mockResolvedValue(""),
+    setActiveAccount: vi.fn().mockResolvedValue(undefined),
+    clearActiveAccount: vi.fn().mockResolvedValue(undefined),
+    clearAllAccountData: vi.fn().mockResolvedValue(undefined),
+    removeAccountFromAllDApps: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -42,8 +43,8 @@ vi.mock("@/utilities/storageUtil", () => ({
 
 import QrlStore from "./qrlStore";
 
-const SOFTWARE = "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1";
-const SECOND = "Q20fB08fF1f1376A14C055E9F56df80563E16722b";
+const SOFTWARE = toChecksumAddress(`Q${"a".repeat(128)}`);
+const SECOND = toChecksumAddress(`Q${"b".repeat(128)}`);
 // Keystores store the address lowercased behind the Q prefix; the UI passes
 // the checksummed form, so every comparison has to be case-insensitive.
 const keystoreFor = (address: string) => ({
@@ -116,7 +117,7 @@ describe("QrlStore.removeAccount", () => {
     // KEYSTORES with accounts still listed makes the service worker report
     // a first-run wallet: onboarding, with no password gate, while usable
     // accounts remain.
-    const LEDGER = "Q30fB08fF1f1376A14C055E9F56df80563E16722b";
+    const LEDGER = toChecksumAddress(`Q${"c".repeat(128)}`);
     mockStorage.getKeystores.mockResolvedValue([keystoreFor(SOFTWARE)]);
     mockStorage.getAllAccounts.mockResolvedValue([SOFTWARE, LEDGER]);
     mockStorage.getActiveAccount.mockResolvedValue(LEDGER);
@@ -131,7 +132,7 @@ describe("QrlStore.removeAccount", () => {
   });
 
   it("allows removing a Ledger account, which has no keystore", async () => {
-    const LEDGER = "Q30fB08fF1f1376A14C055E9F56df80563E16722b";
+    const LEDGER = toChecksumAddress(`Q${"c".repeat(128)}`);
     mockStorage.getKeystores.mockResolvedValue([keystoreFor(SOFTWARE)]);
     mockStorage.getAllAccounts.mockResolvedValue([SOFTWARE, LEDGER]);
     mockStorage.getActiveAccount.mockResolvedValue(SOFTWARE);

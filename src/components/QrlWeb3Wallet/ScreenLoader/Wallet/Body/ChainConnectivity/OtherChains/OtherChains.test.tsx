@@ -11,16 +11,19 @@ vi.mock("@/utilities/storageUtil", async () => {
   >("@/utilities/storageUtil");
   return {
     ...originalModule,
-    getAllBlockChains: vi.fn(async () => [
-      {
-        defaultRpcUrl: "http://testDefaultRpcUrl",
-        defaultBlockExplorerUrl: "http://testDefaultExplorerUrl",
-        defaultIconUrl: "http://testDefaultIconUrl",
-        isTestnet: false,
-        defaultWsRpcUrl: "http://testDefaultRpcUrl",
-        isCustomChain: true,
-      },
-    ]),
+    default: {
+      getAllBlockChains: vi.fn(async () => [
+        {
+          chainId: "0x123",
+          defaultRpcUrl: "http://testDefaultRpcUrl",
+          defaultBlockExplorerUrl: "http://testDefaultExplorerUrl",
+          defaultIconUrl: "http://testDefaultIconUrl",
+          isTestnet: false,
+          defaultWsRpcUrl: "http://testDefaultRpcUrl",
+          isCustomChain: true,
+        },
+      ]),
+    },
   };
 });
 vi.mock(

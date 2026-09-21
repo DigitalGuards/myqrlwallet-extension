@@ -7,10 +7,10 @@ const {
   mockClearTransactionHistory,
   mockUpdateTransactionHistoryEntry,
 } = vi.hoisted(() => ({
-  mockGetTransactionHistory: vi.fn<any>().mockResolvedValue([]),
-  mockSetTransactionHistoryEntry: vi.fn<any>().mockResolvedValue(undefined),
-  mockClearTransactionHistory: vi.fn<any>().mockResolvedValue(undefined),
-  mockUpdateTransactionHistoryEntry: vi.fn<any>().mockResolvedValue(undefined),
+  mockGetTransactionHistory: vi.fn().mockResolvedValue([]),
+  mockSetTransactionHistoryEntry: vi.fn().mockResolvedValue(undefined),
+  mockClearTransactionHistory: vi.fn().mockResolvedValue(undefined),
+  mockUpdateTransactionHistoryEntry: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/utilities/storageUtil", () => ({
@@ -29,7 +29,7 @@ vi.mock("@/utilities/storageUtil", () => ({
 
 const { mockFetchOnChainHistory } = vi.hoisted(() => ({
   mockFetchOnChainHistory: vi
-    .fn<any>()
+    .fn()
     .mockResolvedValue({ entries: [], totalCount: 0 }),
 }));
 
@@ -86,8 +86,125 @@ describe("TransactionHistoryStore", () => {
     expect(store.pendingTransactions).toEqual([]);
   });
 
+  it.each(["unknown", "failed"] as const)(
+    "recovers %s state after an observation timeout and later verified receipt",
+    async (pendingStatus) => {
+      const entry = makeSampleEntry({
+        pendingStatus,
+        status: false,
+        blockNumber: "",
+      });
+      const getReceipt = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("RPC unavailable"))
+        .mockResolvedValueOnce({
+          transactionHash: entry.transactionHash,
+          status: 1n,
+          blockNumber: 101n,
+        });
+      const store = new TransactionHistoryStore();
+      store.transactions = [entry];
+      mockGetTransactionHistory.mockResolvedValue([
+        {
+          ...entry,
+          pendingStatus: "confirmed",
+          status: true,
+          blockNumber: "101",
+        },
+      ]);
+      store.startPolling(entry.from, { getTransactionReceipt: getReceipt });
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(mockUpdateTransactionHistoryEntry).not.toHaveBeenCalled();
+      expect(store.pendingTransactions).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(mockUpdateTransactionHistoryEntry).toHaveBeenCalledWith(
+        entry.from,
+        entry.transactionHash,
+        expect.objectContaining({
+          pendingStatus: "confirmed",
+          receiptStatusVerified: true,
+          blockNumber: "101",
+        }),
+      );
+      expect(store.transactions[0].pendingStatus).toBe("confirmed");
+      store.stopPolling();
+    },
+  );
+
+  it.each([
+    { transactionHash: "0xtxhash1", blockNumber: 101n },
+    { transactionHash: "0xother", blockNumber: 101n, status: 1n },
+  ])(
+    "ignores incomplete or mismatched receipt evidence: %p",
+    async (receipt) => {
+      const store = new TransactionHistoryStore();
+      store.transactions = [
+        makeSampleEntry({ pendingStatus: "pending", blockNumber: "" }),
+      ];
+      store.startPolling("account", {
+        getTransactionReceipt: vi.fn().mockResolvedValue(receipt),
+      });
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(mockUpdateTransactionHistoryEntry).not.toHaveBeenCalled();
+      store.stopPolling();
+    },
+  );
+
+  it("merges authoritative same-chain explorer outcomes while preserving local amount metadata", () => {
+    const store = new TransactionHistoryStore();
+    store.transactions = [
+      makeSampleEntry({
+        pendingStatus: "failed",
+        status: false,
+        amount: "0.123456789012345678",
+        blockNumber: "",
+      }),
+    ];
+    const explorer = makeSampleEntry({
+      pendingStatus: "confirmed",
+      status: true,
+      amount: "0",
+      paidFeesQrl: "0.00001",
+      receiptStatusVerified: true,
+    });
+    store.onChainTransactions = [{ ...explorer, chainId: "0x2" }];
+    expect(store.mergedTransactions[0].pendingStatus).toBe("failed");
+    store.onChainTransactions = [{ ...explorer, receiptStatusVerified: false }];
+    expect(store.mergedTransactions[0].pendingStatus).toBe("failed");
+    store.onChainTransactions = [explorer];
+    expect(store.mergedTransactions[0]).toMatchObject({
+      pendingStatus: "confirmed",
+      amount: "0.123456789012345678",
+      paidFeesQrl: "0.00001",
+    });
+  });
+
+  it("retains a known local exact fee when verified explorer status has no fee", () => {
+    const store = new TransactionHistoryStore();
+    store.transactions = [
+      makeSampleEntry({
+        pendingStatus: "unknown",
+        paidFeesQrl: "0.000000000000000123",
+      }),
+    ];
+    store.onChainTransactions = [
+      makeSampleEntry({
+        pendingStatus: "confirmed",
+        receiptStatusVerified: true,
+        paidFeesQrl: undefined,
+      }),
+    ];
+    expect(store.mergedTransactions[0]).toMatchObject({
+      pendingStatus: "confirmed",
+      paidFeesQrl: "0.000000000000000123",
+    });
+  });
+
   it("should load history from storage", async () => {
-    const entries = [makeSampleEntry(), makeSampleEntry({ id: "0xtxhash2", transactionHash: "0xtxhash2" })];
+    const entries = [
+      makeSampleEntry(),
+      makeSampleEntry({ id: "0xtxhash2", transactionHash: "0xtxhash2" }),
+    ];
     mockGetTransactionHistory.mockResolvedValue(entries);
 
     const store = new TransactionHistoryStore();
@@ -183,9 +300,18 @@ describe("TransactionHistoryStore", () => {
 
   it("should return only pending transactions from pendingTransactions", () => {
     const store = new TransactionHistoryStore();
-    const pending = makeSampleEntry({ pendingStatus: "pending", transactionHash: "0xpending" });
-    const confirmed = makeSampleEntry({ pendingStatus: "confirmed", transactionHash: "0xconfirmed" });
-    const failed = makeSampleEntry({ pendingStatus: "failed", transactionHash: "0xfailed" });
+    const pending = makeSampleEntry({
+      pendingStatus: "pending",
+      transactionHash: "0xpending",
+    });
+    const confirmed = makeSampleEntry({
+      pendingStatus: "confirmed",
+      transactionHash: "0xconfirmed",
+    });
+    const failed = makeSampleEntry({
+      pendingStatus: "failed",
+      transactionHash: "0xfailed",
+    });
 
     store.transactions = [pending, confirmed, failed];
 
@@ -224,7 +350,8 @@ describe("TransactionHistoryStore", () => {
     });
 
     const mockQrlInstance = {
-      getTransactionReceipt: vi.fn<any>().mockResolvedValue({
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        transactionHash: "0xpending1",
         status: BigInt(1),
         blockNumber: BigInt(200),
         gasUsed: BigInt(21000),
@@ -240,7 +367,10 @@ describe("TransactionHistoryStore", () => {
       { ...pendingEntry, pendingStatus: "confirmed", status: true },
     ]);
 
-    store.startPolling("Q20B714091cF2a62DADda2847803e3f1B9D2D3779", mockQrlInstance);
+    store.startPolling(
+      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      mockQrlInstance,
+    );
 
     // Advance timer to trigger polling
     vi.advanceTimersByTime(10000);
@@ -248,7 +378,9 @@ describe("TransactionHistoryStore", () => {
     // Wait for async operations
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(mockQrlInstance.getTransactionReceipt).toHaveBeenCalledWith("0xpending1");
+    expect(mockQrlInstance.getTransactionReceipt).toHaveBeenCalledWith(
+      "0xpending1",
+    );
     expect(mockUpdateTransactionHistoryEntry).toHaveBeenCalledWith(
       "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
       "0xpending1",
@@ -261,14 +393,15 @@ describe("TransactionHistoryStore", () => {
     store.stopPolling();
   });
 
-  it("should mark failed tx when receipt status is not 1", async () => {
+  it("should mark failed tx when receipt status is explicitly zero", async () => {
     const pendingEntry = makeSampleEntry({
       pendingStatus: "pending",
       transactionHash: "0xpending2",
     });
 
     const mockQrlInstance = {
-      getTransactionReceipt: vi.fn<any>().mockResolvedValue({
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        transactionHash: "0xpending2",
         status: BigInt(0),
         blockNumber: BigInt(200),
         gasUsed: BigInt(21000),
@@ -283,7 +416,10 @@ describe("TransactionHistoryStore", () => {
       { ...pendingEntry, pendingStatus: "failed", status: false },
     ]);
 
-    store.startPolling("Q20B714091cF2a62DADda2847803e3f1B9D2D3779", mockQrlInstance);
+    store.startPolling(
+      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      mockQrlInstance,
+    );
 
     vi.advanceTimersByTime(10000);
     await vi.advanceTimersByTimeAsync(0);
@@ -307,18 +443,23 @@ describe("TransactionHistoryStore", () => {
     });
 
     const mockQrlInstance = {
-      getTransactionReceipt: vi.fn<any>().mockResolvedValue(undefined),
+      getTransactionReceipt: vi.fn().mockResolvedValue(undefined),
     };
 
     const store = new TransactionHistoryStore();
     store.transactions = [pendingEntry];
 
-    store.startPolling("Q20B714091cF2a62DADda2847803e3f1B9D2D3779", mockQrlInstance);
+    store.startPolling(
+      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      mockQrlInstance,
+    );
 
     vi.advanceTimersByTime(10000);
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(mockQrlInstance.getTransactionReceipt).toHaveBeenCalledWith("0xstillpending");
+    expect(mockQrlInstance.getTransactionReceipt).toHaveBeenCalledWith(
+      "0xstillpending",
+    );
     expect(mockUpdateTransactionHistoryEntry).not.toHaveBeenCalled();
 
     store.stopPolling();
@@ -328,13 +469,16 @@ describe("TransactionHistoryStore", () => {
     const confirmedEntry = makeSampleEntry({ pendingStatus: "confirmed" });
 
     const mockQrlInstance = {
-      getTransactionReceipt: vi.fn<any>(),
+      getTransactionReceipt: vi.fn(),
     };
 
     const store = new TransactionHistoryStore();
     store.transactions = [confirmedEntry];
 
-    store.startPolling("Q20B714091cF2a62DADda2847803e3f1B9D2D3779", mockQrlInstance);
+    store.startPolling(
+      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      mockQrlInstance,
+    );
 
     vi.advanceTimersByTime(10000);
     await vi.advanceTimersByTimeAsync(0);
@@ -350,7 +494,9 @@ describe("TransactionHistoryStore", () => {
     });
 
     const mockQrlInstance = {
-      getTransactionReceipt: vi.fn<any>().mockRejectedValue(new Error("Network error")),
+      getTransactionReceipt: vi
+        .fn()
+        .mockRejectedValue(new Error("Network error")),
     };
 
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -358,7 +504,10 @@ describe("TransactionHistoryStore", () => {
     const store = new TransactionHistoryStore();
     store.transactions = [pendingEntry];
 
-    store.startPolling("Q20B714091cF2a62DADda2847803e3f1B9D2D3779", mockQrlInstance);
+    store.startPolling(
+      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      mockQrlInstance,
+    );
 
     vi.advanceTimersByTime(10000);
     await vi.advanceTimersByTimeAsync(0);
@@ -374,7 +523,7 @@ describe("TransactionHistoryStore", () => {
 
   it("should stop previous polling when startPolling is called again", () => {
     const mockQrlInstance = {
-      getTransactionReceipt: vi.fn<any>(),
+      getTransactionReceipt: vi.fn(),
     };
 
     const store = new TransactionHistoryStore();
@@ -398,11 +547,14 @@ describe("TransactionHistoryStore", () => {
     mockGetTransactionHistory.mockResolvedValue([pendingEntry]);
 
     const mockQrlInstance = {
-      getTransactionReceipt: vi.fn<any>().mockResolvedValue(undefined),
+      getTransactionReceipt: vi.fn().mockResolvedValue(undefined),
     };
 
     const store = new TransactionHistoryStore();
-    await store.loadHistory("Q20B714091cF2a62DADda2847803e3f1B9D2D3779", mockQrlInstance);
+    await store.loadHistory(
+      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      mockQrlInstance,
+    );
 
     // Advance timer to verify polling was started
     vi.advanceTimersByTime(10000);
@@ -418,11 +570,14 @@ describe("TransactionHistoryStore", () => {
     mockGetTransactionHistory.mockResolvedValue([confirmedEntry]);
 
     const mockQrlInstance = {
-      getTransactionReceipt: vi.fn<any>(),
+      getTransactionReceipt: vi.fn(),
     };
 
     const store = new TransactionHistoryStore();
-    await store.loadHistory("Q20B714091cF2a62DADda2847803e3f1B9D2D3779", mockQrlInstance);
+    await store.loadHistory(
+      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      mockQrlInstance,
+    );
 
     vi.advanceTimersByTime(10000);
     await vi.advanceTimersByTimeAsync(0);
@@ -603,24 +758,20 @@ describe("TransactionHistoryStore", () => {
       const first = store.loadOnChainHistory("Qold", CHAIN);
 
       mockFetchOnChainHistory.mockResolvedValueOnce({
-        entries: [
-          makeSampleEntry({ id: "0xnew", transactionHash: "0xnew" }),
-        ],
+        entries: [makeSampleEntry({ id: "0xnew", transactionHash: "0xnew" })],
         totalCount: 1,
       });
       await store.loadOnChainHistory("Qnew", CHAIN);
 
       resolveFirst({
-        entries: [
-          makeSampleEntry({ id: "0xold", transactionHash: "0xold" }),
-        ],
+        entries: [makeSampleEntry({ id: "0xold", transactionHash: "0xold" })],
         totalCount: 1,
       });
       await first;
 
-      expect(
-        store.onChainTransactions.map((tx) => tx.transactionHash),
-      ).toEqual(["0xnew"]);
+      expect(store.onChainTransactions.map((tx) => tx.transactionHash)).toEqual(
+        ["0xnew"],
+      );
     });
   });
 });

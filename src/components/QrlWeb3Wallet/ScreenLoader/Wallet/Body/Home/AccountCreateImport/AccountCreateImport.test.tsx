@@ -8,10 +8,12 @@ import AccountCreateImport from "./AccountCreateImport";
 
 const { mockGetTokenContractsList, mockGetNFTCollectionsList } = vi.hoisted(
   () => ({
-    mockGetTokenContractsList: vi.fn<any>().mockResolvedValue([
-      { address: "Qd180388b9a863728fdc2e865d5fea87ce100eb2f", image: "" },
-    ]),
-    mockGetNFTCollectionsList: vi.fn<any>().mockResolvedValue([]),
+    mockGetTokenContractsList: vi
+      .fn()
+      .mockResolvedValue([
+        { address: "Qd180388b9a863728fdc2e865d5fea87ce100eb2f", image: "" },
+      ]),
+    mockGetNFTCollectionsList: vi.fn().mockResolvedValue([]),
   }),
 );
 

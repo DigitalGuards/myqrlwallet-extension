@@ -1,10 +1,5 @@
 import { Button } from "@/components/UI/Button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/UI/Card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { Separator } from "@/components/UI/Separator";
 import { getExplorerApiBase } from "@/configuration/assetDiscoveryConfig";
 import { NATIVE_TOKEN_UNITS_OF_GAS } from "@/constants/nativeToken";
@@ -17,6 +12,7 @@ import type {
 } from "@/types/transactionHistory";
 import StorageUtil from "@/utilities/storageUtil";
 import { utils } from "@theqrl/web3";
+import { BigNumber } from "bignumber.js";
 import {
   Ban,
   Check,
@@ -35,13 +31,7 @@ import BackButton from "../../../../Shared/BackButton/BackButton";
 import CircuitBackground from "../../../../Shared/CircuitBackground/CircuitBackground";
 import ReplacementConfirmationDialog from "./ReplacementConfirmationDialog";
 
-const CopyableField = ({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) => {
+const CopyableField = ({ label, value }: { label: string; value: string }) => {
   const [copied, setCopied] = useState(false);
 
   const onCopy = () => {
@@ -81,24 +71,55 @@ function getDisplayStatus(
   return status ? "confirmed" : "failed";
 }
 
-const STATUS_BADGE_CONFIG: Record<string, { className: string; labelKey: string }> = {
-  pending: { className: "bg-amber-500/10 text-amber-500", labelKey: "txDetail.statusPending" },
-  confirmed: { className: "bg-success/10 text-success", labelKey: "txDetail.statusConfirmed" },
-  failed: { className: "bg-destructive/10 text-destructive", labelKey: "txDetail.statusFailed" },
-  replaced: { className: "bg-muted text-muted-foreground", labelKey: "txDetail.statusReplaced" },
-  cancelled: { className: "bg-muted text-muted-foreground", labelKey: "txDetail.statusCancelled" },
-  dropped: { className: "bg-muted text-muted-foreground", labelKey: "txDetail.statusDropped" },
+const STATUS_BADGE_CONFIG: Record<
+  string,
+  { className: string; labelKey: string }
+> = {
+  pending: {
+    className: "bg-amber-500/10 text-amber-500",
+    labelKey: "txDetail.statusPending",
+  },
+  confirmed: {
+    className: "bg-success/10 text-success",
+    labelKey: "txDetail.statusConfirmed",
+  },
+  failed: {
+    className: "bg-destructive/10 text-destructive",
+    labelKey: "txDetail.statusFailed",
+  },
+  replaced: {
+    className: "bg-muted text-muted-foreground",
+    labelKey: "txDetail.statusReplaced",
+  },
+  cancelled: {
+    className: "bg-muted text-muted-foreground",
+    labelKey: "txDetail.statusCancelled",
+  },
+  dropped: {
+    className: "bg-muted text-muted-foreground",
+    labelKey: "txDetail.statusDropped",
+  },
 };
 
-const DEFAULT_BADGE_CONFIG = { className: "bg-muted text-muted-foreground", labelKey: "txDetail.statusUnknown" };
+const DEFAULT_BADGE_CONFIG = {
+  className: "bg-muted text-muted-foreground",
+  labelKey: "txDetail.statusUnknown",
+};
 
 const TransactionDetail = observer(() => {
   const { t } = useTranslation();
-  const { qrlStore, lockStore, transactionHistoryStore, priceStore, settingsStore } = useStore();
+  const {
+    qrlStore,
+    lockStore,
+    transactionHistoryStore,
+    priceStore,
+    settingsStore,
+  } = useStore();
   const location = useLocation();
   const navigate = useNavigate();
-  const transaction = location.state
-    ?.transaction as TransactionHistoryEntry | undefined;
+  const transaction = location.state?.transaction as
+    | TransactionHistoryEntry
+    | undefined;
   const initialAction = location.state?.action as
     | "speed-up"
     | "cancel"
@@ -130,11 +151,13 @@ const TransactionDetail = observer(() => {
         const networkEstimate = gasLimit * (baseFeePerGas + networkPriorityFee);
 
         // Original cost + 10% minimum bump
-        const origCost = BigInt(tx.gasUsed ?? "0") * BigInt(tx.effectiveGasPrice ?? "0");
+        const origCost =
+          BigInt(tx.gasUsed ?? "0") * BigInt(tx.effectiveGasPrice ?? "0");
         const minBumpedCost = origCost + (origCost * BigInt(10)) / BigInt(100);
 
         // Use whichever is higher
-        const finalEstimate = networkEstimate > minBumpedCost ? networkEstimate : minBumpedCost;
+        const finalEstimate =
+          networkEstimate > minBumpedCost ? networkEstimate : minBumpedCost;
 
         const estimatedCost = utils.fromPlanck(finalEstimate, "quanta");
         setEstimatedNewGasFee(estimatedCost);
@@ -167,7 +190,9 @@ const TransactionDetail = observer(() => {
       // Determine signing method
       const isLedger = await StorageUtil.isLedgerAccount(transaction.from);
       if (isLedger) {
-        setActionError("Ledger replacement transactions are not yet supported.");
+        setActionError(
+          "Ledger replacement transactions are not yet supported.",
+        );
         setIsProcessing(false);
         return;
       }
@@ -176,7 +201,9 @@ const TransactionDetail = observer(() => {
         transaction.from,
       );
       if (!mnemonicPhrases) {
-        setActionError("Could not retrieve account keys. Is the wallet unlocked?");
+        setActionError(
+          "Could not retrieve account keys. Is the wallet unlocked?",
+        );
         setIsProcessing(false);
         return;
       }
@@ -282,7 +309,9 @@ const TransactionDetail = observer(() => {
       // Navigate back to history immediately
       navigate(-1);
     } catch (error) {
-      setActionError(`${action === "speed-up" ? "Speed up" : "Cancel"} failed: ${error}`);
+      setActionError(
+        `${action === "speed-up" ? "Speed up" : "Cancel"} failed: ${error}`,
+      );
       setIsProcessing(false);
     }
   };
@@ -296,7 +325,7 @@ const TransactionDetail = observer(() => {
           <Card className="w-full">
             <CardContent className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
               <FileText className="h-12 w-12" />
-              <p className="text-sm">{t('txDetail.notFound')}</p>
+              <p className="text-sm">{t("txDetail.notFound")}</p>
             </CardContent>
           </Card>
         </div>
@@ -330,26 +359,41 @@ const TransactionDetail = observer(() => {
     from?.toLowerCase() !== activeAddress;
 
   const displayStatus = getDisplayStatus(pendingStatus, status);
-  const badgeConfig = STATUS_BADGE_CONFIG[displayStatus] ?? DEFAULT_BADGE_CONFIG;
+  const badgeConfig =
+    STATUS_BADGE_CONFIG[displayStatus] ?? DEFAULT_BADGE_CONFIG;
   const isPending = displayStatus === "pending";
-  const canReplace =
-    isPending && transaction.nonce !== undefined;
+  const canReplace = isPending && transaction.nonce !== undefined;
 
   // Explorer-sourced entries have no gas breakdown, only the fee the
   // explorer pre-computed in QRL units.
   const hasGasBreakdown = gasUsed !== "" && effectiveGasPrice !== "";
   const totalGasFeeInPlanck = Number(gasUsed) * Number(effectiveGasPrice);
   const totalGasFeeQrl =
-    transaction.paidFeesQrl ?? utils.fromPlanck(totalGasFeeInPlanck, "quanta");
+    transaction.paidFeesQrl ??
+    (hasGasBreakdown
+      ? utils.fromPlanck(totalGasFeeInPlanck, "quanta")
+      : undefined);
   const gasPriceQrl = utils.fromPlanck(Number(effectiveGasPrice), "quanta");
-  const totalCost = amount + Number(totalGasFeeQrl);
+  const totalCost =
+    totalGasFeeQrl === undefined
+      ? undefined
+      : new BigNumber(String(amount)).plus(totalGasFeeQrl).toFixed();
 
   const { showBalanceAndPrice, currency } = settingsStore;
   const qrlPrice = priceStore.getPrice(currency);
-  const showFiat = showBalanceAndPrice && qrlPrice > 0 && !transaction.isZrc20Token;
-  const fiatAmount = showFiat ? formatFiatCompact(amount, qrlPrice, currency) : "";
-  const fiatGasFee = showFiat ? formatFiatCompact(totalGasFeeQrl, qrlPrice, currency) : "";
-  const fiatTotalCost = showFiat ? formatFiatCompact(totalCost, qrlPrice, currency) : "";
+  const showFiat =
+    showBalanceAndPrice && qrlPrice > 0 && !transaction.isZrc20Token;
+  const fiatAmount = showFiat
+    ? formatFiatCompact(amount, qrlPrice, currency)
+    : "";
+  const fiatGasFee =
+    showFiat && totalGasFeeQrl !== undefined
+      ? formatFiatCompact(totalGasFeeQrl, qrlPrice, currency)
+      : "";
+  const fiatTotalCost =
+    showFiat && totalCost !== undefined
+      ? formatFiatCompact(totalCost, qrlPrice, currency)
+      : "";
 
   const formattedDate = new Date(timestamp).toLocaleString(undefined, {
     year: "numeric",
@@ -383,7 +427,7 @@ const TransactionDetail = observer(() => {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              {t('txDetail.title')}
+              {t("txDetail.title")}
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -391,9 +435,7 @@ const TransactionDetail = observer(() => {
               <div
                 className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-medium ${badgeConfig.className}`}
               >
-                {isPending && (
-                  <Loader className="mr-1 h-3 w-3 animate-spin" />
-                )}
+                {isPending && <Loader className="mr-1 h-3 w-3 animate-spin" />}
                 {t(badgeConfig.labelKey)}
               </div>
             </div>
@@ -408,7 +450,7 @@ const TransactionDetail = observer(() => {
                     onClick={() => setSpeedUpDialogOpen(true)}
                   >
                     <Zap className="mr-2 h-4 w-4" />
-                    {t('txDetail.speedUp')}
+                    {t("txDetail.speedUp")}
                   </Button>
                   <Button
                     variant="outline"
@@ -416,7 +458,7 @@ const TransactionDetail = observer(() => {
                     onClick={() => setCancelDialogOpen(true)}
                   >
                     <Ban className="mr-2 h-4 w-4" />
-                    {t('txDetail.cancel')}
+                    {t("txDetail.cancel")}
                   </Button>
                 </div>
                 <Separator />
@@ -424,15 +466,14 @@ const TransactionDetail = observer(() => {
             )}
 
             {/* Replacement info for replaced/cancelled TXs */}
-            {(displayStatus === "replaced" ||
-              displayStatus === "cancelled") &&
+            {(displayStatus === "replaced" || displayStatus === "cancelled") &&
               replacementTransactionHash && (
                 <>
                   <div className="flex flex-col gap-1">
                     <span className="text-xs text-muted-foreground">
                       {replacedByAction === "speed-up"
-                        ? t('txDetail.replacedBy')
-                        : t('txDetail.cancelledBy')}
+                        ? t("txDetail.replacedBy")
+                        : t("txDetail.cancelledBy")}
                     </span>
                     <span className="break-all text-sm font-medium text-secondary">
                       {replacementTransactionHash}
@@ -443,7 +484,9 @@ const TransactionDetail = observer(() => {
               )}
 
             <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">{t('txDetail.amount')}</span>
+              <span className="text-xs text-muted-foreground">
+                {t("txDetail.amount")}
+              </span>
               <span className="text-lg font-bold">
                 {amount} {tokenSymbol}
               </span>
@@ -456,13 +499,13 @@ const TransactionDetail = observer(() => {
 
             <Separator />
 
-            <CopyableField label={t('txDetail.from')} value={from} />
-            <CopyableField label={t('txDetail.to')} value={to} />
+            <CopyableField label={t("txDetail.from")} value={from} />
+            <CopyableField label={t("txDetail.to")} value={to} />
 
             <Separator />
 
             <CopyableField
-              label={t('txDetail.transactionHash')}
+              label={t("txDetail.transactionHash")}
               value={transactionHash}
             />
 
@@ -473,7 +516,7 @@ const TransactionDetail = observer(() => {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
                     <span className="text-xs text-muted-foreground">
-                      {t('txDetail.blockNumber')}
+                      {t("txDetail.blockNumber")}
                     </span>
                     <span className="text-sm font-medium">{blockNumber}</span>
                   </div>
@@ -481,7 +524,7 @@ const TransactionDetail = observer(() => {
                     <>
                       <div className="flex flex-col gap-1">
                         <span className="text-xs text-muted-foreground">
-                          {t('txDetail.gasUsed')}
+                          {t("txDetail.gasUsed")}
                         </span>
                         <span className="text-sm font-medium">
                           {Number(gasUsed).toLocaleString()}
@@ -489,7 +532,7 @@ const TransactionDetail = observer(() => {
                       </div>
                       <div className="flex flex-col gap-1">
                         <span className="text-xs text-muted-foreground">
-                          {t('txDetail.gasPrice')}
+                          {t("txDetail.gasPrice")}
                         </span>
                         <span className="text-sm font-medium">
                           {getOptimalGasFee(gasPriceQrl)}
@@ -499,10 +542,12 @@ const TransactionDetail = observer(() => {
                   )}
                   <div className="flex flex-col gap-1">
                     <span className="text-xs text-muted-foreground">
-                      {t('txDetail.totalGasFee')}
+                      {t("txDetail.totalGasFee")}
                     </span>
                     <span className="text-sm font-medium">
-                      {getOptimalGasFee(totalGasFeeQrl)}
+                      {totalGasFeeQrl === undefined
+                        ? "Unavailable"
+                        : getOptimalGasFee(totalGasFeeQrl)}
                     </span>
                     {fiatGasFee && (
                       <span className="text-[10px] text-muted-foreground">
@@ -515,10 +560,12 @@ const TransactionDetail = observer(() => {
                 {!isIncoming && (
                   <div className="flex flex-col gap-1">
                     <span className="text-xs text-muted-foreground">
-                      {t('txDetail.totalCost')}
+                      {t("txDetail.totalCost")}
                     </span>
                     <span className="text-sm font-bold">
-                      {getOptimalGasFee(totalCost.toString())}
+                      {totalCost === undefined
+                        ? "Unavailable"
+                        : getOptimalGasFee(totalCost)}
                     </span>
                     {fiatTotalCost && (
                       <span className="text-xs text-muted-foreground">
@@ -535,13 +582,13 @@ const TransactionDetail = observer(() => {
             {isPending && (
               <div className="flex items-center gap-2 text-sm text-amber-500">
                 <Loader className="h-4 w-4 animate-spin" />
-                {t('txDetail.waiting')}
+                {t("txDetail.waiting")}
               </div>
             )}
 
             <div className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">
-                {t('txDetail.dateTime')}
+                {t("txDetail.dateTime")}
               </span>
               <span className="text-sm font-medium">{formattedDate}</span>
             </div>
@@ -555,7 +602,7 @@ const TransactionDetail = observer(() => {
                   onClick={openInExplorer}
                 >
                   <ExternalLink className="mr-2 h-4 w-4" />
-                  {t('txDetail.viewExplorer')}
+                  {t("txDetail.viewExplorer")}
                 </Button>
               </>
             )}

@@ -1,5 +1,5 @@
+import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import type { Contact } from "@/types/contact";
-import StringUtil from "@/utilities/stringUtil";
 import { Pencil, Trash2 } from "lucide-react";
 
 type ContactItemProps = {
@@ -9,16 +9,14 @@ type ContactItemProps = {
 };
 
 const ContactItem = ({ contact, onEdit, onDelete }: ContactItemProps) => {
-  const { prefix, addressSplit } = StringUtil.getSplitAddress(contact.address);
-
   return (
     <div className="flex items-center justify-between rounded-md border p-3">
-      <div className="flex flex-col gap-1 overflow-hidden">
+      <div className="flex min-w-0 flex-col gap-1">
         <span className="text-sm font-medium">{contact.name}</span>
-        <span className="truncate text-xs text-muted-foreground">
-          {prefix}
-          {addressSplit.join("")}
-        </span>
+        <AddressFingerprint
+          address={contact.address}
+          className="text-xs text-muted-foreground"
+        />
       </div>
       <div className="flex shrink-0 gap-2">
         <button

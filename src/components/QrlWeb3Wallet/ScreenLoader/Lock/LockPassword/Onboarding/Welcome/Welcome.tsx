@@ -28,6 +28,11 @@ const Welcome = observer(({ selectStep }: WelcomeProps) => {
         </CardDescription>
       </CardHeader>
       <CardContent>
+        <p className="mb-4 text-sm text-muted-foreground">
+          This release uses a separate v3 Private wallet. Existing v2 wallet
+          records remain stored. Create a new v3 account or explicitly import
+          your backup for v3.
+        </p>
         <div className="flex h-32 w-full items-center gap-5 overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/40 to-secondary/10 px-6">
           <img
             src="icons/qrl/default.png"

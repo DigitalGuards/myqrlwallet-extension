@@ -46,9 +46,11 @@ const WatchAssetVerification = observer(() => {
   }
 
   return verificationResult ? (
-    <Card className="flex gap-2 p-4 text-destructive">
+    <Card className="flex min-w-0 gap-2 p-4 text-destructive">
       <ShieldAlert className="h-5 w-5 shrink-0 pt-1" />
-      <div>{verificationResult}</div>
+      <div className="min-w-0 break-words [overflow-wrap:anywhere]">
+        {verificationResult}
+      </div>
     </Card>
   ) : (
     <Card className="flex gap-2 p-4">

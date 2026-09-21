@@ -1,34 +1,37 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
-import type { LedgerAccount, LedgerDeviceInfo } from "@/services/ledger/ledgerTypes";
+import type {
+  LedgerAccount,
+  LedgerDeviceInfo,
+} from "@/services/ledger/ledgerTypes";
 
 describe("LedgerStore", () => {
   // Mock functions - using 'any' to avoid complex generic typing issues with Jest mocks
   // Transport mocks
-  const mockConnect = vi.fn<any>();  // Used for both transport and service connect
-  const mockDisconnect = vi.fn<any>();
-  const mockIsConnected = vi.fn<any>();
-  const mockOnDisconnect = vi.fn<any>();
+  const mockConnect = vi.fn(); // Used for both transport and service connect
+  const mockDisconnect = vi.fn();
+  const mockIsConnected = vi.fn();
+  const mockOnDisconnect = vi.fn();
 
   // Service mocks
-  const mockGetAccounts = vi.fn<any>();
-  const mockGetAddress = vi.fn<any>();
-  const mockGetPublicKey = vi.fn<any>();
-  const mockVerifyAddress = vi.fn<any>();
-  const mockSignTransaction = vi.fn<any>();
+  const mockGetAccounts = vi.fn();
+  const mockGetAddress = vi.fn();
+  const mockGetPublicKey = vi.fn();
+  const mockVerifyAddress = vi.fn();
+  const mockSignTransaction = vi.fn();
 
   // Storage mocks
-  const mockGetLedgerAccounts = vi.fn<any>();
-  const mockSetLedgerAccounts = vi.fn<any>();
-  const mockAddLedgerAccountToAllAccounts = vi.fn<any>();
-  const mockRemoveLedgerAccountFromAllAccounts = vi.fn<any>();
+  const mockGetLedgerAccounts = vi.fn();
+  const mockSetLedgerAccounts = vi.fn();
+  const mockAddLedgerAccountToAllAccounts = vi.fn();
+  const mockRemoveLedgerAccountFromAllAccounts = vi.fn();
 
   // FeeMarketEIP1559Transaction mocks
-  const mockSerialize = vi.fn<any>();
-  const mockRaw = vi.fn<any>();
-  const mockGetMessageToSign = vi.fn<any>();
-  const mockFromTxData = vi.fn<any>();
-  const mockFromValuesArray = vi.fn<any>();
+  const mockSerialize = vi.fn();
+  const mockRaw = vi.fn();
+  const mockGetMessageToSign = vi.fn();
+  const mockFromTxData = vi.fn();
+  const mockFromValuesArray = vi.fn();
 
   // Store instance will be dynamically imported
   let LedgerStore: typeof import("./ledgerStore").default;
@@ -67,6 +70,20 @@ describe("LedgerStore", () => {
     mockRemoveLedgerAccountFromAllAccounts.mockResolvedValue(undefined);
     mockIsConnected.mockReturnValue(false);
 
+    vi.doMock("@/constants/ledger", async () => {
+      const actual =
+        await vi.importActual<typeof import("@/constants/ledger")>(
+          "@/constants/ledger",
+        );
+      return {
+        ...actual,
+        LEDGER_CONFIG: {
+          ...actual.LEDGER_CONFIG,
+          QIP55_SUPPORTED: true,
+        },
+      };
+    });
+
     // Set up mocks using doMock (not hoisted)
     vi.doMock("@/services/ledger/ledgerTransport", () => ({
       ledgerTransport: {
@@ -79,7 +96,7 @@ describe("LedgerStore", () => {
 
     vi.doMock("@/services/ledger/ledgerService", () => ({
       ledgerService: {
-        connect: mockConnect,  // ledgerService.connect() returns LedgerDeviceInfo
+        connect: mockConnect, // ledgerService.connect() returns LedgerDeviceInfo
         getAccounts: mockGetAccounts,
         getAddress: mockGetAddress,
         getPublicKey: mockGetPublicKey,
@@ -98,10 +115,10 @@ describe("LedgerStore", () => {
       new Uint8Array([0x52, 0x08]), // gasLimit
       new Uint8Array([0xaa]), // to
       new Uint8Array([0x01]), // value
-      new Uint8Array([]),   // data
-      [],                   // accessList
-      new Uint8Array([]),   // publicKey (empty for unsigned)
-      new Uint8Array([]),   // signature (empty for unsigned)
+      new Uint8Array([]), // data
+      [], // accessList
+      new Uint8Array([]), // publicKey (empty for unsigned)
+      new Uint8Array([]), // signature (empty for unsigned)
     ]);
     mockGetMessageToSign.mockReturnValue(new Uint8Array([0x02, 0xf8, 0x50]));
     mockFromTxData.mockReturnValue({
@@ -126,7 +143,8 @@ describe("LedgerStore", () => {
         getLedgerAccounts: mockGetLedgerAccounts,
         setLedgerAccounts: mockSetLedgerAccounts,
         addLedgerAccountToAllAccounts: mockAddLedgerAccountToAllAccounts,
-        removeLedgerAccountFromAllAccounts: mockRemoveLedgerAccountFromAllAccounts,
+        removeLedgerAccountFromAllAccounts:
+          mockRemoveLedgerAccountFromAllAccounts,
       },
     }));
 
@@ -240,7 +258,7 @@ describe("LedgerStore", () => {
       mockConnect.mockReturnValue(
         new Promise<void>((resolve) => {
           resolveConnect = resolve;
-        })
+        }),
       );
       mockConnect.mockResolvedValue(mockDeviceInfo);
 
@@ -267,7 +285,7 @@ describe("LedgerStore", () => {
       mockConnect.mockReturnValue(
         new Promise<void>((resolve) => {
           resolveConnect = resolve;
-        })
+        }),
       );
       mockConnect.mockResolvedValue(mockDeviceInfo);
 
@@ -313,7 +331,9 @@ describe("LedgerStore", () => {
       // onDisconnect is called once per store construction in beforeEach,
       // but clearAllMocks resets call history. The last call is from current store.
       const lastCallIdx = mockOnDisconnect.mock.calls.length - 1;
-      const disconnectCallback = mockOnDisconnect.mock.calls[lastCallIdx][0] as () => void;
+      const disconnectCallback = mockOnDisconnect.mock.calls[
+        lastCallIdx
+      ][0] as () => void;
 
       store.connectionState = "connected";
       store.deviceInfo = mockDeviceInfo;
@@ -326,7 +346,9 @@ describe("LedgerStore", () => {
 
     it("should set signing error if disconnected during signing", () => {
       const lastCallIdx = mockOnDisconnect.mock.calls.length - 1;
-      const disconnectCallback = mockOnDisconnect.mock.calls[lastCallIdx][0] as () => void;
+      const disconnectCallback = mockOnDisconnect.mock.calls[
+        lastCallIdx
+      ][0] as () => void;
 
       store.connectionState = "connected";
       store.signingState = "signing";
@@ -380,7 +402,7 @@ describe("LedgerStore", () => {
       mockGetAccounts.mockReturnValue(
         new Promise((resolve) => {
           resolveGetAccounts = resolve;
-        })
+        }),
       );
 
       const loadPromise = store.loadAccounts();
@@ -396,7 +418,7 @@ describe("LedgerStore", () => {
       store.connectionState = "disconnected";
 
       await expect(store.loadAccounts()).rejects.toThrow(
-        LEDGER_ERROR_MESSAGES.NOT_CONNECTED
+        LEDGER_ERROR_MESSAGES.NOT_CONNECTED,
       );
     });
 
@@ -428,7 +450,7 @@ describe("LedgerStore", () => {
       store.connectionState = "disconnected";
 
       await expect(store.fetchPageAccounts()).rejects.toThrow(
-        LEDGER_ERROR_MESSAGES.NOT_CONNECTED
+        LEDGER_ERROR_MESSAGES.NOT_CONNECTED,
       );
     });
 
@@ -437,7 +459,7 @@ describe("LedgerStore", () => {
       mockGetAccounts.mockReturnValue(
         new Promise((resolve) => {
           resolveGetAccounts = resolve;
-        })
+        }),
       );
 
       const fetchPromise = store.fetchPageAccounts();
@@ -478,7 +500,7 @@ describe("LedgerStore", () => {
       expect(store.accounts).toHaveLength(1);
       expect(mockSetLedgerAccounts).toHaveBeenCalled();
       expect(mockAddLedgerAccountToAllAccounts).toHaveBeenCalledWith(
-        newAccount.address
+        newAccount.address,
       );
     });
 
@@ -486,7 +508,7 @@ describe("LedgerStore", () => {
       store.connectionState = "disconnected";
 
       await expect(store.addAccount()).rejects.toThrow(
-        LEDGER_ERROR_MESSAGES.NOT_CONNECTED
+        LEDGER_ERROR_MESSAGES.NOT_CONNECTED,
       );
     });
 
@@ -532,7 +554,9 @@ describe("LedgerStore", () => {
     it("should handle error during addAccount", async () => {
       mockVerifyAddress.mockRejectedValue(new Error("Device disconnected"));
 
-      await expect(store.addAccount(true)).rejects.toThrow("Device disconnected");
+      await expect(store.addAccount(true)).rejects.toThrow(
+        "Device disconnected",
+      );
       expect(store.isLoadingAccounts).toBe(false);
     });
   });
@@ -549,7 +573,7 @@ describe("LedgerStore", () => {
       expect(store.accounts[0].address).toBe(mockAccounts[1].address);
       expect(mockSetLedgerAccounts).toHaveBeenCalled();
       expect(mockRemoveLedgerAccountFromAllAccounts).toHaveBeenCalledWith(
-        mockAccounts[0].address
+        mockAccounts[0].address,
       );
     });
 
@@ -574,12 +598,14 @@ describe("LedgerStore", () => {
 
       expect(result).toBe(true);
       expect(mockVerifyAddress).toHaveBeenCalledWith(
-        mockAccounts[0].derivationPath
+        mockAccounts[0].derivationPath,
       );
     });
 
     it("should return false if account not found", async () => {
-      const result = await store.verifyAddress("Q0000000000000000000000000000000000000000");
+      const result = await store.verifyAddress(
+        "Q0000000000000000000000000000000000000000",
+      );
 
       expect(result).toBe(false);
       expect(mockVerifyAddress).not.toHaveBeenCalled();
@@ -589,7 +615,7 @@ describe("LedgerStore", () => {
       store.connectionState = "disconnected";
 
       await expect(
-        store.verifyAddress(mockAccounts[0].address)
+        store.verifyAddress(mockAccounts[0].address),
       ).rejects.toThrow(LEDGER_ERROR_MESSAGES.NOT_CONNECTED);
     });
 
@@ -597,7 +623,7 @@ describe("LedgerStore", () => {
       mockVerifyAddress.mockRejectedValue(new Error("User rejected on device"));
 
       await expect(
-        store.verifyAddress(mockAccounts[0].address)
+        store.verifyAddress(mockAccounts[0].address),
       ).rejects.toThrow("User rejected on device");
     });
   });
@@ -614,13 +640,15 @@ describe("LedgerStore", () => {
 
     it("should handle case-insensitive matching", () => {
       const account = store.getAccountByAddress(
-        mockAccounts[0].address.toLowerCase()
+        mockAccounts[0].address.toLowerCase(),
       );
       expect(account).toEqual(mockAccounts[0]);
     });
 
     it("should return undefined if not found", () => {
-      const account = store.getAccountByAddress("Q0000000000000000000000000000000000000000");
+      const account = store.getAccountByAddress(
+        "Q0000000000000000000000000000000000000000",
+      );
       expect(account).toBeUndefined();
     });
   });
@@ -635,7 +663,9 @@ describe("LedgerStore", () => {
     });
 
     it("should return false for non-ledger account", () => {
-      expect(store.isLedgerAccount("Q0000000000000000000000000000000000000000")).toBe(false);
+      expect(
+        store.isLedgerAccount("Q0000000000000000000000000000000000000000"),
+      ).toBe(false);
     });
   });
 
@@ -646,19 +676,20 @@ describe("LedgerStore", () => {
     });
 
     // RLP-encoded transaction (hex string) - signTransaction expects this format
-    const mockRlpEncodedTx = "0xf86c0185174876e800825208940000000000000000000000000000000000000001880de0b6b3a7640000801ca0...";
+    const mockRlpEncodedTx =
+      "0xf86c0185174876e800825208940000000000000000000000000000000000000001880de0b6b3a7640000801ca0...";
 
     it("should sign transaction successfully", async () => {
       const mockResponseFromLedger = {
         signature: "0xsignature",
-        rawTransaction: "0xrawTransactionData"
+        rawTransaction: "0xrawTransactionData",
       };
 
       mockSignTransaction.mockResolvedValue(mockResponseFromLedger);
 
       const result = await store.signTransaction(
         mockAccounts[0].address,
-        mockRlpEncodedTx
+        mockRlpEncodedTx,
       );
 
       expect(result.success).toBe(true);
@@ -670,7 +701,7 @@ describe("LedgerStore", () => {
     it("should return error for non-ledger account", async () => {
       const result = await store.signTransaction(
         "Q0000000000000000000000000000000000000000",
-        mockRlpEncodedTx
+        mockRlpEncodedTx,
       );
 
       expect(result.success).toBe(false);
@@ -682,12 +713,12 @@ describe("LedgerStore", () => {
       mockSignTransaction.mockReturnValue(
         new Promise((resolve) => {
           resolveSign = resolve;
-        })
+        }),
       );
 
       const signPromise = store.signTransaction(
         mockAccounts[0].address,
-        mockRlpEncodedTx
+        mockRlpEncodedTx,
       );
 
       // Check intermediate states
@@ -704,7 +735,7 @@ describe("LedgerStore", () => {
 
       const result = await store.signTransaction(
         mockAccounts[0].address,
-        mockRlpEncodedTx
+        mockRlpEncodedTx,
       );
 
       expect(result.success).toBe(false);
@@ -720,7 +751,7 @@ describe("LedgerStore", () => {
 
       const result = await store.signTransaction(
         mockAccounts[0].address,
-        mockRlpEncodedTx
+        mockRlpEncodedTx,
       );
 
       expect(mockConnect).toHaveBeenCalled();
@@ -733,7 +764,7 @@ describe("LedgerStore", () => {
 
       const result = await store.signTransaction(
         mockAccounts[0].address,
-        mockRlpEncodedTx
+        mockRlpEncodedTx,
       );
 
       expect(result.success).toBe(false);
@@ -766,37 +797,59 @@ describe("LedgerStore", () => {
       vi.resetModules();
 
       const storedAccounts = [
-        { address: "Q111", derivationPath: "m/44'/238'/0'/0'/0'", publicKey: "", index: 0 },
-        { address: "Q222", derivationPath: "m/44'/238'/0'/0'/3'", publicKey: "", index: 3 },
+        {
+          address: "Q111",
+          derivationPath: "m/44'/238'/0'/0'/0'",
+          publicKey: "",
+          index: 0,
+        },
+        {
+          address: "Q222",
+          derivationPath: "m/44'/238'/0'/0'/3'",
+          publicKey: "",
+          index: 3,
+        },
       ];
       mockGetLedgerAccounts.mockResolvedValue(storedAccounts);
       mockIsConnected.mockReturnValue(false);
 
       vi.doMock("@/services/ledger/ledgerTransport", () => ({
         ledgerTransport: {
-          connect: mockConnect, disconnect: mockDisconnect,
-          isConnected: mockIsConnected, onDisconnect: mockOnDisconnect,
+          connect: mockConnect,
+          disconnect: mockDisconnect,
+          isConnected: mockIsConnected,
+          onDisconnect: mockOnDisconnect,
         },
       }));
       vi.doMock("@/services/ledger/ledgerService", () => ({
         ledgerService: {
-          connect: mockConnect, getAccounts: mockGetAccounts,
-          getAddress: mockGetAddress, getPublicKey: mockGetPublicKey,
-          verifyAddress: mockVerifyAddress, signTransaction: mockSignTransaction,
+          connect: mockConnect,
+          getAccounts: mockGetAccounts,
+          getAddress: mockGetAddress,
+          getPublicKey: mockGetPublicKey,
+          verifyAddress: mockVerifyAddress,
+          signTransaction: mockSignTransaction,
         },
       }));
       vi.doMock("@theqrl/web3", () => ({
-        qrl: { accounts: {
-          FeeMarketEIP1559Transaction: { fromTxData: mockFromTxData, fromValuesArray: mockFromValuesArray },
-          Common: { custom: vi.fn().mockReturnValue({ chainId: 1 }) },
-        }},
+        qrl: {
+          accounts: {
+            FeeMarketEIP1559Transaction: {
+              fromTxData: mockFromTxData,
+              fromValuesArray: mockFromValuesArray,
+            },
+            Common: { custom: vi.fn().mockReturnValue({ chainId: 1 }) },
+          },
+        },
       }));
       vi.doMock("@/utilities/storageUtil", () => ({
         __esModule: true,
         default: {
-          getLedgerAccounts: mockGetLedgerAccounts, setLedgerAccounts: mockSetLedgerAccounts,
+          getLedgerAccounts: mockGetLedgerAccounts,
+          setLedgerAccounts: mockSetLedgerAccounts,
           addLedgerAccountToAllAccounts: mockAddLedgerAccountToAllAccounts,
-          removeLedgerAccountFromAllAccounts: mockRemoveLedgerAccountFromAllAccounts,
+          removeLedgerAccountFromAllAccounts:
+            mockRemoveLedgerAccountFromAllAccounts,
         },
       }));
 
@@ -820,29 +873,41 @@ describe("LedgerStore", () => {
 
       vi.doMock("@/services/ledger/ledgerTransport", () => ({
         ledgerTransport: {
-          connect: mockConnect, disconnect: mockDisconnect,
-          isConnected: mockIsConnected, onDisconnect: mockOnDisconnect,
+          connect: mockConnect,
+          disconnect: mockDisconnect,
+          isConnected: mockIsConnected,
+          onDisconnect: mockOnDisconnect,
         },
       }));
       vi.doMock("@/services/ledger/ledgerService", () => ({
         ledgerService: {
-          connect: mockConnect, getAccounts: mockGetAccounts,
-          getAddress: mockGetAddress, getPublicKey: mockGetPublicKey,
-          verifyAddress: mockVerifyAddress, signTransaction: mockSignTransaction,
+          connect: mockConnect,
+          getAccounts: mockGetAccounts,
+          getAddress: mockGetAddress,
+          getPublicKey: mockGetPublicKey,
+          verifyAddress: mockVerifyAddress,
+          signTransaction: mockSignTransaction,
         },
       }));
       vi.doMock("@theqrl/web3", () => ({
-        qrl: { accounts: {
-          FeeMarketEIP1559Transaction: { fromTxData: mockFromTxData, fromValuesArray: mockFromValuesArray },
-          Common: { custom: vi.fn().mockReturnValue({ chainId: 1 }) },
-        }},
+        qrl: {
+          accounts: {
+            FeeMarketEIP1559Transaction: {
+              fromTxData: mockFromTxData,
+              fromValuesArray: mockFromValuesArray,
+            },
+            Common: { custom: vi.fn().mockReturnValue({ chainId: 1 }) },
+          },
+        },
       }));
       vi.doMock("@/utilities/storageUtil", () => ({
         __esModule: true,
         default: {
-          getLedgerAccounts: mockGetLedgerAccounts, setLedgerAccounts: mockSetLedgerAccounts,
+          getLedgerAccounts: mockGetLedgerAccounts,
+          setLedgerAccounts: mockSetLedgerAccounts,
           addLedgerAccountToAllAccounts: mockAddLedgerAccountToAllAccounts,
-          removeLedgerAccountFromAllAccounts: mockRemoveLedgerAccountFromAllAccounts,
+          removeLedgerAccountFromAllAccounts:
+            mockRemoveLedgerAccountFromAllAccounts,
         },
       }));
 
@@ -878,7 +943,9 @@ describe("LedgerStore", () => {
         publicKey: expectedPublicKey,
       });
 
-      const result = await store.fetchPublicKey("Q1234567890123456789012345678901234567890");
+      const result = await store.fetchPublicKey(
+        "Q1234567890123456789012345678901234567890",
+      );
 
       expect(result.publicKey).toBe(expectedPublicKey);
       expect(mockGetPublicKey).toHaveBeenCalledWith("m/44'/238'/0'/0'/0'");
@@ -888,8 +955,10 @@ describe("LedgerStore", () => {
 
     it("should throw if account not found", async () => {
       await expect(
-        store.fetchPublicKey("Q0000000000000000000000000000000000000000")
-      ).rejects.toThrow("Account Q0000000000000000000000000000000000000000 not found");
+        store.fetchPublicKey("Q0000000000000000000000000000000000000000"),
+      ).rejects.toThrow(
+        "Account Q0000000000000000000000000000000000000000 not found",
+      );
     });
 
     it("should auto-connect if not connected", async () => {
@@ -913,7 +982,9 @@ describe("LedgerStore", () => {
         publicKey: "0xpk",
       });
 
-      const result = await store.fetchPublicKey("q1234567890123456789012345678901234567890");
+      const result = await store.fetchPublicKey(
+        "q1234567890123456789012345678901234567890",
+      );
 
       expect(result.publicKey).toBe("0xpk");
       expect(store.accounts[0].publicKey).toBe("0xpk");
@@ -950,8 +1021,14 @@ describe("LedgerStore", () => {
         mockCommon,
       );
 
-      expect(mockFromTxData).toHaveBeenCalledWith(mockTxData, { common: mockCommon });
-      expect(mockGetMessageToSign).toHaveBeenCalledWith(expect.any(Uint8Array), expect.any(Uint8Array), false);
+      expect(mockFromTxData).toHaveBeenCalledWith(mockTxData, {
+        common: mockCommon,
+      });
+      expect(mockGetMessageToSign).toHaveBeenCalledWith(
+        expect.any(Uint8Array),
+        expect.any(Uint8Array),
+        false,
+      );
       expect(mockRaw).toHaveBeenCalled();
       expect(mockFromValuesArray).toHaveBeenCalled();
       expect(mockSerialize).toHaveBeenCalled();
@@ -971,12 +1048,14 @@ describe("LedgerStore", () => {
 
     it("should fetch public key if not present on account", async () => {
       // Account without public key
-      store.accounts = [{
-        address: "Q1234567890123456789012345678901234567890",
-        derivationPath: "m/44'/238'/0'/0'/0'",
-        publicKey: "",
-        index: 0,
-      }];
+      store.accounts = [
+        {
+          address: "Q1234567890123456789012345678901234567890",
+          derivationPath: "m/44'/238'/0'/0'/0'",
+          publicKey: "",
+          index: 0,
+        },
+      ];
 
       mockGetPublicKey.mockResolvedValue({
         address: "Q1234567890123456789012345678901234567890",
@@ -1001,7 +1080,7 @@ describe("LedgerStore", () => {
           mockAccounts[0].address,
           mockTxData,
           mockCommon,
-        )
+        ),
       ).rejects.toThrow("User rejected");
     });
 
@@ -1018,17 +1097,19 @@ describe("LedgerStore", () => {
           mockAccounts[0].address,
           mockTxData,
           mockCommon,
-        )
+        ),
       ).rejects.toThrow("Ledger account not found");
     });
 
     it("should throw if fetchPublicKey returns empty public key", async () => {
-      store.accounts = [{
-        address: "Q1234567890123456789012345678901234567890",
-        derivationPath: "m/44'/238'/0'/0'/0'",
-        publicKey: "",
-        index: 0,
-      }];
+      store.accounts = [
+        {
+          address: "Q1234567890123456789012345678901234567890",
+          derivationPath: "m/44'/238'/0'/0'/0'",
+          publicKey: "",
+          index: 0,
+        },
+      ];
 
       mockGetPublicKey.mockResolvedValue({
         address: "Q1234567890123456789012345678901234567890",
@@ -1041,7 +1122,7 @@ describe("LedgerStore", () => {
           "Q1234567890123456789012345678901234567890",
           mockTxData,
           mockCommon,
-        )
+        ),
       ).rejects.toThrow("Failed to fetch public key from Ledger");
     });
 
@@ -1058,8 +1139,8 @@ describe("LedgerStore", () => {
       // Should have 12 elements: 9 tx fields + publicKey + signature + descriptor
       expect(valuesArray).toHaveLength(12);
       // publicKey and signature should be Buffer instances
-      expect(Buffer.isBuffer(valuesArray[9])).toBe(true);  // publicKey
-      expect(Buffer.isBuffer(valuesArray[10])).toBe(true);  // signature
+      expect(Buffer.isBuffer(valuesArray[9])).toBe(true); // publicKey
+      expect(Buffer.isBuffer(valuesArray[10])).toBe(true); // signature
       // descriptor should be Uint8Array (3 bytes: [1, 0, 0] for ML-DSA-87)
       expect(valuesArray[11]).toBeInstanceOf(Uint8Array);
       expect(valuesArray[11]).toHaveLength(3);

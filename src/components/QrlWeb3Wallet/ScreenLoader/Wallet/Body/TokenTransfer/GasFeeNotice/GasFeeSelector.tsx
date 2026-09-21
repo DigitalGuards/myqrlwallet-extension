@@ -23,7 +23,7 @@ type GasFeeSelectorProps = {
   tokenDecimals: number;
   from: string;
   to: string;
-  value: number;
+  value: string | number;
   disabled?: boolean;
   onOverridesChange: (overrides: GasFeeOverrides) => void;
   onGasFeeCalculated?: (gasFee: string) => void;
@@ -50,23 +50,26 @@ export const GasFeeSelector = observer(
     const { t } = useTranslation();
     const { settingsStore, qrlStore, priceStore } = useStore();
 
-    const TIERS: TierConfig[] = useMemo(() => [
-      {
-        value: "low" as GasTier,
-        label: t('gasFee.tierLow'),
-        description: t('gasFee.tierLowDescription'),
-      },
-      {
-        value: "market" as GasTier,
-        label: t('gasFee.tierMarket'),
-        description: t('gasFee.tierMarketDescription'),
-      },
-      {
-        value: "aggressive" as GasTier,
-        label: t('gasFee.tierAggressive'),
-        description: t('gasFee.tierAggressiveDescription'),
-      },
-    ], [t]);
+    const TIERS: TierConfig[] = useMemo(
+      () => [
+        {
+          value: "low" as GasTier,
+          label: t("gasFee.tierLow"),
+          description: t("gasFee.tierLowDescription"),
+        },
+        {
+          value: "market" as GasTier,
+          label: t("gasFee.tierMarket"),
+          description: t("gasFee.tierMarketDescription"),
+        },
+        {
+          value: "aggressive" as GasTier,
+          label: t("gasFee.tierAggressive"),
+          description: t("gasFee.tierAggressiveDescription"),
+        },
+      ],
+      [t],
+    );
     const { defaultGasTier, showBalanceAndPrice, currency } = settingsStore;
     const qrlPrice = priceStore.getPrice(currency);
     const { getNativeTokenGas, getZrc20TokenGas } = qrlStore;
@@ -154,10 +157,7 @@ export const GasFeeSelector = observer(
     }, [from, to, value, hasValuesForGasCalculation, calculateGasForTier]);
 
     const buildOverrides = useCallback(
-      (
-        tier: GasTier,
-        advanced = advancedValues,
-      ): GasFeeOverrides => {
+      (tier: GasTier, advanced = advancedValues): GasFeeOverrides => {
         if (tier === "advanced") {
           return {
             tier: "advanced",
@@ -167,9 +167,7 @@ export const GasFeeSelector = observer(
             maxFeePerGas: advanced.maxFeePerGas
               ? BigInt(advanced.maxFeePerGas)
               : undefined,
-            gasLimit: advanced.gasLimit
-              ? Number(advanced.gasLimit)
-              : undefined,
+            gasLimit: advanced.gasLimit ? Number(advanced.gasLimit) : undefined,
           };
         }
         return { tier };
@@ -187,13 +185,13 @@ export const GasFeeSelector = observer(
 
     const toggleAdvanced = async () => {
       if (showAdvanced) {
-        // Collapse — revert to selected tier
+        // Collapse - revert to selected tier
         const overrides = buildOverrides(selectedTier);
         onOverridesChange(overrides);
         onGasFeeCalculated?.(tierCosts[selectedTier] ?? "");
         setShowAdvanced(false);
       } else {
-        // Expand — pre-fill with current Market values
+        // Expand - pre-fill with current Market values
         try {
           const { maxPriorityFeePerGas, maxFeePerGas } =
             await qrlStore.getGasFeeData({ tier: "market" });
@@ -231,7 +229,7 @@ export const GasFeeSelector = observer(
       <TooltipProvider delayDuration={200}>
         <div className="m-1">
           <Label className="mb-2 block text-xs text-muted-foreground">
-            {t('gasFee.label')}
+            {t("gasFee.label")}
           </Label>
           <div className="flex flex-col gap-1">
             {TIERS.map((tier) => {
@@ -285,7 +283,7 @@ export const GasFeeSelector = observer(
                         )}
                       </>
                     ) : (
-                      "—"
+                      "-"
                     )}
                   </div>
                 </button>
@@ -313,13 +311,15 @@ export const GasFeeSelector = observer(
                     showAdvanced ? "bg-secondary" : "bg-muted-foreground/30",
                   )}
                 />
-                <div className="text-sm font-medium">{t('gasFee.tierAdvanced')}</div>
+                <div className="text-sm font-medium">
+                  {t("gasFee.tierAdvanced")}
+                </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Info className="h-3 w-3 text-muted-foreground" />
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-52 text-xs">
-                    {t('gasFee.tierAdvancedDescription')}
+                    {t("gasFee.tierAdvancedDescription")}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -334,12 +334,12 @@ export const GasFeeSelector = observer(
               <div className="flex flex-col gap-2 rounded-md border border-border p-3">
                 <div>
                   <Label className="mb-1 block text-xs text-muted-foreground">
-                    {t('gasFee.maxPriorityFee')}
+                    {t("gasFee.maxPriorityFee")}
                   </Label>
                   <Input
                     type="text"
                     inputMode="numeric"
-                    placeholder={t('gasFee.placeholderAuto')}
+                    placeholder={t("gasFee.placeholderAuto")}
                     value={advancedValues.maxPriorityFeePerGas}
                     onChange={(e) =>
                       handleAdvancedChange(
@@ -353,12 +353,12 @@ export const GasFeeSelector = observer(
                 </div>
                 <div>
                   <Label className="mb-1 block text-xs text-muted-foreground">
-                    {t('gasFee.maxFee')}
+                    {t("gasFee.maxFee")}
                   </Label>
                   <Input
                     type="text"
                     inputMode="numeric"
-                    placeholder={t('gasFee.placeholderAuto')}
+                    placeholder={t("gasFee.placeholderAuto")}
                     value={advancedValues.maxFeePerGas}
                     onChange={(e) =>
                       handleAdvancedChange("maxFeePerGas", e.target.value)
@@ -369,12 +369,12 @@ export const GasFeeSelector = observer(
                 </div>
                 <div>
                   <Label className="mb-1 block text-xs text-muted-foreground">
-                    {t('gasFee.gasLimit')}
+                    {t("gasFee.gasLimit")}
                   </Label>
                   <Input
                     type="text"
                     inputMode="numeric"
-                    placeholder={t('gasFee.placeholderAuto')}
+                    placeholder={t("gasFee.placeholderAuto")}
                     value={advancedValues.gasLimit}
                     onChange={(e) =>
                       handleAdvancedChange("gasLimit", e.target.value)

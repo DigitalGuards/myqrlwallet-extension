@@ -1,3 +1,5 @@
+import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
+const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import AccountLabelsStore from "./accountLabelsStore";
 
@@ -7,15 +9,22 @@ vi.mock("webextension-polyfill", () => ({
   default: {
     storage: {
       local: {
-        get: vi.fn((key: string) =>
-          Promise.resolve(key in localStore ? { [key]: localStore[key] } : {}),
+        get: vi.fn((key: string | null) =>
+          Promise.resolve(
+            key === null
+              ? { ...localStore }
+              : key in localStore
+                ? { [key]: localStore[key] }
+                : {},
+          ),
         ),
         set: vi.fn((data: Record<string, any>) => {
           Object.assign(localStore, data);
           return Promise.resolve();
         }),
-        remove: vi.fn((key: string) => {
-          delete localStore[key];
+        remove: vi.fn((key: string | string[]) => {
+          for (const item of Array.isArray(key) ? key : [key])
+            delete localStore[item];
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
@@ -42,7 +51,7 @@ describe("AccountLabelsStore", () => {
 
   describe("loadLabels", () => {
     it("should load labels from storage", async () => {
-      localStore["ACCOUNT_LABELS"] = {
+      localStore[profileStorageKey("ACCOUNT_LABELS")] = {
         Q20B714091cF2a62DADda2847803e3f1B9D2D3779: "Account 1",
       };
 
@@ -99,7 +108,7 @@ describe("AccountLabelsStore", () => {
 
     it("should avoid number collisions with existing labels", async () => {
       // Pre-seed: "Account 2" already taken
-      localStore["ACCOUNT_LABELS"] = {
+      localStore[profileStorageKey("ACCOUNT_LABELS")] = {
         Q20fB08fF1f1376A14C055E9F56df80563E16722b: "Account 2",
       };
 
@@ -127,13 +136,13 @@ describe("AccountLabelsStore", () => {
 
       await store.syncLabels(accounts, noLedger);
 
-      expect(localStore["ACCOUNT_LABELS"]).toEqual({
+      expect(localStore[profileStorageKey("ACCOUNT_LABELS")]).toEqual({
         Q20B714091cF2a62DADda2847803e3f1B9D2D3779: "Account 1",
       });
     });
 
     it("should not write to storage if no new labels needed", async () => {
-      localStore["ACCOUNT_LABELS"] = {
+      localStore[profileStorageKey("ACCOUNT_LABELS")] = {
         Q20B714091cF2a62DADda2847803e3f1B9D2D3779: "Account 1",
       };
 
@@ -142,19 +151,18 @@ describe("AccountLabelsStore", () => {
       ];
 
       const browser = (await import("webextension-polyfill")).default;
-      const setCalls = (browser.storage.local.set as Mock).mock.calls
-        .length;
+      const setCalls = (browser.storage.local.set as Mock).mock.calls.length;
 
       await store.syncLabels(accounts, noLedger);
 
       // set should not be called again since label already exists
-      expect(
-        (browser.storage.local.set as Mock).mock.calls.length,
-      ).toBe(setCalls);
+      expect((browser.storage.local.set as Mock).mock.calls.length).toBe(
+        setCalls,
+      );
     });
 
     it("should preserve existing labels on sync", async () => {
-      localStore["ACCOUNT_LABELS"] = {
+      localStore[profileStorageKey("ACCOUNT_LABELS")] = {
         Q20B714091cF2a62DADda2847803e3f1B9D2D3779: "My Main",
       };
 
@@ -200,7 +208,7 @@ describe("AccountLabelsStore", () => {
         "My Wallet",
       );
 
-      expect(localStore["ACCOUNT_LABELS"]).toEqual({
+      expect(localStore[profileStorageKey("ACCOUNT_LABELS")]).toEqual({
         Q20B714091cF2a62DADda2847803e3f1B9D2D3779: "My Wallet",
       });
     });
@@ -250,11 +258,15 @@ describe("AccountLabelsStore", () => {
       await store.ensureLabel(ADDRESS);
 
       expect(store.getLabel(ADDRESS)).toBe("Account 1");
-      expect(localStore["ACCOUNT_LABELS"][ADDRESS]).toBe("Account 1");
+      expect(localStore[profileStorageKey("ACCOUNT_LABELS")][ADDRESS]).toBe(
+        "Account 1",
+      );
     });
 
     it("does not renumber an account that already has a label", async () => {
-      localStore["ACCOUNT_LABELS"] = { [ADDRESS]: "Savings" };
+      localStore[profileStorageKey("ACCOUNT_LABELS")] = {
+        [ADDRESS]: "Savings",
+      };
 
       await store.ensureLabel(ADDRESS);
 
@@ -262,7 +274,9 @@ describe("AccountLabelsStore", () => {
     });
 
     it("picks the next free number alongside existing labels", async () => {
-      localStore["ACCOUNT_LABELS"] = { [OTHER]: "Account 1" };
+      localStore[profileStorageKey("ACCOUNT_LABELS")] = {
+        [OTHER]: "Account 1",
+      };
 
       await store.ensureLabel(ADDRESS);
 
@@ -278,7 +292,9 @@ describe("AccountLabelsStore", () => {
     });
 
     it("uses the Ledger prefix and its own numbering", async () => {
-      localStore["ACCOUNT_LABELS"] = { [OTHER]: "Account 1" };
+      localStore[profileStorageKey("ACCOUNT_LABELS")] = {
+        [OTHER]: "Account 1",
+      };
 
       await store.ensureLabel(ADDRESS, true);
 
@@ -288,7 +304,7 @@ describe("AccountLabelsStore", () => {
     it("ignores an empty address", async () => {
       await store.ensureLabel("");
 
-      expect(localStore["ACCOUNT_LABELS"]).toBeUndefined();
+      expect(localStore[profileStorageKey("ACCOUNT_LABELS")]).toBeUndefined();
     });
   });
 
@@ -297,14 +313,14 @@ describe("AccountLabelsStore", () => {
       store.labels = {
         Q20B714091cF2a62DADda2847803e3f1B9D2D3779: "Account 1",
       };
-      localStore["ACCOUNT_LABELS"] = {
+      localStore[profileStorageKey("ACCOUNT_LABELS")] = {
         Q20B714091cF2a62DADda2847803e3f1B9D2D3779: "Account 1",
       };
 
       await store.clearLabels();
 
       expect(store.labels).toEqual({});
-      expect(localStore["ACCOUNT_LABELS"]).toBeUndefined();
+      expect(localStore[profileStorageKey("ACCOUNT_LABELS")]).toBeUndefined();
     });
   });
 });

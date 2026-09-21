@@ -1,8 +1,8 @@
 import { Button } from "@/components/UI/Button";
-import StringUtil from "@/utilities/stringUtil";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import FullAddress from "../AddressDisplay/FullAddress";
 
 type CopyableAddressProps = {
   address: string;
@@ -22,8 +22,6 @@ const CopyableAddress = ({ address, className }: CopyableAddressProps) => {
   const resetTimerRef = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => () => clearTimeout(resetTimerRef.current), []);
 
-  const { prefix, addressSplit } = StringUtil.getSplitAddress(address);
-
   const onCopy = () => {
     navigator.clipboard.writeText(address);
     setCopied(true);
@@ -32,10 +30,11 @@ const CopyableAddress = ({ address, className }: CopyableAddressProps) => {
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <div className={`flex flex-wrap gap-1 ${className ?? ""}`}>
-        {`${prefix} ${addressSplit.join(" ")}`}
-      </div>
+    <div className="flex min-w-0 max-w-full items-start gap-2">
+      <FullAddress
+        address={address}
+        className={`min-w-0 flex-1 ${className ?? ""}`}
+      />
       <Button
         type="button"
         variant="outline"

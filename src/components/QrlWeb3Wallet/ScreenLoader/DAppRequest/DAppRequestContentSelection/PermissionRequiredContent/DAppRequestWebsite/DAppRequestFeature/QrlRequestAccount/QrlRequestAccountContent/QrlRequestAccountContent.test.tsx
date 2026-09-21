@@ -10,13 +10,20 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import QrlRequestAccountContent from "./QrlRequestAccountContent";
 
+const ACTIVE_ACCOUNT = `Q${"a".repeat(128)}`;
+const GRANTED_ACCOUNT = `Q${"b".repeat(128)}`;
+
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlRequestAccount/QrlRequestAccountContent/QrlRequestAccountAccountSelection/QrlRequestAccountAccountSelection",
-  () => ({ default: () => <div>Mocked Qrl Request Account Account Selection</div> }),
+  () => ({
+    default: () => <div>Mocked Qrl Request Account Account Selection</div>,
+  }),
 );
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlRequestAccount/QrlRequestAccountContent/QrlRequestAccountBlockchainSelection/QrlRequestAccountBlockchainSelection",
-  () => ({ default: () => <div>Mocked Qrl Request Account Blockchain Selection</div> }),
+  () => ({
+    default: () => <div>Mocked Qrl Request Account Blockchain Selection</div>,
+  }),
 );
 
 describe("QrlRequestAccountContent", () => {
@@ -37,7 +44,7 @@ describe("QrlRequestAccountContent", () => {
         qrlStore: { qrlAccounts: { isLoading: false } },
         dAppRequestStore: {
           currentTabData: {
-            connectedAccounts: ["Q20fB08fF1f1376A14C055E9F56df80563E16722b"],
+            connectedAccounts: [GRANTED_ACCOUNT],
           },
         },
       }),
@@ -72,7 +79,7 @@ describe("QrlRequestAccountContent", () => {
     await waitFor(() => {
       expect(addToResponseData).toHaveBeenCalledWith({
         // The mocked store's active account.
-        accounts: ["Q20B714091cF2a62DADda2847803e3f1B9D2D3779"],
+        accounts: [ACTIVE_ACCOUNT],
         blockchains: [
           expect.objectContaining({ chainId: DEFAULT_BLOCKCHAIN.chainId }),
         ],
@@ -89,9 +96,7 @@ describe("QrlRequestAccountContent", () => {
         dAppRequestStore: {
           addToResponseData,
           currentTabData: {
-            connectedAccounts: [
-              "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
-            ],
+            connectedAccounts: [GRANTED_ACCOUNT],
             connectedBlockchains: [grantedChain],
           },
         },
@@ -100,7 +105,7 @@ describe("QrlRequestAccountContent", () => {
 
     await waitFor(() => {
       expect(addToResponseData).toHaveBeenCalledWith({
-        accounts: ["Q20fB08fF1f1376A14C055E9F56df80563E16722b"],
+        accounts: [GRANTED_ACCOUNT],
         blockchains: [
           expect.objectContaining({ chainId: grantedChain.chainId }),
         ],

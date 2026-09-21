@@ -20,33 +20,14 @@ import {
 } from "@/constants/zrc20Token";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { getOptimalTokenBalance } from "@/functions/getOptimalTokenBalance";
+import { toTokenBaseUnits } from "@/functions/tokenAmount";
 import type { GasFeeOverrides } from "@/types/gasFee";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
+import { toCanonicalQrlAddress } from "@/utilities/addressUtil";
 import StorageUtil from "@/utilities/storageUtil";
-import Web3, {
-  Web3QRLInterface,
-  utils,
-} from "@theqrl/web3";
-import { BigNumber } from "bignumber.js";
+import { assertV3Network, V3_CHAIN_ID } from "@/configuration/releaseProfile";
+import Web3, { Web3QRLInterface, utils } from "@theqrl/web3";
 import { action, makeAutoObservable, observable, runInAction } from "mobx";
-
-/**
- * Convert a human token amount (a JS number from the form) to integer base
- * units without float error. `value * 10 ** decimals` overflows float
- * precision for high-decimal tokens (signing a corrupted amount) and yields
- * non-integers like 110.00000000000001 that `BigInt()` rejects with a
- * RangeError (blocking everyday sends). BigNumber shifts the decimal point on
- * the string representation, then floors so we can never send more than the
- * displayed amount.
- */
-const toTokenBaseUnits = (value: number, decimals: number): bigint =>
-  BigInt(
-    // Stringify first: bignumber.js 4.1.0 throws on a number literal with more
-    // than 15 significant digits, which a high-precision amount can exceed.
-    new BigNumber(String(value))
-      .times(new BigNumber(10).pow(decimals))
-      .toFixed(0, BigNumber.ROUND_DOWN),
-  );
 
 type ActiveAccountType = {
   accountAddress: string;
@@ -85,8 +66,14 @@ class QrlStore {
   };
   qrlAccounts: QrlAccountsType = { accounts: [], isLoading: false };
   activeAccount: ActiveAccountType = { accountAddress: "" };
-  initProgress: InitProgressType = { active: true, fraction: 0, phase: "chain" };
+  initProgress: InitProgressType = {
+    active: true,
+    fraction: 0,
+    phase: "chain",
+  };
   private balancePollInterval: ReturnType<typeof setInterval> | null = null;
+  private balanceRequestId = 0;
+  private initializationEpoch = 0;
 
   constructor() {
     makeAutoObservable(this, {
@@ -128,8 +115,12 @@ class QrlStore {
   }
 
   async initializeBlockchain() {
+    const epoch = ++this.initializationEpoch;
+    this.stopBalancePolling();
+    this.balanceRequestId++;
     this.setInitProgress({ active: true, fraction: 0.06, phase: "chain" });
     await this.refreshBlockchainData();
+    if (epoch !== this.initializationEpoch) return;
     const qrlHttpProvider = new Web3.providers.HttpProvider(
       this.qrlConnection.blockchain.defaultRpcUrl || "http://localhost",
     );
@@ -138,10 +129,13 @@ class QrlStore {
 
     this.setInitProgress({ active: true, fraction: 0.18, phase: "network" });
     await this.fetchQrlConnection();
+    if (epoch !== this.initializationEpoch) return;
     this.setInitProgress({ active: true, fraction: 0.45, phase: "accounts" });
     await this.fetchAccounts();
+    if (epoch !== this.initializationEpoch) return;
     this.setInitProgress({ active: true, fraction: 0.94, phase: "session" });
-    await this.validateActiveAccount();
+    await this.validateActiveAccount(epoch);
+    if (epoch !== this.initializationEpoch) return;
     this.setInitProgress({ active: false, fraction: 1, phase: "session" });
     // Balances only refreshed on init and after sends before this; funds
     // arriving while the popup/side panel stays open (plain receives,
@@ -172,7 +166,10 @@ class QrlStore {
    *  failure the last known balances stay on screen (unlike fetchAccounts,
    *  which zeroes them: acceptable at init, wrong mid-session). */
   async refreshBalancesQuietly() {
-    if (!this.qrlInstance) return;
+    if (!this.qrlInstance || this.qrlAccounts.isLoading) return;
+    const requestId = ++this.balanceRequestId;
+    const provider = this.qrlInstance;
+    const chainId = this.qrlConnection.blockchain.chainId;
     const storedAccountsList = await StorageUtil.getAllAccounts();
     if (storedAccountsList.length === 0) return;
     try {
@@ -180,7 +177,7 @@ class QrlStore {
         await Promise.all(
           storedAccountsList.map(async (account) => {
             const accountBalance =
-              (await this.qrlInstance?.getBalance(account)) ?? BigInt(0);
+              (await provider.getBalance(account)) ?? BigInt(0);
             return {
               accountAddress: account,
               accountBalance: getOptimalTokenBalance(
@@ -189,6 +186,12 @@ class QrlStore {
             };
           }),
         );
+      if (
+        requestId !== this.balanceRequestId ||
+        provider !== this.qrlInstance ||
+        chainId !== this.qrlConnection.blockchain.chainId
+      )
+        return;
       runInAction(() => {
         this.qrlAccounts = {
           ...this.qrlAccounts,
@@ -243,18 +246,21 @@ class QrlStore {
   }
 
   async setActiveAccount(activeAccount?: string) {
-    await StorageUtil.setActiveAccount(activeAccount);
+    const canonicalActiveAccount = activeAccount
+      ? toCanonicalQrlAddress(activeAccount)
+      : undefined;
+    await StorageUtil.setActiveAccount(canonicalActiveAccount);
     this.activeAccount = {
       ...this.activeAccount,
-      accountAddress: activeAccount ?? "",
+      accountAddress: canonicalActiveAccount ?? "",
     };
 
     let storedAccountList: string[] = [];
     try {
       const accountListFromStorage = await StorageUtil.getAllAccounts();
       storedAccountList = [...accountListFromStorage];
-      if (activeAccount) {
-        storedAccountList.push(activeAccount);
+      if (canonicalActiveAccount) {
+        storedAccountList.push(canonicalActiveAccount);
       }
       storedAccountList = [...new Set(storedAccountList)];
     } finally {
@@ -340,10 +346,17 @@ class QrlStore {
   }
 
   async fetchQrlConnection() {
+    const provider = this.qrlInstance;
+    const blockchain = this.qrlConnection.blockchain;
+    const isCurrent = () =>
+      provider === this.qrlInstance &&
+      blockchain === this.qrlConnection.blockchain;
     this.qrlConnection = { ...this.qrlConnection, isLoading: true };
     try {
-      const isListening = (await this.qrlInstance?.net.isListening()) ?? false;
+      await this.assertSigningNetwork();
+      const isListening = (await provider?.net.isListening()) ?? false;
       runInAction(() => {
+        if (!isCurrent()) return;
         this.qrlConnection = {
           ...this.qrlConnection,
           isConnected: isListening,
@@ -351,16 +364,25 @@ class QrlStore {
       });
     } catch {
       runInAction(() => {
+        if (!isCurrent()) return;
         this.qrlConnection = { ...this.qrlConnection, isConnected: false };
       });
     } finally {
       runInAction(() => {
+        if (!isCurrent()) return;
         this.qrlConnection = { ...this.qrlConnection, isLoading: false };
       });
     }
   }
 
   async fetchAccounts() {
+    const requestId = ++this.balanceRequestId;
+    const provider = this.qrlInstance;
+    const chainId = this.qrlConnection.blockchain.chainId;
+    const isCurrent = () =>
+      requestId === this.balanceRequestId &&
+      provider === this.qrlInstance &&
+      chainId === this.qrlConnection.blockchain.chainId;
     this.qrlAccounts = { ...this.qrlAccounts, isLoading: true };
 
     let storedAccountsList: string[] = [];
@@ -372,13 +394,17 @@ class QrlStore {
         await Promise.all(
           storedAccountsList.map(async (account) => {
             const accountBalance =
-              (await this.qrlInstance?.getBalance(account)) ?? BigInt(0);
+              (await provider?.getBalance(account)) ?? BigInt(0);
             const convertedAccountBalance = getOptimalTokenBalance(
               utils.fromPlanck(accountBalance, "quanta"),
             );
             settledBalances += 1;
             // Real per-account progress across the balances phase (0.45-0.94).
-            if (this.initProgress.active && this.initProgress.phase === "accounts") {
+            if (
+              isCurrent() &&
+              this.initProgress.active &&
+              this.initProgress.phase === "accounts"
+            ) {
               this.setInitProgress({
                 active: true,
                 fraction:
@@ -392,6 +418,7 @@ class QrlStore {
             };
           }),
         );
+      if (!isCurrent()) return;
       runInAction(() => {
         this.qrlAccounts = {
           ...this.qrlAccounts,
@@ -399,6 +426,7 @@ class QrlStore {
         };
       });
     } catch {
+      if (!isCurrent()) return;
       runInAction(() => {
         this.qrlAccounts = {
           ...this.qrlAccounts,
@@ -410,14 +438,15 @@ class QrlStore {
       });
     } finally {
       runInAction(() => {
-        this.qrlAccounts = { ...this.qrlAccounts, isLoading: false };
+        if (isCurrent())
+          this.qrlAccounts = { ...this.qrlAccounts, isLoading: false };
       });
     }
   }
 
-  async validateActiveAccount() {
-    this.activeAccount = { accountAddress: "" };
+  async validateActiveAccount(epoch = this.initializationEpoch) {
     const storedActiveAccount = await StorageUtil.getActiveAccount();
+    if (epoch !== this.initializationEpoch) return;
 
     const confirmedExistingActiveAccount =
       this.qrlAccounts.accounts.find(
@@ -444,7 +473,7 @@ class QrlStore {
       const parsed = BigInt(tip);
       if (parsed > BigInt(0)) return parsed;
     } catch {
-      // RPC method not supported — fall back to default
+      // RPC method not supported - fall back to default
     }
     return BigInt(utils.toPlanck("2", "shor"));
   }
@@ -454,8 +483,7 @@ class QrlStore {
     const baseFeePerGas = latestBlock?.baseFeePerGas ?? BigInt(0);
 
     if (overrides?.tier === "advanced") {
-      const maxPriorityFeePerGas =
-        overrides.maxPriorityFeePerGas ?? BigInt(0);
+      const maxPriorityFeePerGas = overrides.maxPriorityFeePerGas ?? BigInt(0);
       const maxFeePerGas =
         overrides.maxFeePerGas ?? baseFeePerGas + maxPriorityFeePerGas;
       return { baseFeePerGas, maxPriorityFeePerGas, maxFeePerGas };
@@ -473,7 +501,7 @@ class QrlStore {
         break;
       case "market":
       default:
-        // 1.5x — multiply by 3 then divide by 2, rounded up
+        // 1.5x - multiply by 3 then divide by 2, rounded up
         maxPriorityFeePerGas = (baseTip * BigInt(3) + BigInt(1)) / BigInt(2);
         break;
     }
@@ -506,7 +534,7 @@ class QrlStore {
   async signNativeToken(
     from: string,
     to: string,
-    value: number,
+    value: string | number,
     mnemonicPhrases: string,
     overrides?: GasFeeOverrides,
   ) {
@@ -531,13 +559,15 @@ class QrlStore {
       const transactionObject = {
         from,
         to,
-        value: utils.toPlanck(value, "quanta"),
+        value: toTokenBaseUnits(value, 18).toString(),
         nonce,
         gasLimit,
         maxFeePerGas: `0x${maxFeePerGas.toString(16)}`,
         maxPriorityFeePerGas: `0x${maxPriorityFeePerGas.toString(16)}`,
         type: 2,
+        chainId: V3_CHAIN_ID,
       };
+      await this.assertSigningNetwork();
       const signedTransaction =
         await this.qrlInstance?.accounts.signTransaction(
           transactionObject,
@@ -853,9 +883,7 @@ class QrlStore {
           ZRC_721_CONTRACT_ABI,
           contractAddress,
         );
-        const uri = (await contract.methods
-          .tokenURI(tokenId)
-          .call()) as string;
+        const uri = (await contract.methods.tokenURI(tokenId).call()) as string;
         return uri;
       } catch {
         return "";
@@ -911,15 +939,11 @@ class QrlStore {
           this.getGasFeeData(overrides),
           useAdvancedGas
             ? Promise.resolve(null)
-            : transferCall
-                .estimateGas({ from })
-                .catch(() => null),
+            : transferCall.estimateGas({ from }).catch(() => null),
           this.qrlInstance?.getTransactionCount(from),
         ]);
         const { maxFeePerGas, maxPriorityFeePerGas } = gasFeeData;
-        let gasLimit = useAdvancedGas
-          ? overrides!.gasLimit!
-          : NFT_UNITS_OF_GAS;
+        let gasLimit = useAdvancedGas ? overrides!.gasLimit! : NFT_UNITS_OF_GAS;
         if (estimatedGasResult !== null && estimatedGasResult !== undefined) {
           // Add 20% buffer to estimated gas
           gasLimit = Math.ceil(Number(estimatedGasResult) * 1.2);
@@ -934,7 +958,10 @@ class QrlStore {
           maxFeePerGas: `0x${maxFeePerGas.toString(16)}`,
           maxPriorityFeePerGas: `0x${maxPriorityFeePerGas.toString(16)}`,
           type: 2,
+          chainId: V3_CHAIN_ID,
         };
+
+        await this.assertSigningNetwork();
 
         const signedTransaction =
           await this.qrlInstance?.accounts.signTransaction(
@@ -974,7 +1001,7 @@ class QrlStore {
   async getZrc20TokenGas(
     from: string,
     to: string,
-    value: number,
+    value: string | number,
     contractAddress: string,
     decimals: number,
     overrides?: GasFeeOverrides,
@@ -1008,7 +1035,7 @@ class QrlStore {
   async signZrc20Token(
     from: string,
     to: string,
-    value: number,
+    value: string | number,
     mnemonicPhrases: string,
     contractAddress: string,
     decimals: number,
@@ -1054,7 +1081,10 @@ class QrlStore {
           maxFeePerGas: `0x${maxFeePerGas.toString(16)}`,
           maxPriorityFeePerGas: `0x${maxPriorityFeePerGas.toString(16)}`,
           type: 2,
+          chainId: V3_CHAIN_ID,
         };
+
+        await this.assertSigningNetwork();
 
         const signedTransaction =
           await this.qrlInstance?.accounts.signTransaction(
@@ -1134,6 +1164,7 @@ class QrlStore {
           maxFeePerGas: `0x${finalMaxFee.toString(16)}`,
           maxPriorityFeePerGas: `0x${finalPriorityFee.toString(16)}`,
           type: 2,
+          chainId: V3_CHAIN_ID,
         };
       } else {
         // Any token/NFT entry carries a contract address; the real
@@ -1161,9 +1192,12 @@ class QrlStore {
           maxFeePerGas: `0x${finalMaxFee.toString(16)}`,
           maxPriorityFeePerGas: `0x${finalPriorityFee.toString(16)}`,
           type: 2,
+          chainId: V3_CHAIN_ID,
           ...(originalTx.data && { data: originalTx.data }),
         };
       }
+
+      await this.assertSigningNetwork();
 
       const signedTransaction =
         await this.qrlInstance?.accounts.signTransaction(
@@ -1191,7 +1225,23 @@ class QrlStore {
     return await this.qrlInstance?.getTransactionReceipt(txHash);
   }
 
+  private async assertSigningNetwork() {
+    const provider = this.qrlInstance;
+    const chain = this.qrlConnection.blockchain;
+    if (chain.chainId.toLowerCase() !== V3_CHAIN_ID) {
+      throw new Error("Select the v3 Private network.");
+    }
+    await assertV3Network(chain.defaultRpcUrl);
+    if (
+      provider !== this.qrlInstance ||
+      chain !== this.qrlConnection.blockchain
+    ) {
+      throw new Error("The network changed. Review the request again.");
+    }
+  }
+
   async sendRawTransaction(rawTransaction: string) {
+    await this.assertSigningNetwork();
     const receipt =
       await this.qrlInstance?.sendSignedTransaction(rawTransaction);
     return receipt;

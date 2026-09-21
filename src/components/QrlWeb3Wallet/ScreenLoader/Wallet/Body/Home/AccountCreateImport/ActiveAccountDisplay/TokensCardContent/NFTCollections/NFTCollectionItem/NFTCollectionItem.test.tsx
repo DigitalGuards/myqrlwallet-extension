@@ -4,10 +4,14 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import NFTCollectionItem from "./NFTCollectionItem";
 
+const ACTIVE_ACCOUNT = `Q${"a".repeat(128)}`;
+const CONTRACT_ADDRESS = `Q${"c".repeat(128)}`;
+
 const { mockClearFromNFTCollectionsList } = vi.hoisted(() => ({
-  mockClearFromNFTCollectionsList: vi.fn<any>().mockResolvedValue(undefined),
+  mockClearFromNFTCollectionsList: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/utilities/storageUtil", () => ({
@@ -29,7 +33,7 @@ describe("NFTCollectionItem", () => {
     mockClearFromNFTCollectionsList.mockClear();
   });
 
-  const contractAddress = "Q705046e6A6E159eD6ACedE46A36CAD6D449C80A1";
+  const contractAddress = CONTRACT_ADDRESS;
 
   const storeWithCollection = () =>
     mockedStore({
@@ -78,6 +82,34 @@ describe("NFTCollectionItem", () => {
     expect(await screen.findByText("Gallery route")).toBeInTheDocument();
   });
 
+  it("uses the shared fingerprint for a nameless collection row", async () => {
+    render(
+      <StoreProvider
+        value={mockedStore({
+          qrlStore: {
+            getNftCollectionDetails: (async () => ({
+              collection: {
+                name: "",
+                symbol: "",
+                standard: "ZRC721",
+                balance: 1,
+              },
+              error: "",
+            })) as any,
+          },
+        })}
+      >
+        <MemoryRouter>
+          <NFTCollectionItem contractAddress={contractAddress} />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    expect(
+      await screen.findByText(formatQrlAddressFingerprint(contractAddress)),
+    ).toBeInTheDocument();
+  });
+
   it("should open the hide confirmation instead of navigating when Hide Collection is clicked", async () => {
     const user = userEvent.setup();
     renderComponent();
@@ -110,7 +142,7 @@ describe("NFTCollectionItem", () => {
     await user.click(await screen.findByRole("button", { name: "Yes" }));
 
     expect(mockClearFromNFTCollectionsList).toHaveBeenCalledWith(
-      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      ACTIVE_ACCOUNT,
       contractAddress,
     );
     expect(triggerReRender).toHaveBeenCalled();

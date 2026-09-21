@@ -1,3 +1,4 @@
+import { profileStorageKey } from "@/utilities/profileStorage";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
 import {
@@ -6,8 +7,10 @@ import {
 } from "./approvalSurface";
 
 const setSettings = (settings: object) => {
-  vi.mocked(browser.storage.local.get).mockImplementation(
-    async (key) => (key === "SETTINGS" ? { SETTINGS: settings } : {}),
+  vi.mocked(browser.storage.local.get).mockImplementation(async (key) =>
+    key === profileStorageKey("SETTINGS")
+      ? { [profileStorageKey("SETTINGS")]: settings }
+      : {},
   );
 };
 
@@ -104,9 +107,10 @@ describe("openApprovalSurface", () => {
     (globalThis as Record<string, unknown>).chrome = {
       runtime: {
         ContextType: { SIDE_PANEL: "SIDE_PANEL", POPUP: "POPUP" },
-        getContexts: vi.fn(
-          async (filter: { contextTypes: string[] }) =>
-            filter.contextTypes.includes("POPUP") ? [{ contextType: "POPUP" }] : [],
+        getContexts: vi.fn(async (filter: { contextTypes: string[] }) =>
+          filter.contextTypes.includes("POPUP")
+            ? [{ contextType: "POPUP" }]
+            : [],
         ),
       },
     };

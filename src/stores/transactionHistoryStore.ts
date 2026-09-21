@@ -8,6 +8,10 @@ import type {
   TransactionHistoryEntry,
 } from "@/types/transactionHistory";
 import StorageUtil from "@/utilities/storageUtil";
+import {
+  needsReceipt,
+  transactionFailureUpdate,
+} from "@/functions/transactionOutcome";
 import browser from "webextension-polyfill";
 import {
   action,
@@ -20,9 +24,7 @@ import {
 type ReceiptStatus = string | number | bigint;
 
 type QrlInstance = {
-  getTransactionReceipt: (
-    txHash: string,
-  ) => Promise<
+  getTransactionReceipt: (txHash: string) => Promise<
     | {
         status?: ReceiptStatus;
         blockNumber?: bigint;
@@ -78,11 +80,29 @@ class TransactionHistoryStore {
    *  but represent distinct value movement (e.g. a contract paying out
    *  inside a call this wallet sent). */
   get mergedTransactions(): TransactionHistoryEntry[] {
+    const verified = new Map(
+      this.onChainTransactions
+        .filter((tx) => !tx.isInternal && tx.receiptStatusVerified)
+        .map((tx) => [`${tx.chainId}:${tx.transactionHash.toLowerCase()}`, tx]),
+    );
     const localHashes = new Set(
       this.transactions.map((tx) => tx.transactionHash.toLowerCase()),
     );
     return [
-      ...this.transactions,
+      ...this.transactions.map((tx) => {
+        const receipt = verified.get(
+          `${tx.chainId}:${tx.transactionHash.toLowerCase()}`,
+        );
+        if (!receipt) return tx;
+        return {
+          ...tx,
+          status: receipt.status,
+          pendingStatus: receipt.pendingStatus,
+          blockNumber: receipt.blockNumber,
+          paidFeesQrl: receipt.paidFeesQrl ?? tx.paidFeesQrl,
+          receiptStatusVerified: true,
+        };
+      }),
       ...this.onChainTransactions.filter(
         (tx) =>
           tx.isInternal || !localHashes.has(tx.transactionHash.toLowerCase()),
@@ -116,21 +136,17 @@ class TransactionHistoryStore {
   }
 
   get pendingTransactions(): TransactionHistoryEntry[] {
-    return this.transactions.filter((tx) => tx.pendingStatus === "pending");
+    return this.transactions.filter(needsReceipt);
   }
 
   async loadHistory(accountAddress: string, qrlInstance?: QrlInstance) {
     this.isLoading = true;
     try {
-      const history =
-        await StorageUtil.getTransactionHistory(accountAddress);
+      const history = await StorageUtil.getTransactionHistory(accountAddress);
       runInAction(() => {
         this.transactions = history;
       });
-      if (
-        qrlInstance &&
-        history.some((tx) => tx.pendingStatus === "pending")
-      ) {
+      if (qrlInstance && history.some(needsReceipt)) {
         this.startPolling(accountAddress, qrlInstance);
       }
     } catch (error) {
@@ -209,13 +225,13 @@ class TransactionHistoryStore {
     }
   }
 
-  async addTransaction(
-    accountAddress: string,
-    entry: TransactionHistoryEntry,
-  ) {
+  async addTransaction(accountAddress: string, entry: TransactionHistoryEntry) {
     await StorageUtil.setTransactionHistoryEntry(accountAddress, entry);
     await this.loadHistory(accountAddress);
-    if (entry.pendingStatus === "confirmed" || entry.pendingStatus === "failed") {
+    if (
+      entry.pendingStatus === "confirmed" ||
+      entry.pendingStatus === "failed"
+    ) {
       browser.runtime
         .sendMessage({
           name: LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION,
@@ -269,21 +285,16 @@ class TransactionHistoryStore {
           const receipt = await qrlInstance.getTransactionReceipt(
             tx.transactionHash,
           );
-          if (receipt) {
-            const isSuccess = receipt.status?.toString() === "1";
-            const newStatus = isSuccess ? "confirmed" : "failed";
+          const update = transactionFailureUpdate(
+            { receipt },
+            tx.transactionHash,
+          );
+          if (update.receiptStatusVerified) {
+            const newStatus = update.pendingStatus;
             await this.updateTransaction(
               accountAddress,
               tx.transactionHash,
-              {
-                pendingStatus: newStatus,
-                status: isSuccess,
-                blockNumber: receipt.blockNumber?.toString() ?? "",
-                gasUsed: receipt.gasUsed?.toString() ?? "",
-                effectiveGasPrice: (
-                  receipt.effectiveGasPrice ?? 0
-                ).toString(),
-              },
+              update,
             );
             browser.runtime
               .sendMessage({
@@ -298,10 +309,7 @@ class TransactionHistoryStore {
               .catch(() => {});
           }
         } catch (error) {
-          console.error(
-            `Polling error for ${tx.transactionHash}:`,
-            error,
-          );
+          console.error(`Polling error for ${tx.transactionHash}:`, error);
         }
       }
     }, 10000);

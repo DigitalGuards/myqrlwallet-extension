@@ -10,7 +10,7 @@ import { getOptimalTokenBalance } from "@/functions/getOptimalTokenBalance";
 import { ROUTES } from "@/router/router";
 import { StoreType, useStore } from "@/stores/store";
 import StorageUtil from "@/utilities/storageUtil";
-import CopyableAddress from "../../../../Shared/CopyableAddress/CopyableAddress";
+import AddressDisclosure from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressDisclosure";
 import { getRandomTailwindTextColor } from "@/utilities/stylingUtil";
 import { Download, FileBox, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -52,7 +52,7 @@ const TokenImportSuccess = observer(
     return (
       <Card className="w-full">
         <CardHeader>
-          <CardTitle>{t('importToken.title')}</CardTitle>
+          <CardTitle>{t("importToken.title")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-col gap-4">
@@ -61,8 +61,8 @@ const TokenImportSuccess = observer(
               size={64}
             />
             <div className="flex flex-col gap-1">
-              <div>{t('importToken.contractAddressLabel')}</div>
-              <CopyableAddress
+              <div>{t("importToken.contractAddressLabel")}</div>
+              <AddressDisclosure
                 address={contractAddress}
                 className="font-bold text-secondary"
               />
@@ -70,25 +70,25 @@ const TokenImportSuccess = observer(
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-1">
-              <div>{t('importToken.nameLabel')}</div>
+              <div>{t("importToken.nameLabel")}</div>
               <div className="font-bold text-secondary">{name}</div>
             </div>
             <div className="flex flex-col gap-1">
-              <div>{t('importToken.symbolLabel')}</div>
+              <div>{t("importToken.symbolLabel")}</div>
               <div className="font-bold text-secondary">{symbol}</div>
             </div>
             <div className="flex flex-col gap-1">
-              <div>{t('importToken.totalSupplyLabel')}</div>
+              <div>{t("importToken.totalSupplyLabel")}</div>
               <div className="font-bold text-secondary">{totalSupply}</div>
             </div>
             <div className="flex flex-col gap-1">
-              <div>{t('importToken.balanceLabel')}</div>
+              <div>{t("importToken.balanceLabel")}</div>
               <div className="font-bold text-secondary">
                 {getOptimalTokenBalance(balance?.toString() ?? "0", symbol)}
               </div>
             </div>
             <div className="flex flex-col gap-1">
-              <div>{t('importToken.decimalsLabel')}</div>
+              <div>{t("importToken.decimalsLabel")}</div>
               <div className="font-bold text-secondary">
                 {decimals?.toString()}
               </div>
@@ -103,11 +103,11 @@ const TokenImportSuccess = observer(
             onClick={onCancelImport}
           >
             <X className="mr-2 h-4 w-4" />
-            {t('importToken.cancelButton')}
+            {t("importToken.cancelButton")}
           </Button>
           <Button className="w-full" type="button" onClick={onConfirmImport}>
             <Download className="mr-2 h-4 w-4" />
-            {t('importToken.confirmButton')}
+            {t("importToken.confirmButton")}
           </Button>
         </CardFooter>
       </Card>

@@ -1,3 +1,5 @@
+import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
+const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import HiddenAccountsStore from "./hiddenAccountsStore";
 
@@ -7,15 +9,22 @@ vi.mock("webextension-polyfill", () => ({
   default: {
     storage: {
       local: {
-        get: vi.fn((key: string) =>
-          Promise.resolve(key in localStore ? { [key]: localStore[key] } : {}),
+        get: vi.fn((key: string | null) =>
+          Promise.resolve(
+            key === null
+              ? { ...localStore }
+              : key in localStore
+                ? { [key]: localStore[key] }
+                : {},
+          ),
         ),
         set: vi.fn((data: Record<string, any>) => {
           Object.assign(localStore, data);
           return Promise.resolve();
         }),
-        remove: vi.fn((key: string) => {
-          delete localStore[key];
+        remove: vi.fn((key: string | string[]) => {
+          for (const item of Array.isArray(key) ? key : [key])
+            delete localStore[item];
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
@@ -41,7 +50,7 @@ describe("HiddenAccountsStore", () => {
 
   describe("loadHiddenAccounts", () => {
     it("should load hidden accounts from storage", async () => {
-      localStore["HIDDEN_ACCOUNTS"] = {
+      localStore[profileStorageKey("HIDDEN_ACCOUNTS")] = {
         Q20B714091cF2a62DADda2847803e3f1B9D2D3779: true,
       };
 
@@ -63,15 +72,15 @@ describe("HiddenAccountsStore", () => {
     it("should mark an account as hidden", async () => {
       await store.hideAccount("Q20B714091cF2a62DADda2847803e3f1B9D2D3779");
 
-      expect(
-        store.isHidden("Q20B714091cF2a62DADda2847803e3f1B9D2D3779"),
-      ).toBe(true);
+      expect(store.isHidden("Q20B714091cF2a62DADda2847803e3f1B9D2D3779")).toBe(
+        true,
+      );
     });
 
     it("should persist to storage", async () => {
       await store.hideAccount("Q20B714091cF2a62DADda2847803e3f1B9D2D3779");
 
-      expect(localStore["HIDDEN_ACCOUNTS"]).toEqual({
+      expect(localStore[profileStorageKey("HIDDEN_ACCOUNTS")]).toEqual({
         Q20B714091cF2a62DADda2847803e3f1B9D2D3779: true,
       });
     });
@@ -80,12 +89,12 @@ describe("HiddenAccountsStore", () => {
       await store.hideAccount("Q20B714091cF2a62DADda2847803e3f1B9D2D3779");
       await store.hideAccount("Q20fB08fF1f1376A14C055E9F56df80563E16722b");
 
-      expect(
-        store.isHidden("Q20B714091cF2a62DADda2847803e3f1B9D2D3779"),
-      ).toBe(true);
-      expect(
-        store.isHidden("Q20fB08fF1f1376A14C055E9F56df80563E16722b"),
-      ).toBe(true);
+      expect(store.isHidden("Q20B714091cF2a62DADda2847803e3f1B9D2D3779")).toBe(
+        true,
+      );
+      expect(store.isHidden("Q20fB08fF1f1376A14C055E9F56df80563E16722b")).toBe(
+        true,
+      );
     });
   });
 
@@ -94,9 +103,9 @@ describe("HiddenAccountsStore", () => {
       await store.hideAccount("Q20B714091cF2a62DADda2847803e3f1B9D2D3779");
       await store.unhideAccount("Q20B714091cF2a62DADda2847803e3f1B9D2D3779");
 
-      expect(
-        store.isHidden("Q20B714091cF2a62DADda2847803e3f1B9D2D3779"),
-      ).toBe(false);
+      expect(store.isHidden("Q20B714091cF2a62DADda2847803e3f1B9D2D3779")).toBe(
+        false,
+      );
     });
 
     it("should persist to storage after unhide", async () => {
@@ -104,7 +113,7 @@ describe("HiddenAccountsStore", () => {
       await store.hideAccount("Q20fB08fF1f1376A14C055E9F56df80563E16722b");
       await store.unhideAccount("Q20B714091cF2a62DADda2847803e3f1B9D2D3779");
 
-      expect(localStore["HIDDEN_ACCOUNTS"]).toEqual({
+      expect(localStore[profileStorageKey("HIDDEN_ACCOUNTS")]).toEqual({
         Q20fB08fF1f1376A14C055E9F56df80563E16722b: true,
       });
     });
@@ -114,15 +123,15 @@ describe("HiddenAccountsStore", () => {
     it("should return true for hidden account", async () => {
       await store.hideAccount("Q20B714091cF2a62DADda2847803e3f1B9D2D3779");
 
-      expect(
-        store.isHidden("Q20B714091cF2a62DADda2847803e3f1B9D2D3779"),
-      ).toBe(true);
+      expect(store.isHidden("Q20B714091cF2a62DADda2847803e3f1B9D2D3779")).toBe(
+        true,
+      );
     });
 
     it("should return false for non-hidden account", () => {
-      expect(
-        store.isHidden("Q20B714091cF2a62DADda2847803e3f1B9D2D3779"),
-      ).toBe(false);
+      expect(store.isHidden("Q20B714091cF2a62DADda2847803e3f1B9D2D3779")).toBe(
+        false,
+      );
     });
   });
 

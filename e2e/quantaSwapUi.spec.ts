@@ -13,7 +13,6 @@ import {
   CryptoSecretKeyBytes,
   cryptoSignKeypair,
   cryptoSignSignature,
-  cryptoSignVerify,
 } from "@theqrl/mldsa87";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import {
@@ -26,14 +25,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-} from "../src/functions/pqSigning/bytes";
+import { concatBytes, hexToBytes } from "../src/functions/pqSigning/bytes";
 import { SCHEME_TAG_TYPED } from "../src/functions/pqSigning/ctx";
 import {
-  computeTypedDataDigest,
+  computeLegacyTypedDataDigest,
   type TypedDataPayload,
 } from "../src/functions/pqSigning/typedData";
 
@@ -64,8 +59,8 @@ const { TypedDataEncoder } = frontendRequire("ethers") as {
 // Public deterministic fixture from canonical.json. Never fund this account.
 const TEST_ONLY_HEX_SEED =
   "0x0100000580a227e1b6d5a89df7723a71e9c03535e9447ec6d160b68c0ba845c68a05c59226cce711eb3db312c022ccf9577be7";
-const CHECKSUM_QRL_ACCOUNT = "Q6afB7Dfc849bC16E439033dfee7B296484619Db8";
-const CANONICAL_QRL_ACCOUNT = `Q${CHECKSUM_QRL_ACCOUNT.slice(1).toLowerCase()}`;
+const CHECKSUM_QRL_ACCOUNT =
+  "Q6aFB7dFC849bC16E439033DfEE7B296484619Db8fc7e3b7c20a1b1688B128259338aFfd79b7cdda8F28509607bc26eB67a4799Ae457Ec82b57A6a57dea04C194";
 const ETH_ACCOUNT = "0x2222222222222222222222222222222222222222";
 const MAKER_ETH_ACCOUNT = "0x1111111111111111111111111111111111111111";
 const ZERO_BYTES32 = `0x${"00".repeat(32)}`;
@@ -84,6 +79,8 @@ const DEPLOYMENT = {
   ethChainId: "11155111",
   ethHtlc: "eip155:11155111:0x910d5d4a7f2037c01f3b4c835167357e89909281",
   qrlChainId: "1337",
+  // Historical v1 order verification intentionally retains its Q + 40
+  // deployment fixture. The live QIP-55 signing request below must fail.
   qrlHtlc: "Q238322ad2e8f935b4481fcc379779c31b84decb0",
 } as const;
 
@@ -272,7 +269,7 @@ const makePortableOrder = (): PortableOrder => {
   const signature = new Uint8Array(CryptoBytes);
   cryptoSignSignature(
     signature,
-    computeTypedDataDigest(payload),
+    computeLegacyTypedDataDigest(payload),
     secretKey,
     false,
     SCHEME_TAG_TYPED,
@@ -332,10 +329,14 @@ const writeJson = (
 
 const rpcResult = (method: string): unknown => {
   switch (method) {
+    case "qrl_getBlockByNumber":
+      return {
+        hash: "0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4",
+      };
     case "qrl_chainId":
-      return "0x539";
+      return "0x301825";
     case "net_version":
-      return "1337";
+      return "3151909";
     case "net_listening":
       return true;
     case "qrl_blockNumber":
@@ -539,14 +540,24 @@ const waitForDAppRequest = async (
   await expect
     .poll(() =>
       serviceWorker.evaluate(async () => {
-        const stored = await chrome.storage.session.get("DAPPS");
-        return stored.DAPPS?.DAPPS_REQUEST_DATA?.method ?? null;
+        const stored = await chrome.storage.session.get(
+          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS",
+        );
+        return (
+          stored[
+            "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS"
+          ]?.DAPPS_REQUEST_DATA?.method ?? null
+        );
       }),
     )
     .toBe(method);
   return serviceWorker.evaluate(async () => {
-    const stored = await chrome.storage.session.get("DAPPS");
-    return stored.DAPPS?.DAPPS_REQUEST_DATA as DAppRequest;
+    const stored = await chrome.storage.session.get(
+      "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS",
+    );
+    return stored[
+      "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS"
+    ]?.DAPPS_REQUEST_DATA as DAppRequest;
   });
 };
 
@@ -590,9 +601,14 @@ const onboardExtension = async (
     .poll(
       () =>
         serviceWorker.evaluate(async (expectedAccount) => {
-          const { KEYSTORES, ACCOUNTS } = await chrome.storage.local.get([
-            "KEYSTORES",
-            "ACCOUNTS",
+          const {
+            ["v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:KEYSTORES"]:
+              KEYSTORES,
+            ["v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:ACCOUNTS"]:
+              ACCOUNTS,
+          } = await chrome.storage.local.get([
+            "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:KEYSTORES",
+            "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:ACCOUNTS",
           ]);
           const keystores = JSON.parse(KEYSTORES ?? "[]") as Array<{
             address?: string;
@@ -620,7 +636,7 @@ const onboardExtension = async (
   return extensionPage;
 };
 
-test("real QuantaSwap UI connects and submits an authenticated FillIntentV1", async () => {
+test("legacy QuantaSwap UI refuses a QIP-55 account before signing", async () => {
   const order = makePortableOrder();
   const fixture = await startFixtureServer(order);
   const profile = await mkdtemp(path.join(tmpdir(), "quantaswap-ui-e2e-"));
@@ -694,34 +710,36 @@ test("real QuantaSwap UI connects and submits an authenticated FillIntentV1", as
     await serviceWorker.evaluate(
       async ({ rpcUrl }) => {
         await chrome.storage.local.set({
-          SETTINGS: {
-            sidePanelPreferred: true,
-            phishingDetectionEnabled: false,
-            autoLockMinutes: 30,
-          },
-          BLOCKCHAINS: {
-            ACTIVE_BLOCKCHAIN: "0x539",
-            ALL_BLOCKCHAINS: [
-              {
-                chainId: "0x539",
-                chainName: "QRL E2E Testnet",
-                rpcUrls: [rpcUrl],
-                blockExplorerUrls: ["https://example.invalid"],
-                nativeCurrency: {
-                  name: "Quanta",
-                  symbol: "Quanta",
-                  decimals: 18,
+          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:SETTINGS":
+            {
+              sidePanelPreferred: true,
+              phishingDetectionEnabled: false,
+              autoLockMinutes: 30,
+            },
+          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:BLOCKCHAINS":
+            {
+              ACTIVE_BLOCKCHAIN: "0x301825",
+              ALL_BLOCKCHAINS: [
+                {
+                  chainId: "0x301825",
+                  chainName: "QRL E2E Testnet",
+                  rpcUrls: [rpcUrl],
+                  blockExplorerUrls: ["https://example.invalid"],
+                  nativeCurrency: {
+                    name: "Quanta",
+                    symbol: "Quanta",
+                    decimals: 18,
+                  },
+                  iconUrls: [],
+                  defaultRpcUrl: rpcUrl,
+                  defaultBlockExplorerUrl: "https://example.invalid",
+                  defaultIconUrl: "",
+                  isTestnet: true,
+                  defaultWsRpcUrl: rpcUrl,
+                  isCustomChain: true,
                 },
-                iconUrls: [],
-                defaultRpcUrl: rpcUrl,
-                defaultBlockExplorerUrl: "https://example.invalid",
-                defaultIconUrl: "",
-                isTestnet: true,
-                defaultWsRpcUrl: rpcUrl,
-                isCustomChain: true,
-              },
-            ],
-          },
+              ],
+            },
         });
       },
       { rpcUrl: `${fixture.origin}/rpc/qrl` },
@@ -750,108 +768,23 @@ test("real QuantaSwap UI connects and submits an authenticated FillIntentV1", as
     await waitForDAppRequest(serviceWorker, "qrl_requestAccounts");
     await approveCurrentRequest(extensionPage);
     await expect(
+      quantaSwapPage.getByText(/Wallet returned an invalid QRL account/),
+    ).toBeVisible();
+    await expect(
       quantaSwapPage.getByTitle("View address on Zondscan"),
-    ).toBeVisible();
-
-    const orderRow = quantaSwapPage.getByTitle(/^Take:/);
-    await expect(orderRow).toBeVisible();
-    await orderRow.click();
-    await expect(
-      quantaSwapPage.getByText(
-        "Maker's portable OrderV1 signature verified in this browser.",
-      ),
-    ).toBeVisible();
-    await quantaSwapPage
-      .getByRole("button", { name: "Sign fill request" })
-      .click();
-
-    const signingRequest = await waitForDAppRequest(
-      serviceWorker,
-      "qrl_signTypedData",
+    ).toHaveCount(0);
+    expect(fixture.intentPosts).toEqual([]);
+    const pendingMethod = await serviceWorker.evaluate(
+      async () =>
+        (
+          await chrome.storage.session.get(
+            "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS",
+          )
+        )[
+          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS"
+        ]?.DAPPS_REQUEST_DATA?.method ?? null,
     );
-    const signingParams = signingRequest.params ?? [];
-    const requestedSigner = signingParams[0];
-    const payload = signingParams[1] as TypedDataPayload;
-    expect(requestedSigner).toBe(CANONICAL_QRL_ACCOUNT);
-    expect(payload.primaryType).toBe("FillIntentV1");
-    expect(payload.domain).toEqual(DOMAIN);
-    expect(payload.message).toMatchObject({
-      orderDigest: order.orderDigest,
-      takerEthAccount: `eip155:11155111:${ETH_ACCOUNT}`,
-      takerQrlAccount: CANONICAL_QRL_ACCOUNT,
-      ...DEPLOYMENT,
-    });
-    await expect(
-      extensionPage.getByText("QuantaSwap · FillIntentV1"),
-    ).toBeVisible();
-    await approveCurrentRequest(extensionPage);
-
-    await expect
-      .poll(() => fixture.intentPosts.length, { timeout: 60_000 })
-      .toBeGreaterThanOrEqual(1);
-    const submitted = fixture.intentPosts[0];
-    expect(submitted).toBeDefined();
-    expect(fixture.intentStatuses[0]).toBe(201);
-    expect(submitted?.intent).toEqual({
-      orderDigest: order.orderDigest,
-      takerEthAccount: ETH_ACCOUNT,
-      takerQrlAccount: CANONICAL_QRL_ACCOUNT,
-      releaseCommitment: payload.message.releaseCommitment,
-    });
-    expect(submitted?.auth).toMatchObject({
-      version: "1",
-      scheme: "qrl-sign-typed-v1",
-      nonce: payload.message.requestNonce,
-      issuedAt: Number(payload.message.issuedAt),
-      expiresAt: Number(payload.message.expiresAt),
-    });
-    expect(intentMessage(submitted as SignedFillIntent)).toEqual(
-      payload.message,
-    );
-    const typedDigest = computeTypedDataDigest(payload);
-    expect(
-      cryptoSignVerify(
-        hexToBytes(submitted?.auth.signature ?? ""),
-        typedDigest,
-        hexToBytes(submitted?.auth.publicKey ?? ""),
-        SCHEME_TAG_TYPED,
-      ),
-    ).toBe(true);
-    const derivedSigner = `Q${bytesToHex(
-      shake256(
-        concatBytes(
-          hexToBytes(submitted?.auth.descriptor ?? ""),
-          hexToBytes(submitted?.auth.publicKey ?? ""),
-        ),
-        { dkLen: 20 },
-      ),
-    ).slice(2)}`;
-    expect(derivedSigner).toBe(CANONICAL_QRL_ACCOUNT);
-
-    await expect(
-      quantaSwapPage.getByRole("heading", { name: "Fill request signed" }),
-    ).toBeVisible();
-    const persisted = await quantaSwapPage.evaluate(() =>
-      JSON.parse(localStorage.getItem("quantaswap.swap.v2") ?? "null"),
-    );
-    expect(persisted.intent).toEqual(submitted);
-    expect(persisted.orderDigest).toBe(order.orderDigest);
-    expect(persisted.takerQrlAccount).toBe(CHECKSUM_QRL_ACCOUNT);
-
-    const postsBeforeReload = fixture.intentPosts.length;
-    await quantaSwapPage.reload();
-    await expect(
-      quantaSwapPage.getByRole("heading", { name: "Fill request signed" }),
-    ).toBeVisible();
-    await expect
-      .poll(() => fixture.intentPosts.length)
-      .toBeGreaterThan(postsBeforeReload);
-    for (const replay of fixture.intentPosts) {
-      expect(replay).toEqual(submitted);
-    }
-    expect(
-      fixture.intentStatuses.slice(1).every((status) => status === 200),
-    ).toBe(true);
+    expect(pendingMethod).not.toBe("qrl_signTypedData");
     expect(lifecycleErrors).toEqual([]);
   } finally {
     await context.close();

@@ -5,8 +5,7 @@
  * skip discovery and fall back to manual contract-address import.
  */
 const EXPLORER_API_BASES: Record<string, string> = {
-  // QRL Zond Testnet v2 (chain id 1337) is indexed by zondscan.com
-  "0x539": "https://zondscan.com",
+  "0x301825": "https://v3.zondscan.com",
 };
 
 export const getExplorerApiBase = (chainId: string): string | undefined =>

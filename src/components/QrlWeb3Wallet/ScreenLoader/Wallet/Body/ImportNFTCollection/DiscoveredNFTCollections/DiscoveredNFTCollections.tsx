@@ -2,6 +2,7 @@ import { Button } from "@/components/UI/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { Checkbox } from "@/components/UI/Checkbox";
 import { Label } from "@/components/UI/Label";
+import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import { ROUTES } from "@/router/router";
 import {
   DiscoveredNFTCollection,
@@ -122,7 +123,7 @@ const DiscoveredNFTCollections = observer(() => {
                 />
                 <Label
                   htmlFor={`discovered-collection-${key}`}
-                  className="flex flex-1 cursor-pointer flex-col gap-0.5"
+                  className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5"
                 >
                   <span className="text-sm font-medium">
                     {collection.name || t("discovery.unknownCollection")}{" "}
@@ -142,9 +143,10 @@ const DiscoveredNFTCollections = observer(() => {
                       </span>
                     )}
                   </span>
-                  <span className="break-all font-mono text-xs text-muted-foreground">
-                    {collection.address}
-                  </span>
+                  <AddressFingerprint
+                    address={collection.address}
+                    className="text-xs text-muted-foreground"
+                  />
                 </Label>
               </li>
             );

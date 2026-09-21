@@ -6,6 +6,7 @@ import {
 } from "@/components/UI/Accordion";
 import { Button } from "@/components/UI/Button";
 import { Label } from "@/components/UI/Label";
+import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
 import {
   Tooltip,
   TooltipContent,
@@ -14,7 +15,7 @@ import {
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
-import StringUtil, { sanitizeForDisplay } from "@/utilities/stringUtil";
+import { sanitizeForDisplay } from "@/utilities/stringUtil";
 import { MLDSA87, ExtendedSeed } from "@theqrl/wallet.js";
 import { bytesToHex } from "@theqrl/web3-utils";
 import { getEncodedEip712Data } from "@theqrl/web3-qrl-abi";
@@ -139,17 +140,11 @@ const QrlSignTypedDataV4Content = observer(() => {
 
   const params = dAppRequestData?.params;
   const fromAddress = params?.[0] ?? "";
-  const { prefix: prefixFromAddress, addressSplit: addressSplitFromAddress } =
-    StringUtil.getSplitAddress(fromAddress);
   const typedData = params?.[1];
   const domain = (typedData?.domain ?? {}) as Record<string, unknown>;
   const message = (typedData?.message ?? {}) as Record<string, unknown>;
   const primaryType = typedData?.primaryType ?? "";
   const verifyingContract = (domain?.verifyingContract as string) ?? "";
-  const {
-    prefix: prefixVerifyingContract,
-    addressSplit: addressSplitVerifyingContract,
-  } = StringUtil.getSplitAddress(verifyingContract);
 
   const declaredChainId =
     domain?.chainId !== undefined && domain?.chainId !== null
@@ -268,7 +263,10 @@ const QrlSignTypedDataV4Content = observer(() => {
       <div className="flex flex-col rounded-md p-2">
         <div className="flex flex-col gap-1">
           <div>{t("dapp.signature.fromAddress")}</div>
-          <div className="font-data w-64 font-bold text-identity-accent">{`${prefixFromAddress} ${addressSplitFromAddress.join(" ")}`}</div>
+          <FullAddress
+            address={fromAddress}
+            className="w-full font-bold text-identity-accent"
+          />
         </div>
       </div>
       <div className="rounded-md bg-muted/50 p-2 text-xs">
@@ -358,9 +356,10 @@ const QrlSignTypedDataV4Content = observer(() => {
               {verifyingContract && (
                 <div className="flex flex-col gap-1">
                   <div>Verifying Contract</div>
-                  <div className="font-bold text-secondary">
-                    {`${prefixVerifyingContract} ${addressSplitVerifyingContract.join(" ")}`}
-                  </div>
+                  <FullAddress
+                    address={verifyingContract}
+                    className="w-full font-bold text-secondary"
+                  />
                 </div>
               )}
               {domain?.salt !== undefined && (

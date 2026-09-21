@@ -3,10 +3,10 @@ import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
 import type Transport from "@ledgerhq/hw-transport";
 
 // Mock transport instance
-const mockOn = vi.fn<any>();
-const mockClose = vi.fn<any>();
-const mockSend = vi.fn<any>();
-const mockExchange = vi.fn<any>();
+const mockOn = vi.fn();
+const mockClose = vi.fn();
+const mockSend = vi.fn();
+const mockExchange = vi.fn();
 
 const mockTransportInstance = {
   on: mockOn,
@@ -19,7 +19,7 @@ const mockTransportInstance = {
 vi.mock("@ledgerhq/hw-transport-webhid", () => ({
   __esModule: true,
   default: {
-    create: vi.fn<any>(),
+    create: vi.fn(),
   },
 }));
 
@@ -50,7 +50,7 @@ class LedgerTransportService {
 
     try {
       this.transport = await mockedTransportWebHID.create(
-        LEDGER_CONFIG.CONNECTION_TIMEOUT
+        LEDGER_CONFIG.CONNECTION_TIMEOUT,
       );
 
       this.transport!.on("disconnect", () => {
@@ -99,7 +99,7 @@ class LedgerTransportService {
     ins: number,
     p1: number,
     p2: number,
-    data?: Buffer
+    data?: Buffer,
   ): Promise<Buffer> {
     const transport = await this.connect();
 
@@ -127,12 +127,12 @@ vi.mock("./ledgerTransport", () => ({
   __esModule: true,
   LedgerTransportService: class MockedLedgerTransportService {},
   ledgerTransport: {
-    isSupported: vi.fn<any>(),
-    isConnected: vi.fn<any>(),
-    connect: vi.fn<any>(),
-    disconnect: vi.fn<any>(),
-    send: vi.fn<any>(),
-    onDisconnect: vi.fn<any>(),
+    isSupported: vi.fn(),
+    isConnected: vi.fn(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    send: vi.fn(),
+    onDisconnect: vi.fn(),
   },
 }));
 
@@ -206,13 +206,13 @@ describe("LedgerTransportService", () => {
 
     it("should create transport and return it on success", async () => {
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
 
       const transport = await service.connect();
 
       expect(mockedTransportWebHID.create).toHaveBeenCalledWith(
-        LEDGER_CONFIG.CONNECTION_TIMEOUT
+        LEDGER_CONFIG.CONNECTION_TIMEOUT,
       );
       expect(transport).toBe(mockTransportInstance);
       expect(mockOn).toHaveBeenCalledWith("disconnect", expect.any(Function));
@@ -220,7 +220,7 @@ describe("LedgerTransportService", () => {
 
     it("should return existing transport if already connected", async () => {
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
 
       // First connection
@@ -240,43 +240,43 @@ describe("LedgerTransportService", () => {
       });
 
       await expect(service.connect()).rejects.toThrow(
-        LEDGER_ERROR_MESSAGES.WEBHID_NOT_SUPPORTED
+        LEDGER_ERROR_MESSAGES.WEBHID_NOT_SUPPORTED,
       );
     });
 
     it("should throw DEVICE_NOT_FOUND when user closes dialog", async () => {
       (mockedTransportWebHID.create as any).mockRejectedValue(
-        new Error("No device selected")
+        new Error("No device selected"),
       );
 
       await expect(service.connect()).rejects.toThrow(
-        LEDGER_ERROR_MESSAGES.DEVICE_NOT_FOUND
+        LEDGER_ERROR_MESSAGES.DEVICE_NOT_FOUND,
       );
     });
 
     it("should throw CONNECTION_FAILED when access is denied", async () => {
       (mockedTransportWebHID.create as any).mockRejectedValue(
-        new Error("Access denied to device")
+        new Error("Access denied to device"),
       );
 
       await expect(service.connect()).rejects.toThrow(
-        LEDGER_ERROR_MESSAGES.CONNECTION_FAILED
+        LEDGER_ERROR_MESSAGES.CONNECTION_FAILED,
       );
     });
 
     it("should throw CONNECTION_FAILED for other errors", async () => {
       (mockedTransportWebHID.create as any).mockRejectedValue(
-        new Error("Unknown error")
+        new Error("Unknown error"),
       );
 
       await expect(service.connect()).rejects.toThrow(
-        LEDGER_ERROR_MESSAGES.CONNECTION_FAILED
+        LEDGER_ERROR_MESSAGES.CONNECTION_FAILED,
       );
     });
 
     it("should register disconnect handler", async () => {
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
 
       await service.connect();
@@ -286,16 +286,16 @@ describe("LedgerTransportService", () => {
 
     it("should call onDisconnect callback when device disconnects", async () => {
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
-      const onDisconnect = vi.fn<any>();
+      const onDisconnect = vi.fn();
 
       service.onDisconnect(onDisconnect);
       await service.connect();
 
       // Get the disconnect handler and call it
       const disconnectHandler = mockOn.mock.calls.find(
-        (call) => call[0] === "disconnect"
+        (call) => call[0] === "disconnect",
       )?.[1] as () => void;
 
       disconnectHandler();
@@ -306,7 +306,7 @@ describe("LedgerTransportService", () => {
 
     it("should clear transport when device disconnects", async () => {
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
 
       await service.connect();
@@ -314,7 +314,7 @@ describe("LedgerTransportService", () => {
 
       // Simulate disconnect
       const disconnectHandler = mockOn.mock.calls.find(
-        (call) => call[0] === "disconnect"
+        (call) => call[0] === "disconnect",
       )?.[1] as () => void;
 
       disconnectHandler();
@@ -334,7 +334,7 @@ describe("LedgerTransportService", () => {
 
     it("should close transport and clear state", async () => {
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
       mockClose.mockResolvedValue(undefined);
 
@@ -355,7 +355,7 @@ describe("LedgerTransportService", () => {
 
     it("should clear state even if close throws error", async () => {
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
       mockClose.mockRejectedValue(new Error("Close error"));
 
@@ -381,7 +381,7 @@ describe("LedgerTransportService", () => {
 
     it("should return true when connected", async () => {
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
 
       await service.connect();
@@ -391,7 +391,7 @@ describe("LedgerTransportService", () => {
 
     it("should return false after disconnect", async () => {
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
       mockClose.mockResolvedValue(undefined);
 
@@ -404,7 +404,7 @@ describe("LedgerTransportService", () => {
 
   describe("onDisconnect", () => {
     it("should register callback", () => {
-      const callback = vi.fn<any>();
+      const callback = vi.fn();
 
       service.onDisconnect(callback);
 
@@ -425,7 +425,7 @@ describe("LedgerTransportService", () => {
     it("should send APDU command and return response", async () => {
       const mockResponse = Buffer.from([0x01, 0x02, 0x90, 0x00]);
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
       mockSend.mockResolvedValue(mockResponse);
 
@@ -439,7 +439,7 @@ describe("LedgerTransportService", () => {
       const mockResponse = Buffer.from([0x90, 0x00]);
       const inputData = Buffer.from([0xaa, 0xbb, 0xcc]);
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
       mockSend.mockResolvedValue(mockResponse);
 
@@ -451,7 +451,7 @@ describe("LedgerTransportService", () => {
     it("should auto-connect if not connected", async () => {
       const mockResponse = Buffer.from([0x90, 0x00]);
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
       mockSend.mockResolvedValue(mockResponse);
 
@@ -465,30 +465,30 @@ describe("LedgerTransportService", () => {
 
     it("should throw DEVICE_DISCONNECTED when device was unplugged", async () => {
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
       mockSend.mockRejectedValue(new Error("Device was disconnected"));
 
       await expect(service.send(0xe0, 0x03, 0x00, 0x00)).rejects.toThrow(
-        LEDGER_ERROR_MESSAGES.DEVICE_DISCONNECTED
+        LEDGER_ERROR_MESSAGES.DEVICE_DISCONNECTED,
       );
       expect(service.isConnected()).toBe(false);
     });
 
     it("should pass through other errors", async () => {
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
       mockSend.mockRejectedValue(new Error("Some APDU error"));
 
       await expect(service.send(0xe0, 0x03, 0x00, 0x00)).rejects.toThrow(
-        "Some APDU error"
+        "Some APDU error",
       );
     });
 
     it("should pass through non-Error rejections", async () => {
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
       mockSend.mockRejectedValue({ statusCode: 0x6985 });
 
@@ -511,7 +511,7 @@ describe("LedgerTransportService", () => {
       const mockResponse = Buffer.from([0x01, 0x02, 0x90, 0x00]);
       const apduData = Buffer.from([0xe0, 0x03, 0x00, 0x00, 0x00]);
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
       mockExchange.mockResolvedValue(mockResponse);
 
@@ -524,7 +524,7 @@ describe("LedgerTransportService", () => {
     it("should auto-connect if not connected", async () => {
       const mockResponse = Buffer.from([0x90, 0x00]);
       (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance
+        mockTransportInstance,
       );
       mockExchange.mockResolvedValue(mockResponse);
 

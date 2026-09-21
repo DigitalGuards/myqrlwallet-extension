@@ -5,14 +5,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/UI/Dialog";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/UI/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/UI/tabs";
+import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import { useStore } from "@/stores/store";
-import StringUtil from "@/utilities/stringUtil";
 import { BookUser, Users, Wallet, History } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -31,18 +26,17 @@ type AddressRowProps = {
 };
 
 const AddressRow = ({ address, label, onClick }: AddressRowProps) => {
-  const { prefix, addressSplit } = StringUtil.getSplitAddress(address);
-
   return (
     <button
       className="flex w-full flex-col gap-0.5 rounded-md border p-2 text-left transition-colors hover:bg-accent"
+      aria-label={label ? `${label}: ${address}` : address}
       onClick={onClick}
     >
       {label && <span className="text-sm font-medium">{label}</span>}
-      <span className="truncate text-xs text-muted-foreground">
-        {prefix}
-        {addressSplit.join("")}
-      </span>
+      <AddressFingerprint
+        address={address}
+        className="text-xs text-muted-foreground"
+      />
     </button>
   );
 };
@@ -77,9 +71,7 @@ const RecipientPicker = observer(
         (qrlAccounts.accounts ?? [])
           .map((a) => ({
             address: a.accountAddress,
-            label:
-              accountLabelsStore.getLabel(a.accountAddress) ||
-              a.accountAddress,
+            label: accountLabelsStore.getLabel(a.accountAddress) || undefined,
           }))
           .filter(
             (a) => a.address.toLowerCase() !== accountAddress.toLowerCase(),
@@ -110,7 +102,7 @@ const RecipientPicker = observer(
         <DialogTrigger asChild>
           <button
             type="button"
-            aria-label={t('recipient.openAddressBook')}
+            aria-label={t("recipient.openAddressBook")}
             className="shrink-0 rounded p-2 text-muted-foreground transition-colors hover:text-secondary"
           >
             <BookUser size={18} />
@@ -118,18 +110,18 @@ const RecipientPicker = observer(
         </DialogTrigger>
         <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{t('recipient.dialogTitle')}</DialogTitle>
+            <DialogTitle>{t("recipient.dialogTitle")}</DialogTitle>
           </DialogHeader>
           <Tabs defaultValue="accounts">
             <TabsList className="w-full">
               <TabsTrigger value="accounts" className="flex-1">
-                {t('recipient.tabAccounts')}
+                {t("recipient.tabAccounts")}
               </TabsTrigger>
               <TabsTrigger value="contacts" className="flex-1">
-                {t('recipient.tabContacts')}
+                {t("recipient.tabContacts")}
               </TabsTrigger>
               <TabsTrigger value="recent" className="flex-1">
-                {t('recipient.tabRecent')}
+                {t("recipient.tabRecent")}
               </TabsTrigger>
             </TabsList>
 
@@ -137,7 +129,7 @@ const RecipientPicker = observer(
               {otherAccounts.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-6 text-muted-foreground">
                   <Wallet className="h-8 w-8" />
-                  <p className="text-sm">{t('recipient.emptyAccounts')}</p>
+                  <p className="text-sm">{t("recipient.emptyAccounts")}</p>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
@@ -157,7 +149,7 @@ const RecipientPicker = observer(
               {contacts.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-6 text-muted-foreground">
                   <Users className="h-8 w-8" />
-                  <p className="text-sm">{t('recipient.emptyContacts')}</p>
+                  <p className="text-sm">{t("recipient.emptyContacts")}</p>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
@@ -177,7 +169,7 @@ const RecipientPicker = observer(
               {recentAddresses.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-6 text-muted-foreground">
                   <History className="h-8 w-8" />
-                  <p className="text-sm">{t('recipient.emptyRecent')}</p>
+                  <p className="text-sm">{t("recipient.emptyRecent")}</p>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">

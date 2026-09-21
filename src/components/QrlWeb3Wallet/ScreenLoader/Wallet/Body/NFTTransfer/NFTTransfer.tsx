@@ -1,4 +1,5 @@
 import { Button } from "@/components/UI/Button";
+import AddressDisclosure from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressDisclosure";
 import {
   Card,
   CardContent,
@@ -20,10 +21,10 @@ import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
 import type { NFTStandard } from "@/types/nft";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
+import { isCanonicalQrlAddress, isQrlAddress } from "@/utilities/addressUtil";
 import StorageUtil from "@/utilities/storageUtil";
 import { isQrnsName, resolveQrnsName } from "@/utilities/qrnsResolver";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { validator } from "@theqrl/web3";
 import { Image, Loader, Send, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useEffect, useRef, useState } from "react";
@@ -61,7 +62,7 @@ const createFormSchema = (t: TFunction, maxAmount?: string) =>
     })
     .refine(
       (fields) =>
-        validator.isAddressString(fields.receiverAddress) ||
+        isQrlAddress(fields.receiverAddress) ||
         isQrnsName(fields.receiverAddress),
       {
         message: t("validation.addressInvalid"),
@@ -113,7 +114,13 @@ const NFTTransfer = observer(() => {
   const FormSchema = createFormSchema(t, is1155 ? ownedBalance : undefined);
 
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
+  const [resolvedQrns, setResolvedQrns] = useState<{
+    name: string;
+    chainId: string;
+    rpcUrl: string;
+    registryAddress: string;
+    address: string;
+  } | null>(null);
   const [qrnsResolving, setQrnsResolving] = useState(false);
   const [qrnsError, setQrnsError] = useState<string | null>(null);
 
@@ -144,6 +151,12 @@ const NFTTransfer = observer(() => {
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     try {
       let receiver = formData.receiverAddress;
+      if (isQrnsName(receiver) && !resolvedAddress) {
+        control.setError("receiverAddress", {
+          message: t("transfer.qrnsResolutionFailed"),
+        });
+        return;
+      }
       if (isQrnsName(receiver) && resolvedAddress) {
         receiver = resolvedAddress;
       }
@@ -159,7 +172,16 @@ const NFTTransfer = observer(() => {
         is1155 ? formData.amount : "1",
       );
 
-      const { transactionHash, rawTransaction, error, nonce, maxFeePerGas, maxPriorityFeePerGas, gasLimit, data } = signResult;
+      const {
+        transactionHash,
+        rawTransaction,
+        error,
+        nonce,
+        maxFeePerGas,
+        maxPriorityFeePerGas,
+        gasLimit,
+        data,
+      } = signResult;
 
       if (error) {
         control.setError("receiverAddress", {
@@ -219,8 +241,7 @@ const NFTTransfer = observer(() => {
                 status: isSuccess,
                 blockNumber: receipt.blockNumber?.toString() ?? "",
                 gasUsed: receipt.gasUsed?.toString() ?? "",
-                effectiveGasPrice:
-                  (receipt.effectiveGasPrice ?? 0).toString(),
+                effectiveGasPrice: (receipt.effectiveGasPrice ?? 0).toString(),
               },
             );
             await fetchAccounts();
@@ -245,40 +266,80 @@ const NFTTransfer = observer(() => {
   }
 
   const watchedReceiver = watch("receiverAddress");
+  const qrnsBlockchain = qrlStore.qrlConnection.blockchain;
+  const qrnsChainId = qrnsBlockchain.chainId;
+  const qrnsRpcUrl = qrnsBlockchain.defaultRpcUrl;
+  const qrnsRegistryAddress = qrnsBlockchain.qrnsRegistryAddress;
+  const resolvedAddress =
+    resolvedQrns &&
+    resolvedQrns.name === watchedReceiver &&
+    resolvedQrns.chainId === qrnsChainId &&
+    resolvedQrns.rpcUrl === qrnsRpcUrl &&
+    resolvedQrns.registryAddress === qrnsRegistryAddress
+      ? resolvedQrns.address
+      : null;
   const resolveTimerRef = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
     clearTimeout(resolveTimerRef.current);
+    let cancelled = false;
 
     if (!watchedReceiver || !isQrnsName(watchedReceiver)) {
-      setResolvedAddress(null);
+      setResolvedQrns(null);
       setQrnsError(null);
       setQrnsResolving(false);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
-    setQrnsResolving(true);
-    setQrnsError(null);
-    setResolvedAddress(null);
+    setResolvedQrns(null);
+    if (!isCanonicalQrlAddress(qrnsRegistryAddress)) {
+      setQrnsError(t("transfer.qrnsUnavailable"));
+      setQrnsResolving(false);
+      return () => {
+        cancelled = true;
+      };
+    }
 
-    const rpcUrl = qrlStore.qrlConnection.blockchain.defaultRpcUrl;
-    const registry = qrlStore.qrlConnection.blockchain.qrnsRegistryAddress;
-    const nameToResolve = watchedReceiver.trim();
+    setQrnsError(null);
+    setQrnsResolving(true);
+    const nameToResolve = watchedReceiver;
 
     resolveTimerRef.current = setTimeout(() => {
-      resolveQrnsName(nameToResolve, rpcUrl, registry)
+      resolveQrnsName(nameToResolve, qrnsBlockchain)
         .then((addr) => {
-          setResolvedAddress(addr);
+          if (cancelled) return;
+          setResolvedQrns({
+            name: nameToResolve,
+            chainId: qrnsChainId,
+            rpcUrl: qrnsRpcUrl,
+            registryAddress: qrnsRegistryAddress,
+            address: addr,
+          });
           setQrnsError(null);
         })
         .catch(() => {
-          setResolvedAddress(null);
+          if (cancelled) return;
+          setResolvedQrns(null);
           setQrnsError(t("transfer.qrnsResolutionFailed"));
         })
-        .finally(() => setQrnsResolving(false));
+        .finally(() => {
+          if (!cancelled) setQrnsResolving(false);
+        });
     }, 500);
 
-    return () => clearTimeout(resolveTimerRef.current);
-  }, [watchedReceiver]);
+    return () => {
+      cancelled = true;
+      clearTimeout(resolveTimerRef.current);
+    };
+  }, [
+    watchedReceiver,
+    qrnsBlockchain,
+    qrnsChainId,
+    qrnsRpcUrl,
+    qrnsRegistryAddress,
+    t,
+  ]);
 
   const [imageError, setImageError] = useState(false);
 
@@ -365,9 +426,17 @@ const NFTTransfer = observer(() => {
                       </p>
                     )}
                     {resolvedAddress && !qrnsResolving && (
-                      <p className="text-xs text-success">
-                        → {resolvedAddress}
-                      </p>
+                      <div className="rounded-md border border-success/20 bg-success/5 p-2 text-success">
+                        <p className="mb-1 text-xs font-medium">
+                          {t("transfer.qrnsResolved")}
+                        </p>
+                        <AddressDisclosure
+                          key={resolvedAddress}
+                          address={resolvedAddress}
+                          fingerprintClassName="text-success"
+                          fullAddressClassName="text-success"
+                        />
+                      </div>
                     )}
                     {qrnsError && !qrnsResolving && (
                       <p className="text-xs text-destructive">{qrnsError}</p>
@@ -429,9 +498,7 @@ const NFTTransfer = observer(() => {
                 ) : (
                   <Send className="mr-2 h-4 w-4" />
                 )}
-                {isSubmitting
-                  ? t("nft.sendingNft")
-                  : t("nft.sendNftButton")}
+                {isSubmitting ? t("nft.sendingNft") : t("nft.sendNftButton")}
               </Button>
             </CardFooter>
           </Card>

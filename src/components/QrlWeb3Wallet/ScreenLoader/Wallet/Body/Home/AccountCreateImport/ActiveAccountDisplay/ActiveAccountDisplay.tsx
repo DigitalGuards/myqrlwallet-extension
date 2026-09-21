@@ -1,7 +1,7 @@
 import { formatFiatCompact } from "@/functions/formatFiat";
 import { parseBalanceValue } from "@/functions/parseBalanceValue";
 import { useStore } from "@/stores/store";
-import StringUtil from "@/utilities/stringUtil";
+import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import { Check, Copy, TrendingDown, TrendingUp } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useState } from "react";
@@ -29,10 +29,6 @@ const ActiveAccountDisplay = observer(() => {
       : accountBalance.slice(0, balanceSpaceIdx);
   const balanceUnit =
     balanceSpaceIdx === -1 ? "" : accountBalance.slice(balanceSpaceIdx + 1);
-  const { prefix, addressSplit } = StringUtil.getSplitAddress(accountAddress);
-  // Compact pill: full address lives on Receive and the account list.
-  const abbreviatedAddress = `${prefix}${addressSplit[0]}...${addressSplit[addressSplit.length - 1]}`;
-
   const numericBalance = parseBalanceValue(accountBalance).toNumber();
   const price = priceStore.getPrice(currency);
   const fiatDisplay =
@@ -88,9 +84,10 @@ const ActiveAccountDisplay = observer(() => {
         title={accountAddress}
         onClick={() => void handleCopyAddress()}
       >
-        <span className="font-data text-xs text-identity-accent">
-          {abbreviatedAddress}
-        </span>
+        <AddressFingerprint
+          address={accountAddress}
+          className="text-xs text-identity-accent"
+        />
         {copiedAddress ? (
           <Check className="h-3.5 w-3.5 shrink-0 text-success" />
         ) : (

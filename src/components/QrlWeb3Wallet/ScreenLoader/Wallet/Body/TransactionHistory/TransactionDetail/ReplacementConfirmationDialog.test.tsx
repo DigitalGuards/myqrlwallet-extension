@@ -6,8 +6,8 @@ import ReplacementConfirmationDialog from "./ReplacementConfirmationDialog";
 
 vi.mock("@theqrl/web3", () => ({
   utils: {
-    fromPlanck: vi.fn<any>(
-      (value: number | bigint, _unit: string) => String(Number(value) / 1e18),
+    fromPlanck: vi.fn((value: number | bigint, _unit: string) =>
+      String(Number(value) / 1e18),
     ),
   },
 }));
@@ -72,21 +72,19 @@ describe("ReplacementConfirmationDialog", () => {
   // ── Cancel mode ──
 
   it("should display cancel title and description", () => {
-    render(
-      <ReplacementConfirmationDialog {...defaultProps} action="cancel" />,
-    );
+    render(<ReplacementConfirmationDialog {...defaultProps} action="cancel" />);
 
-    // Title and button both say "Cancel Transaction" — verify at least 2 exist
-    expect(screen.getAllByText("Cancel Transaction").length).toBeGreaterThanOrEqual(2);
+    // Title and button both say "Cancel Transaction" - verify at least 2 exist
+    expect(
+      screen.getAllByText("Cancel Transaction").length,
+    ).toBeGreaterThanOrEqual(2);
     expect(
       screen.getByText(/self-send transaction.*same nonce/),
     ).toBeInTheDocument();
   });
 
   it("should display 'Cancel Transaction' on confirm button", () => {
-    render(
-      <ReplacementConfirmationDialog {...defaultProps} action="cancel" />,
-    );
+    render(<ReplacementConfirmationDialog {...defaultProps} action="cancel" />);
 
     expect(
       screen.getByRole("button", { name: "Cancel Transaction" }),
@@ -131,10 +129,7 @@ describe("ReplacementConfirmationDialog", () => {
 
   it("should show 'Estimating...' when estimatedNewGasFee is empty", () => {
     render(
-      <ReplacementConfirmationDialog
-        {...defaultProps}
-        estimatedNewGasFee=""
-      />,
+      <ReplacementConfirmationDialog {...defaultProps} estimatedNewGasFee="" />,
     );
 
     expect(screen.getByText("Estimating...")).toBeInTheDocument();
@@ -150,9 +145,7 @@ describe("ReplacementConfirmationDialog", () => {
       />,
     );
 
-    expect(
-      screen.getByText("Insufficient funds for gas"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Insufficient funds for gas")).toBeInTheDocument();
   });
 
   it("should not display error when error is empty", () => {
@@ -176,18 +169,11 @@ describe("ReplacementConfirmationDialog", () => {
 
   it("should enable buttons when isProcessing is false", () => {
     render(
-      <ReplacementConfirmationDialog
-        {...defaultProps}
-        isProcessing={false}
-      />,
+      <ReplacementConfirmationDialog {...defaultProps} isProcessing={false} />,
     );
 
-    expect(
-      screen.getByRole("button", { name: "Speed Up" }),
-    ).toBeEnabled();
-    expect(
-      screen.getByRole("button", { name: "Go Back" }),
-    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Speed Up" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Go Back" })).toBeEnabled();
   });
 
   // ── Callbacks ──
@@ -195,10 +181,7 @@ describe("ReplacementConfirmationDialog", () => {
   it("should call onConfirm when confirm button is clicked", async () => {
     const onConfirm = vi.fn();
     render(
-      <ReplacementConfirmationDialog
-        {...defaultProps}
-        onConfirm={onConfirm}
-      />,
+      <ReplacementConfirmationDialog {...defaultProps} onConfirm={onConfirm} />,
     );
 
     await userEvent.click(screen.getByRole("button", { name: "Speed Up" }));
@@ -214,12 +197,8 @@ describe("ReplacementConfirmationDialog", () => {
   // ── Closed state ──
 
   it("should not render content when open is false", () => {
-    render(
-      <ReplacementConfirmationDialog {...defaultProps} open={false} />,
-    );
+    render(<ReplacementConfirmationDialog {...defaultProps} open={false} />);
 
-    expect(
-      screen.queryByText("Speed Up Transaction"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Speed Up Transaction")).not.toBeInTheDocument();
   });
 });

@@ -16,7 +16,7 @@ import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { useStore } from "@/stores/store";
-import StringUtil from "@/utilities/stringUtil";
+import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
 import ResetWalletDialog from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/ResetWalletDialog/ResetWalletDialog";
@@ -68,10 +68,6 @@ const LockPasswordCheck = observer(() => {
   } = form;
 
   const label = accountLabelsStore.getLabel(accountAddress);
-  const { prefix, addressSplit } = StringUtil.getSplitAddress(accountAddress);
-  const abbreviatedAddress = accountAddress
-    ? `${prefix}${addressSplit[0]}...${addressSplit[addressSplit.length - 1]}`
-    : "";
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     scrollShellToTop();
@@ -84,9 +80,7 @@ const LockPasswordCheck = observer(() => {
       }
     } catch (error) {
       const message =
-        error instanceof Error
-          ? error.message
-          : t("lock.unlock.errorFailed");
+        error instanceof Error ? error.message : t("lock.unlock.errorFailed");
       setError("password", { message });
     }
     setUnlockAttempt((attempt) => attempt + 1);
@@ -121,9 +115,16 @@ const LockPasswordCheck = observer(() => {
               >
                 {/* text-primary so the glow-dot halo (currentColor) pulses ember, not foreground */}
                 <span className="glow-dot h-2 w-2 shrink-0 rounded-full bg-primary text-primary" />
-                <span className="font-data truncate text-xs text-identity-accent">
-                  {label || abbreviatedAddress}
-                </span>
+                {label ? (
+                  <span className="truncate text-xs text-identity-accent">
+                    {label}
+                  </span>
+                ) : (
+                  <AddressFingerprint
+                    address={accountAddress}
+                    className="text-xs text-identity-accent"
+                  />
+                )}
               </div>
             )}
           </div>

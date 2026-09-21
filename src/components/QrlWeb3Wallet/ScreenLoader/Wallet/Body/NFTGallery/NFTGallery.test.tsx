@@ -47,7 +47,7 @@ describe("NFTGallery", () => {
   it("should render collection name as title", async () => {
     renderComponent({
       qrlStore: {
-        getOwnedNftTokens: vi.fn<any>().mockResolvedValue([]),
+        getOwnedNftTokens: vi.fn().mockResolvedValue([]),
       },
     });
 
@@ -57,15 +57,13 @@ describe("NFTGallery", () => {
   it("should show empty state when no tokens owned", async () => {
     renderComponent({
       qrlStore: {
-        getOwnedNftTokens: vi.fn<any>().mockResolvedValue([]),
+        getOwnedNftTokens: vi.fn().mockResolvedValue([]),
       },
     });
 
     await waitFor(() => {
       expect(
-        screen.getByText(
-          "No NFTs found in this collection for this account.",
-        ),
+        screen.getByText("No NFTs found in this collection for this account."),
       ).toBeInTheDocument();
     });
   });
@@ -74,7 +72,7 @@ describe("NFTGallery", () => {
     renderComponent({
       qrlStore: {
         getOwnedNftTokens: vi
-          .fn<any>()
+          .fn()
           .mockResolvedValue([
             { tokenId: "1" },
             { tokenId: "2" },
@@ -92,7 +90,7 @@ describe("NFTGallery", () => {
 
   it("should pass the route standard to the store and balances to items", async () => {
     const getOwnedNftTokens = vi
-      .fn<any>()
+      .fn()
       .mockResolvedValue([{ tokenId: "42", balance: "3" }]);
     renderComponent(
       { qrlStore: { getOwnedNftTokens } },
@@ -111,7 +109,7 @@ describe("NFTGallery", () => {
   it("should have a back button", async () => {
     renderComponent({
       qrlStore: {
-        getOwnedNftTokens: vi.fn<any>().mockResolvedValue([]),
+        getOwnedNftTokens: vi.fn().mockResolvedValue([]),
       },
     });
 

@@ -1,5 +1,6 @@
 import { Button } from "@/components/UI/Button";
 import { Label } from "@/components/UI/Label";
+import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
 import {
   Tooltip,
   TooltipContent,
@@ -15,7 +16,7 @@ import { RESTRICTED_METHODS } from "@/scripts/constants/requestConstants";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import { useStore } from "@/stores/store";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
-import StringUtil, { sanitizeForDisplay } from "@/utilities/stringUtil";
+import { sanitizeForDisplay } from "@/utilities/stringUtil";
 import { Buffer } from "buffer";
 import { Copy } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -48,9 +49,6 @@ const QrlPqSign = observer(() => {
   const params = dAppRequestData?.params;
   const fromAddress: string = params?.[0] ?? "";
   const payload: unknown = params?.[1];
-
-  const { prefix: prefixFromAddress, addressSplit } =
-    StringUtil.getSplitAddress(fromAddress);
 
   // Message-mode display: decode the hex payload to UTF-8 when possible.
   const rawMessage: string = isTypedData
@@ -136,9 +134,10 @@ const QrlPqSign = observer(() => {
     <div className="flex flex-col gap-2 rounded-md p-2">
       <div className="flex flex-col gap-1">
         <div>{t("dapp.signature.fromAddress")}</div>
-        <div className="w-64 font-bold text-secondary">
-          {`${prefixFromAddress} ${addressSplit.join(" ")}`}
-        </div>
+        <FullAddress
+          address={fromAddress}
+          className="w-full font-bold text-secondary"
+        />
       </div>
 
       {isTypedData ? (
@@ -153,13 +152,14 @@ const QrlPqSign = observer(() => {
               {typedPayload?.primaryType}
             </div>
             {verifyingContract && (
-              <div className="break-all">
+              <div className="min-w-0">
                 <span className="text-muted-foreground">
                   {t("dapp.pqSignature.verifyingContract")}:
-                </span>{" "}
-                <span className="font-mono text-secondary">
-                  {verifyingContract}
                 </span>
+                <FullAddress
+                  address={verifyingContract}
+                  className="ml-1 text-secondary"
+                />
               </div>
             )}
             {hasChainId && (

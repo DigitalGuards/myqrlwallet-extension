@@ -1,5 +1,6 @@
 import { Button } from "@/components/UI/Button";
 import { Label } from "@/components/UI/Label";
+import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
 import {
   Tooltip,
   TooltipContent,
@@ -8,7 +9,7 @@ import {
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
-import StringUtil, { sanitizeForDisplay } from "@/utilities/stringUtil";
+import { sanitizeForDisplay } from "@/utilities/stringUtil";
 import { MLDSA87, ExtendedSeed } from "@theqrl/wallet.js";
 import { bytesToHex } from "@theqrl/web3-utils";
 import { parseAndValidateSeed } from "@theqrl/web3-qrl-accounts";
@@ -47,8 +48,6 @@ const PersonalSign = observer(() => {
   const { sanitized: challenge, hadHidden: hasHiddenChars } =
     sanitizeForDisplay(decodedChallenge);
   const fromAddress = params?.[1] ?? "";
-  const { prefix: prefixFromAddress, addressSplit: addressSplitFromAddress } =
-    StringUtil.getSplitAddress(fromAddress);
 
   useEffect(() => {
     if (isConnected) {
@@ -114,7 +113,10 @@ const PersonalSign = observer(() => {
     <div className="flex flex-col gap-2 rounded-md p-2">
       <div className="flex flex-col gap-1">
         <div>{t("dapp.signature.fromAddress")}</div>
-        <div className="font-data w-64 font-bold text-identity-accent">{`${prefixFromAddress} ${addressSplitFromAddress.join(" ")}`}</div>
+        <FullAddress
+          address={fromAddress}
+          className="w-full font-bold text-identity-accent"
+        />
       </div>
       <div className="flex flex-col gap-1">
         <div>{t("dapp.signature.message")}</div>

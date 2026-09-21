@@ -1,6 +1,8 @@
+import { profileStorageKey } from "@/utilities/profileStorage";
 import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
+import { toChecksumAddress } from "@theqrl/wallet.js";
 import {
   checkRequestCanCompleteSilently,
   restrictedMethodsMiddleware,
@@ -8,9 +10,11 @@ import {
 
 const { mockIsLocked, mockCheckDomain } = vi.hoisted(() => ({
   mockIsLocked: vi
-    .fn<any>()
+    .fn()
     .mockResolvedValue({ isLocked: false, hasPasswordSet: true }),
-  mockCheckDomain: vi.fn<any>(() => ({ isDomainPhishing: false })),
+  mockCheckDomain: vi.fn<
+    typeof import("../phishing/phishingDetector").checkDomain
+  >(() => ({ isDomainPhishing: false })),
 }));
 
 // The real LockManager pulls in the @theqrl/web3 crypto graph; the silent
@@ -21,12 +25,13 @@ vi.mock("../lockManager/lockManager", () => ({
 }));
 
 vi.mock("../phishing/phishingDetector", () => ({
-  checkDomain: (...args: any[]) => mockCheckDomain(...args),
+  checkDomain: (...args: Parameters<typeof mockCheckDomain>) =>
+    mockCheckDomain(...args),
 }));
 
 const ORIGIN = "https://dapp.example";
-const ACCOUNT_A = "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1";
-const ACCOUNT_B = "Qb70193d03d693c2c3d0eba4b7d08f31c2b5fe871";
+const ACCOUNT_A = toChecksumAddress(`Q${"a".repeat(128)}`);
+const ACCOUNT_B = toChecksumAddress(`Q${"b".repeat(128)}`);
 
 type StorageFixtures = {
   connectedAccounts?: string[];
@@ -43,10 +48,10 @@ const setupStorage = ({
 }: StorageFixtures) => {
   vi.mocked(browser.storage.local.get).mockImplementation(async (key) => {
     switch (key) {
-      case "DAPPS":
+      case profileStorageKey("DAPPS"):
         return connectedAccounts
           ? {
-              DAPPS: {
+              [profileStorageKey("DAPPS")]: {
                 ALL_DAPPS: {
                   [ORIGIN]: {
                     urlOrigin: ORIGIN,
@@ -58,16 +63,18 @@ const setupStorage = ({
               },
             }
           : {};
-      case "ACCOUNTS":
-        return { ACCOUNTS: { ALL_ACCOUNTS: walletAccounts } };
-      case "LEDGER":
+      case profileStorageKey("ACCOUNTS"):
         return {
-          LEDGER: {
+          [profileStorageKey("ACCOUNTS")]: { ALL_ACCOUNTS: walletAccounts },
+        };
+      case profileStorageKey("LEDGER"):
+        return {
+          [profileStorageKey("LEDGER")]: {
             LEDGER_ACCOUNTS: ledgerAccounts.map((address) => ({ address })),
           },
         };
-      case "SETTINGS":
-        return { SETTINGS: settings };
+      case profileStorageKey("SETTINGS"):
+        return { [profileStorageKey("SETTINGS")]: settings };
       default:
         return {};
     }
@@ -182,9 +189,11 @@ describe("qrl_requestAccounts silent reconnect", () => {
     const writes = vi.mocked(browser.storage.local.set).mock.calls;
     expect(writes.length).toBeGreaterThan(0);
     const written = writes[writes.length - 1][0] as {
-      DAPPS: { ALL_DAPPS: Record<string, { accounts: string[] }> };
+      [key: string]: { ALL_DAPPS: Record<string, { accounts: string[] }> };
     };
-    expect(written.DAPPS.ALL_DAPPS[ORIGIN].accounts).toEqual([ACCOUNT_A]);
+    expect(
+      written[profileStorageKey("DAPPS")].ALL_DAPPS[ORIGIN].accounts,
+    ).toEqual([ACCOUNT_A]);
   });
 
   it("counts ledger accounts as live accounts", async () => {
@@ -221,4 +230,27 @@ describe("qrl_requestAccounts silent reconnect", () => {
       ),
     ).toEqual({ hasCompleted: false });
   });
+
+  it.each(["qrl_signTypedData_v4", "qrl_signTypedData"])(
+    "rejects %s locally before opening an approval surface",
+    async (method) => {
+      setupStorage({ connectedAccounts: [ACCOUNT_A] });
+      const req = buildRequest(method);
+      req.params = [ACCOUNT_A, { domain: { chainId: "0x539" } }] as never;
+      const res = {} as {
+        result?: unknown;
+        error?: { code?: number; message?: string };
+      };
+      const end = vi.fn();
+
+      await restrictedMethodsMiddleware(req, res as never, vi.fn(), end);
+
+      expect(res.error?.code).toBe(4200);
+      expect(res.error?.message).toContain("versioned 64-byte address layout");
+      expect(end).toHaveBeenCalledTimes(1);
+      expect(browser.action.openPopup).not.toHaveBeenCalled();
+      expect(browser.windows.create).not.toHaveBeenCalled();
+      expect(browser.storage.session.set).not.toHaveBeenCalled();
+    },
+  );
 });

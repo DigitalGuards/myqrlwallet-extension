@@ -10,6 +10,13 @@
  */
 export const LEDGER_CONFIG = {
   /**
+   * The installed QRL Ledger application exposes a 20-byte address response
+   * and a signature reassembly bound below the 4,627-byte ML-DSA-87 output.
+   * Keep device account and signing flows closed until a versioned QIP-55
+   * APDU contract is available.
+   */
+  QIP55_SUPPORTED: false,
+  /**
    * Class byte - QRL Zond application identifier on Ledger.
    * Value 0xE0 is standard for blockchain applications.
    */
@@ -158,8 +165,7 @@ export const LEDGER_CONFIG = {
  * Used in UI to display understandable errors.
  */
 export const LEDGER_ERRORS: Record<number, string> = {
-  [LEDGER_CONFIG.STATUS.DENY]:
-    "Transaction was rejected on the Ledger device",
+  [LEDGER_CONFIG.STATUS.DENY]: "Transaction was rejected on the Ledger device",
   [LEDGER_CONFIG.STATUS.WRONG_P1P2]: "Invalid operation parameters",
   [LEDGER_CONFIG.STATUS.WRONG_DATA_LENGTH]: "Invalid data length",
   [LEDGER_CONFIG.STATUS.INS_NOT_SUPPORTED]:
@@ -169,10 +175,8 @@ export const LEDGER_ERRORS: Record<number, string> = {
   [LEDGER_CONFIG.STATUS.TX_PARSING_FAIL]:
     "Transaction parsing error - invalid format",
   [LEDGER_CONFIG.STATUS.TX_HASH_FAIL]: "Transaction hashing error",
-  [LEDGER_CONFIG.STATUS.SIGNATURE_FAIL]:
-    "Transaction signing error on device",
-  [LEDGER_CONFIG.STATUS.BAD_STATE]:
-    "Security error - device in invalid state",
+  [LEDGER_CONFIG.STATUS.SIGNATURE_FAIL]: "Transaction signing error on device",
+  [LEDGER_CONFIG.STATUS.BAD_STATE]: "Security error - device in invalid state",
 };
 
 /**
@@ -184,8 +188,7 @@ export const LEDGER_ERROR_MESSAGES = {
   DEVICE_NOT_FOUND:
     "Ledger device not found. Make sure it is connected via USB.",
   /** Device connected but QRL Zond app not open */
-  APP_NOT_OPEN:
-    "Open the QRL Zond app on your Ledger device and try again.",
+  APP_NOT_OPEN: "Open the QRL Zond app on your Ledger device and try again.",
   /** User rejected operation with button on device */
   USER_REJECTED: "Operation was rejected on the Ledger device.",
   /** General connection error */
@@ -200,14 +203,16 @@ export const LEDGER_ERROR_MESSAGES = {
   WEBHID_NOT_SUPPORTED:
     "Your browser doesn't support WebHID. Use Chrome, Edge, or Brave.",
   /** Device was disconnected during operation */
-  DEVICE_DISCONNECTED:
-    "Ledger device was disconnected. Please reconnect it.",
+  DEVICE_DISCONNECTED: "Ledger device was disconnected. Please reconnect it.",
   /** Device not connected - operation requires connection */
   NOT_CONNECTED:
     "Ledger device is not connected. Please connect your device first.",
   /** Device returned data of unexpected size during chunk reassembly */
   INCONSISTENT_DEVICE_RESPONSE:
     "Ledger device returned an unexpected response. Reconnect the device or check the QRL Zond app firmware version.",
+  /** Current device protocol cannot carry QIP-55 identities and signatures. */
+  QIP55_UNSUPPORTED:
+    "Ledger support is unavailable for QIP-55 until the device app defines a 64-byte address and 4,627-byte ML-DSA-87 signature protocol.",
 } as const;
 
 /**
