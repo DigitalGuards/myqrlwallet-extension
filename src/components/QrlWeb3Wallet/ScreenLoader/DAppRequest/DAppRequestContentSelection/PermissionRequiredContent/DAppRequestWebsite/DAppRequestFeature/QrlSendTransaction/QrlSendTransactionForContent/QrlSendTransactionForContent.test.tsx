@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/UI/Tooltip";
 import StringUtil from "@/utilities/stringUtil";
 import QrlSendTransactionForContent from "./QrlSendTransactionForContent";
 import { SEND_TRANSACTION_TYPES } from "../QrlSendTransaction";
+import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 
 const SENDER_ADDRESS = `Q${"a".repeat(128)}`;
 const RECIPIENT_ADDRESS = `Q${"b".repeat(128)}`;
@@ -54,6 +55,7 @@ describe("QrlSendTransactionForContent", () => {
     );
 
   const zndTransferRequest = {
+    chainId: "0x301825",
     from: SENDER_ADDRESS,
     to: RECIPIENT_ADDRESS,
     value: "0x30",
@@ -62,6 +64,7 @@ describe("QrlSendTransactionForContent", () => {
   };
 
   const contractDeploymentRequest = {
+    chainId: "0x301825",
     data: "0x608060405234",
     from: SENDER_ADDRESS,
     gas: "0x1cbb3",
@@ -70,6 +73,7 @@ describe("QrlSendTransactionForContent", () => {
   };
 
   const contractInteractionRequest = {
+    chainId: "0x301825",
     from: SENDER_ADDRESS,
     to: CONTRACT_ADDRESS,
     data: "0x608060405234",
@@ -128,6 +132,63 @@ describe("QrlSendTransactionForContent", () => {
       } as any,
     });
   };
+
+  it.each([
+    [SEND_TRANSACTION_TYPES.QRL_TRANSFER, zndTransferRequest],
+    [SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION, contractInteractionRequest],
+  ])(
+    "pins signing chain and stops broadcast if final identity check fails (%s)",
+    async (transactionType, requestParams) => {
+      const signTransaction = vi.fn().mockResolvedValue({
+        rawTransaction: "0xsignedraw",
+      });
+      const sendSignedTransaction = vi.fn();
+      const addToResponseData = vi.fn();
+      const authorization = vi.mocked(revalidateAuthorizedDAppRequest);
+      const authorized = {
+        canProceed: true,
+        proceedError: undefined,
+        authorizedChainId: "0x301825",
+      };
+      authorization
+        .mockResolvedValueOnce(authorized)
+        .mockResolvedValueOnce(authorized)
+        .mockResolvedValueOnce(authorized)
+        .mockResolvedValueOnce({
+          canProceed: false,
+          proceedError: new Error("Pinned network identity changed") as never,
+        });
+      renderComponent(
+        createStoreWithCallback({
+          requestParams,
+          addToResponseData,
+          qrlStore: {
+            qrlInstance: {
+              getGasPrice: async () => 1000n,
+              getTransactionCount: async () => 0,
+              accounts: {
+                seedToAccount: () => ({ address: SENDER_ADDRESS }),
+                signTransaction,
+              },
+              sendSignedTransaction,
+            },
+          },
+        }),
+        { transactionType },
+      );
+      await act(async () => capturedPermissionCallback!(true));
+      expect(signTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({ chainId: "0x301825" }),
+        "0xhexseed",
+      );
+      expect(sendSignedTransaction).not.toHaveBeenCalled();
+      expect(addToResponseData).toHaveBeenCalledWith({
+        error: expect.objectContaining({
+          message: "Pinned network identity changed",
+        }),
+      });
+    },
+  );
 
   it("should render the qrl send transaction component for contract deployment", async () => {
     const requestForContractDeployment = {
