@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Contact } from "@/types/contact";
+import { toChecksumAddress } from "@theqrl/wallet.js";
+
+const ALICE_ADDRESS = toChecksumAddress(`Q${"a".repeat(128)}`);
+const BOB_ADDRESS = toChecksumAddress(`Q${"b".repeat(128)}`);
 
 // In-memory storage mock
 const localStore: Record<string, any> = {};
@@ -54,9 +58,7 @@ describe("ContactsStore", () => {
   });
 
   it("should load contacts from storage", async () => {
-    const contacts: Contact[] = [
-      { name: "Alice", address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779" },
-    ];
+    const contacts: Contact[] = [{ name: "Alice", address: ALICE_ADDRESS }];
     await StorageUtil.setContacts(contacts);
 
     await store.loadContacts();
@@ -68,7 +70,7 @@ describe("ContactsStore", () => {
   it("should add a contact", async () => {
     const contact: Contact = {
       name: "Bob",
-      address: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+      address: BOB_ADDRESS,
     };
 
     await store.addContact(contact);
@@ -84,11 +86,11 @@ describe("ContactsStore", () => {
   it("should remove a contact by address", async () => {
     const c1: Contact = {
       name: "Alice",
-      address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      address: ALICE_ADDRESS,
     };
     const c2: Contact = {
       name: "Bob",
-      address: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+      address: BOB_ADDRESS,
     };
     await store.addContact(c1);
     await store.addContact(c2);
@@ -102,11 +104,11 @@ describe("ContactsStore", () => {
   it("should remove contact case-insensitively", async () => {
     const contact: Contact = {
       name: "Alice",
-      address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      address: ALICE_ADDRESS,
     };
     await store.addContact(contact);
 
-    await store.removeContact("q20b714091cf2a62dadda2847803e3f1b9d2d3779");
+    await store.removeContact(`Q${ALICE_ADDRESS.slice(1).toLowerCase()}`);
 
     expect(store.contacts).toHaveLength(0);
   });
@@ -114,7 +116,7 @@ describe("ContactsStore", () => {
   it("should update a contact", async () => {
     const contact: Contact = {
       name: "Alice",
-      address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      address: ALICE_ADDRESS,
     };
     await store.addContact(contact);
 
@@ -130,7 +132,7 @@ describe("ContactsStore", () => {
   it("should find a contact by address", async () => {
     const contact: Contact = {
       name: "Alice",
-      address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      address: ALICE_ADDRESS,
     };
     await store.addContact(contact);
 
@@ -139,21 +141,21 @@ describe("ContactsStore", () => {
   });
 
   it("should return undefined for unknown address", () => {
-    const found = store.getContactByAddress("Q0000000000000000000000000000000000000000");
+    const found = store.getContactByAddress(`Q${"0".repeat(128)}`);
     expect(found).toBeUndefined();
   });
 
   it("should not add duplicate address", async () => {
     const contact: Contact = {
       name: "Alice",
-      address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      address: ALICE_ADDRESS,
     };
     await store.addContact(contact);
 
     // Try adding same address with different name
     await store.addContact({
       name: "Alice Duplicate",
-      address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      address: ALICE_ADDRESS,
     });
 
     expect(store.contacts).toHaveLength(1);
@@ -163,13 +165,13 @@ describe("ContactsStore", () => {
   it("should not add duplicate address case-insensitively", async () => {
     const contact: Contact = {
       name: "Alice",
-      address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      address: ALICE_ADDRESS,
     };
     await store.addContact(contact);
 
     await store.addContact({
       name: "Alice Lower",
-      address: "q20b714091cf2a62dadda2847803e3f1b9d2d3779",
+      address: `Q${ALICE_ADDRESS.slice(1).toLowerCase()}`,
     });
 
     expect(store.contacts).toHaveLength(1);

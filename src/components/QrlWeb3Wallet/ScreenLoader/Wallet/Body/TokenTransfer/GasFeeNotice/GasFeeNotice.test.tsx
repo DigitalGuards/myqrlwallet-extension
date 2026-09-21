@@ -86,7 +86,7 @@ describe("GasFeeNotice", () => {
   });
 
   it("should call onGasFeeCalculated with raw gas fee", async () => {
-    const onGasFeeCalculated = vi.fn<any>();
+    const onGasFeeCalculated = vi.fn();
     renderComponent(
       mockedStore({
         qrlStore: {

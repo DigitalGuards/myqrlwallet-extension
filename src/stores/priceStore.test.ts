@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const { mockGetPriceCache, mockSetPriceCache } = vi.hoisted(() => ({
-  mockGetPriceCache: vi.fn<any>().mockResolvedValue(null),
-  mockSetPriceCache: vi.fn<any>().mockResolvedValue(undefined),
+  mockGetPriceCache: vi.fn().mockResolvedValue(null),
+  mockSetPriceCache: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/utilities/storageUtil", () => ({
@@ -14,7 +14,7 @@ vi.mock("@/utilities/storageUtil", () => ({
 }));
 
 // Mock global fetch
-const mockFetch = vi.fn<any>();
+const mockFetch = vi.fn();
 (globalThis as any).fetch = mockFetch;
 
 describe("PriceStore", () => {
@@ -222,7 +222,7 @@ describe("PriceStore", () => {
     store.startAutoRefresh();
     store.stopAutoRefresh();
 
-    // Advance past interval — should not trigger fetch
+    // Advance past interval - should not trigger fetch
     mockFetch.mockClear();
     vi.advanceTimersByTime(120_000);
     expect(mockFetch).not.toHaveBeenCalled();

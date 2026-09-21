@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import AccountBadge from "./AccountBadge";
 
 describe("AccountBadge", () => {
@@ -29,6 +30,17 @@ describe("AccountBadge", () => {
       }),
     );
 
-    expect(screen.getByText("Q20fB0...6722b")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        formatQrlAddressFingerprint(
+          "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+        ),
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Accounts: Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+      }),
+    ).toBeInTheDocument();
   });
 });

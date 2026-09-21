@@ -35,7 +35,7 @@ const mockedStoreValues: StoreType = {
   } as unknown as SettingsStore,
   qrlStore: {
     activeAccount: {
-      accountAddress: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      accountAddress: `Q${"a".repeat(128)}`,
     },
     qrlAccounts: {
       isLoading: false,
@@ -75,7 +75,11 @@ const mockedStoreValues: StoreType = {
       _value: number,
       _mnemonicPhrases: string,
     ) => {
-      return { transactionHash: undefined, rawTransaction: undefined, error: "" };
+      return {
+        transactionHash: undefined,
+        rawTransaction: undefined,
+        error: "",
+      };
     },
     validateActiveAccount: async () => {},
     getGasFeeData: async () => {
@@ -118,7 +122,11 @@ const mockedStoreValues: StoreType = {
       _contractAddress: string,
       _decimals: number,
     ) => {
-      return { transactionHash: undefined, rawTransaction: undefined, error: "" };
+      return {
+        transactionHash: undefined,
+        rawTransaction: undefined,
+        error: "",
+      };
     },
     signAndSendReplacementTransaction: async () => ({
       transactionHash: undefined,

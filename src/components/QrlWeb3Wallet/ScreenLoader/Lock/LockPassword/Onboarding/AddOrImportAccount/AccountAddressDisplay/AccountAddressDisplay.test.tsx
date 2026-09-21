@@ -3,7 +3,10 @@ import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import AccountAddressDisplay from "./AccountAddressDisplay";
+
+const ADDRESS = `Q${"0123456789abcdef".repeat(8)}`;
 
 describe("AccountAddressDisplay", () => {
   afterEach(cleanup);
@@ -22,7 +25,7 @@ describe("AccountAddressDisplay", () => {
       mockedStore({
         qrlStore: {
           activeAccount: {
-            accountAddress: "Q208318ecd68f26726CE7C54b29CaBA94584969B6",
+            accountAddress: ADDRESS,
           },
         },
       }),
@@ -30,7 +33,10 @@ describe("AccountAddressDisplay", () => {
 
     expect(screen.getByText("Account address")).toBeInTheDocument();
     expect(
-      screen.getByText("Q 20831 8ecd6 8f267 26CE7 C54b2 9CaBA 94584 969B6"),
+      screen.getByText(formatQrlAddressFingerprint(ADDRESS)),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show full address" }),
     ).toBeInTheDocument();
   });
 });

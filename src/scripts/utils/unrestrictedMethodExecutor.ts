@@ -1,10 +1,16 @@
 import StorageUtil from "@/utilities/storageUtil";
+import {
+  assertV3Network,
+  V3_CHAIN_ID,
+  V3_GENESIS_HASH,
+} from "@/configuration/releaseProfile";
 import Web3, { FMT_BYTES, FMT_NUMBER } from "@theqrl/web3";
 import { Web3RequestManager } from "@theqrl/web3-core";
 import { qrlRpcMethods } from "@theqrl/web3-rpc-methods";
 import { BaseProvider } from "@theqrl/qrl-wallet-provider/providers";
 import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
+import { prepareQip55LogFilter } from "./qip55LogFilter";
 import { getSerializableObject } from "./scriptUtils";
 
 /**
@@ -47,6 +53,26 @@ const postJson = async (
 export const executeUnrestrictedMethod = async (
   req: JsonRpcRequest<JsonRpcRequest>,
 ): Promise<unknown> => {
+  if (req.method === UNRESTRICTED_METHODS.QRL_WALLET_CAPABILITIES) {
+    const chain = await StorageUtil.getActiveBlockChain();
+    if (chain.chainId.toLowerCase() !== V3_CHAIN_ID)
+      throw new Error("Select the v3 Private network.");
+    await assertV3Network(chain.defaultRpcUrl);
+    const currentChain = await StorageUtil.getActiveBlockChain();
+    if (
+      currentChain.chainId !== chain.chainId ||
+      currentChain.defaultRpcUrl !== chain.defaultRpcUrl
+    ) {
+      throw new Error(
+        "The network changed. Request wallet capabilities again.",
+      );
+    }
+    return {
+      addressScheme: "qip55-64",
+      chainId: V3_CHAIN_ID,
+      genesisHash: V3_GENESIS_HASH,
+    };
+  }
   const { provider, qrl, defaultWsRpcUrl } = await getQrlProperties();
   const method = req.method;
   if (method === UNRESTRICTED_METHODS.QRL_GET_BLOCK_BY_NUMBER) {
@@ -152,10 +178,10 @@ export const executeUnrestrictedMethod = async (
     return filterIdentifier;
   } else if (method === UNRESTRICTED_METHODS.QRL_NEW_FILTER) {
     const [filter] = req?.params ?? [];
-    const filterIdentifier = await qrlRpcMethods.newFilter(
-      new Web3RequestManager(provider),
-      filter,
-    );
+    const filterIdentifier = await new Web3RequestManager(provider).send({
+      method: "qrl_newFilter",
+      params: [prepareQip55LogFilter(filter)],
+    });
     return filterIdentifier;
   } else if (
     method === UNRESTRICTED_METHODS.QRL_NEW_PENDING_TRANSACTION_FILTER
@@ -165,14 +191,21 @@ export const executeUnrestrictedMethod = async (
     );
     return filterIdentifier;
   } else if (method === UNRESTRICTED_METHODS.QRL_SEND_RAW_TRANSACTION) {
+    await assertV3Network(
+      (await StorageUtil.getActiveBlockChain()).defaultRpcUrl,
+    );
     const [rawTransaction] = req?.params ?? [];
     const transactionHash = (await qrl.sendSignedTransaction(rawTransaction))
       ?.transactionHash;
     return transactionHash;
   } else if (method === UNRESTRICTED_METHODS.QRL_SUBSCRIBE) {
     const params = req.params;
+    const subscriptionParams =
+      Array.isArray(params) && params[0] === "logs"
+        ? [params[0], prepareQip55LogFilter(params[1] ?? {})]
+        : params;
     const data = await postJson(`${defaultWsRpcUrl}/qrl_subscribe`, {
-      params,
+      params: subscriptionParams,
     });
     const subscriptionId = data?.subscriptionId as string;
     return subscriptionId;
@@ -206,7 +239,10 @@ export const executeUnrestrictedMethod = async (
     return getSerializableObject(logObjects);
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_LOGS) {
     const [filter] = req.params;
-    const logs = await qrl.getPastLogs(filter);
+    const logs = await new Web3RequestManager(provider).send({
+      method: "qrl_getLogs",
+      params: [prepareQip55LogFilter(filter)],
+    });
     return getSerializableObject(logs);
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_PROOF) {
     const [address, storageKeys, blockNumber] = req.params;

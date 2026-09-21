@@ -3,7 +3,11 @@ import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import AccountAddressSection from "./AccountAddressSection";
+
+const ACTIVE_ACCOUNT = `Q${"a".repeat(128)}`;
+const DISPLAY_ADDRESS = formatQrlAddressFingerprint(ACTIVE_ACCOUNT);
 
 describe("AccountAddressSection", () => {
   afterEach(cleanup);
@@ -21,9 +25,7 @@ describe("AccountAddressSection", () => {
     renderComponent();
 
     expect(screen.getByText("Account address")).toBeInTheDocument();
-    expect(
-      screen.getByText("Q 20B71 4091c F2a62 DADda 28478 03e3f 1B9D2 D3779"),
-    ).toBeInTheDocument();
+    expect(screen.getByText(DISPLAY_ADDRESS)).toBeInTheDocument();
     expect(screen.getByText("Balance")).toBeInTheDocument();
     expect(screen.getByText("0.0 Quanta")).toBeInTheDocument();
   });

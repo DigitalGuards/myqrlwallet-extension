@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { toChecksumAddress } from "@theqrl/wallet.js";
 import {
   discoverNftCollections,
   discoverOwnedNftTokens,
   discoverTokens,
 } from "./assetDiscovery";
 
-const TESTNET_CHAIN_ID = "0x539";
-const HOLDER = "Q1111111111111111111111111111111111111111";
+const TESTNET_CHAIN_ID = "0x301825";
+const HOLDER = toChecksumAddress(`Q${"1".repeat(128)}`);
 
 const mockFetchJson = (body: unknown, ok = true, status = 200) => {
   const fetchMock = vi.fn().mockResolvedValue({
@@ -29,19 +30,19 @@ describe("discoverTokens", () => {
       count: 3,
       tokens: [
         {
-          contractAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          contractAddress: `0x${"a".repeat(128)}`,
           name: "Alpha",
           symbol: "ALP",
           decimals: 12,
         },
         {
-          contractAddress: "qbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          contractAddress: `q${"b".repeat(128)}`,
           name: "",
           symbol: "",
           decimals: 0,
         },
         {
-          contractAddress: "Qcccccccccccccccccccccccccccccccccccccccc",
+          contractAddress: toChecksumAddress(`Q${"c".repeat(128)}`),
           name: "Gamma",
           symbol: "GAM",
           decimals: null,
@@ -52,24 +53,24 @@ describe("discoverTokens", () => {
     const tokens = await discoverTokens(HOLDER, TESTNET_CHAIN_ID);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `https://zondscan.com/api/address/${HOLDER}/tokens?standard=ERC-20`,
+      `https://v3.zondscan.com/api/address/${HOLDER}/tokens?standard=ERC-20`,
     );
     expect(tokens).toEqual([
       {
-        address: "Qaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        address: toChecksumAddress(`Q${"a".repeat(128)}`),
         name: "Alpha",
         symbol: "ALP",
         decimals: 12,
       },
       {
-        address: "Qbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        address: toChecksumAddress(`Q${"b".repeat(128)}`),
         name: "Unknown Token",
         symbol: "UNK",
         // 0 is a valid decimals value and must not fall through to 18
         decimals: 0,
       },
       {
-        address: "Qcccccccccccccccccccccccccccccccccccccccc",
+        address: toChecksumAddress(`Q${"c".repeat(128)}`),
         name: "Gamma",
         symbol: "GAM",
         decimals: 18,
@@ -101,14 +102,14 @@ describe("discoverNftCollections", () => {
       count: 4,
       nfts: [
         {
-          contractAddress: "0xdddddddddddddddddddddddddddddddddddddddd",
+          contractAddress: `0x${"d".repeat(128)}`,
           tokenID: "1",
           tokenStandard: "ERC-721",
           collectionName: "Doodles",
           collectionSymbol: "DOO",
         },
         {
-          contractAddress: "Qdddddddddddddddddddddddddddddddddddddddd",
+          contractAddress: toChecksumAddress(`Q${"d".repeat(128)}`),
           tokenID: "2",
           tokenStandard: "ERC-721",
           collectionName: "Doodles",
@@ -116,52 +117,49 @@ describe("discoverNftCollections", () => {
         },
         {
           // duplicate (contract, tokenID) row must not inflate tokenCount
-          contractAddress: "Qdddddddddddddddddddddddddddddddddddddddd",
+          contractAddress: toChecksumAddress(`Q${"d".repeat(128)}`),
           tokenID: "2",
           tokenStandard: "ERC-721",
           collectionName: "Doodles",
           collectionSymbol: "DOO",
         },
         {
-          contractAddress: "Qeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          contractAddress: toChecksumAddress(`Q${"e".repeat(128)}`),
           tokenID: "7",
           tokenStandard: "ERC-1155",
           collectionName: "Multi",
           collectionSymbol: "MUL",
         },
         {
-          contractAddress: "Qffffffffffffffffffffffffffffffffffffffff",
+          contractAddress: toChecksumAddress(`Q${"f".repeat(128)}`),
           tokenID: "9",
           tokenStandard: "ERC-721",
         },
       ],
     });
 
-    const collections = await discoverNftCollections(
-      HOLDER,
-      TESTNET_CHAIN_ID,
-    );
+    const collections = await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `https://zondscan.com/api/address/${HOLDER}/nfts`,
+      `https://v3.zondscan.com/api/address/${HOLDER}/nfts`,
     );
     expect(collections).toEqual([
       {
-        address: "Qdddddddddddddddddddddddddddddddddddddddd",
+        address: toChecksumAddress(`Q${"d".repeat(128)}`),
         name: "Doodles",
         symbol: "DOO",
         standard: "ZRC721",
         tokenCount: 2,
       },
       {
-        address: "Qeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        address: toChecksumAddress(`Q${"e".repeat(128)}`),
         name: "Multi",
         symbol: "MUL",
         standard: "ZRC1155",
         tokenCount: 1,
       },
       {
-        address: "Qffffffffffffffffffffffffffffffffffffffff",
+        address: toChecksumAddress(`Q${"f".repeat(128)}`),
         name: "",
         symbol: "",
         standard: "ZRC721",
@@ -172,9 +170,7 @@ describe("discoverNftCollections", () => {
 
   it("returns an empty list on malformed responses", async () => {
     mockFetchJson({ unexpected: true });
-    expect(await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID)).toEqual(
-      [],
-    );
+    expect(await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID)).toEqual([]);
   });
 });
 
@@ -184,23 +180,23 @@ describe("discoverOwnedNftTokens", () => {
     count: 4,
     nfts: [
       {
-        contractAddress: "0xdddddddddddddddddddddddddddddddddddddddd",
+        contractAddress: `0x${"d".repeat(128)}`,
         tokenID: "1",
         tokenStandard: "ERC-721",
       },
       {
-        contractAddress: "Qdddddddddddddddddddddddddddddddddddddddd",
+        contractAddress: toChecksumAddress(`Q${"d".repeat(128)}`),
         tokenID: "2",
         tokenStandard: "ERC-721",
       },
       {
         // duplicate row for the same id must be deduped
-        contractAddress: "Qdddddddddddddddddddddddddddddddddddddddd",
+        contractAddress: toChecksumAddress(`Q${"d".repeat(128)}`),
         tokenID: "2",
         tokenStandard: "ERC-721",
       },
       {
-        contractAddress: "Qeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        contractAddress: toChecksumAddress(`Q${"e".repeat(128)}`),
         tokenID: "42",
         tokenStandard: "ERC-1155",
         balance: "3",
@@ -213,7 +209,7 @@ describe("discoverOwnedNftTokens", () => {
     const tokens = await discoverOwnedNftTokens(
       HOLDER,
       TESTNET_CHAIN_ID,
-      "0xDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      `0x${"D".repeat(128)}`,
     );
     expect(tokens).toEqual([
       { tokenId: "1", standard: "ZRC721", balance: undefined },
@@ -226,7 +222,7 @@ describe("discoverOwnedNftTokens", () => {
     const tokens = await discoverOwnedNftTokens(
       HOLDER,
       TESTNET_CHAIN_ID,
-      "Qeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      toChecksumAddress(`Q${"e".repeat(128)}`),
     );
     expect(tokens).toEqual([
       { tokenId: "42", standard: "ZRC1155", balance: "3" },
@@ -239,7 +235,7 @@ describe("discoverOwnedNftTokens", () => {
       await discoverOwnedNftTokens(
         HOLDER,
         "0x1",
-        "Qdddddddddddddddddddddddddddddddddddddddd",
+        toChecksumAddress(`Q${"d".repeat(128)}`),
       ),
     ).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -250,7 +246,7 @@ describe("discoverOwnedNftTokens", () => {
       address: HOLDER,
       count: 80,
       nfts: Array.from({ length: 80 }, (_, i) => ({
-        contractAddress: "Qdddddddddddddddddddddddddddddddddddddddd",
+        contractAddress: toChecksumAddress(`Q${"d".repeat(128)}`),
         tokenID: String(i + 1),
         tokenStandard: "ERC-721",
       })),
@@ -258,7 +254,7 @@ describe("discoverOwnedNftTokens", () => {
     const tokens = await discoverOwnedNftTokens(
       HOLDER,
       TESTNET_CHAIN_ID,
-      "Qdddddddddddddddddddddddddddddddddddddddd",
+      toChecksumAddress(`Q${"d".repeat(128)}`),
     );
     expect(tokens).toHaveLength(50);
   });

@@ -13,12 +13,16 @@
  * matches the algorithm description in docs/POST-QUANTUM-SIGNING-PLAN.md.
  */
 
-import { shake256 } from '@noble/hashes/sha3.js';
-import { SCHEME_TAG_TYPED, DIGEST_LEN } from './ctx';
-import { hexToBytes, concatBytes, concatBytesArr } from './bytes';
-// Inline Q-address shape check (mirrors the SDK port; the wallet repo uses
-// its shared util here, byte-for-byte equivalent for digest purposes).
-const isValidQrlAddress = (address: string): boolean => /^Q[0-9a-fA-F]{40}$/.test(address);
+import { shake256 } from "@noble/hashes/sha3.js";
+import { SCHEME_TAG_TYPED, DIGEST_LEN } from "./ctx";
+import { hexToBytes, concatBytes, concatBytesArr } from "./bytes";
+
+export const QIP55_TYPED_DATA_ERROR =
+  "QRL-SIGN-TYPED-v1 uses 32-byte slots and cannot encode QIP-55 addresses. A versioned 64-byte typed-data layout is required.";
+// Historical v1 Q + 40 validation remains available only through
+// computeLegacyTypedDataDigest so existing signatures can still be checked.
+const isValidQrlAddress = (address: string): boolean =>
+  /^Q[0-9a-fA-F]{40}$/.test(address);
 
 const SLOT = 32;
 
@@ -40,37 +44,48 @@ export interface TypedDataPayload {
 }
 
 type AtomicKind =
-  | { kind: 'address' | 'bool' | 'string' | 'bytes' }
-  | { kind: 'uintN' | 'intN'; width: number }
-  | { kind: 'bytesN'; width: number }
-  | { kind: 'array'; inner: FieldType; size?: number }
-  | { kind: 'ref'; name: string };
+  | { kind: "address" | "bool" | "string" | "bytes" }
+  | { kind: "uintN" | "intN"; width: number }
+  | { kind: "bytesN"; width: number }
+  | { kind: "array"; inner: FieldType; size?: number }
+  | { kind: "ref"; name: string };
 
-const ATOMIC_RE = /^(?:(address|bool|string|bytes)|(u?int)(\d+)|bytes(\d+)|(.+?)\[(\d*)\])$/;
+const ATOMIC_RE =
+  /^(?:(address|bool|string|bytes)|(u?int)(\d+)|bytes(\d+)|(.+?)\[(\d*)\])$/;
 const MAX_TYPE_DEPTH = 12;
 
-function parseFieldType(type: FieldType, types: TypeMap, depth = 0): AtomicKind {
+function parseFieldType(
+  type: FieldType,
+  types: TypeMap,
+  depth = 0,
+): AtomicKind {
   if (depth > MAX_TYPE_DEPTH) throw new Error(`type nesting too deep: ${type}`);
   if (Object.prototype.hasOwnProperty.call(types, type)) {
-    return { kind: 'ref', name: type };
+    return { kind: "ref", name: type };
   }
   const m = ATOMIC_RE.exec(type);
   if (!m) throw new Error(`unknown type: ${type}`);
   const [, atomic, intKind, intWidthStr, bytesWidthStr, innerType, sizeStr] = m;
-  if (atomic) return { kind: atomic as 'address' | 'bool' | 'string' | 'bytes' };
+  if (atomic)
+    return { kind: atomic as "address" | "bool" | "string" | "bytes" };
   if (intKind) {
     const width = Number(intWidthStr);
-    if (!Number.isInteger(width) || width < 8 || width > 256 || width % 8 !== 0) {
+    if (
+      !Number.isInteger(width) ||
+      width < 8 ||
+      width > 256 ||
+      width % 8 !== 0
+    ) {
       throw new Error(`invalid int width: ${type}`);
     }
-    return { kind: intKind === 'uint' ? 'uintN' : 'intN', width };
+    return { kind: intKind === "uint" ? "uintN" : "intN", width };
   }
   if (bytesWidthStr) {
     const width = Number(bytesWidthStr);
     if (!Number.isInteger(width) || width < 1 || width > 32) {
       throw new Error(`invalid bytesN width: ${type}`);
     }
-    return { kind: 'bytesN', width };
+    return { kind: "bytesN", width };
   }
   if (innerType !== undefined) {
     parseFieldType(innerType, types, depth + 1);
@@ -78,13 +93,13 @@ function parseFieldType(type: FieldType, types: TypeMap, depth = 0): AtomicKind 
     if (sizeStr && (!Number.isInteger(size) || (size as number) <= 0)) {
       throw new Error(`invalid array size: ${type}`);
     }
-    return { kind: 'array', inner: innerType, size };
+    return { kind: "array", inner: innerType, size };
   }
   throw new Error(`unhandled type: ${type}`);
 }
 
 function baseTypeName(type: FieldType): string {
-  return type.replace(/(\[\d*\])+$/, '');
+  return type.replace(/(\[\d*\])+$/, "");
 }
 
 function collectDependencies(primary: string, types: TypeMap): Set<string> {
@@ -94,7 +109,7 @@ function collectDependencies(primary: string, types: TypeMap): Set<string> {
   const visited = new Set<string>();
   const visit = (name: string, path: string[]): void => {
     if (path.includes(name)) {
-      throw new Error(`cyclic type reference: ${[...path, name].join(' -> ')}`);
+      throw new Error(`cyclic type reference: ${[...path, name].join(" -> ")}`);
     }
     if (visited.has(name)) return;
     visited.add(name);
@@ -121,10 +136,10 @@ function validateTypeMap(types: TypeMap): void {
     }
     const seen = new Set<string>();
     for (const f of def) {
-      if (!f || typeof f.name !== 'string' || !f.name) {
+      if (!f || typeof f.name !== "string" || !f.name) {
         throw new Error(`bad field in ${name}`);
       }
-      if (typeof f.type !== 'string' || !f.type) {
+      if (typeof f.type !== "string" || !f.type) {
         throw new Error(`bad field type in ${name}.${f.name}`);
       }
       if (seen.has(f.name)) {
@@ -141,7 +156,7 @@ function validateTypeMap(types: TypeMap): void {
  *
  * This only emits structs reachable from `primary`. Unused-declaration
  * rejection is a payload-level concern (the union of reachable sets across
- * QRLDomain + primaryType) and lives in `computeTypedDataDigest`.
+ * QRLDomain + primaryType) and lives in `computeLegacyTypedDataDigest`.
  */
 export function encodeType(primary: string, types: TypeMap): string {
   const deps = collectDependencies(primary, types);
@@ -155,38 +170,44 @@ export function encodeType(primary: string, types: TypeMap): string {
         // change the type hash and thus the signature).
         throw new Error(`encodeType: missing type definition for ${name}`);
       }
-      const inner = fields.map((f) => `${f.type} ${f.name}`).join(',');
+      const inner = fields.map((f) => `${f.type} ${f.name}`).join(",");
       return `${name}(${inner})`;
     })
-    .join('');
+    .join("");
 }
 
 export function typeHash(primary: string, types: TypeMap): Uint8Array {
-  return shake256(new TextEncoder().encode(encodeType(primary, types)), { dkLen: DIGEST_LEN });
+  return shake256(new TextEncoder().encode(encodeType(primary, types)), {
+    dkLen: DIGEST_LEN,
+  });
 }
 
 function parseQAddress(addr: string): Uint8Array {
   if (!isValidQrlAddress(addr)) {
     throw new Error(`invalid Q-address: ${String(addr)}`);
   }
-  return hexToBytes('0x' + addr.slice(1).toLowerCase());
+  return hexToBytes("0x" + addr.slice(1).toLowerCase());
 }
 
 function padLeft32(bytes: Uint8Array): Uint8Array {
-  if (bytes.length > SLOT) throw new Error('cannot pad: bytes > 32');
+  if (bytes.length > SLOT) throw new Error("cannot pad: bytes > 32");
   const out = new Uint8Array(SLOT);
   out.set(bytes, SLOT - bytes.length);
   return out;
 }
 
 function padRight32(bytes: Uint8Array): Uint8Array {
-  if (bytes.length > SLOT) throw new Error('cannot pad: bytes > 32');
+  if (bytes.length > SLOT) throw new Error("cannot pad: bytes > 32");
   const out = new Uint8Array(SLOT);
   out.set(bytes, 0);
   return out;
 }
 
-function bigIntToSlot(value: bigint, width: number, signed: boolean): Uint8Array {
+function bigIntToSlot(
+  value: bigint,
+  width: number,
+  signed: boolean,
+): Uint8Array {
   if (signed) {
     const limit = 1n << BigInt(width - 1);
     if (value >= limit || value < -limit) {
@@ -210,11 +231,11 @@ function bigIntToSlot(value: bigint, width: number, signed: boolean): Uint8Array
 }
 
 function parseIntValue(v: unknown, typeLabel: string): bigint {
-  if (typeof v === 'bigint') return v;
-  if (typeof v === 'string') {
+  if (typeof v === "bigint") return v;
+  if (typeof v === "string") {
     if (/^-?0x[0-9a-fA-F]+$/i.test(v)) {
       // BigInt() throws on a "-0x.." literal, so split the sign off first.
-      const isNegative = v.startsWith('-');
+      const isNegative = v.startsWith("-");
       const abs = BigInt(isNegative ? v.slice(1) : v);
       return isNegative ? -abs : abs;
     }
@@ -223,7 +244,7 @@ function parseIntValue(v: unknown, typeLabel: string): bigint {
     }
     return BigInt(v);
   }
-  if (typeof v === 'number') {
+  if (typeof v === "number") {
     if (!Number.isInteger(v) || !Number.isSafeInteger(v)) {
       throw new Error(`unsafe ${typeLabel} number: ${v}, pass as string`);
     }
@@ -232,63 +253,81 @@ function parseIntValue(v: unknown, typeLabel: string): bigint {
   throw new Error(`unsupported ${typeLabel} value: ${typeof v}`);
 }
 
-export function encodeField(type: FieldType, value: unknown, types: TypeMap): Uint8Array {
+export function encodeField(
+  type: FieldType,
+  value: unknown,
+  types: TypeMap,
+): Uint8Array {
   const parsed = parseFieldType(type, types);
 
   switch (parsed.kind) {
-    case 'ref':
-      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    case "ref":
+      if (value === null || typeof value !== "object" || Array.isArray(value)) {
         throw new Error(`struct field expects object: ${type}`);
       }
       return hashStruct(parsed.name, value as Message, types);
 
-    case 'address':
-      if (typeof value !== 'string') {
+    case "address":
+      if (typeof value !== "string") {
         throw new Error(`address field expects string: ${typeof value}`);
       }
       return padLeft32(parseQAddress(value));
 
-    case 'bool':
-      if (typeof value !== 'boolean') {
+    case "bool":
+      if (typeof value !== "boolean") {
         throw new Error(`bool field expects boolean: ${typeof value}`);
       }
       return padLeft32(new Uint8Array([value ? 1 : 0]));
 
-    case 'string':
-      if (typeof value !== 'string') {
+    case "string":
+      if (typeof value !== "string") {
         throw new Error(`string field expects string: ${typeof value}`);
       }
       return shake256(new TextEncoder().encode(value), { dkLen: DIGEST_LEN });
 
-    case 'bytes':
-      if (typeof value !== 'string') {
+    case "bytes":
+      if (typeof value !== "string") {
         throw new Error(`bytes field expects 0x-hex string: ${typeof value}`);
       }
       return shake256(hexToBytes(value), { dkLen: DIGEST_LEN });
 
-    case 'uintN':
-      return bigIntToSlot(parseIntValue(value, `uint${parsed.width}`), parsed.width, false);
+    case "uintN":
+      return bigIntToSlot(
+        parseIntValue(value, `uint${parsed.width}`),
+        parsed.width,
+        false,
+      );
 
-    case 'intN':
-      return bigIntToSlot(parseIntValue(value, `int${parsed.width}`), parsed.width, true);
+    case "intN":
+      return bigIntToSlot(
+        parseIntValue(value, `int${parsed.width}`),
+        parsed.width,
+        true,
+      );
 
-    case 'bytesN': {
-      if (typeof value !== 'string') {
-        throw new Error(`bytes${parsed.width} expects 0x-hex string: ${typeof value}`);
+    case "bytesN": {
+      if (typeof value !== "string") {
+        throw new Error(
+          `bytes${parsed.width} expects 0x-hex string: ${typeof value}`,
+        );
       }
       const raw = hexToBytes(value);
       if (raw.length !== parsed.width) {
-        throw new Error(`bytes${parsed.width} requires ${parsed.width} bytes, got ${raw.length}`);
+        throw new Error(
+          `bytes${parsed.width} requires ${parsed.width} bytes, got ${raw.length}`,
+        );
       }
       return padRight32(raw);
     }
 
-    case 'array': {
+    case "array": {
       if (!Array.isArray(value)) {
         throw new Error(`array field expects array: ${typeof value}`);
       }
       if (parsed.size !== undefined && value.length !== parsed.size) {
-        throw new Error(`fixed array ${type} requires length ${parsed.size}, got ${value.length}`);
+        throw new Error(
+          `fixed array ${type} requires length ${parsed.size}, got ${value.length}`,
+        );
       }
       const chunks = value.map((v) => encodeField(parsed.inner, v, types));
       return shake256(concatBytesArr(chunks), { dkLen: DIGEST_LEN });
@@ -296,7 +335,11 @@ export function encodeField(type: FieldType, value: unknown, types: TypeMap): Ui
   }
 }
 
-export function hashStruct(primary: string, data: Message, types: TypeMap): Uint8Array {
+export function hashStruct(
+  primary: string,
+  data: Message,
+  types: TypeMap,
+): Uint8Array {
   const fields = types[primary];
   if (!fields) throw new Error(`unknown struct: ${primary}`);
   const expected = new Set(fields.map((f) => f.name));
@@ -305,7 +348,8 @@ export function hashStruct(primary: string, data: Message, types: TypeMap): Uint
   }
   const parts: Uint8Array[] = [typeHash(primary, types)];
   for (const f of fields) {
-    if (!(f.name in data)) throw new Error(`missing field ${primary}.${f.name}`);
+    if (!(f.name in data))
+      throw new Error(`missing field ${primary}.${f.name}`);
     parts.push(encodeField(f.type, data[f.name], types));
   }
   return shake256(concatBytesArr(parts), { dkLen: DIGEST_LEN });
@@ -324,16 +368,16 @@ export function hashStruct(primary: string, data: Message, types: TypeMap): Uint
  * Any other field name, or a type mismatch on a reserved name, is rejected.
  */
 const RESERVED_DOMAIN_FIELDS: Record<string, string> = {
-  name: 'string',
-  version: 'string',
-  chainId: 'uint256',
-  verifyingContract: 'address',
-  salt: 'bytes32',
+  name: "string",
+  version: "string",
+  chainId: "uint256",
+  verifyingContract: "address",
+  salt: "bytes32",
 };
 
 function validateDomainTypes(types: TypeMap): void {
-  const def = types['QRLDomain'];
-  if (!def) throw new Error('QRLDomain type is required');
+  const def = types["QRLDomain"];
+  if (!def) throw new Error("QRLDomain type is required");
   let hasName = false;
   for (const f of def) {
     const expected = RESERVED_DOMAIN_FIELDS[f.name];
@@ -344,16 +388,18 @@ function validateDomainTypes(types: TypeMap): void {
       );
     }
     if (f.type !== expected) {
-      throw new Error(`QRLDomain field "${f.name}" must be type "${expected}", got "${f.type}"`);
+      throw new Error(
+        `QRLDomain field "${f.name}" must be type "${expected}", got "${f.type}"`,
+      );
     }
-    if (f.name === 'name') hasName = true;
+    if (f.name === "name") hasName = true;
   }
-  if (!hasName) throw new Error('QRLDomain.name is required');
+  if (!hasName) throw new Error("QRLDomain.name is required");
 }
 
 function validatePayloadReachability(primary: string, types: TypeMap): void {
   const reachable = new Set<string>();
-  for (const root of ['QRLDomain', primary]) {
+  for (const root of ["QRLDomain", primary]) {
     for (const t of collectDependencies(root, types)) reachable.add(t);
   }
   for (const k of Object.keys(types)) {
@@ -368,14 +414,32 @@ function validatePayloadReachability(primary: string, types: TypeMap): void {
  *   messageHash = hashStruct(primaryType, message, types)
  *   digest      = SHAKE256("QRL-SIGN-TYPED-v1" || domainHash || messageHash, 64)
  */
-export function computeTypedDataDigest(payload: TypedDataPayload): Uint8Array {
-  if (!payload || typeof payload !== 'object') {
-    throw new Error('invalid typed data payload');
+export function computeLegacyTypedDataDigest(
+  payload: TypedDataPayload,
+): Uint8Array {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("invalid typed data payload");
   }
   validateTypeMap(payload.types);
   validateDomainTypes(payload.types);
   validatePayloadReachability(payload.primaryType, payload.types);
-  const domainHash = hashStruct('QRLDomain', payload.domain, payload.types);
-  const messageHash = hashStruct(payload.primaryType, payload.message, payload.types);
-  return shake256(concatBytes(SCHEME_TAG_TYPED, domainHash, messageHash), { dkLen: DIGEST_LEN });
+  const domainHash = hashStruct("QRLDomain", payload.domain, payload.types);
+  const messageHash = hashStruct(
+    payload.primaryType,
+    payload.message,
+    payload.types,
+  );
+  return shake256(concatBytes(SCHEME_TAG_TYPED, domainHash, messageHash), {
+    dkLen: DIGEST_LEN,
+  });
+}
+
+/**
+ * Refuse new typed-data signatures until a versioned 64-byte address slot
+ * layout is defined. Historical v1 verification remains available through
+ * computeLegacyTypedDataDigest.
+ */
+export function computeTypedDataDigest(payload: TypedDataPayload): Uint8Array {
+  void payload;
+  throw new Error(QIP55_TYPED_DATA_ERROR);
 }

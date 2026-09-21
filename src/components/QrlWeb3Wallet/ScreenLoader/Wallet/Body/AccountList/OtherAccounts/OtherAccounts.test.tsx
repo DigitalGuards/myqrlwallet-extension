@@ -82,9 +82,7 @@ describe("OtherAccounts", () => {
 
     await openMenu();
     await act(async () => {
-      await userEvent.click(
-        screen.getByRole("menuitem", { name: "Switch" }),
-      );
+      await userEvent.click(screen.getByRole("menuitem", { name: "Switch" }));
     });
     expect(mockedSetActiveAccount).toBeCalledTimes(1);
   });
@@ -154,9 +152,7 @@ describe("OtherAccounts", () => {
     renderComponent(storeWithLabel());
 
     await openMenu();
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "Rename" }),
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
 
     const input = screen.getByRole("textbox", { name: "Edit account label" });
     expect(input).toBeInTheDocument();
@@ -170,21 +166,17 @@ describe("OtherAccounts", () => {
   });
 
   it("should call setLabel on save", async () => {
-    const setLabel = vi.fn<any>(() => Promise.resolve());
+    const setLabel = vi.fn(() => Promise.resolve());
     renderComponent(storeWithLabel({ setLabel }));
 
     await openMenu();
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "Rename" }),
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
 
     const input = screen.getByRole("textbox", { name: "Edit account label" });
     await userEvent.clear(input);
     await userEvent.type(input, "Savings");
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Save label" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Save label" }));
 
     expect(setLabel).toHaveBeenCalledWith(
       "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
@@ -196,16 +188,12 @@ describe("OtherAccounts", () => {
     renderComponent(storeWithLabel());
 
     await openMenu();
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "Rename" }),
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     expect(
       screen.getByRole("textbox", { name: "Edit account label" }),
     ).toBeInTheDocument();
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Cancel edit" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
 
     expect(
       screen.queryByRole("textbox", { name: "Edit account label" }),
@@ -213,13 +201,11 @@ describe("OtherAccounts", () => {
   });
 
   it("should save on Enter key", async () => {
-    const setLabel = vi.fn<any>(() => Promise.resolve());
+    const setLabel = vi.fn(() => Promise.resolve());
     renderComponent(storeWithLabel({ setLabel }));
 
     await openMenu();
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "Rename" }),
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
 
     const input = screen.getByRole("textbox", { name: "Edit account label" });
     await userEvent.clear(input);
@@ -237,9 +223,7 @@ describe("OtherAccounts", () => {
     renderComponent(storeWithLabel());
 
     await openMenu();
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "Rename" }),
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
 
     const input = screen.getByRole("textbox", { name: "Edit account label" });
     await userEvent.type(input, "{Escape}");
@@ -253,13 +237,11 @@ describe("OtherAccounts", () => {
     renderComponent(twoAccountStore());
 
     await openMenu();
-    expect(
-      screen.getByRole("menuitem", { name: "Hide" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Hide" })).toBeInTheDocument();
   });
 
   it("should call hideAccount when Hide is clicked", async () => {
-    const hideAccount = vi.fn<any>(() => Promise.resolve());
+    const hideAccount = vi.fn(() => Promise.resolve());
     renderComponent(
       mockedStore({
         qrlStore: {
@@ -292,9 +274,7 @@ describe("OtherAccounts", () => {
     );
 
     await openMenu();
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "Hide" }),
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Hide" }));
 
     expect(hideAccount).toHaveBeenCalledWith(
       "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
@@ -311,10 +291,10 @@ describe("OtherAccounts", () => {
   });
 
   it("should remove the account only after confirming the dialog", async () => {
-    const removeAccount = vi.fn<any>(() => Promise.resolve());
-    const removeAccountKey = vi.fn<any>(() => Promise.resolve());
-    const removeLabel = vi.fn<any>(() => Promise.resolve());
-    const unhideAccount = vi.fn<any>(() => Promise.resolve());
+    const removeAccount = vi.fn(() => Promise.resolve());
+    const removeAccountKey = vi.fn(() => Promise.resolve());
+    const removeLabel = vi.fn(() => Promise.resolve());
+    const unhideAccount = vi.fn(() => Promise.resolve());
     renderComponent(
       mockedStore({
         qrlStore: {
@@ -361,7 +341,7 @@ describe("OtherAccounts", () => {
   });
 
   it("should not remove the account when the dialog is cancelled", async () => {
-    const removeAccount = vi.fn<any>(() => Promise.resolve());
+    const removeAccount = vi.fn(() => Promise.resolve());
     renderComponent(twoAccountStore({ removeAccount }));
 
     await openMenu();

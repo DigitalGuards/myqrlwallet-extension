@@ -6,6 +6,10 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import Receive from "./Receive";
 
+const ADDRESS = `Q${"0123456789abcdef".repeat(8)}`;
+const OTHER_ADDRESS = `Q${"fedcba9876543210".repeat(8)}`;
+const FINGERPRINT = "Q01234567...cdef0123...89abcdef";
+
 vi.mock("qrcode.react", () => ({
   QRCodeSVG: ({ value }: { value: string }) => (
     <div data-testid="qr-code" data-value={value} />
@@ -36,40 +40,36 @@ describe("Receive", () => {
   });
 
   it("should render a QR code for the active account", () => {
-    const address = "Q20B714091cF2a62DADda2847803e3f1B9D2D3779";
     renderComponent(
       mockedStore({
-        qrlStore: { activeAccount: { accountAddress: address } },
+        qrlStore: { activeAccount: { accountAddress: ADDRESS } },
       }),
     );
 
     const qr = screen.getByTestId("qr-code");
     expect(qr).toBeInTheDocument();
-    expect(qr).toHaveAttribute("data-value", address);
+    expect(qr).toHaveAttribute("data-value", ADDRESS);
   });
 
   it("should use accountAddress from location state when provided", () => {
-    const stateAddress = "Q20fB08fF1f1376A14C055E9F56df80563E16722b";
-    renderComponent(mockedStore(), { accountAddress: stateAddress });
+    renderComponent(mockedStore(), { accountAddress: OTHER_ADDRESS });
 
     const qr = screen.getByTestId("qr-code");
-    expect(qr).toHaveAttribute("data-value", stateAddress);
+    expect(qr).toHaveAttribute("data-value", OTHER_ADDRESS);
   });
 
-  it("should display the split address", () => {
-    const address = "Q20B714091cF2a62DADda2847803e3f1B9D2D3779";
+  it("should display the approved compact address fingerprint", () => {
     renderComponent(
       mockedStore({
-        qrlStore: { activeAccount: { accountAddress: address } },
+        qrlStore: { activeAccount: { accountAddress: ADDRESS } },
       }),
     );
 
-    // Address is rendered as "Q 20B71 4091c ..." (prefix + space-separated chunks)
-    expect(screen.getByText(/Q\s+20B71/)).toBeInTheDocument();
+    expect(screen.getByText(FINGERPRINT)).toBeInTheDocument();
+    expect(screen.getByText(ADDRESS)).toHaveClass("sr-only");
   });
 
   it("should copy address to clipboard on click", async () => {
-    const address = "Q20B714091cF2a62DADda2847803e3f1B9D2D3779";
     const mockedWriteText = vi.fn(() => Promise.resolve());
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: mockedWriteText },
@@ -78,13 +78,15 @@ describe("Receive", () => {
 
     renderComponent(
       mockedStore({
-        qrlStore: { activeAccount: { accountAddress: address } },
+        qrlStore: { activeAccount: { accountAddress: ADDRESS } },
       }),
     );
 
-    const copyButton = screen.getByRole("button", { name: "Copy address" });
+    const copyButton = screen.getByRole("button", {
+      name: "Copy full address",
+    });
     await userEvent.click(copyButton);
 
-    expect(mockedWriteText).toHaveBeenCalledWith(address);
+    expect(mockedWriteText).toHaveBeenCalledWith(ADDRESS);
   });
 });

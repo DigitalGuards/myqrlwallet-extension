@@ -1,20 +1,7 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
-import {
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
-import {
-  act,
-  cleanup,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -37,8 +24,8 @@ describe("GasFeeSelector", () => {
     to: "0x20fB08fF1f1376A14C055E9F56df80563E16722b",
     value: 1.5,
     disabled: false,
-    onOverridesChange: vi.fn<any>(),
-    onGasFeeCalculated: vi.fn<any>(),
+    onOverridesChange: vi.fn(),
+    onGasFeeCalculated: vi.fn(),
   };
 
   const renderComponent = (
@@ -73,10 +60,8 @@ describe("GasFeeSelector", () => {
   });
 
   it("should render estimated costs for each tier", async () => {
-    const getNativeTokenGas = vi.fn<any>(async () => "0.042");
-    renderComponent(
-      mockedStore({ qrlStore: { getNativeTokenGas } }),
-    );
+    const getNativeTokenGas = vi.fn(async () => "0.042");
+    renderComponent(mockedStore({ qrlStore: { getNativeTokenGas } }));
 
     await waitFor(() => {
       expect(getNativeTokenGas).toHaveBeenCalled();
@@ -84,7 +69,7 @@ describe("GasFeeSelector", () => {
   });
 
   it("should call onOverridesChange when selecting a tier", async () => {
-    const onOverridesChange = vi.fn<any>();
+    const onOverridesChange = vi.fn();
     renderComponent(undefined, { onOverridesChange });
 
     await act(async () => {
@@ -95,7 +80,7 @@ describe("GasFeeSelector", () => {
   });
 
   it("should call onOverridesChange with aggressive tier", async () => {
-    const onOverridesChange = vi.fn<any>();
+    const onOverridesChange = vi.fn();
     renderComponent(undefined, { onOverridesChange });
 
     await act(async () => {
@@ -116,15 +101,13 @@ describe("GasFeeSelector", () => {
       await userEvent.click(screen.getByText("Advanced"));
     });
 
-    expect(
-      screen.getByText("Max priority fee (planck)"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Max priority fee (planck)")).toBeInTheDocument();
     expect(screen.getByText("Max fee (planck)")).toBeInTheDocument();
     expect(screen.getByText("Gas limit")).toBeInTheDocument();
   });
 
   it("should pre-fill advanced inputs with market values", async () => {
-    const getGasFeeData = vi.fn<any>(async () => ({
+    const getGasFeeData = vi.fn(async () => ({
       baseFeePerGas: BigInt(1000),
       maxPriorityFeePerGas: BigInt(300),
       maxFeePerGas: BigInt(1300),
@@ -144,7 +127,7 @@ describe("GasFeeSelector", () => {
   });
 
   it("should collapse advanced and revert to selected tier", async () => {
-    const onOverridesChange = vi.fn<any>();
+    const onOverridesChange = vi.fn();
     renderComponent(undefined, { onOverridesChange });
 
     // First select Low
@@ -157,11 +140,9 @@ describe("GasFeeSelector", () => {
       await userEvent.click(screen.getByText("Advanced"));
     });
 
-    expect(
-      screen.getByText("Max priority fee (planck)"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Max priority fee (planck)")).toBeInTheDocument();
 
-    // Close Advanced — should revert to Low
+    // Close Advanced - should revert to Low
     await act(async () => {
       await userEvent.click(screen.getByText("Advanced"));
     });
@@ -177,7 +158,7 @@ describe("GasFeeSelector", () => {
   });
 
   it("should emit advanced overrides when typing in inputs", async () => {
-    const onOverridesChange = vi.fn<any>();
+    const onOverridesChange = vi.fn();
     renderComponent(undefined, { onOverridesChange });
 
     await act(async () => {
@@ -195,7 +176,9 @@ describe("GasFeeSelector", () => {
       (call: any) => call[0].tier === "advanced",
     );
     expect(advancedCalls.length).toBeGreaterThan(0);
-    expect((advancedCalls[advancedCalls.length - 1] as any)[0].tier).toBe("advanced");
+    expect((advancedCalls[advancedCalls.length - 1] as any)[0].tier).toBe(
+      "advanced",
+    );
   });
 
   it("should sanitize non-numeric input in advanced fields", async () => {
@@ -215,7 +198,7 @@ describe("GasFeeSelector", () => {
   });
 
   it("should use defaultGasTier from settings as initial selection", async () => {
-    const onOverridesChange = vi.fn<any>();
+    const onOverridesChange = vi.fn();
     renderComponent(
       mockedStore({
         settingsStore: { defaultGasTier: "aggressive" as const },
@@ -223,7 +206,7 @@ describe("GasFeeSelector", () => {
       { onOverridesChange },
     );
 
-    // Click Market to change — this verifies "aggressive" was the initial
+    // Click Market to change - this verifies "aggressive" was the initial
     await act(async () => {
       await userEvent.click(screen.getByText("Market"));
     });
@@ -241,12 +224,11 @@ describe("GasFeeSelector", () => {
   });
 
   it("should call onGasFeeCalculated when tier is selected and costs are loaded", async () => {
-    const onGasFeeCalculated = vi.fn<any>();
-    const getNativeTokenGas = vi.fn<any>(async () => "0.042");
-    renderComponent(
-      mockedStore({ qrlStore: { getNativeTokenGas } }),
-      { onGasFeeCalculated },
-    );
+    const onGasFeeCalculated = vi.fn();
+    const getNativeTokenGas = vi.fn(async () => "0.042");
+    renderComponent(mockedStore({ qrlStore: { getNativeTokenGas } }), {
+      onGasFeeCalculated,
+    });
 
     await waitFor(() => {
       expect(getNativeTokenGas).toHaveBeenCalled();
@@ -260,12 +242,10 @@ describe("GasFeeSelector", () => {
   });
 
   it("should handle gas calculation errors gracefully", async () => {
-    const getNativeTokenGas = vi.fn<any>(async () => {
+    const getNativeTokenGas = vi.fn(async () => {
       throw new Error("RPC error");
     });
-    renderComponent(
-      mockedStore({ qrlStore: { getNativeTokenGas } }),
-    );
+    renderComponent(mockedStore({ qrlStore: { getNativeTokenGas } }));
 
     await waitFor(() => {
       expect(getNativeTokenGas).toHaveBeenCalled();
@@ -277,23 +257,20 @@ describe("GasFeeSelector", () => {
   });
 
   it("should open advanced with fallback when getGasFeeData throws", async () => {
-    const onOverridesChange = vi.fn<any>();
-    const getGasFeeData = vi.fn<any>(async () => {
+    const onOverridesChange = vi.fn();
+    const getGasFeeData = vi.fn(async () => {
       throw new Error("RPC error");
     });
-    renderComponent(
-      mockedStore({ qrlStore: { getGasFeeData } }),
-      { onOverridesChange },
-    );
+    renderComponent(mockedStore({ qrlStore: { getGasFeeData } }), {
+      onOverridesChange,
+    });
 
     await act(async () => {
       await userEvent.click(screen.getByText("Advanced"));
     });
 
     // Advanced section should still open
-    expect(
-      screen.getByText("Max priority fee (planck)"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Max priority fee (planck)")).toBeInTheDocument();
 
     // Should have called onOverridesChange with advanced tier
     const advancedCalls = onOverridesChange.mock.calls.filter(
@@ -303,7 +280,7 @@ describe("GasFeeSelector", () => {
   });
 
   it("should handle typing in maxFeePerGas and gasLimit advanced inputs", async () => {
-    const onOverridesChange = vi.fn<any>();
+    const onOverridesChange = vi.fn();
     renderComponent(undefined, { onOverridesChange });
 
     await act(async () => {
@@ -335,15 +312,12 @@ describe("GasFeeSelector", () => {
   });
 
   it("should calculate gas for ZRC-20 tokens", async () => {
-    const getZrc20TokenGas = vi.fn<any>(async () => "1.5");
-    renderComponent(
-      mockedStore({ qrlStore: { getZrc20TokenGas } }),
-      {
-        isZrc20Token: true,
-        tokenContractAddress: "0x28c4113a9d3a2e836f28c23ed8e3c1e7c243f566",
-        tokenDecimals: 18,
-      },
-    );
+    const getZrc20TokenGas = vi.fn(async () => "1.5");
+    renderComponent(mockedStore({ qrlStore: { getZrc20TokenGas } }), {
+      isZrc20Token: true,
+      tokenContractAddress: "0x28c4113a9d3a2e836f28c23ed8e3c1e7c243f566",
+      tokenDecimals: 18,
+    });
 
     await waitFor(() => {
       expect(getZrc20TokenGas).toHaveBeenCalled();

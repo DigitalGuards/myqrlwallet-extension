@@ -26,12 +26,21 @@
  * - Signing starts → state.signingStatus changes → UI shows "Check your device"
  */
 
-import { action, computed, makeAutoObservable, observable, runInAction } from "mobx";
+import {
+  action,
+  computed,
+  makeAutoObservable,
+  observable,
+  runInAction,
+} from "mobx";
 import { ledgerService } from "@/services/ledger/ledgerService";
 import { ledgerTransport } from "@/services/ledger/ledgerTransport";
-import type { LedgerAccount, LedgerDeviceInfo } from "@/services/ledger/ledgerTypes";
+import type {
+  LedgerAccount,
+  LedgerDeviceInfo,
+} from "@/services/ledger/ledgerTypes";
 import StorageUtil from "@/utilities/storageUtil";
-import { LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
+import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
 import { getDerivationPath } from "@/services/ledger/ledgerApdu";
 import { FeeMarketEIP1559Transaction } from "@theqrl/web3-qrl-accounts";
 import { newMLDSA87Descriptor } from "@theqrl/wallet.js";
@@ -152,6 +161,12 @@ class LedgerStore {
     return this.signingState === "awaiting_confirmation";
   }
 
+  private assertQip55Supported(): void {
+    if (!LEDGER_CONFIG.QIP55_SUPPORTED) {
+      throw new Error(LEDGER_ERROR_MESSAGES.QIP55_UNSUPPORTED);
+    }
+  }
+
   async connect(): Promise<void> {
     if (this.connectionState === "connecting") {
       return;
@@ -175,7 +190,9 @@ class LedgerStore {
       console.log("[LedgerStore] Connected successfully:", deviceInfo);
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : LEDGER_ERROR_MESSAGES.CONNECTION_FAILED;
+        error instanceof Error
+          ? error.message
+          : LEDGER_ERROR_MESSAGES.CONNECTION_FAILED;
 
       runInAction(() => {
         this.connectionState = "error";
@@ -239,14 +256,18 @@ class LedgerStore {
       });
       console.log(
         "[LedgerStore] Loaded accounts from storage:",
-        storedAccounts.length
+        storedAccounts.length,
       );
     } catch (error) {
-      console.error("[LedgerStore] Failed to load accounts from storage:", error);
+      console.error(
+        "[LedgerStore] Failed to load accounts from storage:",
+        error,
+      );
     }
   }
 
   async loadAccounts(count: number = 5, startIndex: number = 0): Promise<void> {
+    this.assertQip55Supported();
     if (!this.isConnected) {
       throw new Error(LEDGER_ERROR_MESSAGES.NOT_CONNECTED);
     }
@@ -278,8 +299,9 @@ class LedgerStore {
 
   async fetchPageAccounts(
     count: number = 5,
-    startIndex: number = 0
+    startIndex: number = 0,
   ): Promise<void> {
+    this.assertQip55Supported();
     if (!this.isConnected) {
       throw new Error(LEDGER_ERROR_MESSAGES.NOT_CONNECTED);
     }
@@ -299,7 +321,7 @@ class LedgerStore {
         "[LedgerStore] Fetched page accounts:",
         accounts.length,
         "startIndex:",
-        startIndex
+        startIndex,
       );
     } catch (error) {
       console.error("[LedgerStore] Failed to fetch page accounts:", error);
@@ -312,6 +334,7 @@ class LedgerStore {
   }
 
   async addAccount(verify: boolean = true): Promise<LedgerAccount> {
+    this.assertQip55Supported();
     if (!this.isConnected) {
       throw new Error(LEDGER_ERROR_MESSAGES.NOT_CONNECTED);
     }
@@ -360,7 +383,7 @@ class LedgerStore {
   async removeAccount(address: string): Promise<void> {
     runInAction(() => {
       this.accounts = this.accounts.filter(
-        (a) => a.address.toLowerCase() !== address.toLowerCase()
+        (a) => a.address.toLowerCase() !== address.toLowerCase(),
       );
     });
 
@@ -371,16 +394,20 @@ class LedgerStore {
   }
 
   async verifyAddress(address: string): Promise<boolean> {
+    this.assertQip55Supported();
     if (!this.isConnected) {
       throw new Error(LEDGER_ERROR_MESSAGES.NOT_CONNECTED);
     }
 
     const account = this.accounts.find(
-      (a) => a.address.toLowerCase() === address.toLowerCase()
+      (a) => a.address.toLowerCase() === address.toLowerCase(),
     );
 
     if (!account) {
-      console.warn("[LedgerStore] Account not found for verification:", address);
+      console.warn(
+        "[LedgerStore] Account not found for verification:",
+        address,
+      );
       return false;
     }
 
@@ -395,7 +422,7 @@ class LedgerStore {
 
   getAccountByAddress(address: string): LedgerAccount | undefined {
     return this.accounts.find(
-      (a) => a.address.toLowerCase() === address.toLowerCase()
+      (a) => a.address.toLowerCase() === address.toLowerCase(),
     );
   }
 
@@ -408,6 +435,7 @@ class LedgerStore {
    * This is needed when accounts were loaded without public keys.
    */
   async fetchPublicKey(address: string): Promise<{ publicKey: string }> {
+    this.assertQip55Supported();
     const account = this.getAccountByAddress(address);
     if (!account) {
       throw new Error(`Account ${address} not found`);
@@ -417,12 +445,14 @@ class LedgerStore {
       await this.connect();
     }
 
-    const { publicKey } = await ledgerService.getPublicKey(account.derivationPath);
+    const { publicKey } = await ledgerService.getPublicKey(
+      account.derivationPath,
+    );
 
     // Update account with public key
     runInAction(() => {
       const idx = this.accounts.findIndex(
-        (a) => a.address.toLowerCase() === address.toLowerCase()
+        (a) => a.address.toLowerCase() === address.toLowerCase(),
       );
       if (idx >= 0) {
         this.accounts[idx] = { ...this.accounts[idx], publicKey };
@@ -447,8 +477,20 @@ class LedgerStore {
    */
   async signTransaction(
     fromAddress: string,
-    rlpEncodedTx: string
+    rlpEncodedTx: string,
   ): Promise<StoreSignResult> {
+    if (!LEDGER_CONFIG.QIP55_SUPPORTED) {
+      const result: StoreSignResult = {
+        success: false,
+        error: LEDGER_ERROR_MESSAGES.QIP55_UNSUPPORTED,
+      };
+      runInAction(() => {
+        this.signingState = "error";
+        this.signingStatus = { state: "error", message: result.error ?? "" };
+        this.signResult = result;
+      });
+      return result;
+    }
     const account = this.getAccountByAddress(fromAddress);
     console.log("[LedgerStore] Signing transaction for account:", fromAddress);
     if (!account) {
@@ -494,7 +536,8 @@ class LedgerStore {
       this.signingState = "awaiting_confirmation";
       this.signingStatus = {
         state: "awaiting_confirmation",
-        message: "Please review and confirm the transaction on your Ledger device",
+        message:
+          "Please review and confirm the transaction on your Ledger device",
       };
       this.signResult = null;
     });
@@ -511,7 +554,7 @@ class LedgerStore {
 
       const signedResult = await ledgerService.signTransaction(
         account.derivationPath,
-        rlpEncodedTx
+        rlpEncodedTx,
       );
 
       console.log("[LedgerStore] Transaction signed, preparing result");
@@ -569,10 +612,17 @@ class LedgerStore {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     common: any,
   ): Promise<string> {
-    const unsignedTx = FeeMarketEIP1559Transaction.fromTxData(txData, { common });
+    this.assertQip55Supported();
+    const unsignedTx = FeeMarketEIP1559Transaction.fromTxData(txData, {
+      common,
+    });
     const descriptor = newMLDSA87Descriptor().toBytes();
     const extraParams = new Uint8Array([]);
-    const messageToSign = unsignedTx.getMessageToSign(descriptor, extraParams, false);
+    const messageToSign = unsignedTx.getMessageToSign(
+      descriptor,
+      extraParams,
+      false,
+    );
     const serializedTx = Buffer.from(messageToSign).toString("hex");
 
     const signResult = await this.signTransaction(fromAddress, serializedTx);
@@ -587,7 +637,8 @@ class LedgerStore {
 
     let publicKey = account.publicKey;
     if (!publicKey) {
-      const { publicKey: fetchedPublicKey } = await this.fetchPublicKey(fromAddress);
+      const { publicKey: fetchedPublicKey } =
+        await this.fetchPublicKey(fromAddress);
       publicKey = fetchedPublicKey;
       if (!publicKey) {
         throw new Error("Failed to fetch public key from Ledger");
@@ -595,12 +646,24 @@ class LedgerStore {
     }
 
     const rawValues = unsignedTx.raw();
-    const signatureBytes = Buffer.from(signResult.signature!.replace("0x", ""), "hex");
+    const signatureBytes = Buffer.from(
+      signResult.signature!.replace("0x", ""),
+      "hex",
+    );
     const publicKeyBytes = Buffer.from(publicKey.replace("0x", ""), "hex");
 
-    const signedTxValues = [...rawValues.slice(0, 9), publicKeyBytes, signatureBytes, descriptor];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const signedTx = FeeMarketEIP1559Transaction.fromValuesArray(signedTxValues as any, { common });
+    const signedTxValues = [
+      ...rawValues.slice(0, 9),
+      publicKeyBytes,
+      signatureBytes,
+      descriptor,
+    ];
+    const signedTx = FeeMarketEIP1559Transaction.fromValuesArray(
+      signedTxValues as Parameters<
+        typeof FeeMarketEIP1559Transaction.fromValuesArray
+      >[0],
+      { common },
+    );
     const signedRawTx = signedTx.serialize();
     return "0x" + Buffer.from(signedRawTx).toString("hex");
   }

@@ -1,4 +1,8 @@
 import {
+  walletSessionStorage,
+  profileStorageKey,
+} from "@/utilities/profileStorage";
+import {
   DecryptedKeyType,
   EncryptAccountType,
   LOCK_MANAGER_MESSAGES,
@@ -20,6 +24,11 @@ import StorageUtil, {
   LockState,
   PRICE_CACHE_IDENTIFIER,
 } from "@/utilities/storageUtil";
+import {
+  isLegacyQrlAddress,
+  isQrlAddress,
+  LEGACY_QRL_ADDRESS_MIGRATION_ERROR,
+} from "@/utilities/addressUtil";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
 import { action, makeAutoObservable, runInAction } from "mobx";
 import browser from "webextension-polyfill";
@@ -39,7 +48,7 @@ class LockStore {
    */
   private cachedKeys?: DecryptedKeyType[];
   /**
-   * Wallet password held in popup memory only — paired with cachedKeys so
+   * Wallet password held in popup memory only - paired with cachedKeys so
    * the popup can re-arm the SW after a Chrome-driven restart without
    * re-prompting the user. Stored separately from `cachedKeys` so leaks of
    * either store do not necessarily leak both.
@@ -80,7 +89,7 @@ class LockStore {
         name: LOCK_MANAGER_MESSAGES.LOCK_MANAGER_KEEP_LIVE,
       });
       this.keepAlivePort.onDisconnect.addListener(() => {
-        // SW dropped the port — reconnect to wake it back up
+        // SW dropped the port - reconnect to wake it back up
         setTimeout(() => this.connectKeepAlive(), PORT_RECONNECT_DELAY);
       });
     } catch {
@@ -103,10 +112,9 @@ class LockStore {
         this.bootAttempt = i + 1;
       });
       try {
-        const { isLocked, hasPasswordSet } =
-          await browser.runtime.sendMessage({
-            name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
-          });
+        const { isLocked, hasPasswordSet } = await browser.runtime.sendMessage({
+          name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
+        });
         runInAction(() => {
           this.isLocked = isLocked;
           this.hasPasswordSet = hasPasswordSet;
@@ -141,7 +149,9 @@ class LockStore {
       if (
         areaName === "local" &&
         changedKeys.length > 0 &&
-        changedKeys.every((key) => key === PRICE_CACHE_IDENTIFIER)
+        changedKeys.every(
+          (key) => key === profileStorageKey(PRICE_CACHE_IDENTIFIER),
+        )
       ) {
         return;
       }
@@ -186,10 +196,11 @@ class LockStore {
   }
 
   async getMnemonicPhrases(accountAddress: string) {
-    const decryptedKeys: DecryptedKeyType[] =
-      await browser.runtime.sendMessage({
+    const decryptedKeys: DecryptedKeyType[] = await browser.runtime.sendMessage(
+      {
         name: LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS,
-      });
+      },
+    );
     const accountKey = decryptedKeys?.find(
       (key) => key?.address?.toLowerCase() === accountAddress?.toLowerCase(),
     );
@@ -226,6 +237,12 @@ class LockStore {
   ): Promise<boolean> {
     const keyStores = await StorageUtil.getKeystores();
     if (!keyStores.length) return false;
+    if (keyStores.some((keyStore) => isLegacyQrlAddress(keyStore.address))) {
+      throw new Error(LEGACY_QRL_ADDRESS_MIGRATION_ERROR);
+    }
+    if (keyStores.some((keyStore) => !isQrlAddress(keyStore.address))) {
+      throw new Error("The wallet contains a keystore with an invalid address");
+    }
 
     // Fan the keystores out over several workers so the argon2id runs
     // execute concurrently (contiguous chunks keep the original order when
@@ -285,7 +302,7 @@ class LockStore {
         },
       });
     } catch {
-      // Keys are persisted — SW will pick them up on next unlock.
+      // Keys are persisted - SW will pick them up on next unlock.
     }
 
     this.cachedKeys = result.newKeys as DecryptedKeyType[];
@@ -320,11 +337,11 @@ class LockStore {
           LockState.UNLOCKED,
         );
         if (lockedTs > unlockedTs) {
-          // Intentional lock (manual or auto-lock) — don't re-send
+          // Intentional lock (manual or auto-lock) - don't re-send
           this.cachedKeys = undefined;
           this.cachedPassword = undefined;
         } else {
-          // SW restart — re-send cached keys (and password if known) to recover
+          // SW restart - re-send cached keys (and password if known) to recover
           try {
             await browser.runtime.sendMessage({
               name: LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
@@ -341,7 +358,7 @@ class LockStore {
             isLocked = recheck.isLocked;
             hasPasswordSet = recheck.hasPasswordSet;
           } catch {
-            // Re-send failed — accept the locked state
+            // Re-send failed - accept the locked state
           }
         }
       }
@@ -396,7 +413,7 @@ class LockStore {
         name: LOCK_MANAGER_MESSAGES.RESET_WALLET,
       });
     } catch {
-      await browser.storage.session.clear();
+      await walletSessionStorage.clear();
       await StorageUtil.clearAllData();
       await StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
     }
@@ -449,6 +466,12 @@ class LockStore {
     // Read keystores and decrypt in Web Workers (separate threads).
     const keyStores = await StorageUtil.getKeystores();
     if (!keyStores.length) return false;
+    if (keyStores.some((keyStore) => isLegacyQrlAddress(keyStore.address))) {
+      throw new Error(LEGACY_QRL_ADDRESS_MIGRATION_ERROR);
+    }
+    if (keyStores.some((keyStore) => !isQrlAddress(keyStore.address))) {
+      throw new Error("The wallet contains a keystore with an invalid address");
+    }
 
     // Contiguous chunks keep the original keystore order when the per-chunk
     // results are concatenated back together.
@@ -543,7 +566,7 @@ class LockStore {
         return true;
       }
     } catch {
-      // Verification failed — but keys were sent successfully
+      // Verification failed - but keys were sent successfully
     }
 
     return false;

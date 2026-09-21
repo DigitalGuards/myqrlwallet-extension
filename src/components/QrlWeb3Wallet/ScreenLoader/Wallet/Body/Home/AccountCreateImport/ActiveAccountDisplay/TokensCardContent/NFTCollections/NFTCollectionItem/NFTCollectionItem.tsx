@@ -21,14 +21,9 @@ import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
 import type { NFTStandard } from "@/types/nft";
 import StorageUtil from "@/utilities/storageUtil";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import { getRandomTailwindTextColor } from "@/utilities/stylingUtil";
-import {
-  Check,
-  CircleMinus,
-  EllipsisVertical,
-  Image,
-  X,
-} from "lucide-react";
+import { Check, CircleMinus, EllipsisVertical, Image, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -122,7 +117,7 @@ const NFTCollectionItem = observer(
     const displayName =
       collection.name ||
       collection.symbol ||
-      `${contractAddress.slice(0, 10)}...`;
+      formatQrlAddressFingerprint(contractAddress);
 
     return (
       <>

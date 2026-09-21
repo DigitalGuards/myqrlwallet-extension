@@ -1,3 +1,4 @@
+import { profileStorageKey } from "@/utilities/profileStorage";
 import StorageUtil from "@/utilities/storageUtil";
 import { JsonRpcEngine } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
 import { createEngineStream } from "@theqrl/qrl-wallet-provider/json-rpc-middleware-stream";
@@ -61,7 +62,7 @@ const prepareListeners = () => {
   // Listening to storage for displaying the badge in the extension.
   browser.storage.onChanged.addListener(async (changes, areaName) => {
     if (areaName === "local") {
-      notifyDAppAccountsChanged(changes.DAPPS);
+      notifyDAppAccountsChanged(changes[profileStorageKey("DAPPS")]);
     }
     const storedDAppRequestData = await StorageUtil.getDAppsRequestData();
     if (storedDAppRequestData) {

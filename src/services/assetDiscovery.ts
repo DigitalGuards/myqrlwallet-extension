@@ -1,5 +1,6 @@
 import { getExplorerApiBase } from "@/configuration/assetDiscoveryConfig";
 import type { NFTStandard } from "@/types/nft";
+import { toCanonicalQrlAddress } from "@/utilities/addressUtil";
 
 /**
  * Explorer-side asset discovery, ported from myqrlwallet-frontend
@@ -64,12 +65,14 @@ type ExplorerNFTResponse = {
   count: number;
 };
 
-// The explorer may return contract addresses as "Q...", "q..." or "0x...";
-// the extension stores Q-prefixed addresses on testnet v2.
-const toQAddress = (address: string): string => {
-  if (address.startsWith("Q")) return address;
-  if (address.startsWith("q")) return `Q${address.slice(1)}`;
-  return `Q${address.replace(/^0x/i, "")}`;
+// The explorer may return contract addresses as Q, q, or 0x. Normalize only
+// full QIP-55 addresses and discard malformed indexer rows.
+const toQAddress = (address: string): string | null => {
+  try {
+    return toCanonicalQrlAddress(address);
+  } catch {
+    return null;
+  }
 };
 
 // The extension stores NFTStandard as "ZRC721"/"ZRC1155"; the explorer
@@ -103,16 +106,21 @@ export async function discoverTokens(
     const data = (await response.json()) as ExplorerTokenResponse;
     if (!data || !Array.isArray(data.tokens)) return [];
 
-    return data.tokens
-      .filter((token) => !!token.contractAddress)
-      .map((token) => ({
-        address: toQAddress(token.contractAddress),
-        name: token.name || "Unknown Token",
-        symbol: token.symbol || "UNK",
-        // Nullish coalescing, not ||: 0 is a valid decimals value and
-        // must not fall through to 18.
-        decimals: token.decimals ?? 18,
-      }));
+    return data.tokens.flatMap((token) => {
+      const contractAddress = token.contractAddress
+        ? toQAddress(token.contractAddress)
+        : null;
+      if (!contractAddress) return [];
+      return [
+        {
+          address: contractAddress,
+          name: token.name || "Unknown Token",
+          symbol: token.symbol || "UNK",
+          // Nullish coalescing preserves 0 as a valid decimals value.
+          decimals: token.decimals ?? 18,
+        },
+      ];
+    });
   } catch {
     return [];
   }
@@ -157,6 +165,7 @@ export async function discoverNftCollections(
     if (!standard) continue;
 
     const contractAddress = toQAddress(nft.contractAddress);
+    if (!contractAddress) continue;
     const key = contractAddress.toLowerCase();
     // The explorer can return duplicate (contract, tokenID) rows; count
     // each token once so the picker's item count matches the gallery.
@@ -216,14 +225,19 @@ export async function discoverOwnedNftTokens(
 ): Promise<DiscoveredNftToken[]> {
   if (!contractAddress) return [];
   const rows = await fetchExplorerNfts(address, chainId);
-  const wanted = toQAddress(contractAddress).toLowerCase();
+  const canonicalContractAddress = toQAddress(contractAddress);
+  if (!canonicalContractAddress) return [];
+  const wanted = canonicalContractAddress.toLowerCase();
 
   const seen = new Set<string>();
   const out: DiscoveredNftToken[] = [];
   for (const nft of rows) {
     if (out.length >= MAX_DISCOVERED_TOKEN_IDS) break;
     if (!nft.contractAddress || !nft.tokenID) continue;
-    if (toQAddress(nft.contractAddress).toLowerCase() !== wanted) continue;
+    const rowContractAddress = toQAddress(nft.contractAddress);
+    if (!rowContractAddress || rowContractAddress.toLowerCase() !== wanted) {
+      continue;
+    }
     const standard = toNftStandard(nft.tokenStandard);
     if (!standard) continue;
     if (seen.has(nft.tokenID)) continue;

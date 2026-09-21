@@ -72,7 +72,9 @@ const PASSWORD = "Str0ng!Pass";
 describe("ImportEncryptedWallet", () => {
   afterEach(cleanup);
 
-  const renderComponent = (onImported = vi.fn().mockResolvedValue(undefined)) => {
+  const renderComponent = (
+    onImported = vi.fn().mockResolvedValue(undefined),
+  ) => {
     render(
       <StoreProvider
         value={mockedStore({
@@ -117,10 +119,7 @@ describe("ImportEncryptedWallet", () => {
     Object.defineProperty(file, "text", { value: async () => fileText });
 
     await userEvent.upload(screen.getByLabelText("walletFile"), file);
-    await userEvent.type(
-      screen.getByLabelText("walletFilePassword"),
-      PASSWORD,
-    );
+    await userEvent.type(screen.getByLabelText("walletFilePassword"), PASSWORD);
     await userEvent.click(
       screen.getByRole("button", { name: "Import account" }),
     );
@@ -180,6 +179,20 @@ describe("ImportEncryptedWallet", () => {
 
     expect(screen.getByText("my-backup.json")).toBeInTheDocument();
     expect(screen.queryByText("No file selected")).not.toBeInTheDocument();
+  });
+
+  it("contains a long address-derived filename and exposes its full value", async () => {
+    renderComponent();
+    const filename = `encrypted-wallet-Q${"0123456789abcdef".repeat(8)}.json`;
+    const file = new File(["{}"], filename, {
+      type: "application/json",
+    });
+
+    await userEvent.upload(screen.getByLabelText("walletFile"), file);
+
+    const filenameDisplay = screen.getByTitle(filename);
+    expect(filenameDisplay).toHaveTextContent(filename);
+    expect(filenameDisplay).toHaveClass("min-w-0", "flex-1", "truncate");
   });
 
   it("opens the file dialog from the themed button", async () => {
@@ -257,7 +270,9 @@ function makeUploadFile(text: string, name = "qrl-wallet-backup.json"): File {
 describe("ImportEncryptedWallet backup envelope", () => {
   afterEach(cleanup);
 
-  const renderComponent = (onImported = vi.fn().mockResolvedValue(undefined)) => {
+  const renderComponent = (
+    onImported = vi.fn().mockResolvedValue(undefined),
+  ) => {
     render(
       <StoreProvider
         value={mockedStore({
@@ -302,10 +317,10 @@ describe("ImportEncryptedWallet backup envelope", () => {
         "This backup contains 2 accounts. Import them one at a time; run the import again for the others.",
       ),
     ).toBeInTheDocument();
-    // First account preselected, shown truncated (trigger + Radix's hidden
-    // native option both render the text).
+    // First account preselected with the shared three-segment fingerprint
+    // (trigger + Radix's hidden native option both render the text).
     expect(
-      screen.getAllByText("Qcfec0cbee...8f1fb8c5").length,
+      screen.getAllByText("Qcfec0cbe...ed895802...8f1fb8c5").length,
     ).toBeGreaterThan(0);
 
     cleanup();
@@ -317,7 +332,9 @@ describe("ImportEncryptedWallet backup envelope", () => {
         "Extension backups are encrypted with the unlock password of the wallet that exported them.",
       ),
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText("walletFileAccount")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("walletFileAccount"),
+    ).not.toBeInTheDocument();
   });
 
   it("decrypts the selected backup keystore and imports the derived account", async () => {
@@ -326,8 +343,13 @@ describe("ImportEncryptedWallet backup envelope", () => {
     const file = makeUploadFile(makeBackupFileText([KEYSTORE_A, KEYSTORE_B]));
 
     await userEvent.upload(screen.getByLabelText("walletFile"), file);
-    await userEvent.type(screen.getByLabelText("walletFilePassword"), "hunter22");
-    await userEvent.click(screen.getByRole("button", { name: "Import account" }));
+    await userEvent.type(
+      screen.getByLabelText("walletFilePassword"),
+      "hunter22",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Import account" }),
+    );
 
     await waitFor(() => {
       expect(onImported).toHaveBeenCalledTimes(1);
@@ -349,7 +371,9 @@ describe("ImportEncryptedWallet backup envelope", () => {
 
     await userEvent.upload(screen.getByLabelText("walletFile"), file);
     await userEvent.type(screen.getByLabelText("walletFilePassword"), "wrong");
-    await userEvent.click(screen.getByRole("button", { name: "Import account" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Import account" }),
+    );
 
     expect(
       await screen.findByText(
@@ -370,8 +394,13 @@ describe("ImportEncryptedWallet backup envelope", () => {
         "This is not a valid MyQRLWallet encrypted wallet file",
       ),
     ).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText("walletFilePassword"), "anything");
-    expect(screen.getByRole("button", { name: "Import account" })).toBeDisabled();
+    await userEvent.type(
+      screen.getByLabelText("walletFilePassword"),
+      "anything",
+    );
+    expect(
+      screen.getByRole("button", { name: "Import account" }),
+    ).toBeDisabled();
   });
 
   it("reports an empty backup at selection time", async () => {

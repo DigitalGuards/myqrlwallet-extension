@@ -1,3 +1,4 @@
+import { profileStorageKey } from "@/utilities/profileStorage";
 import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 import { EXTENSION_MESSAGES } from "@/scripts/constants/streamConstants";
 import {
@@ -85,7 +86,7 @@ class DAppRequestStore {
     // previous request.
     try {
       browser.storage.onChanged.addListener((changes, areaName) => {
-        if (areaName === "session" && "DAPPS" in changes) {
+        if (areaName === "session" && profileStorageKey("DAPPS") in changes) {
           this.responseData = {};
           this.canProceed = false;
           this.onPermissionCallBack = async () => undefined;
@@ -96,7 +97,7 @@ class DAppRequestStore {
           };
           void this.readDAppRequestData();
         }
-        if (areaName === "local" && "DAPPS" in changes) {
+        if (areaName === "local" && profileStorageKey("DAPPS") in changes) {
           void this.fetchCurrentTabData();
         }
       });

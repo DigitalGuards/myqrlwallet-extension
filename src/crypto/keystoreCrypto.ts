@@ -11,7 +11,7 @@
  * keystores written by either implementation stay mutually compatible.
  *
  * Format contract (mirrors account.js in @theqrl/web3-qrl-accounts):
- * - version: 1, id: UUID v4, address: "Q" + 40 lowercase hex chars
+ * - version: 1, id: UUID v4, address: "Q" + 128 lowercase hex chars
  * - crypto.ciphertext: hex (no 0x) of AES-256-GCM output incl. the 16-byte
  *   auth tag; the tag is the sole integrity/wrong-password check (no MAC)
  * - crypto.cipherparams.iv: hex (no 0x), exactly 12 bytes
@@ -21,12 +21,14 @@
 
 import { argon2id as argon2idWasm } from "hash-wasm";
 import { argon2id as argon2idJs } from "@theqrl/qrl-cryptography/argon2id.js";
-import {
-  parseAndValidateSeed,
-  seedToAccount,
-} from "@theqrl/web3-qrl-accounts";
+import { parseAndValidateSeed, seedToAccount } from "@theqrl/web3-qrl-accounts";
 import type { Bytes, KeyStore } from "@theqrl/web3";
 import { RECOMMENDED_KEYSTORE_KDF_PARAMS } from "@/scripts/lockManager/keystoreParams";
+import {
+  areAddressesEquivalent,
+  isLegacyQrlAddress,
+  isQrlAddress,
+} from "@/utilities/addressUtil";
 
 export type DecryptedKeystore = {
   /** Checksummed Q-address, as returned by seedToAccount. */
@@ -49,8 +51,8 @@ export type EncryptKeystoreOptions = Partial<KeystoreKdfParams> & {
   iv?: Uint8Array | string;
 };
 
-// Parameter bounds mirrored from @theqrl/web3-qrl-accounts kdf_policy.js so
-// both implementations accept and reject the same keystores.
+// The 4096 KiB lower bound remains readable for legacy extension keystores.
+// New keystores use the stronger recommended parameters from keystoreParams.
 const KDF_PARAM_BOUNDS: Record<keyof KeystoreKdfParams, [number, number]> = {
   m: [4096, 1048576],
   t: [2, 50],
@@ -175,7 +177,11 @@ export async function decryptKeystore(
 
   const passwordBytes = new TextEncoder().encode(password);
   const saltBytes = toBytes(kdfparams.salt);
-  const derivedKey = await deriveArgon2idKey(passwordBytes, saltBytes, kdfparams);
+  const derivedKey = await deriveArgon2idKey(
+    passwordBytes,
+    saltBytes,
+    kdfparams,
+  );
 
   const iv = hexToBytes(keystore.crypto.cipherparams.iv);
   assertIvLength(iv);
@@ -187,6 +193,18 @@ export async function decryptKeystore(
   );
 
   const account = seedToAccount(new Uint8Array(seedBuffer));
+  if (
+    !isQrlAddress(keystore.address) &&
+    !isLegacyQrlAddress(keystore.address)
+  ) {
+    throw new Error("keystoreCrypto: invalid stored address");
+  }
+  if (
+    isQrlAddress(keystore.address) &&
+    !areAddressesEquivalent(keystore.address, account.address)
+  ) {
+    throw new Error("keystoreCrypto: stored address does not match seed");
+  }
   return { address: account.address, seed: account.seed };
 }
 

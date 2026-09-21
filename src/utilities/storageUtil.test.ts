@@ -1,20 +1,25 @@
+import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
+const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
+import { toChecksumAddress } from "@theqrl/wallet.js";
 
 // In-memory mock of browser.storage.local and browser.storage.session
 const localStore: Record<string, any> = {};
 const sessionStore: Record<string, any> = {};
 
 const makeStorageArea = (store: Record<string, any>) => ({
-  get: vi.fn((key: string) =>
-    Promise.resolve(key in store ? { [key]: store[key] } : {}),
+  get: vi.fn((key: string | null) =>
+    Promise.resolve(
+      key === null ? { ...store } : key in store ? { [key]: store[key] } : {},
+    ),
   ),
   set: vi.fn((data: Record<string, any>) => {
     Object.assign(store, data);
     return Promise.resolve();
   }),
-  remove: vi.fn((key: string) => {
-    delete store[key];
+  remove: vi.fn((key: string | string[]) => {
+    for (const item of Array.isArray(key) ? key : [key]) delete store[item];
     return Promise.resolve();
   }),
   clear: vi.fn(() => {
@@ -67,8 +72,14 @@ const clearStore = (store: Record<string, any>) => {
   for (const k of Object.keys(store)) delete store[k];
 };
 
-const ACCOUNT = "Q20B714091cF2a62DADda2847803e3f1B9D2D3779";
-const ACCOUNT_2 = "Q20fB08fF1f1376A14C055E9F56df80563E16722b";
+const ACCOUNT = toChecksumAddress(`Q${"a".repeat(128)}`);
+const ACCOUNT_2 = toChecksumAddress(`Q${"b".repeat(128)}`);
+const LEGACY_ACCOUNT = `Q${"c".repeat(40)}`;
+const WRONG_CHECKSUM_ACCOUNT = `${ACCOUNT.slice(0, 1)}${
+  ACCOUNT[1] === ACCOUNT[1].toUpperCase()
+    ? ACCOUNT[1].toLowerCase()
+    : ACCOUNT[1].toUpperCase()
+}${ACCOUNT.slice(2)}`;
 
 const makeTxEntry = (
   overrides: Partial<TransactionHistoryEntry> = {},
@@ -109,7 +120,7 @@ describe("StorageUtil", () => {
 
   describe("Keystores", () => {
     it("should store and retrieve keystores", async () => {
-      const keystores = [{ id: "ks1", address: "0x123" }] as any;
+      const keystores = [{ id: "ks1", address: ACCOUNT }] as any;
       await StorageUtil.setKeystores(keystores);
       const result = await StorageUtil.getKeystores();
       expect(result).toEqual(keystores);
@@ -121,10 +132,23 @@ describe("StorageUtil", () => {
     });
 
     it("should clear keystores", async () => {
-      await StorageUtil.setKeystores([{ id: "ks1" }] as any);
+      await StorageUtil.setKeystores([{ id: "ks1", address: ACCOUNT }] as any);
       await StorageUtil.clearKeystores();
       const result = await StorageUtil.getKeystores();
       expect(result).toEqual([]);
+    });
+
+    it("preserves legacy keystores for explicit seed-aware migration", async () => {
+      const legacyKeystore = { id: "legacy", address: LEGACY_ACCOUNT } as any;
+      await StorageUtil.setKeystores([legacyKeystore]);
+
+      expect(await StorageUtil.getKeystores()).toEqual([legacyKeystore]);
+    });
+
+    it("rejects malformed keystore addresses", async () => {
+      await expect(
+        StorageUtil.setKeystores([{ id: "bad", address: "Q123" }] as any),
+      ).rejects.toThrow("invalid QRL address");
     });
   });
 
@@ -135,14 +159,17 @@ describe("StorageUtil", () => {
       const before = Date.now();
       await StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
       expect(mockLocal.set).toHaveBeenCalled();
-      const storedTs = localStore["LOCK_MANAGER_LOCKED_TIMESTAMP"];
+      const storedTs =
+        localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")];
       expect(storedTs).toBeGreaterThanOrEqual(before);
       expect(storedTs).toBeLessThanOrEqual(Date.now());
     });
 
     it("should store a timestamp for UNLOCKED state", async () => {
       await StorageUtil.updateLockStateTimeStamp(LockState.UNLOCKED);
-      expect(localStore["LOCK_MANAGER_UNLOCKED_TIMESTAMP"]).toBeDefined();
+      expect(
+        localStore[profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP")],
+      ).toBeDefined();
     });
   });
 
@@ -151,14 +178,18 @@ describe("StorageUtil", () => {
       await StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
       const ts = await StorageUtil.getLockStateTimeStamp(LockState.LOCKED);
       expect(ts).toBeGreaterThan(0);
-      expect(ts).toBe(localStore["LOCK_MANAGER_LOCKED_TIMESTAMP"]);
+      expect(ts).toBe(
+        localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")],
+      );
     });
 
     it("should return stored UNLOCKED timestamp", async () => {
       await StorageUtil.updateLockStateTimeStamp(LockState.UNLOCKED);
       const ts = await StorageUtil.getLockStateTimeStamp(LockState.UNLOCKED);
       expect(ts).toBeGreaterThan(0);
-      expect(ts).toBe(localStore["LOCK_MANAGER_UNLOCKED_TIMESTAMP"]);
+      expect(ts).toBe(
+        localStore[profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP")],
+      );
     });
 
     it("should return 0 when no timestamp exists", async () => {
@@ -168,13 +199,15 @@ describe("StorageUtil", () => {
 
     it("should distinguish LOCKED and UNLOCKED timestamps", async () => {
       await StorageUtil.updateLockStateTimeStamp(LockState.UNLOCKED);
-      const unlockedTs = localStore["LOCK_MANAGER_UNLOCKED_TIMESTAMP"];
+      const unlockedTs =
+        localStore[profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP")];
 
       // Small delay to ensure different timestamp
       await new Promise((r) => setTimeout(r, 5));
 
       await StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
-      const lockedTs = localStore["LOCK_MANAGER_LOCKED_TIMESTAMP"];
+      const lockedTs =
+        localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")];
 
       const readLocked = await StorageUtil.getLockStateTimeStamp(
         LockState.LOCKED,
@@ -233,6 +266,34 @@ describe("StorageUtil", () => {
       await StorageUtil.setActiveAccount(ACCOUNT);
       const allAccounts = await StorageUtil.getAllAccounts();
       expect(allAccounts).toEqual([ACCOUNT, ACCOUNT_2]);
+    });
+
+    it("canonicalizes QIP-55 accounts before persistence", async () => {
+      await StorageUtil.setAllAccounts([ACCOUNT.toLowerCase()]);
+
+      expect(await StorageUtil.getStoredAccounts()).toEqual([ACCOUNT]);
+    });
+
+    it("rejects legacy accounts on new writes", async () => {
+      await expect(
+        StorageUtil.setAllAccounts([LEGACY_ACCOUNT]),
+      ).rejects.toThrow("128 hexadecimal characters");
+    });
+
+    it("hides legacy accounts from live flows without deleting raw storage", async () => {
+      localStore[profileStorageKey("ACCOUNTS")] = {
+        ALL_ACCOUNTS: [LEGACY_ACCOUNT, ACCOUNT],
+      };
+
+      expect(await StorageUtil.getAllAccounts()).toEqual([ACCOUNT]);
+      expect(await StorageUtil.getStoredAccounts()).toEqual([
+        LEGACY_ACCOUNT,
+        ACCOUNT,
+      ]);
+      expect(localStore[profileStorageKey("ACCOUNTS")].ALL_ACCOUNTS).toEqual([
+        LEGACY_ACCOUNT,
+        ACCOUNT,
+      ]);
     });
   });
 
@@ -310,6 +371,75 @@ describe("StorageUtil", () => {
       const result = await StorageUtil.getActiveBlockChain();
       expect(result.chainId).toBe("0x1");
     });
+
+    it("persists a canonical QIP-55 QRNS registry", async () => {
+      await StorageUtil.setAllBlockChains([
+        { ...chain1, qrnsRegistryAddress: ACCOUNT },
+      ] as any);
+
+      expect(
+        localStore[profileStorageKey("BLOCKCHAINS")].ALL_BLOCKCHAINS[0]
+          .qrnsRegistryAddress,
+      ).toBe(ACCOUNT);
+      expect(
+        (await StorageUtil.getAllBlockChains())[0].qrnsRegistryAddress,
+      ).toBe(ACCOUNT);
+    });
+
+    it.each([undefined, null, ""])(
+      "stores an absent QRNS registry without a field (%s)",
+      async (qrnsRegistryAddress) => {
+        await StorageUtil.setAllBlockChains([
+          { ...chain1, qrnsRegistryAddress },
+        ] as any);
+
+        expect(
+          localStore[profileStorageKey("BLOCKCHAINS")].ALL_BLOCKCHAINS[0]
+            .qrnsRegistryAddress,
+        ).toBeUndefined();
+      },
+    );
+
+    it.each([
+      LEGACY_ACCOUNT,
+      WRONG_CHECKSUM_ACCOUNT,
+      `q${ACCOUNT.slice(1)}`,
+      `0x${ACCOUNT.slice(1)}`,
+      `Q${ACCOUNT.slice(1).toLowerCase()}`,
+    ])(
+      "rejects an invalid QRNS registry before persistence (%s)",
+      async (qrnsRegistryAddress) => {
+        await expect(
+          StorageUtil.setAllBlockChains([
+            { ...chain1, qrnsRegistryAddress },
+          ] as any),
+        ).rejects.toThrow("128 hexadecimal characters");
+        expect(localStore[profileStorageKey("BLOCKCHAINS")]).toBeUndefined();
+      },
+    );
+
+    it.each([
+      LEGACY_ACCOUNT,
+      WRONG_CHECKSUM_ACCOUNT,
+      `q${ACCOUNT.slice(1)}`,
+      `0x${ACCOUNT.slice(1)}`,
+      `Q${ACCOUNT.slice(1).toLowerCase()}`,
+    ])(
+      "hides a stored noncanonical QRNS registry without rewriting it (%s)",
+      async (qrnsRegistryAddress) => {
+        localStore[profileStorageKey("BLOCKCHAINS")] = {
+          ALL_BLOCKCHAINS: [{ ...chain1, qrnsRegistryAddress }],
+        };
+
+        expect(
+          (await StorageUtil.getAllBlockChains())[0].qrnsRegistryAddress,
+        ).toBe(undefined);
+        expect(
+          localStore[profileStorageKey("BLOCKCHAINS")].ALL_BLOCKCHAINS[0]
+            .qrnsRegistryAddress,
+        ).toBe(qrnsRegistryAddress);
+      },
+    );
   });
 
   // ── Active page ────────────────────────────────────────────
@@ -483,6 +613,14 @@ describe("StorageUtil", () => {
   // ── DApps connected accounts ───────────────────────────────
 
   describe("DApps connected accounts", () => {
+    const connectedChain = {
+      chainId: "0x2",
+      chainName: "Connected Chain",
+      rpcUrls: ["https://rpc.example"],
+      blockExplorerUrls: [],
+      nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
+      iconUrls: [],
+    };
     const connectedData = {
       urlOrigin: "https://example.com",
       accounts: [ACCOUNT],
@@ -499,9 +637,86 @@ describe("StorageUtil", () => {
       expect(result?.accounts).toEqual([ACCOUNT]);
     });
 
+    it("stores and returns only a canonical QRNS registry for dApp chains", async () => {
+      await StorageUtil.setDAppsConnectedAccountsData({
+        ...connectedData,
+        blockchains: [{ ...connectedChain, qrnsRegistryAddress: ACCOUNT }],
+      });
+
+      const result = await StorageUtil.getDAppsConnectedAccountsData(
+        connectedData.urlOrigin,
+      );
+      expect(result?.blockchains[0].qrnsRegistryAddress).toBe(ACCOUNT);
+      expect(
+        localStore[profileStorageKey("DAPPS")].ALL_DAPPS[
+          connectedData.urlOrigin
+        ].blockchains[0].qrnsRegistryAddress,
+      ).toBe(ACCOUNT);
+    });
+
+    it.each([undefined, null, ""])(
+      "stores an absent dApp-chain QRNS registry without a field (%s)",
+      async (qrnsRegistryAddress) => {
+        await StorageUtil.setDAppsConnectedAccountsData({
+          ...connectedData,
+          blockchains: [{ ...connectedChain, qrnsRegistryAddress }],
+        });
+
+        expect(
+          localStore[profileStorageKey("DAPPS")].ALL_DAPPS[
+            connectedData.urlOrigin
+          ].blockchains[0].qrnsRegistryAddress,
+        ).toBeUndefined();
+      },
+    );
+
+    it.each([
+      LEGACY_ACCOUNT,
+      WRONG_CHECKSUM_ACCOUNT,
+      `q${ACCOUNT.slice(1)}`,
+      `0x${ACCOUNT.slice(1)}`,
+      `Q${ACCOUNT.slice(1).toLowerCase()}`,
+    ])(
+      "rejects a noncanonical QRNS registry before storing a dApp chain (%s)",
+      async (qrnsRegistryAddress) => {
+        await expect(
+          StorageUtil.setDAppsConnectedAccountsData({
+            ...connectedData,
+            blockchains: [{ ...connectedChain, qrnsRegistryAddress }],
+          }),
+        ).rejects.toThrow("canonical uppercase-Q address");
+        expect(localStore[profileStorageKey("DAPPS")]).toBeUndefined();
+      },
+    );
+
+    it("hides a noncanonical QRNS registry from a stored dApp chain without rewriting it", async () => {
+      const registryAddress = `q${ACCOUNT.slice(1)}`;
+      localStore[profileStorageKey("DAPPS")] = {
+        ALL_DAPPS: {
+          [connectedData.urlOrigin]: {
+            ...connectedData,
+            blockchains: [
+              { ...connectedChain, qrnsRegistryAddress: registryAddress },
+            ],
+          },
+        },
+      };
+
+      const result = await StorageUtil.getDAppsConnectedAccountsData(
+        connectedData.urlOrigin,
+      );
+      expect(result?.blockchains[0].qrnsRegistryAddress).toBeUndefined();
+      expect(
+        localStore[profileStorageKey("DAPPS")].ALL_DAPPS[
+          connectedData.urlOrigin
+        ].blockchains[0].qrnsRegistryAddress,
+      ).toBe(registryAddress);
+    });
+
     it("should return undefined for unknown origin", async () => {
-      const result =
-        await StorageUtil.getDAppsConnectedAccountsData("https://unknown.com");
+      const result = await StorageUtil.getDAppsConnectedAccountsData(
+        "https://unknown.com",
+      );
       expect(result).toBeUndefined();
     });
 
@@ -527,6 +742,29 @@ describe("StorageUtil", () => {
       const result =
         await StorageUtil.getDAppsConnectedAccountsData("https://other.com");
       expect(result?.accounts).toEqual([ACCOUNT_2]);
+    });
+
+    it("hides a legacy session without rewriting its stored recovery data", async () => {
+      const legacySession = {
+        urlOrigin: "https://legacy.example",
+        accounts: [LEGACY_ACCOUNT],
+        blockchains: [],
+        permissions: [],
+      };
+      localStore[profileStorageKey("DAPPS")] = {
+        ALL_DAPPS: {
+          [legacySession.urlOrigin]: legacySession,
+        },
+      };
+
+      await expect(
+        StorageUtil.getDAppsConnectedAccountsData(legacySession.urlOrigin),
+      ).resolves.toBeUndefined();
+      expect(
+        localStore[profileStorageKey("DAPPS")].ALL_DAPPS[
+          legacySession.urlOrigin
+        ].accounts,
+      ).toEqual([LEGACY_ACCOUNT]);
     });
   });
 
@@ -572,9 +810,9 @@ describe("StorageUtil", () => {
 
     it("should check ledger account case-insensitively", async () => {
       await StorageUtil.setLedgerAccounts([ledgerAccount1]);
-      expect(
-        await StorageUtil.isLedgerAccount(ACCOUNT.toLowerCase()),
-      ).toBe(true);
+      expect(await StorageUtil.isLedgerAccount(ACCOUNT.toLowerCase())).toBe(
+        true,
+      );
     });
 
     it("should get ledger account by address", async () => {
@@ -586,7 +824,7 @@ describe("StorageUtil", () => {
     it("should return undefined for unknown ledger address", async () => {
       await StorageUtil.setLedgerAccounts([ledgerAccount1]);
       const result = await StorageUtil.getLedgerAccountByAddress(
-        "Q0000000000000000000000000000000000000000",
+        `Q${"0".repeat(128)}`,
       );
       expect(result).toBeUndefined();
     });
@@ -630,7 +868,7 @@ describe("StorageUtil", () => {
 
       it("should return stored transactions for account and chain", async () => {
         const entries = [makeTxEntry()];
-        localStore["TX_HISTORY"] = {
+        localStore[profileStorageKey("TX_HISTORY")] = {
           ALL_TX_HISTORY: {
             [ACCOUNT]: { "0x1": { transactions: entries } },
           },
@@ -641,7 +879,7 @@ describe("StorageUtil", () => {
       });
 
       it("should return empty array for different account", async () => {
-        localStore["TX_HISTORY"] = {
+        localStore[profileStorageKey("TX_HISTORY")] = {
           ALL_TX_HISTORY: {
             [ACCOUNT]: { "0x1": { transactions: [makeTxEntry()] } },
           },
@@ -658,8 +896,9 @@ describe("StorageUtil", () => {
         await StorageUtil.setTransactionHistoryEntry(ACCOUNT, entry);
 
         expect(
-          localStore["TX_HISTORY"]["ALL_TX_HISTORY"][ACCOUNT]["0x1"]
-            .transactions,
+          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
+            ACCOUNT
+          ]["0x1"].transactions,
         ).toEqual([entry]);
       });
 
@@ -668,7 +907,7 @@ describe("StorageUtil", () => {
           id: "0xold",
           transactionHash: "0xold",
         });
-        localStore["TX_HISTORY"] = {
+        localStore[profileStorageKey("TX_HISTORY")] = {
           ALL_TX_HISTORY: {
             [ACCOUNT]: { "0x1": { transactions: [existing] } },
           },
@@ -682,8 +921,9 @@ describe("StorageUtil", () => {
         await StorageUtil.setTransactionHistoryEntry(ACCOUNT, newEntry);
 
         const stored =
-          localStore["TX_HISTORY"]["ALL_TX_HISTORY"][ACCOUNT]["0x1"]
-            .transactions;
+          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
+            ACCOUNT
+          ]["0x1"].transactions;
         expect(stored).toHaveLength(2);
         expect(stored[0]).toEqual(newEntry);
         expect(stored[1]).toEqual(existing);
@@ -691,7 +931,7 @@ describe("StorageUtil", () => {
 
       it("should deduplicate by transactionHash", async () => {
         const existing = makeTxEntry({ amount: 2.5 });
-        localStore["TX_HISTORY"] = {
+        localStore[profileStorageKey("TX_HISTORY")] = {
           ALL_TX_HISTORY: {
             [ACCOUNT]: { "0x1": { transactions: [existing] } },
           },
@@ -701,8 +941,9 @@ describe("StorageUtil", () => {
         await StorageUtil.setTransactionHistoryEntry(ACCOUNT, updated);
 
         const stored =
-          localStore["TX_HISTORY"]["ALL_TX_HISTORY"][ACCOUNT]["0x1"]
-            .transactions;
+          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
+            ACCOUNT
+          ]["0x1"].transactions;
         expect(stored).toHaveLength(1);
         expect(stored[0]).toEqual(updated);
       });
@@ -712,7 +953,7 @@ describe("StorageUtil", () => {
           id: "0xother",
           transactionHash: "0xother",
         });
-        localStore["TX_HISTORY"] = {
+        localStore[profileStorageKey("TX_HISTORY")] = {
           ALL_TX_HISTORY: {
             [ACCOUNT_2]: { "0x1": { transactions: [otherEntry] } },
           },
@@ -721,15 +962,16 @@ describe("StorageUtil", () => {
         await StorageUtil.setTransactionHistoryEntry(ACCOUNT, makeTxEntry());
 
         expect(
-          localStore["TX_HISTORY"]["ALL_TX_HISTORY"][ACCOUNT_2]["0x1"]
-            .transactions,
+          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
+            ACCOUNT_2
+          ]["0x1"].transactions,
         ).toEqual([otherEntry]);
       });
     });
 
     describe("clearTransactionHistory", () => {
       it("should clear transactions for the account", async () => {
-        localStore["TX_HISTORY"] = {
+        localStore[profileStorageKey("TX_HISTORY")] = {
           ALL_TX_HISTORY: {
             [ACCOUNT]: { "0x1": { transactions: [makeTxEntry()] } },
           },
@@ -738,14 +980,15 @@ describe("StorageUtil", () => {
         await StorageUtil.clearTransactionHistory(ACCOUNT);
 
         expect(
-          localStore["TX_HISTORY"]["ALL_TX_HISTORY"][ACCOUNT]["0x1"]
-            .transactions,
+          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
+            ACCOUNT
+          ]["0x1"].transactions,
         ).toEqual([]);
       });
 
       it("should do nothing when no history exists", async () => {
         await StorageUtil.clearTransactionHistory(ACCOUNT);
-        expect(localStore["TX_HISTORY"]).toBeUndefined();
+        expect(localStore[profileStorageKey("TX_HISTORY")]).toBeUndefined();
       });
 
       it("should not affect other accounts when clearing", async () => {
@@ -753,7 +996,7 @@ describe("StorageUtil", () => {
           id: "0xother",
           transactionHash: "0xother",
         });
-        localStore["TX_HISTORY"] = {
+        localStore[profileStorageKey("TX_HISTORY")] = {
           ALL_TX_HISTORY: {
             [ACCOUNT]: { "0x1": { transactions: [makeTxEntry()] } },
             [ACCOUNT_2]: { "0x1": { transactions: [otherEntry] } },
@@ -763,12 +1006,14 @@ describe("StorageUtil", () => {
         await StorageUtil.clearTransactionHistory(ACCOUNT);
 
         expect(
-          localStore["TX_HISTORY"]["ALL_TX_HISTORY"][ACCOUNT]["0x1"]
-            .transactions,
+          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
+            ACCOUNT
+          ]["0x1"].transactions,
         ).toEqual([]);
         expect(
-          localStore["TX_HISTORY"]["ALL_TX_HISTORY"][ACCOUNT_2]["0x1"]
-            .transactions,
+          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
+            ACCOUNT_2
+          ]["0x1"].transactions,
         ).toEqual([otherEntry]);
       });
     });
@@ -776,12 +1021,27 @@ describe("StorageUtil", () => {
 
   describe("Contacts", () => {
     it("should clear contacts", async () => {
-      await StorageUtil.setContacts([
-        { name: "Alice", address: ACCOUNT },
-      ]);
+      await StorageUtil.setContacts([{ name: "Alice", address: ACCOUNT }]);
       await StorageUtil.clearContacts();
       const result = await StorageUtil.getContacts();
       expect(result).toEqual([]);
+    });
+
+    it("canonicalizes contacts and hides legacy entries from live flows", async () => {
+      await StorageUtil.setContacts([
+        { name: "Alice", address: ACCOUNT.toLowerCase() },
+      ]);
+      expect(await StorageUtil.getContacts()).toEqual([
+        { name: "Alice", address: ACCOUNT },
+      ]);
+
+      localStore[profileStorageKey("CONTACTS")].ALL_CONTACTS.push({
+        name: "Legacy",
+        address: LEGACY_ACCOUNT,
+      });
+      expect(await StorageUtil.getContacts()).toEqual([
+        { name: "Alice", address: ACCOUNT },
+      ]);
     });
   });
 
@@ -818,7 +1078,8 @@ describe("StorageUtil", () => {
       await StorageUtil.setAllAccounts([ACCOUNT]);
       await StorageUtil.setActivePage("/settings");
       await StorageUtil.clearAllData();
-      expect(mockLocal.clear).toHaveBeenCalled();
+      expect(await StorageUtil.getSettings()).toEqual({});
+      expect(await StorageUtil.getActivePage()).toBe("");
     });
   });
 
@@ -887,18 +1148,59 @@ describe("StorageUtil", () => {
   // ── updateTransactionHistoryEntry ──
 
   describe("updateTransactionHistoryEntry", () => {
+    it("reconciles an old failure with a verified receipt while preserving terminal evidence", async () => {
+      await StorageUtil.setTransactionHistoryEntry(
+        ACCOUNT,
+        makeTxEntry({
+          pendingStatus: "failed",
+          status: false,
+          blockNumber: "",
+        }),
+      );
+      const [entry] = await StorageUtil.getTransactionHistory(ACCOUNT);
+      await StorageUtil.updateTransactionHistoryEntry(
+        ACCOUNT,
+        entry.transactionHash,
+        {
+          pendingStatus: "confirmed",
+          status: true,
+          blockNumber: "99",
+          receiptStatusVerified: true,
+        },
+      );
+      await StorageUtil.updateTransactionHistoryEntry(
+        ACCOUNT,
+        entry.transactionHash,
+        {
+          pendingStatus: "unknown",
+          status: false,
+        },
+      );
+      const [updated] = await StorageUtil.getTransactionHistory(ACCOUNT);
+      expect(updated.pendingStatus).toBe("confirmed");
+      expect(updated.status).toBe(true);
+      expect(updated.blockNumber).toBe("99");
+    });
+
     it("should update a specific transaction by hash", async () => {
-      const entry1 = makeTxEntry({ transactionHash: "0xhash1", id: "0xhash1", pendingStatus: "pending" });
-      const entry2 = makeTxEntry({ transactionHash: "0xhash2", id: "0xhash2", pendingStatus: "pending" });
+      const entry1 = makeTxEntry({
+        transactionHash: "0xhash1",
+        id: "0xhash1",
+        pendingStatus: "pending",
+      });
+      const entry2 = makeTxEntry({
+        transactionHash: "0xhash2",
+        id: "0xhash2",
+        pendingStatus: "pending",
+      });
 
       await StorageUtil.setTransactionHistoryEntry(ACCOUNT, entry1);
       await StorageUtil.setTransactionHistoryEntry(ACCOUNT, entry2);
 
-      await StorageUtil.updateTransactionHistoryEntry(
-        ACCOUNT,
-        "0xhash1",
-        { pendingStatus: "confirmed", status: true },
-      );
+      await StorageUtil.updateTransactionHistoryEntry(ACCOUNT, "0xhash1", {
+        pendingStatus: "confirmed",
+        status: true,
+      });
 
       const history = await StorageUtil.getTransactionHistory(ACCOUNT);
       const updated = history.find((tx) => tx.transactionHash === "0xhash1");
@@ -910,14 +1212,16 @@ describe("StorageUtil", () => {
     });
 
     it("should not modify other transactions when updating one", async () => {
-      const entry = makeTxEntry({ transactionHash: "0xonly", id: "0xonly", amount: 5 });
+      const entry = makeTxEntry({
+        transactionHash: "0xonly",
+        id: "0xonly",
+        amount: 5,
+      });
       await StorageUtil.setTransactionHistoryEntry(ACCOUNT, entry);
 
-      await StorageUtil.updateTransactionHistoryEntry(
-        ACCOUNT,
-        "0xonly",
-        { pendingStatus: "failed" },
-      );
+      await StorageUtil.updateTransactionHistoryEntry(ACCOUNT, "0xonly", {
+        pendingStatus: "failed",
+      });
 
       const history = await StorageUtil.getTransactionHistory(ACCOUNT);
       expect(history).toHaveLength(1);
@@ -998,9 +1302,8 @@ describe("storageUtil module boundary", () => {
 
   it("keeps the copied caveat literal in sync with CAVEAT_TYPES", async () => {
     const raw = await readSource();
-    const { CAVEAT_TYPES } = await import(
-      "@/scripts/middlewares/middlewareTypes"
-    );
+    const { CAVEAT_TYPES } =
+      await import("@/scripts/middlewares/middlewareTypes");
     const match = raw.match(
       /const RESTRICT_RETURNED_ACCOUNTS_CAVEAT = "([^"]+)"/,
     );

@@ -1,5 +1,6 @@
 export type PendingStatus =
   | "pending"
+  | "unknown"
   | "confirmed"
   | "failed"
   | "replaced"
@@ -10,7 +11,7 @@ export type TransactionHistoryEntry = {
   id: string;
   from: string;
   to: string;
-  amount: number;
+  amount: string | number;
   tokenSymbol: string;
   tokenName: string;
   isZrc20Token: boolean;
@@ -26,6 +27,8 @@ export type TransactionHistoryEntry = {
   /** Explorer-sourced entries carry the fee pre-computed in QRL units;
    *  locally-sent entries derive it from gasUsed * effectiveGasPrice. */
   paidFeesQrl?: string;
+  receiptStatusVerified?: boolean;
+  submissionRejected?: boolean;
   /** Value moved by contract code inside another transaction (explorer
    *  internal transaction), e.g. an HTLC claim payout. Shares its
    *  transactionHash with the outer transaction but is a distinct entry. */

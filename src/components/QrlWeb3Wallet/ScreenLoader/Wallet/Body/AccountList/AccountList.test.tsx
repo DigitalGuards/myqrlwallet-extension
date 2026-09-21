@@ -130,7 +130,7 @@ describe("AccountList", () => {
   });
 
   it("should call unhideAccount when unhide button is clicked", async () => {
-    const unhideAccount = vi.fn<any>(() => Promise.resolve());
+    const unhideAccount = vi.fn(() => Promise.resolve());
     const hidden: Record<string, boolean> = {
       Q20fB08fF1f1376A14C055E9F56df80563E16722b: true,
     };

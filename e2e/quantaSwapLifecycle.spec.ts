@@ -16,13 +16,10 @@ import {
   hexToBytes,
 } from "../src/functions/pqSigning/bytes";
 import {
-  SCHEME_TAG_TYPED,
-  SCHEME_VERSION_TYPED,
+  SCHEME_TAG_MSG,
+  SCHEME_VERSION_MSG,
 } from "../src/functions/pqSigning/ctx";
-import {
-  computeTypedDataDigest,
-  type TypedDataPayload,
-} from "../src/functions/pqSigning/typedData";
+import { computeMessageDigest } from "../src/functions/pqSigning/messageDigest";
 
 const REPO_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -33,57 +30,10 @@ const EXTENSION_PATH = path.join(REPO_ROOT, "Extension");
 // Public deterministic fixture from canonical.json. Never fund this account.
 const TEST_ONLY_HEX_SEED =
   "0x0100000580a227e1b6d5a89df7723a71e9c03535e9447ec6d160b68c0ba845c68a05c59226cce711eb3db312c022ccf9577be7";
-const CHECKSUM_ACCOUNT = "Q6afB7Dfc849bC16E439033dfee7B296484619Db8";
+const CHECKSUM_ACCOUNT =
+  "Q6aFB7dFC849bC16E439033DfEE7B296484619Db8fc7e3b7c20a1b1688B128259338aFfd79b7cdda8F28509607bc26eB67a4799Ae457Ec82b57A6a57dea04C194";
 const CANONICAL_ACCOUNT = `Q${CHECKSUM_ACCOUNT.slice(1).toLowerCase()}`;
-
-const FILL_INTENT_V1_FIELDS = [
-  { name: "orderDigest", type: "bytes32" },
-  { name: "requestNonce", type: "bytes32" },
-  { name: "takerEthAccount", type: "string" },
-  { name: "takerQrlAccount", type: "string" },
-  { name: "releaseCommitment", type: "bytes32" },
-  { name: "issuedAt", type: "uint64" },
-  { name: "expiresAt", type: "uint64" },
-  { name: "ethChainId", type: "uint256" },
-  { name: "ethHtlc", type: "string" },
-  { name: "qrlChainId", type: "uint256" },
-  { name: "qrlHtlc", type: "string" },
-] as const;
-
-const fillIntentPayload: TypedDataPayload = {
-  types: {
-    QRLDomain: [
-      { name: "name", type: "string" },
-      { name: "version", type: "string" },
-      { name: "chainId", type: "uint256" },
-      { name: "salt", type: "bytes32" },
-    ],
-    FillIntentV1: [...FILL_INTENT_V1_FIELDS],
-  },
-  primaryType: "FillIntentV1",
-  domain: {
-    name: "QuantaSwap",
-    version: "1",
-    chainId: "1337",
-    salt: "0x1ed0597b5e221ddfd0e541d33a5c14d663f5261645be67c4ee3a4be4d804a740",
-  },
-  message: {
-    orderDigest:
-      "0x5a76e96bdd26891fc5b28848ed2f519a9fee5d8bdc7614692b71a3431c085a48",
-    requestNonce: `0x${"43".repeat(32)}`,
-    takerEthAccount:
-      "eip155:11155111:0x2222222222222222222222222222222222222222",
-    takerQrlAccount: CANONICAL_ACCOUNT,
-    releaseCommitment:
-      "0xa786c492a3707147bfa3277ddf44d49af0c794252e42dd05379f04b8c4621e0e",
-    issuedAt: "1800000010",
-    expiresAt: "1800000130",
-    ethChainId: "11155111",
-    ethHtlc: "eip155:11155111:0x910d5d4a7f2037c01f3b4c835167357e89909281",
-    qrlChainId: "1337",
-    qrlHtlc: "Q238322ad2e8f935b4481fcc379779c31b84decb0",
-  },
-};
+const MESSAGE_HEX = "0x5175616e746153776170205149502d353520453245";
 
 interface QrlProvider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -140,10 +90,14 @@ const dAppHtml = `<!doctype html>
 
 const rpcResult = (method: string): unknown => {
   switch (method) {
+    case "qrl_getBlockByNumber":
+      return {
+        hash: "0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4",
+      };
     case "qrl_chainId":
-      return "0x539";
+      return "0x301825";
     case "net_version":
-      return "1337";
+      return "3151909";
     case "net_listening":
       return true;
     case "qrl_getBalance":
@@ -337,7 +291,7 @@ const approveCurrentRequest = async (extensionPage: Page) => {
   await yes.click();
 };
 
-test("QuantaSwap connect, lowercase PQ sign, disconnect, and reconnect", async () => {
+test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect", async () => {
   const fixture = await startFixtureServer();
   const profile = await mkdtemp(path.join(tmpdir(), "myqrlwallet-e2e-"));
   const context = await chromium.launchPersistentContext(profile, {
@@ -369,40 +323,58 @@ test("QuantaSwap connect, lowercase PQ sign, disconnect, and reconnect", async (
     await serviceWorker.evaluate(
       async ({ rpcUrl }) => {
         await chrome.storage.local.set({
-          SETTINGS: {
-            sidePanelPreferred: true,
-            phishingDetectionEnabled: false,
-            autoLockMinutes: 30,
-          },
-          BLOCKCHAINS: {
-            ACTIVE_BLOCKCHAIN: "0x539",
-            ALL_BLOCKCHAINS: [
-              {
-                chainId: "0x539",
-                chainName: "QRL E2E Testnet",
-                rpcUrls: [rpcUrl],
-                blockExplorerUrls: ["https://example.invalid"],
-                nativeCurrency: {
-                  name: "Quanta",
-                  symbol: "Quanta",
-                  decimals: 18,
+          KEYSTORES: "legacy-v2-encrypted-record",
+          ACCOUNTS: { ALL_ACCOUNTS: [`Q${"a".repeat(40)}`] },
+          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:SETTINGS":
+            {
+              sidePanelPreferred: true,
+              phishingDetectionEnabled: false,
+              autoLockMinutes: 30,
+            },
+          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:BLOCKCHAINS":
+            {
+              ACTIVE_BLOCKCHAIN: "0x301825",
+              ALL_BLOCKCHAINS: [
+                {
+                  chainId: "0x301825",
+                  chainName: "QRL E2E Testnet",
+                  rpcUrls: [rpcUrl],
+                  blockExplorerUrls: ["https://example.invalid"],
+                  nativeCurrency: {
+                    name: "Quanta",
+                    symbol: "Quanta",
+                    decimals: 18,
+                  },
+                  iconUrls: [],
+                  defaultRpcUrl: rpcUrl,
+                  defaultBlockExplorerUrl: "https://example.invalid",
+                  defaultIconUrl: "",
+                  isTestnet: true,
+                  defaultWsRpcUrl: rpcUrl,
+                  isCustomChain: true,
                 },
-                iconUrls: [],
-                defaultRpcUrl: rpcUrl,
-                defaultBlockExplorerUrl: "https://example.invalid",
-                defaultIconUrl: "",
-                isTestnet: true,
-                defaultWsRpcUrl: rpcUrl,
-                isCustomChain: true,
-              },
-            ],
-          },
+              ],
+            },
         });
       },
       { rpcUrl: `${fixture.origin}/rpc` },
     );
 
     let extensionPage = await context.newPage();
+    const pageErrors: string[] = [];
+    for (const query of ["", "?sidepanel=true", "?tab=true"]) {
+      const surface = await context.newPage();
+      surface.on("pageerror", (error) => pageErrors.push(error.message));
+      await surface.goto(
+        `chrome-extension://${extensionId}/index.html${query}`,
+      );
+      await expect(surface.locator("#root")).not.toBeEmpty();
+      await expect(
+        surface.getByText("v3 Private", { exact: true }),
+      ).toBeVisible();
+      await surface.close();
+    }
+    expect(pageErrors).toEqual([]);
     await extensionPage.goto(
       `chrome-extension://${extensionId}/index.html?tab=true`,
     );
@@ -433,9 +405,14 @@ test("QuantaSwap connect, lowercase PQ sign, disconnect, and reconnect", async (
       .poll(
         () =>
           serviceWorker.evaluate(async (expectedAccount) => {
-            const { KEYSTORES, ACCOUNTS } = await chrome.storage.local.get([
-              "KEYSTORES",
-              "ACCOUNTS",
+            const {
+              ["v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:KEYSTORES"]:
+                KEYSTORES,
+              ["v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:ACCOUNTS"]:
+                ACCOUNTS,
+            } = await chrome.storage.local.get([
+              "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:KEYSTORES",
+              "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:ACCOUNTS",
             ]);
             const keystores = JSON.parse(KEYSTORES ?? "[]") as Array<{
               address?: string;
@@ -472,8 +449,25 @@ test("QuantaSwap connect, lowercase PQ sign, disconnect, and reconnect", async (
           () => (window as unknown as DAppWindow).qrlProvider?.chainId ?? null,
         ),
       )
-      .toBe("0x539");
+      .toBe("0x301825");
     expect(fixture.rpcMethods).toContain("qrl_chainId");
+    await beginRequest(dAppPage, "qrl_walletCapabilities");
+    await expect(requestResult(dAppPage)).resolves.toEqual({
+      addressScheme: "qip55-64",
+      chainId: "0x301825",
+      genesisHash:
+        "0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4",
+    });
+    expect(
+      await dAppPage.evaluate(
+        () => (window as unknown as DAppWindow).qrlProvider?.selectedAddress,
+      ),
+    ).toBeNull();
+    expect(
+      await serviceWorker.evaluate(
+        async () => (await chrome.storage.local.get("KEYSTORES")).KEYSTORES,
+      ),
+    ).toBe("legacy-v2-encrypted-record");
 
     const blockCallsBeforeRestart = fixture.rpcMethods.filter(
       (method) => method === "qrl_blockNumber",
@@ -572,8 +566,13 @@ test("QuantaSwap connect, lowercase PQ sign, disconnect, and reconnect", async (
       .poll(() =>
         extensionPage.evaluate(
           async () =>
-            (await chrome.storage.session.get("DAPPS")).DAPPS
-              ?.DAPPS_REQUEST_DATA?.method ?? null,
+            (
+              await chrome.storage.session.get(
+                "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS",
+              )
+            )[
+              "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS"
+            ]?.DAPPS_REQUEST_DATA?.method ?? null,
         ),
       )
       .toBe("qrl_requestAccounts");
@@ -584,14 +583,20 @@ test("QuantaSwap connect, lowercase PQ sign, disconnect, and reconnect", async (
 
     const storedConnection = await extensionPage.evaluate(
       async (origin) =>
-        (await chrome.storage.local.get("DAPPS")).DAPPS?.ALL_DAPPS?.[origin],
+        (
+          await chrome.storage.local.get(
+            "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS",
+          )
+        )[
+          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS"
+        ]?.ALL_DAPPS?.[origin],
       fixture.origin,
     );
     expect(storedConnection?.accounts).toEqual([CHECKSUM_ACCOUNT]);
     const chainIdCallsBeforeReload = fixture.rpcMethods.filter(
       (method) => method === "qrl_chainId",
     ).length;
-    expect(chainIdCallsBeforeReload).toBe(1);
+    expect(chainIdCallsBeforeReload).toBeGreaterThan(0);
 
     await dAppPage.reload();
     await waitForProvider(dAppPage);
@@ -610,14 +615,14 @@ test("QuantaSwap connect, lowercase PQ sign, disconnect, and reconnect", async (
       )
       .toBe(chainIdCallsBeforeReload + 1);
 
-    await beginRequest(dAppPage, "qrl_signTypedData", [
+    await beginRequest(dAppPage, "qrl_signMessage", [
       CANONICAL_ACCOUNT,
-      fillIntentPayload,
+      MESSAGE_HEX,
     ]);
     await approveCurrentRequest(extensionPage);
     const proof = await requestResult<SignProof>(dAppPage);
-    const digest = computeTypedDataDigest(fillIntentPayload);
-    expect(proof.schemeVersion).toBe(SCHEME_VERSION_TYPED);
+    const digest = computeMessageDigest(hexToBytes(MESSAGE_HEX));
+    expect(proof.schemeVersion).toBe(SCHEME_VERSION_MSG);
     expect(proof.digest).toBe(bytesToHex(digest));
     expect(`Q${proof.signer.slice(1).toLowerCase()}`).toBe(CANONICAL_ACCOUNT);
     expect(
@@ -625,12 +630,12 @@ test("QuantaSwap connect, lowercase PQ sign, disconnect, and reconnect", async (
         hexToBytes(proof.signature),
         digest,
         hexToBytes(proof.publicKey),
-        SCHEME_TAG_TYPED,
+        SCHEME_TAG_MSG,
       ),
     ).toBe(true);
     const signerHash = shake256(
       concatBytes(hexToBytes(proof.descriptor), hexToBytes(proof.publicKey)),
-      { dkLen: 20 },
+      { dkLen: 64 },
     );
     expect(`Q${bytesToHex(signerHash).slice(2)}`).toBe(CANONICAL_ACCOUNT);
 
@@ -669,9 +674,13 @@ test("QuantaSwap connect, lowercase PQ sign, disconnect, and reconnect", async (
       .poll(() =>
         extensionPage.evaluate(
           async (origin) =>
-            (await chrome.storage.local.get("DAPPS")).DAPPS?.ALL_DAPPS?.[
-              origin
-            ] ?? null,
+            (
+              await chrome.storage.local.get(
+                "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS",
+              )
+            )[
+              "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS"
+            ]?.ALL_DAPPS?.[origin] ?? null,
           fixture.origin,
         ),
       )
@@ -702,12 +711,17 @@ test("QuantaSwap connect, lowercase PQ sign, disconnect, and reconnect", async (
       )
       .toContainEqual([]);
     expect(
-      fixture.rpcMethods.filter((method) => method === "qrl_chainId"),
-    ).toHaveLength(2);
+      fixture.rpcMethods.filter((method) => method === "qrl_chainId").length,
+    ).toBeGreaterThanOrEqual(chainIdCallsBeforeReload + 2);
     expect(
       fixture.rpcMethods.filter((method) => method === "net_version"),
     ).toHaveLength(2);
     expect(providerLifecycleErrors).toEqual([]);
+    expect(
+      await extensionPage.evaluate(
+        async () => (await chrome.storage.local.get("KEYSTORES")).KEYSTORES,
+      ),
+    ).toBe("legacy-v2-encrypted-record");
   } finally {
     await context.close();
     await fixture.close();

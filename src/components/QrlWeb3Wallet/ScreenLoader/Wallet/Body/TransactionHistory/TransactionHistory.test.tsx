@@ -7,12 +7,15 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import TransactionHistory from "./TransactionHistory";
 
+const ACTIVE_ACCOUNT = `Q${"a".repeat(128)}`;
+const SECOND_ACCOUNT = `Q${"b".repeat(128)}`;
+
 const makeSampleEntry = (
   overrides: Partial<TransactionHistoryEntry> = {},
 ): TransactionHistoryEntry => ({
   id: "0xtxhash1",
-  from: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
-  to: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+  from: ACTIVE_ACCOUNT,
+  to: SECOND_ACCOUNT,
   amount: 2.5,
   tokenSymbol: "QRL",
   tokenName: "QRL",
@@ -66,7 +69,7 @@ describe("TransactionHistory", () => {
     );
 
     expect(loadOnChainHistory).toHaveBeenCalledWith(
-      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      ACTIVE_ACCOUNT,
       expect.any(String),
     );
   });
@@ -163,7 +166,7 @@ describe("TransactionHistory", () => {
   });
 
   it("should call setFilter when tab is clicked", async () => {
-    const mockSetFilter = vi.fn<any>();
+    const mockSetFilter = vi.fn();
     renderComponent(
       mockedStore({
         transactionHistoryStore: {

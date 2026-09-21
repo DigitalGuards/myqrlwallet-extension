@@ -14,7 +14,10 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { decrypt as upstreamDecrypt, encrypt as upstreamEncrypt } from "@theqrl/web3-qrl-accounts";
+import {
+  decrypt as upstreamDecrypt,
+  encrypt as upstreamEncrypt,
+} from "@theqrl/web3-qrl-accounts";
 import { argon2id as nobleArgon2id } from "@theqrl/qrl-cryptography/argon2id.js";
 import { argon2id as wasmArgon2id } from "hash-wasm";
 import {
@@ -27,11 +30,11 @@ import {
 const SEED_HEX =
   "0x010000cea755979937e2dc6137c0e51ba0d1eb2a44920cefffb1a860cf194ea7d23d694045fd2c8a72ec5aecf1e7e5bb591ff2";
 const PASSWORD = "correct horse battery staple";
-// Smallest parameters the shared kdf_policy bounds allow.
-const FAST_KDF = { m: 4096, t: 2, p: 1, dklen: 32 };
+// Smallest parameters the current wallet.js 6 kdf_policy allows.
+const FAST_KDF = { m: 19456, t: 2, p: 1, dklen: 32 };
+const LEGACY_READ_KDF = { m: 4096, t: 2, p: 1, dklen: 32 };
 const FIXED_SALT =
   "210d0ec956787d865358ac45716e6dd42e68d48e346d795746509523aeb477dd";
-const FIXED_IV = "bfb43120ae00e9de110f8325";
 
 const SLOW_TEST_TIMEOUT = 30000;
 
@@ -42,7 +45,7 @@ describe("keystoreCrypto", () => {
       const keystore = await encryptKeystore(SEED_HEX, PASSWORD, FAST_KDF);
       expect(keystore.version).toBe(1);
       expect(keystore.crypto.kdf).toBe("argon2id");
-      expect(keystore.address).toMatch(/^Q[0-9a-f]{40}$/);
+      expect(keystore.address).toMatch(/^Q[0-9a-f]{128}$/);
 
       const { address, seed } = await decryptKeystore(keystore, PASSWORD);
       expect(seed).toBe(SEED_HEX);
@@ -56,7 +59,6 @@ describe("keystoreCrypto", () => {
     async () => {
       const upstreamKeystore = await upstreamEncrypt(SEED_HEX, PASSWORD, {
         salt: FIXED_SALT,
-        iv: FIXED_IV,
         ...FAST_KDF,
       });
 
@@ -78,16 +80,15 @@ describe("keystoreCrypto", () => {
   );
 
   it(
-    "produces a byte-identical crypto envelope for fixed salt/iv/params",
+    "produces a byte-identical crypto envelope for an upstream IV",
     async () => {
-      const ours = await encryptKeystore(SEED_HEX, PASSWORD, {
-        salt: FIXED_SALT,
-        iv: FIXED_IV,
-        ...FAST_KDF,
-      });
       const theirs = await upstreamEncrypt(SEED_HEX, PASSWORD, {
         salt: FIXED_SALT,
-        iv: FIXED_IV,
+        ...FAST_KDF,
+      });
+      const ours = await encryptKeystore(SEED_HEX, PASSWORD, {
+        salt: FIXED_SALT,
+        iv: theirs.crypto.cipherparams.iv,
         ...FAST_KDF,
       });
 
@@ -109,11 +110,46 @@ describe("keystoreCrypto", () => {
     SLOW_TEST_TIMEOUT,
   );
 
+  it(
+    "reads a preserved legacy address but rejects a mismatched QIP-55 address",
+    async () => {
+      const keystore = await encryptKeystore(
+        SEED_HEX,
+        PASSWORD,
+        LEGACY_READ_KDF,
+      );
+      const legacyKeystore = {
+        ...keystore,
+        address: `Q${"c".repeat(40)}`,
+      };
+      const mismatchedKeystore = {
+        ...keystore,
+        address: `Q${"0".repeat(128)}`,
+      };
+
+      await expect(
+        decryptKeystore(legacyKeystore, PASSWORD),
+      ).resolves.toMatchObject({ seed: SEED_HEX });
+      await expect(
+        decryptKeystore(mismatchedKeystore, PASSWORD),
+      ).rejects.toThrow("stored address does not match seed");
+    },
+    SLOW_TEST_TIMEOUT,
+  );
+
   it("rejects out-of-bounds kdf parameters", () => {
-    expect(() => validateKdfParams({ m: 2048, t: 2, p: 1, dklen: 32 })).toThrow();
-    expect(() => validateKdfParams({ m: 4096, t: 1, p: 1, dklen: 32 })).toThrow();
-    expect(() => validateKdfParams({ m: 4096, t: 2, p: 0, dklen: 32 })).toThrow();
-    expect(() => validateKdfParams({ m: 4096, t: 2, p: 1, dklen: 8 })).toThrow();
+    expect(() =>
+      validateKdfParams({ m: 2048, t: 2, p: 1, dklen: 32 }),
+    ).toThrow();
+    expect(() =>
+      validateKdfParams({ m: 4096, t: 1, p: 1, dklen: 32 }),
+    ).toThrow();
+    expect(() =>
+      validateKdfParams({ m: 4096, t: 2, p: 0, dklen: 32 }),
+    ).toThrow();
+    expect(() =>
+      validateKdfParams({ m: 4096, t: 2, p: 1, dklen: 8 }),
+    ).toThrow();
     expect(() =>
       validateKdfParams({ m: 4096, t: 2, p: 1, dklen: 32 }),
     ).not.toThrow();

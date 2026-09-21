@@ -79,7 +79,7 @@ export function packDerivationPath(path: string): Buffer {
   if (parts.length !== 5) {
     throw new Error(
       `Invalid derivation path: expected 5 components, got ${parts.length}. ` +
-        `Valid format: m/44'/238'/0'/0/0`
+        `Valid format: m/44'/238'/0'/0/0`,
     );
   }
 
@@ -142,7 +142,7 @@ export function getDerivationPath(index: number): string {
  */
 export function splitIntoChunks(
   message: Buffer,
-  maxSize: number = LEDGER_CONFIG.MAX_APDU_SIZE
+  maxSize: number = LEDGER_CONFIG.MAX_APDU_SIZE,
 ): Buffer[] {
   const chunks: Buffer[] = [];
 
@@ -224,7 +224,7 @@ export function extractResponseData(response: Buffer): Buffer {
  */
 export function createLedgerError(
   statusCode: number,
-  message: string
+  message: string,
 ): LedgerError {
   // Determine if error can be fixed by retrying
   const retryable = isRetryableError(statusCode);
@@ -283,7 +283,9 @@ export function isWrongApp(statusCode: number): boolean {
 }
 
 /**
- * Parses QRL address from GET_PUBLIC_KEY response.
+ * Parses the legacy QRL address from the installed device protocol's
+ * GET_PUBLIC_KEY response. Live QIP-55 use is blocked in ledgerStore until a
+ * versioned 64-byte address response exists.
  *
  * RESPONSE FORMAT (address only):
  * ┌────────┬───────────────────┬────────┐
@@ -297,7 +299,7 @@ export function isWrongApp(statusCode: number): boolean {
  * This is part of QRL specification.
  *
  * @param response - APDU response from GET_PUBLIC_KEY
- * @returns Address in QRL format (Q + 40 hex characters)
+ * @returns Legacy device address in Q + 40 hex format
  */
 export function parseQrlAddress(response: Buffer): string {
   // Check status
@@ -310,7 +312,7 @@ export function parseQrlAddress(response: Buffer): string {
   if (data.length < 21) {
     throw createLedgerError(
       0,
-      `Invalid response length: expected min. 21 bytes, got ${data.length}`
+      `Invalid response length: expected min. 21 bytes, got ${data.length}`,
     );
   }
 
@@ -319,7 +321,7 @@ export function parseQrlAddress(response: Buffer): string {
   if (prefix !== "Q") {
     throw createLedgerError(
       0,
-      `Invalid address prefix: expected 'Q', got '${prefix}'`
+      `Invalid address prefix: expected 'Q', got '${prefix}'`,
     );
   }
 
@@ -334,7 +336,7 @@ export function parseQrlAddress(response: Buffer): string {
  * Result of parsing GET_PUBLIC_KEY response with public key.
  */
 export interface PublicKeyResponse {
-  /** Address in QRL format (Q + 40 hex characters) */
+  /** Legacy device address in Q + 40 hex format */
   address: string;
   /** Dilithium public key (hex with 0x prefix), empty if not included in response */
   publicKey: string;
@@ -369,7 +371,7 @@ export function parsePublicKeyResponse(response: Buffer): PublicKeyResponse {
   if (data.length < 21) {
     throw createLedgerError(
       0,
-      `Invalid response length: expected min. 21 bytes, got ${data.length}`
+      `Invalid response length: expected min. 21 bytes, got ${data.length}`,
     );
   }
 
@@ -378,7 +380,7 @@ export function parsePublicKeyResponse(response: Buffer): PublicKeyResponse {
   if (prefix !== "Q") {
     throw createLedgerError(
       0,
-      `Invalid address prefix: expected 'Q', got '${prefix}'`
+      `Invalid address prefix: expected 'Q', got '${prefix}'`,
     );
   }
 
@@ -416,7 +418,7 @@ export function parseAppVersion(response: Buffer): string {
   if (data.length < 3) {
     throw createLedgerError(
       0,
-      `Invalid version response length: expected min. 3 bytes`
+      `Invalid version response length: expected min. 3 bytes`,
     );
   }
 

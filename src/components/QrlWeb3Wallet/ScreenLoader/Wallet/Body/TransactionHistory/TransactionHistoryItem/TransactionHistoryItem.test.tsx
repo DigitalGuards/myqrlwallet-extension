@@ -6,13 +6,17 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import TransactionHistoryItem from "./TransactionHistoryItem";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
+
+const ACTIVE_ACCOUNT = `Q${"a".repeat(128)}`;
+const OTHER_ACCOUNT = `Q${"b".repeat(128)}`;
 
 const makeSampleEntry = (
   overrides: Partial<TransactionHistoryEntry> = {},
 ): TransactionHistoryEntry => ({
   id: "0xtxhash1",
-  from: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
-  to: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+  from: ACTIVE_ACCOUNT,
+  to: OTHER_ACCOUNT,
   amount: 2.5,
   tokenSymbol: "QRL",
   tokenName: "QRL",
@@ -47,6 +51,9 @@ describe("TransactionHistoryItem", () => {
     expect(screen.getByText("Send")).toBeInTheDocument();
     expect(screen.getByText("2.5 QRL")).toBeInTheDocument();
     expect(screen.getByText("Confirmed")).toBeInTheDocument();
+    expect(
+      screen.getByText(formatQrlAddressFingerprint(OTHER_ACCOUNT)),
+    ).toBeInTheDocument();
   });
 
   it("should render a failed transaction", () => {
@@ -61,8 +68,8 @@ describe("TransactionHistoryItem", () => {
     // so the entry is incoming.
     renderComponent(
       makeSampleEntry({
-        from: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
-        to: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+        from: OTHER_ACCOUNT,
+        to: ACTIVE_ACCOUNT,
       }),
     );
 
@@ -74,8 +81,8 @@ describe("TransactionHistoryItem", () => {
   it("should render a self-send as a send", () => {
     renderComponent(
       makeSampleEntry({
-        from: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
-        to: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+        from: ACTIVE_ACCOUNT,
+        to: ACTIVE_ACCOUNT,
       }),
     );
 
@@ -128,9 +135,7 @@ describe("TransactionHistoryItem", () => {
   });
 
   it("should show Speed Up and Cancel buttons for pending tx with nonce", () => {
-    renderComponent(
-      makeSampleEntry({ pendingStatus: "pending", nonce: 5 }),
-    );
+    renderComponent(makeSampleEntry({ pendingStatus: "pending", nonce: 5 }));
 
     expect(screen.getByText("Speed Up")).toBeInTheDocument();
     expect(screen.getByText("Cancel")).toBeInTheDocument();
@@ -151,9 +156,7 @@ describe("TransactionHistoryItem", () => {
   });
 
   it("should navigate with speed-up action when Speed Up clicked", async () => {
-    renderComponent(
-      makeSampleEntry({ pendingStatus: "pending", nonce: 5 }),
-    );
+    renderComponent(makeSampleEntry({ pendingStatus: "pending", nonce: 5 }));
 
     await userEvent.click(screen.getByText("Speed Up"));
     // The click handler calls navigate and e.preventDefault, so the link should not have been followed
@@ -162,16 +165,16 @@ describe("TransactionHistoryItem", () => {
   });
 
   it("should navigate with cancel action when Cancel clicked", async () => {
-    renderComponent(
-      makeSampleEntry({ pendingStatus: "pending", nonce: 5 }),
-    );
+    renderComponent(makeSampleEntry({ pendingStatus: "pending", nonce: 5 }));
 
     await userEvent.click(screen.getByText("Cancel"));
     expect(screen.getByText("Cancel")).toBeInTheDocument();
   });
 
   it("should use status boolean as fallback when no pendingStatus", () => {
-    renderComponent(makeSampleEntry({ pendingStatus: undefined, status: true }));
+    renderComponent(
+      makeSampleEntry({ pendingStatus: undefined, status: true }),
+    );
     expect(screen.getByText("Confirmed")).toBeInTheDocument();
   });
 
@@ -189,7 +192,9 @@ describe("TransactionHistoryItem", () => {
     render(
       <StoreProvider value={storeWithPrice}>
         <MemoryRouter>
-          <TransactionHistoryItem transaction={makeSampleEntry({ amount: 10 })} />
+          <TransactionHistoryItem
+            transaction={makeSampleEntry({ amount: 10 })}
+          />
         </MemoryRouter>
       </StoreProvider>,
     );
@@ -212,7 +217,9 @@ describe("TransactionHistoryItem", () => {
     render(
       <StoreProvider value={storeHidden}>
         <MemoryRouter>
-          <TransactionHistoryItem transaction={makeSampleEntry({ amount: 10 })} />
+          <TransactionHistoryItem
+            transaction={makeSampleEntry({ amount: 10 })}
+          />
         </MemoryRouter>
       </StoreProvider>,
     );
@@ -262,7 +269,9 @@ describe("TransactionHistoryItem", () => {
     render(
       <StoreProvider value={storeNoPrice}>
         <MemoryRouter>
-          <TransactionHistoryItem transaction={makeSampleEntry({ amount: 10 })} />
+          <TransactionHistoryItem
+            transaction={makeSampleEntry({ amount: 10 })}
+          />
         </MemoryRouter>
       </StoreProvider>,
     );

@@ -1,10 +1,13 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import TokenImportSuccess from "./TokenImportSuccess";
+
+const CONTRACT_ADDRESS = `Q${"0123456789abcdef".repeat(8)}`;
 
 describe("TokenImportSuccess", () => {
   afterEach(cleanup);
@@ -16,7 +19,7 @@ describe("TokenImportSuccess", () => {
       <StoreProvider value={mockedStoreValues}>
         <MemoryRouter>
           <TokenImportSuccess
-            contractAddress="Q0db3981cb93db985e4e3a62ff695f7a1b242dd7c"
+            contractAddress={CONTRACT_ADDRESS}
             onCancelImport={mockedOnCancelImport}
             token={{
               balance: 25,
@@ -39,7 +42,7 @@ describe("TokenImportSuccess", () => {
     );
     expect(screen.getByText("Contract address")).toBeInTheDocument();
     expect(
-      screen.getByText("Q 0db39 81cb9 3db98 5e4e3 a62ff 695f7 a1b24 2dd7c"),
+      screen.getByText(formatQrlAddressFingerprint(CONTRACT_ADDRESS)),
     ).toBeInTheDocument();
     expect(screen.getByText("Name")).toBeInTheDocument();
     expect(screen.getByText("MOCK TOKEN")).toBeInTheDocument();

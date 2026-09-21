@@ -28,6 +28,7 @@ import {
   type ParsedWalletImportFile,
 } from "@/functions/walletBackupImport";
 import { useStore } from "@/stores/store";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import { cn } from "@/utilities/stylingUtil";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
@@ -50,9 +51,9 @@ interface ImportEncryptedWalletProps {
 // bounds, but worth a warning before a long or memory-hungry decrypt.
 const HEAVY_KDF_MEMORY_KIB = 262144;
 
-const shortAddress = (address: string, index: number): string =>
+const getAccountDisplay = (address: string, index: number): string =>
   address.length >= 12
-    ? `${address.slice(0, 10)}...${address.slice(-8)}`
+    ? formatQrlAddressFingerprint(address)
     : `Account ${index + 1}`;
 
 const ImportEncryptedWallet = observer(
@@ -283,7 +284,7 @@ const ImportEncryptedWallet = observer(
                         value={String(i)}
                         className="font-data"
                       >
-                        {shortAddress(ks.address, i)}
+                        {getAccountDisplay(ks.address, i)}
                       </SelectItem>
                     ))}
                   </SelectContent>

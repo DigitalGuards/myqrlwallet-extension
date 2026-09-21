@@ -52,16 +52,19 @@ export default defineConfig({
       },
     },
   },
+  worker: {
+    // Worker builds need their own CommonJS and browser polyfill instances.
+    plugins: () => [
+      commonjs({ requireReturnsDefault: "auto" }),
+      nodePolyfills() as Plugin,
+    ],
+  },
   build: {
     outDir: "Extension",
     emptyOutDir: true,
+    commonjsOptions: { requireReturnsDefault: "auto" },
     rollupOptions: {
-      plugins: [
-        commonjs({
-          requireReturnsDefault: "auto",
-        }),
-        nodePolyfills() as Plugin,
-      ],
+      plugins: [nodePolyfills() as Plugin],
     },
   },
   resolve: {
