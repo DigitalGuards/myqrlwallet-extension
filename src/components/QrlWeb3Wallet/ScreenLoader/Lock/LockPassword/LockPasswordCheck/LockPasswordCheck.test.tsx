@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import LockPasswordCheck from "./LockPasswordCheck";
 
 describe("LockPasswordCheck", () => {
@@ -153,10 +154,10 @@ describe("LockPasswordCheck", () => {
       }),
     );
 
-    // Abbreviated form (prefix + first group ... last group), not the full address.
-    expect(screen.getByText("Q2090E...093A1")).toBeInTheDocument();
+    const address = "Q2090E9F38771876FB6Fc51a6b464121d3cC093A1";
     expect(
-      screen.queryByText("Q2090E9F38771876FB6Fc51a6b464121d3cC093A1"),
-    ).not.toBeInTheDocument();
+      screen.getByText(formatQrlAddressFingerprint(address)),
+    ).toBeInTheDocument();
+    expect(screen.getByText(address)).toHaveClass("sr-only");
   });
 });

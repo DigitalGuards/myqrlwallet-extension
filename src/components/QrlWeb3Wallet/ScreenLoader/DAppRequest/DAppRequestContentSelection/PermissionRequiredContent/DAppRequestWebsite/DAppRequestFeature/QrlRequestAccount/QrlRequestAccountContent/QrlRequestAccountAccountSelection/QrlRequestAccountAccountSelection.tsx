@@ -24,7 +24,7 @@ const QrlRequestAccountAccountSelection = observer(
 
     return (
       <div className="flex flex-col gap-4">
-        <div>{t('dapp.selectAccounts')}</div>
+        <div>{t("dapp.selectAccounts")}</div>
         {isLoading ? (
           <div className="flex h-12 w-full animate-pulse items-center justify-between">
             <div className="h-full w-full rounded-md bg-accent" />
@@ -32,7 +32,7 @@ const QrlRequestAccountAccountSelection = observer(
         ) : hasAccounts ? (
           <div className="flex flex-col gap-3">
             {availableAccounts.map((account) => (
-              <div key={account} className="flex items-start space-x-3">
+              <div key={account} className="flex min-w-0 items-start space-x-3">
                 <Checkbox
                   id={account}
                   checked={selectedAccounts.includes(account)}
@@ -43,7 +43,7 @@ const QrlRequestAccountAccountSelection = observer(
                 />
                 <label
                   htmlFor={account}
-                  className="cursor-pointer text-xs font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                  className="min-w-0 flex-1 cursor-pointer text-xs font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                 >
                   <AccountId account={account} />
                 </label>
@@ -51,7 +51,7 @@ const QrlRequestAccountAccountSelection = observer(
             ))}
           </div>
         ) : (
-          <div>{t('dapp.noAccountsAvailable')}</div>
+          <div>{t("dapp.noAccountsAvailable")}</div>
         )}
       </div>
     );

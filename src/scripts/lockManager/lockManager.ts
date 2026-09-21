@@ -1,7 +1,9 @@
+import { walletSessionStorage } from "@/utilities/profileStorage";
 import StorageUtil, { LockState } from "@/utilities/storageUtil";
 import { Bytes } from "@theqrl/web3";
 import { encryptKeystore } from "@/crypto/keystoreCrypto";
 import { getMnemonicFromHexSeed } from "@/functions/getMnemonicFromHexSeed";
+import { isQrlAddress } from "@/utilities/addressUtil";
 import browser from "webextension-polyfill";
 
 type MessageType = {
@@ -58,7 +60,7 @@ export const LOCK_MANAGER_MESSAGES = {
  */
 class LockManager {
   private static decryptedKeys?: DecryptedKeyType[];
-  // Held in memory only — never written to session storage. Separating the
+  // Held in memory only - never written to session storage. Separating the
   // password from `decryptedKeys` reduces blast radius if either store leaks.
   private static walletPassword?: string;
   static readonly AUTO_LOCK_ALARM = "QRL_AUTO_LOCK";
@@ -115,7 +117,7 @@ class LockManager {
   static async resetWallet() {
     this.clearDecryptedKeys();
     this.walletPassword = undefined;
-    await browser.storage.session.clear();
+    await walletSessionStorage.clear();
     await this.stopKeepAlive();
     await this.clearAutoLockAlarm();
     await StorageUtil.clearAllData();
@@ -125,7 +127,7 @@ class LockManager {
 
   static async startKeepAlive() {
     await browser.alarms.create(this.KEEP_ALIVE_ALARM, {
-      periodInMinutes: 0.4, // ~24 seconds — under Chrome's 30s kill threshold
+      periodInMinutes: 0.4, // ~24 seconds - under Chrome's 30s kill threshold
     });
   }
 
@@ -144,7 +146,7 @@ class LockManager {
       await this.restoreKeysFromSession();
     }
     // Write to session storage to keep the SW alive
-    await browser.storage.session.set({ keepAlive: Date.now() });
+    await walletSessionStorage.set({ keepAlive: Date.now() });
   }
 
   static async setupAutoLockAlarm() {
@@ -174,14 +176,14 @@ class LockManager {
    */
   private static async backupKeysToSession() {
     if (this.decryptedKeys) {
-      await browser.storage.session.set({
+      await walletSessionStorage.set({
         [this.SESSION_KEYS_KEY]: this.decryptedKeys,
       });
     }
   }
 
   private static async clearSessionKeys() {
-    await browser.storage.session.remove(this.SESSION_KEYS_KEY);
+    await walletSessionStorage.remove(this.SESSION_KEYS_KEY);
   }
 
   /**
@@ -196,7 +198,7 @@ class LockManager {
    */
   static async restoreKeysFromSession(): Promise<boolean> {
     try {
-      const data = await browser.storage.session.get(this.SESSION_KEYS_KEY);
+      const data = await walletSessionStorage.get(this.SESSION_KEYS_KEY);
       const keys = data?.[this.SESSION_KEYS_KEY] as
         | DecryptedKeyType[]
         | undefined;
@@ -205,7 +207,11 @@ class LockManager {
           StorageUtil.getKeystores(),
           StorageUtil.getAllAccounts(),
         ]);
-        if (keyStores.length === 0 || accounts.length === 0) {
+        if (
+          keyStores.length === 0 ||
+          accounts.length === 0 ||
+          keys.some((key) => !isQrlAddress(key?.address))
+        ) {
           await this.clearSessionKeys();
           return false;
         }
@@ -213,19 +219,19 @@ class LockManager {
         return true;
       }
     } catch {
-      // Session storage read failed — accept locked state
+      // Session storage read failed - accept locked state
     }
     return false;
   }
 
   static async isLocked() {
     const keyStores = await StorageUtil.getKeystores();
-    const accounts = await StorageUtil.getAllAccounts();
+    const accounts = await StorageUtil.getStoredAccounts();
     const hasPasswordSet = keyStores.length > 0 && accounts.length > 0;
     if (!hasPasswordSet) {
       // Storage looks like a first-run / partial-reset state. Drop any
       // in-memory keys but do NOT wipe persistent storage from a query
-      // path — the popup's onboarding flow will guide the user. An
+      // path - the popup's onboarding flow will guide the user. An
       // explicit factory-reset action lives in settings for intentional
       // wipes.
       this.clearDecryptedKeys();
@@ -256,6 +262,9 @@ class LockManager {
     payload: SetDecryptedKeysPayload | DecryptedKeyType[],
   ) {
     const keys = Array.isArray(payload) ? payload : payload.keys;
+    if (keys.some((key) => !isQrlAddress(key?.address))) {
+      throw new Error("Refusing to cache a key with an invalid QIP-55 address");
+    }
     if (!Array.isArray(payload) && payload.walletPassword) {
       this.walletPassword = payload.walletPassword;
     }

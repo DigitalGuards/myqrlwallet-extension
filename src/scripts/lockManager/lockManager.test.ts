@@ -1,3 +1,5 @@
+import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
+const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Plain object stores (hoisting-safe) ────────────────────────────
@@ -10,17 +12,22 @@ vi.mock("webextension-polyfill", () => ({
   default: {
     storage: {
       local: {
-        get: vi.fn((key: string) =>
+        get: vi.fn((key: string | null) =>
           Promise.resolve(
-            key in localStore ? { [key]: localStore[key] } : {},
+            key === null
+              ? { ...localStore }
+              : key in localStore
+                ? { [key]: localStore[key] }
+                : {},
           ),
         ),
         set: vi.fn((data: Record<string, any>) => {
           Object.assign(localStore, data);
           return Promise.resolve();
         }),
-        remove: vi.fn((key: string) => {
-          delete localStore[key];
+        remove: vi.fn((key: string | string[]) => {
+          for (const item of Array.isArray(key) ? key : [key])
+            delete localStore[item];
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
@@ -29,17 +36,22 @@ vi.mock("webextension-polyfill", () => ({
         }),
       },
       session: {
-        get: vi.fn((key: string) =>
+        get: vi.fn((key: string | null) =>
           Promise.resolve(
-            key in sessionStore ? { [key]: sessionStore[key] } : {},
+            key === null
+              ? { ...sessionStore }
+              : key in sessionStore
+                ? { [key]: sessionStore[key] }
+                : {},
           ),
         ),
         set: vi.fn((data: Record<string, any>) => {
           Object.assign(sessionStore, data);
           return Promise.resolve();
         }),
-        remove: vi.fn((key: string) => {
-          delete sessionStore[key];
+        remove: vi.fn((key: string | string[]) => {
+          for (const item of Array.isArray(key) ? key : [key])
+            delete sessionStore[item];
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
@@ -57,9 +69,7 @@ vi.mock("webextension-polyfill", () => ({
         delete alarmsStore[name];
         return Promise.resolve(true);
       }),
-      get: vi.fn((name: string) =>
-        Promise.resolve(alarmsStore[name] ?? null),
-      ),
+      get: vi.fn((name: string) => Promise.resolve(alarmsStore[name] ?? null)),
     },
   },
 }));
@@ -84,7 +94,7 @@ const clearStore = (store: Record<string, any>) => {
 
 const MOCK_KEYS: DecryptedKeyType[] = [
   {
-    address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+    address: `Q${"a".repeat(128)}`,
     mnemonicPhrases: "mocked mnemonic",
   },
 ];
@@ -104,9 +114,12 @@ describe("LockManager – keep-alive & auto-lock", () => {
     it("should create a periodic alarm", async () => {
       await LockManager.startKeepAlive();
 
-      expect(mockAlarms.create).toHaveBeenCalledWith(LockManager.KEEP_ALIVE_ALARM, {
-        periodInMinutes: 0.4,
-      });
+      expect(mockAlarms.create).toHaveBeenCalledWith(
+        LockManager.KEEP_ALIVE_ALARM,
+        {
+          periodInMinutes: 0.4,
+        },
+      );
     });
   });
 
@@ -114,7 +127,9 @@ describe("LockManager – keep-alive & auto-lock", () => {
     it("should clear the keep-alive alarm", async () => {
       await LockManager.stopKeepAlive();
 
-      expect(mockAlarms.clear).toHaveBeenCalledWith(LockManager.KEEP_ALIVE_ALARM);
+      expect(mockAlarms.clear).toHaveBeenCalledWith(
+        LockManager.KEEP_ALIVE_ALARM,
+      );
     });
   });
 
@@ -124,8 +139,10 @@ describe("LockManager – keep-alive & auto-lock", () => {
     it("should write to session storage", async () => {
       await LockManager.handleKeepAliveAlarm();
 
-      expect(sessionStore.keepAlive).toBeDefined();
-      expect(typeof sessionStore.keepAlive).toBe("number");
+      expect(sessionStore[profileStorageKey("keepAlive")]).toBeDefined();
+      expect(typeof sessionStore[profileStorageKey("keepAlive")]).toBe(
+        "number",
+      );
     });
 
     it("should restore keys from session if SW restarted", async () => {
@@ -133,13 +150,17 @@ describe("LockManager – keep-alive & auto-lock", () => {
       // empty (SW restart). The wallet has to be in storage BEFORE the tick:
       // restoring keys for a wallet that is not there is exactly what the
       // post-reset scrub refuses to do.
-      localStore["KEYSTORES"] = JSON.stringify([{ address: "0x123" }]);
-      localStore["ACCOUNTS"] = { ALL_ACCOUNTS: ["0x123"] };
-      sessionStore["_LM_CACHED_KEYS"] = MOCK_KEYS;
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "0x123" },
+      ]);
+      localStore[profileStorageKey("ACCOUNTS")] = {
+        ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+      };
+      sessionStore[profileStorageKey("_LM_CACHED_KEYS")] = MOCK_KEYS;
 
       await LockManager.handleKeepAliveAlarm();
 
-      // Keys should be restored — wallet unlocked
+      // Keys should be restored - wallet unlocked
       const { isLocked } = await LockManager.isLocked();
       expect(isLocked).toBe(false);
 
@@ -153,22 +174,30 @@ describe("LockManager – keep-alive & auto-lock", () => {
     it("should backup keys to session storage when keys are set", () => {
       LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
 
-      expect(sessionStore["_LM_CACHED_KEYS"]).toEqual(MOCK_KEYS);
+      expect(sessionStore[profileStorageKey("_LM_CACHED_KEYS")]).toEqual(
+        MOCK_KEYS,
+      );
     });
 
     it("should clear session keys on lock", async () => {
       LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
-      expect(sessionStore["_LM_CACHED_KEYS"]).toBeDefined();
+      expect(sessionStore[profileStorageKey("_LM_CACHED_KEYS")]).toBeDefined();
 
       await LockManager.lock();
 
-      expect(sessionStore["_LM_CACHED_KEYS"]).toBeUndefined();
+      expect(
+        sessionStore[profileStorageKey("_LM_CACHED_KEYS")],
+      ).toBeUndefined();
     });
 
     it("should restore keys from session in isLocked()", async () => {
-      localStore["KEYSTORES"] = JSON.stringify([{ address: "0x123" }]);
-      localStore["ACCOUNTS"] = { ALL_ACCOUNTS: ["0x123"] };
-      sessionStore["_LM_CACHED_KEYS"] = MOCK_KEYS;
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "0x123" },
+      ]);
+      localStore[profileStorageKey("ACCOUNTS")] = {
+        ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+      };
+      sessionStore[profileStorageKey("_LM_CACHED_KEYS")] = MOCK_KEYS;
 
       const { isLocked } = await LockManager.isLocked();
       expect(isLocked).toBe(false);
@@ -178,7 +207,7 @@ describe("LockManager – keep-alive & auto-lock", () => {
 
     it("should NOT restore from session when no keystores exist", async () => {
       // No keystores → clearAllData path → hasPasswordSet = false
-      sessionStore["_LM_CACHED_KEYS"] = MOCK_KEYS;
+      sessionStore[profileStorageKey("_LM_CACHED_KEYS")] = MOCK_KEYS;
 
       const { isLocked, hasPasswordSet } = await LockManager.isLocked();
       expect(isLocked).toBe(true);
@@ -190,30 +219,38 @@ describe("LockManager – keep-alive & auto-lock", () => {
 
   describe("setupAutoLockAlarm", () => {
     it("should create an alarm with the configured minutes", async () => {
-      localStore["SETTINGS"] = { autoLockMinutes: 5 };
+      localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 5 };
 
       await LockManager.setupAutoLockAlarm();
 
-      expect(mockAlarms.create).toHaveBeenCalledWith(LockManager.AUTO_LOCK_ALARM, {
-        delayInMinutes: 5,
-      });
+      expect(mockAlarms.create).toHaveBeenCalledWith(
+        LockManager.AUTO_LOCK_ALARM,
+        {
+          delayInMinutes: 5,
+        },
+      );
     });
 
     it("should use default of 15 minutes when not configured", async () => {
       await LockManager.setupAutoLockAlarm();
 
-      expect(mockAlarms.create).toHaveBeenCalledWith(LockManager.AUTO_LOCK_ALARM, {
-        delayInMinutes: 15,
-      });
+      expect(mockAlarms.create).toHaveBeenCalledWith(
+        LockManager.AUTO_LOCK_ALARM,
+        {
+          delayInMinutes: 15,
+        },
+      );
     });
 
     it("should clear alarm when autoLockMinutes is 0 (Never)", async () => {
-      localStore["SETTINGS"] = { autoLockMinutes: 0 };
+      localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 0 };
 
       await LockManager.setupAutoLockAlarm();
 
       expect(mockAlarms.create).not.toHaveBeenCalled();
-      expect(mockAlarms.clear).toHaveBeenCalledWith(LockManager.AUTO_LOCK_ALARM);
+      expect(mockAlarms.clear).toHaveBeenCalledWith(
+        LockManager.AUTO_LOCK_ALARM,
+      );
     });
   });
 
@@ -221,8 +258,12 @@ describe("LockManager – keep-alive & auto-lock", () => {
 
   describe("handleAutoLockAlarm", () => {
     it("should lock the wallet, save LOCKED timestamp, and clear session keys", async () => {
-      localStore["KEYSTORES"] = JSON.stringify([{ address: "0x123" }]);
-      localStore["ACCOUNTS"] = { ALL_ACCOUNTS: ["0x123"] };
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "0x123" },
+      ]);
+      localStore[profileStorageKey("ACCOUNTS")] = {
+        ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+      };
 
       LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
       await LockManager.startKeepAlive();
@@ -231,9 +272,13 @@ describe("LockManager – keep-alive & auto-lock", () => {
 
       const { isLocked } = await LockManager.isLocked();
       expect(isLocked).toBe(true);
-      expect(localStore["LOCK_MANAGER_LOCKED_TIMESTAMP"]).toBeDefined();
+      expect(
+        localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")],
+      ).toBeDefined();
       // Session keys should be cleared so restore doesn't re-unlock
-      expect(sessionStore["_LM_CACHED_KEYS"]).toBeUndefined();
+      expect(
+        sessionStore[profileStorageKey("_LM_CACHED_KEYS")],
+      ).toBeUndefined();
     });
   });
 
@@ -247,14 +292,24 @@ describe("LockManager – keep-alive & auto-lock", () => {
 
       await LockManager.lock();
 
-      localStore["KEYSTORES"] = JSON.stringify([{ address: "0x123" }]);
-      localStore["ACCOUNTS"] = { ALL_ACCOUNTS: ["0x123"] };
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "0x123" },
+      ]);
+      localStore[profileStorageKey("ACCOUNTS")] = {
+        ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+      };
       const { isLocked } = await LockManager.isLocked();
       expect(isLocked).toBe(true);
 
-      expect(mockAlarms.clear).toHaveBeenCalledWith(LockManager.AUTO_LOCK_ALARM);
-      expect(mockAlarms.clear).toHaveBeenCalledWith(LockManager.KEEP_ALIVE_ALARM);
-      expect(sessionStore["_LM_CACHED_KEYS"]).toBeUndefined();
+      expect(mockAlarms.clear).toHaveBeenCalledWith(
+        LockManager.AUTO_LOCK_ALARM,
+      );
+      expect(mockAlarms.clear).toHaveBeenCalledWith(
+        LockManager.KEEP_ALIVE_ALARM,
+      );
+      expect(
+        sessionStore[profileStorageKey("_LM_CACHED_KEYS")],
+      ).toBeUndefined();
     });
   });
 
@@ -262,7 +317,7 @@ describe("LockManager – keep-alive & auto-lock", () => {
 
   describe("lockManagerListener", () => {
     it("should start keep-alive and alarm on SET_DECRYPTED_KEYS", async () => {
-      localStore["SETTINGS"] = { autoLockMinutes: 10 };
+      localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 10 };
 
       const result = await LockManager.lockManagerListener({
         name: LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
@@ -277,17 +332,22 @@ describe("LockManager – keep-alive & auto-lock", () => {
         expect.any(Object),
       );
       // Auto-lock alarm created
-      expect(mockAlarms.create).toHaveBeenCalledWith(LockManager.AUTO_LOCK_ALARM, {
-        delayInMinutes: 10,
-      });
+      expect(mockAlarms.create).toHaveBeenCalledWith(
+        LockManager.AUTO_LOCK_ALARM,
+        {
+          delayInMinutes: 10,
+        },
+      );
       // Keys backed up to session
-      expect(sessionStore["_LM_CACHED_KEYS"]).toEqual(MOCK_KEYS);
+      expect(sessionStore[profileStorageKey("_LM_CACHED_KEYS")]).toEqual(
+        MOCK_KEYS,
+      );
 
       await LockManager.lock();
     });
 
     it("should handle UPDATE_AUTO_LOCK by recreating alarm", async () => {
-      localStore["SETTINGS"] = { autoLockMinutes: 30 };
+      localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 30 };
 
       const result = await LockManager.lockManagerListener({
         name: LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK,
@@ -295,15 +355,22 @@ describe("LockManager – keep-alive & auto-lock", () => {
       });
 
       expect(result).toEqual({ success: true });
-      expect(mockAlarms.create).toHaveBeenCalledWith(LockManager.AUTO_LOCK_ALARM, {
-        delayInMinutes: 30,
-      });
+      expect(mockAlarms.create).toHaveBeenCalledWith(
+        LockManager.AUTO_LOCK_ALARM,
+        {
+          delayInMinutes: 30,
+        },
+      );
     });
 
     it("should reset auto-lock timer on any message while unlocked", async () => {
-      localStore["SETTINGS"] = { autoLockMinutes: 5 };
-      localStore["KEYSTORES"] = JSON.stringify([{ address: "0x123" }]);
-      localStore["ACCOUNTS"] = { ALL_ACCOUNTS: ["0x123"] };
+      localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 5 };
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "0x123" },
+      ]);
+      localStore[profileStorageKey("ACCOUNTS")] = {
+        ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+      };
 
       LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
       mockAlarms.create.mockClear();
@@ -313,15 +380,18 @@ describe("LockManager – keep-alive & auto-lock", () => {
         data: undefined,
       });
 
-      expect(mockAlarms.create).toHaveBeenCalledWith(LockManager.AUTO_LOCK_ALARM, {
-        delayInMinutes: 5,
-      });
+      expect(mockAlarms.create).toHaveBeenCalledWith(
+        LockManager.AUTO_LOCK_ALARM,
+        {
+          delayInMinutes: 5,
+        },
+      );
 
       await LockManager.lock();
     });
 
     it("should NOT reset auto-lock timer when wallet is locked", async () => {
-      localStore["SETTINGS"] = { autoLockMinutes: 5 };
+      localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 5 };
 
       mockAlarms.create.mockClear();
 
@@ -334,8 +404,10 @@ describe("LockManager – keep-alive & auto-lock", () => {
     });
 
     it("should lock wallet on LOCK message", async () => {
-      localStore["KEYSTORES"] = JSON.stringify([{ address: "0x123" }]);
-      localStore["ACCOUNTS"] = { ALL_ACCOUNTS: ["0x123"] };
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "0x123" },
+      ]);
+      localStore[profileStorageKey("ACCOUNTS")] = { ALL_ACCOUNTS: ["0x123"] };
       LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
 
       await LockManager.lockManagerListener({
@@ -345,8 +417,10 @@ describe("LockManager – keep-alive & auto-lock", () => {
 
       const { isLocked } = await LockManager.isLocked();
       expect(isLocked).toBe(true);
-      // Session keys cleared — no restore after intentional lock
-      expect(sessionStore["_LM_CACHED_KEYS"]).toBeUndefined();
+      // Session keys cleared - no restore after intentional lock
+      expect(
+        sessionStore[profileStorageKey("_LM_CACHED_KEYS")],
+      ).toBeUndefined();
     });
   });
 
@@ -374,10 +448,10 @@ describe("LockManager – keep-alive & auto-lock", () => {
 });
 
 describe("LockManager – account removal & factory reset", () => {
-  const SESSION_KEYS_KEY = "_LM_CACHED_KEYS";
+  const SESSION_KEYS_KEY = profileStorageKey("_LM_CACHED_KEYS");
   const KEY_A = MOCK_KEYS[0];
   const KEY_B: DecryptedKeyType = {
-    address: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+    address: `Q${"b".repeat(128)}`,
     mnemonicPhrases: "second mnemonic",
   };
 
@@ -409,11 +483,11 @@ describe("LockManager – account removal & factory reset", () => {
       // next keep-alive tick would load it straight back into memory.
       // The wallet itself is still present: this is an account removal,
       // not a reset.
-      localStore["KEYSTORES"] = JSON.stringify([
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
         { address: KEY_A.address.toLowerCase() },
         { address: KEY_B.address.toLowerCase() },
       ]);
-      localStore["ACCOUNTS"] = {
+      localStore[profileStorageKey("ACCOUNTS")] = {
         ALL_ACCOUNTS: [KEY_A.address, KEY_B.address],
       };
       sessionStore[SESSION_KEYS_KEY] = [KEY_A, KEY_B];
@@ -443,8 +517,12 @@ describe("LockManager – account removal & factory reset", () => {
         walletPassword: "pw",
       });
       // Both are required for isLocked() to consider the wallet set up.
-      localStore["KEYSTORES"] = JSON.stringify([{ address: "qaaa" }]);
-      localStore["ACCOUNTS"] = { ALL_ACCOUNTS: [KEY_A.address] };
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "qaaa" },
+      ]);
+      localStore[profileStorageKey("ACCOUNTS")] = {
+        ALL_ACCOUNTS: [KEY_A.address],
+      };
     });
 
     it("clears in-memory keys, the session backup, local storage and both alarms", async () => {
@@ -455,7 +533,7 @@ describe("LockManager – account removal & factory reset", () => {
 
       expect(() => LockManager.getDecryptedKeys()).toThrow();
       expect(sessionStore[SESSION_KEYS_KEY]).toBeUndefined();
-      expect(localStore["KEYSTORES"]).toBeUndefined();
+      expect(localStore[profileStorageKey("KEYSTORES")]).toBeUndefined();
       expect(alarmsStore[LockManager.KEEP_ALIVE_ALARM]).toBeUndefined();
       expect(alarmsStore[LockManager.AUTO_LOCK_ALARM]).toBeUndefined();
     });
@@ -472,7 +550,9 @@ describe("LockManager – account removal & factory reset", () => {
       // and a wiped marker makes peer surfaces re-arm the reset wallet.
       await LockManager.resetWallet();
 
-      expect(typeof localStore["LOCK_MANAGER_LOCKED_TIMESTAMP"]).toBe("number");
+      expect(
+        typeof localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")],
+      ).toBe("number");
     });
 
     it("reports a first-run wallet afterwards", async () => {
@@ -491,7 +571,7 @@ describe("LockManager – account removal & factory reset", () => {
 });
 
 describe("LockManager – session backup cannot outlive the wallet", () => {
-  const SESSION_KEYS_KEY = "_LM_CACHED_KEYS";
+  const SESSION_KEYS_KEY = profileStorageKey("_LM_CACHED_KEYS");
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -514,8 +594,12 @@ describe("LockManager – session backup cannot outlive the wallet", () => {
   });
 
   it("still restores when the wallet is intact", async () => {
-    localStore["KEYSTORES"] = JSON.stringify([{ address: "qaaa" }]);
-    localStore["ACCOUNTS"] = { ALL_ACCOUNTS: [MOCK_KEYS[0].address] };
+    localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+      { address: "qaaa" },
+    ]);
+    localStore[profileStorageKey("ACCOUNTS")] = {
+      ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+    };
     sessionStore[SESSION_KEYS_KEY] = MOCK_KEYS;
 
     const restored = await LockManager.restoreKeysFromSession();

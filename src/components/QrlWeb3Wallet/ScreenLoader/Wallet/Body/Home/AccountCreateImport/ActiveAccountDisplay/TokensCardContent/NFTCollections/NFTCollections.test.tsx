@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import NFTCollections from "./NFTCollections";
 
 const { mockGetNFTCollectionsList } = vi.hoisted(() => ({
-  mockGetNFTCollectionsList: vi.fn<any>().mockResolvedValue([]),
+  mockGetNFTCollectionsList: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/utilities/storageUtil", () => ({

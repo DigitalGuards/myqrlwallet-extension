@@ -2,6 +2,7 @@ import type { Contact } from "@/types/contact";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import ContactItem from "./ContactItem";
 
 describe("ContactItem", () => {
@@ -14,11 +15,7 @@ describe("ContactItem", () => {
 
   it("should render the contact name", () => {
     render(
-      <ContactItem
-        contact={contact}
-        onEdit={vi.fn()}
-        onDelete={vi.fn()}
-      />,
+      <ContactItem contact={contact} onEdit={vi.fn()} onDelete={vi.fn()} />,
     );
 
     expect(screen.getByText("Alice")).toBeInTheDocument();
@@ -26,20 +23,16 @@ describe("ContactItem", () => {
 
   it("should render the contact address", () => {
     render(
-      <ContactItem
-        contact={contact}
-        onEdit={vi.fn()}
-        onDelete={vi.fn()}
-      />,
+      <ContactItem contact={contact} onEdit={vi.fn()} onDelete={vi.fn()} />,
     );
 
     expect(
-      screen.getByText(/Q20B714091cF2a62DADda2847803e3f1B9D2D3779/),
+      screen.getByText(formatQrlAddressFingerprint(contact.address)),
     ).toBeInTheDocument();
   });
 
   it("should call onEdit when edit button is clicked", async () => {
-    const onEdit = vi.fn<any>();
+    const onEdit = vi.fn();
     render(
       <ContactItem contact={contact} onEdit={onEdit} onDelete={vi.fn()} />,
     );
@@ -49,13 +42,9 @@ describe("ContactItem", () => {
   });
 
   it("should call onDelete when delete button is clicked", async () => {
-    const onDelete = vi.fn<any>();
+    const onDelete = vi.fn();
     render(
-      <ContactItem
-        contact={contact}
-        onEdit={vi.fn()}
-        onDelete={onDelete}
-      />,
+      <ContactItem contact={contact} onEdit={vi.fn()} onDelete={onDelete} />,
     );
 
     await userEvent.click(screen.getByLabelText("Delete contact"));

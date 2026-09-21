@@ -1,7 +1,13 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import SettingsSecurity from "./SettingsSecurity";
@@ -40,7 +46,7 @@ describe("SettingsSecurity", () => {
   });
 
   it("should call setAutoLockMinutes when selecting an option", async () => {
-    const setAutoLockMinutes = vi.fn<any>(() => Promise.resolve());
+    const setAutoLockMinutes = vi.fn(() => Promise.resolve());
     renderComponent(mockedStore({ settingsStore: { setAutoLockMinutes } }));
 
     await userEvent.click(
@@ -52,7 +58,7 @@ describe("SettingsSecurity", () => {
   });
 
   it("should call setAutoLockMinutes with 0 for Never", async () => {
-    const setAutoLockMinutes = vi.fn<any>(() => Promise.resolve());
+    const setAutoLockMinutes = vi.fn(() => Promise.resolve());
     renderComponent(mockedStore({ settingsStore: { setAutoLockMinutes } }));
 
     await userEvent.click(
@@ -78,9 +84,9 @@ describe("SettingsSecurity", () => {
   });
 
   it("should call setShowBalanceAndPrice when toggling checkbox", async () => {
-    const setShowBalanceAndPrice = vi.fn<any>(() => Promise.resolve());
-    const fetchPrices = vi.fn<any>(() => Promise.resolve());
-    const startAutoRefresh = vi.fn<any>();
+    const setShowBalanceAndPrice = vi.fn(() => Promise.resolve());
+    const fetchPrices = vi.fn(() => Promise.resolve());
+    const startAutoRefresh = vi.fn();
     renderComponent(
       mockedStore({
         settingsStore: { showBalanceAndPrice: true, setShowBalanceAndPrice },
@@ -97,9 +103,9 @@ describe("SettingsSecurity", () => {
   });
 
   it("should start auto-refresh when enabling balance display", async () => {
-    const setShowBalanceAndPrice = vi.fn<any>(() => Promise.resolve());
-    const fetchPrices = vi.fn<any>(() => Promise.resolve());
-    const startAutoRefresh = vi.fn<any>();
+    const setShowBalanceAndPrice = vi.fn(() => Promise.resolve());
+    const fetchPrices = vi.fn(() => Promise.resolve());
+    const startAutoRefresh = vi.fn();
     renderComponent(
       mockedStore({
         settingsStore: { showBalanceAndPrice: false, setShowBalanceAndPrice },
@@ -118,8 +124,8 @@ describe("SettingsSecurity", () => {
   });
 
   it("should stop auto-refresh when disabling balance display", async () => {
-    const setShowBalanceAndPrice = vi.fn<any>(() => Promise.resolve());
-    const stopAutoRefresh = vi.fn<any>();
+    const setShowBalanceAndPrice = vi.fn(() => Promise.resolve());
+    const stopAutoRefresh = vi.fn();
     renderComponent(
       mockedStore({
         settingsStore: { showBalanceAndPrice: true, setShowBalanceAndPrice },
@@ -154,15 +160,9 @@ describe("SettingsSecurity", () => {
       expect(
         screen.getByText("Enter your current password and choose a new one."),
       ).toBeInTheDocument();
-      expect(
-        screen.getByLabelText("Current password"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByLabelText("New password"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByLabelText("Confirm new password"),
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Current password")).toBeInTheDocument();
+      expect(screen.getByLabelText("New password")).toBeInTheDocument();
+      expect(screen.getByLabelText("Confirm new password")).toBeInTheDocument();
     });
 
     it("should keep the submit button disabled until all fields are valid", async () => {
@@ -173,19 +173,30 @@ describe("SettingsSecurity", () => {
       );
 
       const dialog = screen.getByRole("dialog");
-      const submitButton = within(dialog).getByRole("button", { name: /Change Password/i });
+      const submitButton = within(dialog).getByRole("button", {
+        name: /Change Password/i,
+      });
       expect(submitButton).toBeDisabled();
 
-      // Fill only current password — still disabled
-      await userEvent.type(screen.getByLabelText("Current password"), "oldpass12345");
+      // Fill only current password - still disabled
+      await userEvent.type(
+        screen.getByLabelText("Current password"),
+        "oldpass12345",
+      );
       expect(submitButton).toBeDisabled();
 
-      // Fill new password but not confirm — still disabled
-      await userEvent.type(screen.getByLabelText("New password"), "newpass12345");
+      // Fill new password but not confirm - still disabled
+      await userEvent.type(
+        screen.getByLabelText("New password"),
+        "newpass12345",
+      );
       expect(submitButton).toBeDisabled();
 
-      // Fill confirm with matching password — now enabled
-      await userEvent.type(screen.getByLabelText("Confirm new password"), "newpass12345");
+      // Fill confirm with matching password - now enabled
+      await userEvent.type(
+        screen.getByLabelText("Confirm new password"),
+        "newpass12345",
+      );
       await waitFor(() => {
         expect(submitButton).toBeEnabled();
       });
@@ -198,9 +209,18 @@ describe("SettingsSecurity", () => {
         screen.getByRole("button", { name: /Change Password/i }),
       );
 
-      await userEvent.type(screen.getByLabelText("Current password"), "oldpass12345");
-      await userEvent.type(screen.getByLabelText("New password"), "newpass12345");
-      await userEvent.type(screen.getByLabelText("Confirm new password"), "different123");
+      await userEvent.type(
+        screen.getByLabelText("Current password"),
+        "oldpass12345",
+      );
+      await userEvent.type(
+        screen.getByLabelText("New password"),
+        "newpass12345",
+      );
+      await userEvent.type(
+        screen.getByLabelText("Confirm new password"),
+        "different123",
+      );
 
       await waitFor(() => {
         expect(screen.getByText("Passwords doesn't match")).toBeInTheDocument();
@@ -208,21 +228,30 @@ describe("SettingsSecurity", () => {
     });
 
     it("should call changePassword and show success on correct password", async () => {
-      const changePassword = vi.fn<any>(() => Promise.resolve(true));
-      renderComponent(
-        mockedStore({ lockStore: { changePassword } }),
-      );
+      const changePassword = vi.fn(() => Promise.resolve(true));
+      renderComponent(mockedStore({ lockStore: { changePassword } }));
 
       await userEvent.click(
         screen.getByRole("button", { name: /Change Password/i }),
       );
 
-      await userEvent.type(screen.getByLabelText("Current password"), "oldpass12345");
-      await userEvent.type(screen.getByLabelText("New password"), "newpass12345");
-      await userEvent.type(screen.getByLabelText("Confirm new password"), "newpass12345");
+      await userEvent.type(
+        screen.getByLabelText("Current password"),
+        "oldpass12345",
+      );
+      await userEvent.type(
+        screen.getByLabelText("New password"),
+        "newpass12345",
+      );
+      await userEvent.type(
+        screen.getByLabelText("Confirm new password"),
+        "newpass12345",
+      );
 
       const dialog = screen.getByRole("dialog");
-      const submitButton = within(dialog).getByRole("button", { name: /Change Password/i });
+      const submitButton = within(dialog).getByRole("button", {
+        name: /Change Password/i,
+      });
       await waitFor(() => {
         expect(submitButton).toBeEnabled();
       });
@@ -230,27 +259,41 @@ describe("SettingsSecurity", () => {
       await userEvent.click(submitButton);
 
       await waitFor(() => {
-        expect(changePassword).toHaveBeenCalledWith("oldpass12345", "newpass12345");
-        expect(screen.getByText("Password changed successfully")).toBeInTheDocument();
+        expect(changePassword).toHaveBeenCalledWith(
+          "oldpass12345",
+          "newpass12345",
+        );
+        expect(
+          screen.getByText("Password changed successfully"),
+        ).toBeInTheDocument();
       });
     });
 
     it("should show error when current password is incorrect", async () => {
-      const changePassword = vi.fn<any>(() => Promise.resolve(false));
-      renderComponent(
-        mockedStore({ lockStore: { changePassword } }),
-      );
+      const changePassword = vi.fn(() => Promise.resolve(false));
+      renderComponent(mockedStore({ lockStore: { changePassword } }));
 
       await userEvent.click(
         screen.getByRole("button", { name: /Change Password/i }),
       );
 
-      await userEvent.type(screen.getByLabelText("Current password"), "wrongpass123");
-      await userEvent.type(screen.getByLabelText("New password"), "newpass12345");
-      await userEvent.type(screen.getByLabelText("Confirm new password"), "newpass12345");
+      await userEvent.type(
+        screen.getByLabelText("Current password"),
+        "wrongpass123",
+      );
+      await userEvent.type(
+        screen.getByLabelText("New password"),
+        "newpass12345",
+      );
+      await userEvent.type(
+        screen.getByLabelText("Confirm new password"),
+        "newpass12345",
+      );
 
       const dialog = screen.getByRole("dialog");
-      const submitButton = within(dialog).getByRole("button", { name: /Change Password/i });
+      const submitButton = within(dialog).getByRole("button", {
+        name: /Change Password/i,
+      });
       await waitFor(() => {
         expect(submitButton).toBeEnabled();
       });
@@ -258,8 +301,13 @@ describe("SettingsSecurity", () => {
       await userEvent.click(submitButton);
 
       await waitFor(() => {
-        expect(changePassword).toHaveBeenCalledWith("wrongpass123", "newpass12345");
-        expect(screen.getByText("Current password is incorrect")).toBeInTheDocument();
+        expect(changePassword).toHaveBeenCalledWith(
+          "wrongpass123",
+          "newpass12345",
+        );
+        expect(
+          screen.getByText("Current password is incorrect"),
+        ).toBeInTheDocument();
       });
     });
   });

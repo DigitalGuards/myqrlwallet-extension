@@ -6,8 +6,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/UI/Card";
+import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
 import { ROUTES } from "@/router/router";
-import StringUtil from "@/utilities/stringUtil";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -21,8 +21,6 @@ type AccountImportSuccessProps = {
 const AccountImportSuccess = ({ account }: AccountImportSuccessProps) => {
   const { t } = useTranslation();
   const accountAddress = account?.address ?? "";
-  const { prefix, addressSplit } = StringUtil.getSplitAddress(accountAddress);
-  const spacedAccountAddress = addressSplit.join(" ");
 
   const [hasJustCopied, setHasJustCopied] = useState(false);
   const [timer, setTimer] = useState<NodeJS.Timeout>();
@@ -47,13 +45,16 @@ const AccountImportSuccess = ({ account }: AccountImportSuccessProps) => {
   return (
     <Card className="w-full">
       <CardHeader>
-        <CardTitle>{t('account.imported')}</CardTitle>
+        <CardTitle>{t("account.imported")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-8">
-        <div className="flex flex-col gap-2">
-          <div>{t('account.publicAddress')}</div>
-          <div className="font-data font-bold text-identity-accent">{`${prefix} ${spacedAccountAddress}`}</div>
-          <div>{t('account.importedSuccess')}</div>
+        <div className="flex min-w-0 flex-col gap-2">
+          <div>{t("account.publicAddress")}</div>
+          <FullAddress
+            address={accountAddress}
+            className="w-full font-bold text-identity-accent"
+          />
+          <div>{t("account.importedSuccess")}</div>
         </div>
       </CardContent>
       <CardFooter className="gap-4">
@@ -64,7 +65,7 @@ const AccountImportSuccess = ({ account }: AccountImportSuccessProps) => {
           onClick={onCopy}
         >
           <Copy className="mr-2 h-4 w-4" />
-          {hasJustCopied ? t('account.copied') : t('account.copy')}
+          {hasJustCopied ? t("account.copied") : t("account.copy")}
         </Button>
         <Link
           className="w-full"
@@ -73,7 +74,7 @@ const AccountImportSuccess = ({ account }: AccountImportSuccessProps) => {
         >
           <Button className="w-full" type="button">
             <Check className="mr-2 h-4 w-4" />
-            {t('account.done')}
+            {t("account.done")}
           </Button>
         </Link>
       </CardFooter>

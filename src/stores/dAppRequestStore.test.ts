@@ -1,3 +1,4 @@
+import { profileStorageKey } from "@/utilities/profileStorage";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
 import StorageUtil from "@/utilities/storageUtil";
@@ -17,7 +18,10 @@ describe("DAppRequestStore permission refresh", () => {
     const listener = vi.mocked(browser.storage.onChanged.addListener).mock
       .calls[0]?.[0];
 
-    listener?.({ DAPPS: { oldValue: {}, newValue: {} } }, "local");
+    listener?.(
+      { [profileStorageKey("DAPPS")]: { oldValue: {}, newValue: {} } },
+      "local",
+    );
 
     expect(fetchCurrentTabData).toHaveBeenCalledTimes(2);
   });
@@ -35,7 +39,10 @@ describe("DAppRequestStore permission refresh", () => {
     const listener = vi.mocked(browser.storage.onChanged.addListener).mock
       .calls[0]?.[0];
 
-    listener?.({ DAPPS: { oldValue: {}, newValue: {} } }, "session");
+    listener?.(
+      { [profileStorageKey("DAPPS")]: { oldValue: {}, newValue: {} } },
+      "session",
+    );
     await store.onPermissionCallBack(true);
 
     expect(store.canProceed).toBe(false);

@@ -1,15 +1,28 @@
+vi.mock("@/configuration/releaseProfile", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/configuration/releaseProfile")>()),
+  assertV3Network: vi.fn().mockResolvedValue(undefined),
+}));
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toChecksumAddress } from "@theqrl/wallet.js";
+import { assertV3Network } from "@/configuration/releaseProfile";
 import StorageUtil from "@/utilities/storageUtil";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import {
   checkAccountHasBeenAuthorized,
   checkAccountAndChainHaveBeenAuthorized,
+  checkWalletAddQrlChainParams,
   normalizeChainId,
   revalidateAuthorizedDAppRequest,
 } from "./restrictedMethodsMiddlewareUtils";
 
-const ACCOUNT = "Q20B714091cF2a62DADda2847803e3f1B9D2D3779";
+const ACCOUNT = `Q${"a".repeat(128)}`;
 const ORIGIN = "https://audit-dapp.example";
+const CHECKSUM_ACCOUNT = toChecksumAddress(ACCOUNT);
+const WRONG_CHECKSUM_ACCOUNT = `${CHECKSUM_ACCOUNT.slice(0, 1)}${
+  CHECKSUM_ACCOUNT[1] === CHECKSUM_ACCOUNT[1].toUpperCase()
+    ? CHECKSUM_ACCOUNT[1].toLowerCase()
+    : CHECKSUM_ACCOUNT[1].toUpperCase()
+}${CHECKSUM_ACCOUNT.slice(2)}`;
 
 const request = (method: string, params: unknown[]) =>
   ({
@@ -26,18 +39,18 @@ describe("dApp chain authorization", () => {
     vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
       urlOrigin: ORIGIN,
       accounts: [ACCOUNT],
-      blockchains: [{ chainId: "0x539" } as never],
+      blockchains: [{ chainId: "0x301825" } as never],
       permissions: [],
     });
     vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue({
-      chainId: "0x539",
+      chainId: "0x301825",
     } as never);
   });
 
   it("canonicalizes supported decimal and hexadecimal chain IDs", () => {
-    expect(normalizeChainId(1337)).toBe("0x539");
-    expect(normalizeChainId("1337")).toBe("0x539");
-    expect(normalizeChainId("0X0539")).toBe("0x539");
+    expect(normalizeChainId(3151909)).toBe("0x301825");
+    expect(normalizeChainId("3151909")).toBe("0x301825");
+    expect(normalizeChainId("0X0301825")).toBe("0x301825");
     expect(normalizeChainId("1.5")).toBeUndefined();
     expect(normalizeChainId(-1)).toBeUndefined();
   });
@@ -48,27 +61,116 @@ describe("dApp chain authorization", () => {
     );
 
     expect(result.canProceed).toBe(true);
-    expect(result).toMatchObject({ authorizedChainId: "0x539" });
+    expect(result).toMatchObject({ authorizedChainId: "0x301825" });
+  });
+
+  it.each(["0x301825", "3151909", 3151909])(
+    "accepts an explicit SDK transaction chain matching the wallet (%s)",
+    async (chainId) => {
+      const result = await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [
+          { from: ACCOUNT, to: CHECKSUM_ACCOUNT, chainId, value: "0x0" },
+        ]),
+      );
+      expect(result).toMatchObject({
+        canProceed: true,
+        authorizedChainId: "0x301825",
+      });
+    },
+  );
+
+  it.each(["0x539", "0x1"])(
+    "rejects a different explicit transaction chain before approval (%s)",
+    async (chainId) => {
+      const result = await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [
+          { from: ACCOUNT, chainId },
+        ]),
+      );
+      expect(result.canProceed).toBe(false);
+      expect(result.proceedError?.message).toContain(
+        "does not match the active, authorized wallet chain",
+      );
+    },
+  );
+
+  it.each([null, undefined, "", "0x0", "invalid", -1, 1.5, {}])(
+    "rejects a malformed explicit transaction chain (%s)",
+    async (chainId) => {
+      const result = await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [
+          { from: ACCOUNT, chainId },
+        ]),
+      );
+      expect(result.canProceed).toBe(false);
+      expect(result.proceedError?.message).toContain("invalid chain ID");
+    },
+  );
+
+  it("rechecks the declared transaction chain against its approval context", async () => {
+    const result = await revalidateAuthorizedDAppRequest({
+      method: RESTRICTED_METHODS.QRL_SEND_TRANSACTION,
+      params: [{ from: ACCOUNT, chainId: "0x539" }],
+      requestId: "request-id",
+      authorizedChainId: "0x301825",
+      requestData: { senderData: { url: `${ORIGIN}/request` } },
+    });
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain(
+      "does not match the active, authorized wallet chain",
+    );
+  });
+
+  it("checks pinned RPC identity even for an explicitly matching transaction chain", async () => {
+    vi.mocked(assertV3Network).mockRejectedValueOnce(
+      new Error("The RPC does not match the pinned v3 Private network."),
+    );
+    const result = await revalidateAuthorizedDAppRequest({
+      method: RESTRICTED_METHODS.QRL_SEND_TRANSACTION,
+      params: [{ from: ACCOUNT, chainId: "0x301825" }],
+      requestId: "request-id",
+      authorizedChainId: "0x301825",
+      requestData: { senderData: { url: `${ORIGIN}/request` } },
+    });
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("pinned v3 Private network");
+  });
+
+  it.each([
+    `Q${"b".repeat(40)}`,
+    WRONG_CHECKSUM_ACCOUNT,
+    `q${CHECKSUM_ACCOUNT.slice(1)}`,
+    `0x${CHECKSUM_ACCOUNT.slice(1)}`,
+  ])("rejects an invalid transaction recipient (%s)", async (to) => {
+    const result = await checkAccountAndChainHaveBeenAuthorized(
+      request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [{ from: ACCOUNT, to }]),
+    );
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain(
+      "uppercase-Q QIP-55 address",
+    );
   });
 
   it("accepts checksum-case variants of an authorized signing account", async () => {
+    const upperPrefixLowerBody = `Q${ACCOUNT.slice(1).toLowerCase()}`;
     const result = await checkAccountAndChainHaveBeenAuthorized(
       request(RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4, [
-        ACCOUNT.toLowerCase(),
-        { domain: { chainId: "0x539" } },
+        upperPrefixLowerBody,
+        { domain: { chainId: "0x301825" } },
       ]),
     );
 
     expect(result.canProceed).toBe(true);
-    expect(result).toMatchObject({ authorizedChainId: "0x539" });
+    expect(result).toMatchObject({ authorizedChainId: "0x301825" });
   });
 
   it("rejects a signing account with one different nibble", async () => {
-    const differentAccount = `${ACCOUNT.slice(0, -1)}8`.toLowerCase();
+    const differentAccount = `Q${`${ACCOUNT.slice(1, -1)}8`.toLowerCase()}`;
     const result = await checkAccountHasBeenAuthorized(
       request(RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4, [
         differentAccount,
-        { domain: { chainId: "0x539" } },
+        { domain: { chainId: "0x301825" } },
       ]),
     );
 
@@ -121,7 +223,7 @@ describe("dApp chain authorization", () => {
       method: RESTRICTED_METHODS.PERSONAL_SIGN,
       params: ["0x1234", ACCOUNT],
       requestId: "request-id",
-      authorizedChainId: "0x539",
+      authorizedChainId: "0x301825",
       requestData: { senderData: { url: `${ORIGIN}/request` } },
     });
 
@@ -130,6 +232,53 @@ describe("dApp chain authorization", () => {
       "not the active wallet chain",
     );
   });
+});
+
+describe("custom-chain QRNS registry validation", () => {
+  const chain = {
+    chainName: "Local QRL",
+    chainId: "0x301825",
+    nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
+    rpcUrls: ["https://rpc.example"],
+    blockExplorerUrls: [],
+    iconUrls: [],
+    isCustomChain: true,
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(StorageUtil, "getAllBlockChains").mockResolvedValue([]);
+  });
+
+  it.each([
+    `Q${"b".repeat(40)}`,
+    WRONG_CHECKSUM_ACCOUNT,
+    `q${CHECKSUM_ACCOUNT.slice(1)}`,
+    `0x${CHECKSUM_ACCOUNT.slice(1)}`,
+    `Q${CHECKSUM_ACCOUNT.slice(1).toLowerCase()}`,
+  ])("rejects a non-QIP-55 QRNS registry (%s)", async (qrnsRegistryAddress) => {
+    const result = await checkWalletAddQrlChainParams(
+      { ...chain, qrnsRegistryAddress } as never,
+      true,
+    );
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain(
+      "uppercase-Q QIP-55 address",
+    );
+  });
+
+  it.each([undefined, null, "", CHECKSUM_ACCOUNT])(
+    "accepts an empty or canonical QRNS registry (%s)",
+    async (qrnsRegistryAddress) => {
+      const result = await checkWalletAddQrlChainParams(
+        { ...chain, qrnsRegistryAddress } as never,
+        true,
+      );
+
+      expect(result.canProceed).toBe(true);
+    },
+  );
 });
 
 // Fork-only coverage: the PQ signing methods qrl_signMessage and
@@ -142,11 +291,11 @@ describe("dApp chain authorization for PQ signing methods", () => {
     vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
       urlOrigin: ORIGIN,
       accounts: [ACCOUNT],
-      blockchains: [{ chainId: "0x539" } as never],
+      blockchains: [{ chainId: "0x301825" } as never],
       permissions: [],
     });
     vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue({
-      chainId: "0x539",
+      chainId: "0x301825",
     } as never);
   });
 
@@ -168,12 +317,12 @@ describe("dApp chain authorization for PQ signing methods", () => {
     const result = await checkAccountAndChainHaveBeenAuthorized(
       request(RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA, [
         ACCOUNT,
-        { domain: { chainId: 1337 } },
+        { domain: { chainId: 3151909 } },
       ]),
     );
 
     expect(result.canProceed).toBe(true);
-    expect(result).toMatchObject({ authorizedChainId: "0x539" });
+    expect(result).toMatchObject({ authorizedChainId: "0x301825" });
   });
 
   it("binds qrl_signTypedData without a declared chain to the active chain", async () => {
@@ -185,7 +334,7 @@ describe("dApp chain authorization for PQ signing methods", () => {
     );
 
     expect(result.canProceed).toBe(true);
-    expect(result).toMatchObject({ authorizedChainId: "0x539" });
+    expect(result).toMatchObject({ authorizedChainId: "0x301825" });
   });
 
   it("allows qrl_signMessage on the authorized active chain", async () => {
@@ -194,7 +343,7 @@ describe("dApp chain authorization for PQ signing methods", () => {
     );
 
     expect(result.canProceed).toBe(true);
-    expect(result).toMatchObject({ authorizedChainId: "0x539" });
+    expect(result).toMatchObject({ authorizedChainId: "0x301825" });
   });
 
   it("rejects qrl_signMessage when the active chain was not granted", async () => {
@@ -219,7 +368,7 @@ describe("dApp chain authorization for PQ signing methods", () => {
       method: RESTRICTED_METHODS.QRL_SIGN_MESSAGE,
       params: [ACCOUNT, "0xdeadbeef"],
       requestId: "request-id",
-      authorizedChainId: "0x539",
+      authorizedChainId: "0x301825",
       requestData: { senderData: { url: `${ORIGIN}/request` } },
     });
 
@@ -240,6 +389,25 @@ describe("dApp chain authorization for PQ signing methods", () => {
     expect(result.canProceed).toBe(false);
     expect(result.proceedError?.message).toContain(
       "missing its authorized chain context",
+    );
+  });
+
+  it.each([
+    RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4,
+    RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA,
+  ])("revalidation rejects an approved %s request", async (method) => {
+    const result = await revalidateAuthorizedDAppRequest({
+      method,
+      params: [ACCOUNT, { domain: { chainId: "0x301825" } }],
+      requestId: "request-id",
+      authorizedChainId: "0x301825",
+      requestData: { senderData: { url: `${ORIGIN}/request` } },
+    });
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.code).toBe(4200);
+    expect(result.proceedError?.message).toContain(
+      "versioned 64-byte address layout",
     );
   });
 });

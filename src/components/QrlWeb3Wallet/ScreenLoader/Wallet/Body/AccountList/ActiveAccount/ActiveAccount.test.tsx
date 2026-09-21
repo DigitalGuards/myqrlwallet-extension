@@ -104,9 +104,7 @@ describe("ActiveAccount", () => {
     );
 
     await openMenu();
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "Rename" }),
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
 
     const input = screen.getByRole("textbox", { name: "Edit account label" });
     expect(input).toBeInTheDocument();
@@ -120,7 +118,7 @@ describe("ActiveAccount", () => {
   });
 
   it("should call setLabel on save", async () => {
-    const setLabel = vi.fn<any>(() => Promise.resolve());
+    const setLabel = vi.fn(() => Promise.resolve());
     const labels: Record<string, string> = {
       Q20fB08fF1f1376A14C055E9F56df80563E16722b: "Old Name",
     };
@@ -140,17 +138,13 @@ describe("ActiveAccount", () => {
     );
 
     await openMenu();
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "Rename" }),
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
 
     const input = screen.getByRole("textbox", { name: "Edit account label" });
     await userEvent.clear(input);
     await userEvent.type(input, "New Name");
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Save label" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Save label" }));
 
     expect(setLabel).toHaveBeenCalledWith(
       "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
@@ -170,16 +164,12 @@ describe("ActiveAccount", () => {
     );
 
     await openMenu();
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "Rename" }),
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     expect(
       screen.getByRole("textbox", { name: "Edit account label" }),
     ).toBeInTheDocument();
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Cancel edit" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
 
     expect(
       screen.queryByRole("textbox", { name: "Edit account label" }),
@@ -187,7 +177,7 @@ describe("ActiveAccount", () => {
   });
 
   it("should save on Enter key", async () => {
-    const setLabel = vi.fn<any>(() => Promise.resolve());
+    const setLabel = vi.fn(() => Promise.resolve());
     const labels: Record<string, string> = {
       Q20fB08fF1f1376A14C055E9F56df80563E16722b: "Old Name",
     };
@@ -207,9 +197,7 @@ describe("ActiveAccount", () => {
     );
 
     await openMenu();
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "Rename" }),
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
 
     const input = screen.getByRole("textbox", { name: "Edit account label" });
     await userEvent.clear(input);
@@ -235,9 +223,7 @@ describe("ActiveAccount", () => {
     );
 
     await openMenu();
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "Rename" }),
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
 
     const input = screen.getByRole("textbox", { name: "Edit account label" });
     await userEvent.type(input, "{Escape}");
@@ -272,9 +258,7 @@ describe("ActiveAccount", () => {
     );
 
     await openMenu();
-    expect(
-      screen.getByRole("menuitem", { name: "Hide" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Hide" })).toBeInTheDocument();
   });
 
   it("should not show Hide when it is the only visible account", async () => {
@@ -304,8 +288,8 @@ describe("ActiveAccount", () => {
   });
 
   it("should call hideAccount and setActiveAccount when Hide is clicked", async () => {
-    const hideAccount = vi.fn<any>(() => Promise.resolve());
-    const setActiveAccount = vi.fn<any>(() => Promise.resolve());
+    const hideAccount = vi.fn(() => Promise.resolve());
+    const setActiveAccount = vi.fn(() => Promise.resolve());
     renderComponent(
       mockedStore({
         qrlStore: {
@@ -339,9 +323,7 @@ describe("ActiveAccount", () => {
     );
 
     await openMenu();
-    await userEvent.click(
-      screen.getByRole("menuitem", { name: "Hide" }),
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Hide" }));
 
     expect(hideAccount).toHaveBeenCalledWith(
       "Q20fB08fF1f1376A14C055E9F56df80563E16722b",

@@ -10,12 +10,17 @@
 
 import { describe, expect, it } from "vitest";
 import { shake256 } from "@noble/hashes/sha3.js";
-import { toChecksumAddress } from "@theqrl/web3-utils";
+import { toChecksumAddress } from "@theqrl/wallet.js";
 import canonical from "./__fixtures__/canonical.json";
 import { bytesToHex, concatBytes, hexToBytes } from "./bytes";
 import { SCHEME_VERSION_MSG, SCHEME_VERSION_TYPED } from "./ctx";
 import { computeMessageDigest } from "./messageDigest";
-import { computeTypedDataDigest, type TypedDataPayload } from "./typedData";
+import {
+  computeLegacyTypedDataDigest,
+  computeTypedDataDigest,
+  QIP55_TYPED_DATA_ERROR,
+  type TypedDataPayload,
+} from "./typedData";
 import { signMessage, signTypedData } from "./sign";
 
 interface MessageVector {
@@ -56,7 +61,7 @@ function signerFromDescriptorAndPublicKey(
 ): string {
   const identityHash = shake256(
     concatBytes(hexToBytes(descriptor), hexToBytes(publicKey)),
-    { dkLen: 20 },
+    { dkLen: 64 },
   );
   return toChecksumAddress(`Q${bytesToHex(identityHash).slice(2)}`);
 }
@@ -77,9 +82,12 @@ describe("pqSigning parity with canonical fixtures", () => {
   );
 
   it.each(canonical.typedVectors as unknown as TypedVector[])(
-    "typed-data digest: $label",
+    "retains the legacy typed-data digest for verification: $label",
     ({ payload, digestHex }) => {
-      expect(bytesToHex(computeTypedDataDigest(payload))).toBe(digestHex);
+      expect(bytesToHex(computeLegacyTypedDataDigest(payload))).toBe(digestHex);
+      expect(() => computeTypedDataDigest(payload)).toThrow(
+        QIP55_TYPED_DATA_ERROR,
+      );
     },
   );
 
@@ -102,24 +110,14 @@ describe("pqSigning parity with canonical fixtures", () => {
     expect(result.schemeVersion).toBe(canonical.schemeVersionMsg);
   });
 
-  it("reproduces the deterministic signTypedData vector byte-for-byte", () => {
+  it("rejects deterministic typed-data signing until v2 is defined", () => {
     const [, vector] = canonical.signingVectors as unknown as [
       SignMessageVector,
       SignTypedVector,
     ];
-    const result = signTypedData(vector.payload, vector.hexSeed, {
-      randomized: false,
-    });
-    expect(result.digest).toBe(vector.digest);
-    expect(result.publicKey).toBe(vector.publicKey);
-    expect(result.descriptor).toBe(vector.hexSeed.slice(0, 8));
-    expect(result.signer).toBe(vector.signer);
-    expect(
-      signerFromDescriptorAndPublicKey(result.descriptor, result.publicKey),
-    ).toBe(result.signer);
-    expect(result.signature).toBe(vector.signature);
-    expect(result.schemeVersion).toBe(canonical.schemeVersionTyped);
-    expect(result.domain).toEqual(vector.payload.domain);
+    expect(() =>
+      signTypedData(vector.payload, vector.hexSeed, { randomized: false }),
+    ).toThrow(QIP55_TYPED_DATA_ERROR);
   });
 
   it("hedged signing (production default) still verifies structurally", () => {

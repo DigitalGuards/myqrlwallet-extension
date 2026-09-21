@@ -7,7 +7,7 @@ import {
 } from "@/components/UI/Tooltip";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
-import StringUtil from "@/utilities/stringUtil";
+import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import { cva } from "class-variance-authority";
 import { Wallet } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -45,9 +45,6 @@ const AccountBadge = observer(() => {
   }, [accountAddress]);
 
   const label = accountLabelsStore.getLabel(accountAddress);
-  const { prefix, addressSplit } = StringUtil.getSplitAddress(accountAddress);
-  const abbreviatedAddress = `${prefix}${addressSplit[0]}...${addressSplit[addressSplit.length - 1]}`;
-  const account = label || abbreviatedAddress;
 
   return (
     !!accountAddress && (
@@ -60,13 +57,27 @@ const AccountBadge = observer(() => {
               className={badgeButtonClasses({
                 isActive: pathName === ROUTES.ACCOUNT_LIST,
               })}
+              aria-label={`${t("nav.accounts")}: ${accountAddress}`}
             >
               <Wallet className="h-3 w-3" />
-              {account}
+              {label ? (
+                <span className="max-w-20 truncate">{label}</span>
+              ) : (
+                <AddressFingerprint
+                  address={accountAddress}
+                  className="hidden text-[10px] min-[430px]:inline"
+                />
+              )}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <Label>{t('nav.accounts')}</Label>
+            <div className="flex max-w-72 flex-col gap-1">
+              <Label>{t("nav.accounts")}</Label>
+              <AddressFingerprint
+                address={accountAddress}
+                className="text-xs"
+              />
+            </div>
           </TooltipContent>
         </Tooltip>
       </Link>

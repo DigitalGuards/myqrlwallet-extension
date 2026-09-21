@@ -40,7 +40,7 @@ describe("SettingsAppearance", () => {
   });
 
   it("should call setThemePreference when selecting Light", async () => {
-    const setThemePreference = vi.fn<any>(() => Promise.resolve());
+    const setThemePreference = vi.fn(() => Promise.resolve());
     renderComponent(
       mockedStore({
         settingsStore: { themePreference: "system", setThemePreference },
@@ -54,7 +54,7 @@ describe("SettingsAppearance", () => {
   });
 
   it("should call setThemePreference when selecting Dark", async () => {
-    const setThemePreference = vi.fn<any>(() => Promise.resolve());
+    const setThemePreference = vi.fn(() => Promise.resolve());
     renderComponent(
       mockedStore({
         settingsStore: { themePreference: "system", setThemePreference },

@@ -4,38 +4,38 @@ import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
 // Mock ledgerTransport
 vi.mock("./ledgerTransport", () => ({
   ledgerTransport: {
-    isSupported: vi.fn<any>(),
-    isConnected: vi.fn<any>(),
-    connect: vi.fn<any>(),
-    disconnect: vi.fn<any>(),
-    send: vi.fn<any>(),
-    onDisconnect: vi.fn<any>(),
+    isSupported: vi.fn(),
+    isConnected: vi.fn(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    send: vi.fn(),
+    onDisconnect: vi.fn(),
   },
 }));
 
 // Mock ledgerApdu functions
 vi.mock("./ledgerApdu", () => ({
-  packDerivationPath: vi.fn<any>(() => Buffer.alloc(21)),
-  getDerivationPath: vi.fn<any>((index: number) => `m/44'/238'/0'/0/${index}`),
-  splitIntoChunks: vi.fn<any>((data: Buffer) => [data]),
-  combineSignatureChunks: vi.fn<any>((chunks: Buffer[]) => Buffer.concat(chunks)),
-  parseQrlAddress: vi.fn<any>(() => "Q" + "ab".repeat(24)),
-  parsePublicKeyResponse: vi.fn<any>(() => ({
+  packDerivationPath: vi.fn(() => Buffer.alloc(21)),
+  getDerivationPath: vi.fn((index: number) => `m/44'/238'/0'/0/${index}`),
+  splitIntoChunks: vi.fn((data: Buffer) => [data]),
+  combineSignatureChunks: vi.fn((chunks: Buffer[]) => Buffer.concat(chunks)),
+  parseQrlAddress: vi.fn(() => "Q" + "ab".repeat(24)),
+  parsePublicKeyResponse: vi.fn(() => ({
     address: "Q" + "ab".repeat(24),
     publicKey: "0x" + "cc".repeat(100),
   })),
-  parseAppVersion: vi.fn<any>(() => "1.2.3"),
-  parseAppName: vi.fn<any>(() => "QRL Zond"),
-  checkStatusWord: vi.fn<any>(),
-  extractResponseData: vi.fn<any>((response: Buffer) =>
-    response.subarray(0, response.length - 2)
+  parseAppVersion: vi.fn(() => "1.2.3"),
+  parseAppName: vi.fn(() => "QRL Zond"),
+  checkStatusWord: vi.fn(),
+  extractResponseData: vi.fn((response: Buffer) =>
+    response.subarray(0, response.length - 2),
   ),
-  isUserRejection: vi.fn<any>((code: number) => code === 0x6985),
-  isWrongApp: vi.fn<any>((code: number) => code === 0x6e00),
-  hexToBuffer: vi.fn<any>((hex: string) =>
-    Buffer.from(hex.replace(/^0x/, ""), "hex")
+  isUserRejection: vi.fn((code: number) => code === 0x6985),
+  isWrongApp: vi.fn((code: number) => code === 0x6e00),
+  hexToBuffer: vi.fn((hex: string) =>
+    Buffer.from(hex.replace(/^0x/, ""), "hex"),
   ),
-  bufferToHex: vi.fn<any>((buffer: Buffer) => "0x" + buffer.toString("hex")),
+  bufferToHex: vi.fn((buffer: Buffer) => "0x" + buffer.toString("hex")),
 }));
 
 // Note: We import modules dynamically in tests after applying mocks
@@ -54,39 +54,39 @@ describe("LedgerService", () => {
     // Re-apply mocks after reset
     vi.doMock("./ledgerTransport", () => ({
       ledgerTransport: {
-        isSupported: vi.fn<any>(),
-        isConnected: vi.fn<any>(),
-        connect: vi.fn<any>(),
-        disconnect: vi.fn<any>(),
-        send: vi.fn<any>(),
-        onDisconnect: vi.fn<any>(),
+        isSupported: vi.fn(),
+        isConnected: vi.fn(),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        send: vi.fn(),
+        onDisconnect: vi.fn(),
       },
     }));
 
     vi.doMock("./ledgerApdu", () => ({
-      packDerivationPath: vi.fn<any>(() => Buffer.alloc(21)),
-      getDerivationPath: vi.fn<any>((index: number) => `m/44'/238'/0'/0/${index}`),
-      splitIntoChunks: vi.fn<any>((data: Buffer) => [data]),
-      combineSignatureChunks: vi.fn<any>((chunks: Buffer[]) =>
-        Buffer.concat(chunks)
+      packDerivationPath: vi.fn(() => Buffer.alloc(21)),
+      getDerivationPath: vi.fn((index: number) => `m/44'/238'/0'/0/${index}`),
+      splitIntoChunks: vi.fn((data: Buffer) => [data]),
+      combineSignatureChunks: vi.fn((chunks: Buffer[]) =>
+        Buffer.concat(chunks),
       ),
-      parseQrlAddress: vi.fn<any>(() => "Q" + "ab".repeat(24)),
-      parsePublicKeyResponse: vi.fn<any>(() => ({
+      parseQrlAddress: vi.fn(() => "Q" + "ab".repeat(24)),
+      parsePublicKeyResponse: vi.fn(() => ({
         address: "Q" + "ab".repeat(24),
         publicKey: "0x" + "cc".repeat(100),
       })),
-      parseAppVersion: vi.fn<any>(() => "1.2.3"),
-      parseAppName: vi.fn<any>(() => "QRL Zond"),
-      checkStatusWord: vi.fn<any>(),
-      extractResponseData: vi.fn<any>((response: Buffer) =>
-        response.subarray(0, response.length - 2)
+      parseAppVersion: vi.fn(() => "1.2.3"),
+      parseAppName: vi.fn(() => "QRL Zond"),
+      checkStatusWord: vi.fn(),
+      extractResponseData: vi.fn((response: Buffer) =>
+        response.subarray(0, response.length - 2),
       ),
-      isUserRejection: vi.fn<any>((code: number) => code === 0x6985),
-      isWrongApp: vi.fn<any>((code: number) => code === 0x6e00),
-      hexToBuffer: vi.fn<any>((hex: string) =>
-        Buffer.from(hex.replace(/^0x/, ""), "hex")
+      isUserRejection: vi.fn((code: number) => code === 0x6985),
+      isWrongApp: vi.fn((code: number) => code === 0x6e00),
+      hexToBuffer: vi.fn((hex: string) =>
+        Buffer.from(hex.replace(/^0x/, ""), "hex"),
       ),
-      bufferToHex: vi.fn<any>((buffer: Buffer) => "0x" + buffer.toString("hex")),
+      bufferToHex: vi.fn((buffer: Buffer) => "0x" + buffer.toString("hex")),
     }));
 
     // Import fresh instance
@@ -131,7 +131,7 @@ describe("LedgerService", () => {
       const { ledgerTransport: transport } = await import("./ledgerTransport");
       (transport.connect as any).mockResolvedValue(undefined);
       (transport.send as any).mockResolvedValue(
-        Buffer.from([0x01, 0x02, 0x03, 0x90, 0x00])
+        Buffer.from([0x01, 0x02, 0x03, 0x90, 0x00]),
       );
 
       const info = await ledgerService.connect();
@@ -141,7 +141,7 @@ describe("LedgerService", () => {
         LEDGER_CONFIG.CLA,
         LEDGER_CONFIG.INS.GET_VERSION,
         LEDGER_CONFIG.P1.START,
-        LEDGER_CONFIG.P2.LAST
+        LEDGER_CONFIG.P2.LAST,
       );
       expect(info.version).toBe("1.2.3");
       expect(info.connected).toBe(true);
@@ -154,14 +154,14 @@ describe("LedgerService", () => {
       (transport.send as any).mockRejectedValue({ statusCode: 0x6e00 });
 
       await expect(ledgerService.connect()).rejects.toThrow(
-        LEDGER_ERROR_MESSAGES.APP_NOT_OPEN
+        LEDGER_ERROR_MESSAGES.APP_NOT_OPEN,
       );
     });
 
     it("should throw connection error on failure", async () => {
       const { ledgerTransport: transport } = await import("./ledgerTransport");
       (transport.connect as any).mockRejectedValue(
-        new Error("Connection failed")
+        new Error("Connection failed"),
       );
 
       await expect(ledgerService.connect()).rejects.toThrow();
@@ -172,7 +172,7 @@ describe("LedgerService", () => {
       (transport.connect as any).mockRejectedValue("some string error");
 
       await expect(ledgerService.connect()).rejects.toThrow(
-        LEDGER_ERROR_MESSAGES.CONNECTION_FAILED
+        LEDGER_ERROR_MESSAGES.CONNECTION_FAILED,
       );
     });
   });
@@ -181,7 +181,7 @@ describe("LedgerService", () => {
     it("should return app name", async () => {
       const { ledgerTransport: transport } = await import("./ledgerTransport");
       (transport.send as any).mockResolvedValue(
-        Buffer.from([0x51, 0x52, 0x4c, 0x90, 0x00])
+        Buffer.from([0x51, 0x52, 0x4c, 0x90, 0x00]),
       );
 
       const name = await ledgerService.getAppName();
@@ -190,7 +190,7 @@ describe("LedgerService", () => {
         LEDGER_CONFIG.CLA,
         LEDGER_CONFIG.INS.GET_APP_NAME,
         LEDGER_CONFIG.P1.START,
-        LEDGER_CONFIG.P2.LAST
+        LEDGER_CONFIG.P2.LAST,
       );
       expect(name).toBe("QRL Zond");
     });
@@ -215,7 +215,7 @@ describe("LedgerService", () => {
           Buffer.from([0x51]), // 'Q' prefix
           Buffer.alloc(24, 0xab),
           Buffer.from([0x90, 0x00]),
-        ])
+        ]),
       );
 
       const accounts = await ledgerService.getAccounts();
@@ -237,7 +237,7 @@ describe("LedgerService", () => {
           Buffer.from([0x51]),
           Buffer.alloc(24, 0xab),
           Buffer.from([0x90, 0x00]),
-        ])
+        ]),
       );
 
       const accounts = await ledgerService.getAccounts(5, 3);
@@ -257,7 +257,7 @@ describe("LedgerService", () => {
           Buffer.from([0x51]),
           Buffer.alloc(24, 0xab),
           Buffer.from([0x90, 0x00]),
-        ])
+        ]),
       );
 
       const result = await ledgerService.getAddress("m/44'/238'/0'/0/0", false);
@@ -267,7 +267,7 @@ describe("LedgerService", () => {
         LEDGER_CONFIG.INS.GET_PUBLIC_KEY,
         LEDGER_CONFIG.P1.START, // No confirmation
         LEDGER_CONFIG.P2.LAST,
-        expect.any(Buffer)
+        expect.any(Buffer),
       );
       expect(result.address).toMatch(/^Q/);
       expect(result.derivationPath).toBe("m/44'/238'/0'/0/0");
@@ -281,7 +281,7 @@ describe("LedgerService", () => {
           Buffer.from([0x51]),
           Buffer.alloc(24, 0xab),
           Buffer.from([0x90, 0x00]),
-        ])
+        ]),
       );
 
       await ledgerService.getAddress("m/44'/238'/0'/0/0", true);
@@ -291,7 +291,7 @@ describe("LedgerService", () => {
         LEDGER_CONFIG.INS.GET_PUBLIC_KEY,
         LEDGER_CONFIG.P1.CONFIRM, // With confirmation
         LEDGER_CONFIG.P2.LAST,
-        expect.any(Buffer)
+        expect.any(Buffer),
       );
     });
   });
@@ -325,7 +325,7 @@ describe("LedgerService", () => {
 
       const result = await ledgerService.getPublicKey(
         "m/44'/238'/0'/0/0",
-        false
+        false,
       );
 
       expect(transport.send).toHaveBeenNthCalledWith(
@@ -334,7 +334,7 @@ describe("LedgerService", () => {
         LEDGER_CONFIG.INS.GET_PUBLIC_KEY,
         LEDGER_CONFIG.P1.START, // No confirmation
         LEDGER_CONFIG.P2.LAST,
-        expect.any(Buffer)
+        expect.any(Buffer),
       );
       expect(result.address).toMatch(/^Q/);
       expect(result.derivationPath).toBe("m/44'/238'/0'/0/0");
@@ -358,7 +358,7 @@ describe("LedgerService", () => {
         LEDGER_CONFIG.INS.GET_PUBLIC_KEY,
         LEDGER_CONFIG.P1.CONFIRM, // With confirmation
         LEDGER_CONFIG.P2.LAST,
-        expect.any(Buffer)
+        expect.any(Buffer),
       );
     });
   });
@@ -371,7 +371,7 @@ describe("LedgerService", () => {
           Buffer.from([0x51]),
           Buffer.alloc(24, 0xab),
           Buffer.from([0x90, 0x00]),
-        ])
+        ]),
       );
 
       const address = await ledgerService.verifyAddress("m/44'/238'/0'/0/0");
@@ -381,7 +381,7 @@ describe("LedgerService", () => {
         LEDGER_CONFIG.INS.GET_PUBLIC_KEY,
         LEDGER_CONFIG.P1.CONFIRM,
         LEDGER_CONFIG.P2.LAST,
-        expect.any(Buffer)
+        expect.any(Buffer),
       );
       expect(address).toMatch(/^Q/);
     });
@@ -401,7 +401,7 @@ describe("LedgerService", () => {
 
       const result = await ledgerService.signTransaction(
         mockDerivationPath,
-        mockTxHex
+        mockTxHex,
       );
 
       expect(result).toHaveProperty("rawTransaction");
@@ -427,7 +427,7 @@ describe("LedgerService", () => {
         LEDGER_CONFIG.INS.SIGN_TX,
         0x00, // P1: first packet (BIP32 path)
         0x00,
-        expect.any(Buffer)
+        expect.any(Buffer),
       );
     });
 
@@ -448,7 +448,7 @@ describe("LedgerService", () => {
         LEDGER_CONFIG.INS.SIGN_TX,
         0x02, // P1: last data packet
         0x00,
-        expect.any(Buffer)
+        expect.any(Buffer),
       );
     });
 
@@ -464,7 +464,7 @@ describe("LedgerService", () => {
 
       // 1 (path) + 1 (tx data) + 17 (remaining signature chunks) = 19 calls
       expect(transport.send).toHaveBeenCalledTimes(
-        1 + 1 + (LEDGER_CONFIG.SIGNATURE_CHUNKS - 1)
+        1 + 1 + (LEDGER_CONFIG.SIGNATURE_CHUNKS - 1),
       );
     });
 
@@ -477,18 +477,16 @@ describe("LedgerService", () => {
         .mockRejectedValueOnce({ statusCode: 0x6985 }); // User rejected
 
       await expect(
-        ledgerService.signTransaction(mockDerivationPath, mockTxHex)
+        ledgerService.signTransaction(mockDerivationPath, mockTxHex),
       ).rejects.toThrow(LEDGER_ERROR_MESSAGES.USER_REJECTED);
     });
 
     it("should handle signing error", async () => {
       const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.send as any).mockRejectedValue(
-        new Error("Signing failed")
-      );
+      (transport.send as any).mockRejectedValue(new Error("Signing failed"));
 
       await expect(
-        ledgerService.signTransaction(mockDerivationPath, mockTxHex)
+        ledgerService.signTransaction(mockDerivationPath, mockTxHex),
       ).rejects.toThrow();
     });
 
@@ -509,7 +507,7 @@ describe("LedgerService", () => {
 
     it("should call signing status callbacks on success", async () => {
       const { ledgerTransport: transport } = await import("./ledgerTransport");
-      const onSigningStatusChange = vi.fn<any>();
+      const onSigningStatusChange = vi.fn();
       ledgerService.setCallbacks({ onSigningStatusChange });
 
       const signatureChunk = Buffer.concat([
@@ -522,7 +520,7 @@ describe("LedgerService", () => {
 
       expect(onSigningStatusChange).toHaveBeenCalledWith("connecting");
       expect(onSigningStatusChange).toHaveBeenCalledWith(
-        "awaiting_confirmation"
+        "awaiting_confirmation",
       );
       expect(onSigningStatusChange).toHaveBeenCalledWith("success");
     });
@@ -553,7 +551,7 @@ describe("LedgerService", () => {
         LEDGER_CONFIG.INS.SIGN_TX,
         0x01,
         0x00,
-        Buffer.alloc(100, 0x01)
+        Buffer.alloc(100, 0x01),
       );
       // Call 3: intermediate chunk 2 (P1=0x01)
       expect(transport.send).toHaveBeenNthCalledWith(
@@ -562,13 +560,13 @@ describe("LedgerService", () => {
         LEDGER_CONFIG.INS.SIGN_TX,
         0x01,
         0x00,
-        Buffer.alloc(100, 0x02)
+        Buffer.alloc(100, 0x02),
       );
     });
 
     it("should call rejected callback on user rejection", async () => {
       const { ledgerTransport: transport } = await import("./ledgerTransport");
-      const onSigningStatusChange = vi.fn<any>();
+      const onSigningStatusChange = vi.fn();
       ledgerService.setCallbacks({ onSigningStatusChange });
 
       (transport.send as any)
@@ -576,7 +574,7 @@ describe("LedgerService", () => {
         .mockRejectedValueOnce({ statusCode: 0x6985 });
 
       await expect(
-        ledgerService.signTransaction(mockDerivationPath, mockTxHex)
+        ledgerService.signTransaction(mockDerivationPath, mockTxHex),
       ).rejects.toThrow(LEDGER_ERROR_MESSAGES.USER_REJECTED);
 
       expect(onSigningStatusChange).toHaveBeenCalledWith("connecting");
@@ -585,13 +583,13 @@ describe("LedgerService", () => {
 
     it("should call error callback on non-rejection error with callbacks", async () => {
       const { ledgerTransport: transport } = await import("./ledgerTransport");
-      const onSigningStatusChange = vi.fn<any>();
+      const onSigningStatusChange = vi.fn();
       ledgerService.setCallbacks({ onSigningStatusChange });
 
       (transport.send as any).mockRejectedValue(new Error("Signing failed"));
 
       await expect(
-        ledgerService.signTransaction(mockDerivationPath, mockTxHex)
+        ledgerService.signTransaction(mockDerivationPath, mockTxHex),
       ).rejects.toThrow("Signing failed");
 
       expect(onSigningStatusChange).toHaveBeenCalledWith("connecting");
@@ -604,14 +602,14 @@ describe("LedgerService", () => {
       (transport.send as any).mockRejectedValue({ statusCode: 0x1234 });
 
       await expect(
-        ledgerService.signTransaction(mockDerivationPath, mockTxHex)
+        ledgerService.signTransaction(mockDerivationPath, mockTxHex),
       ).rejects.toThrow(LEDGER_ERROR_MESSAGES.SIGNING_FAILED);
     });
   });
 
   describe("setCallbacks", () => {
     it("should register callbacks", async () => {
-      const onConnect = vi.fn<any>();
+      const onConnect = vi.fn();
 
       ledgerService.setCallbacks({ onConnect });
 
@@ -619,7 +617,7 @@ describe("LedgerService", () => {
       const { ledgerTransport: transport } = await import("./ledgerTransport");
       (transport.connect as any).mockResolvedValue(undefined);
       (transport.send as any).mockResolvedValue(
-        Buffer.from([0x01, 0x02, 0x03, 0x90, 0x00])
+        Buffer.from([0x01, 0x02, 0x03, 0x90, 0x00]),
       );
 
       await ledgerService.connect();
@@ -631,7 +629,7 @@ describe("LedgerService", () => {
   describe("disconnect callback", () => {
     it("should call onDisconnect callback when device disconnects", async () => {
       const { ledgerTransport: transport } = await import("./ledgerTransport");
-      const onDisconnect = vi.fn<any>();
+      const onDisconnect = vi.fn();
 
       ledgerService.setCallbacks({ onDisconnect });
 

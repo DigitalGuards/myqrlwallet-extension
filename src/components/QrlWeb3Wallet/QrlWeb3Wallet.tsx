@@ -31,6 +31,9 @@ const QrlWeb3Wallet = observer(() => {
 
   return (
     <div className={qrlWalletBodyClasses({ mode })}>
+      <div className="shrink-0 border-b border-border px-3 py-1 text-center text-xs text-muted-foreground">
+        v3 Private
+      </div>
       <RouteMonitor />
       <TooltipProvider>
         <ScreenLoader />

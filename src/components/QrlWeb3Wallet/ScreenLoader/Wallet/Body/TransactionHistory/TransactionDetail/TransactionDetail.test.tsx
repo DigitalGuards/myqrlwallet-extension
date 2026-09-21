@@ -1,7 +1,7 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
-import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -19,8 +19,8 @@ vi.mock("webextension-polyfill", () => ({
 vi.mock("@/utilities/storageUtil", () => ({
   __esModule: true,
   default: {
-    isLedgerAccount: vi.fn<any>().mockResolvedValue(false),
-    getActiveBlockChain: vi.fn<any>().mockResolvedValue({ chainId: "0x1" }),
+    isLedgerAccount: vi.fn().mockResolvedValue(false),
+    getActiveBlockChain: vi.fn().mockResolvedValue({ chainId: "0x1" }),
   },
 }));
 
@@ -84,6 +84,26 @@ describe("TransactionDetail", () => {
     renderComponent(sampleTransaction);
 
     expect(screen.getByText("Transaction Details")).toBeInTheDocument();
+  });
+
+  it("shows historical fees as unavailable when receipt facts are absent", () => {
+    renderComponent({
+      ...sampleTransaction,
+      gasUsed: "",
+      effectiveGasPrice: "",
+      paidFeesQrl: undefined,
+    });
+    expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+  });
+
+  it("displays a neutral status for an observation failure awaiting reconciliation", () => {
+    renderComponent({
+      ...pendingTransaction,
+      pendingStatus: "unknown",
+      status: false,
+    });
+    expect(screen.getByText("Unknown")).toBeInTheDocument();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
   });
 
   it("should show transaction not found when no state", () => {
@@ -160,13 +180,11 @@ describe("TransactionDetail", () => {
 
     expect(screen.getByLabelText("Copy From")).toBeInTheDocument();
     expect(screen.getByLabelText("Copy To")).toBeInTheDocument();
-    expect(
-      screen.getByLabelText("Copy Transaction Hash"),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Copy Transaction Hash")).toBeInTheDocument();
   });
 
   it("should copy value to clipboard on copy button click", async () => {
-    const writeText = vi.fn<any>().mockResolvedValue(undefined);
+    const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
 
     renderComponent(sampleTransaction);
@@ -213,7 +231,9 @@ describe("TransactionDetail", () => {
   it("should not show View on Block Explorer for pending transaction", () => {
     renderComponent(pendingTransaction);
 
-    expect(screen.queryByText("View on Block Explorer")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("View on Block Explorer"),
+    ).not.toBeInTheDocument();
   });
 
   it("should show Speed Up and Cancel buttons for pending tx with nonce", () => {
@@ -229,7 +249,9 @@ describe("TransactionDetail", () => {
       nonce: undefined,
     });
 
-    expect(screen.queryByRole("button", { name: /speed up/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /speed up/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("should display Replaced status badge", () => {
@@ -284,7 +306,9 @@ describe("TransactionDetail", () => {
     await userEvent.click(screen.getByText("Cancel"));
 
     await waitFor(() => {
-      expect(screen.getAllByText("Cancel Transaction").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Cancel Transaction").length).toBeGreaterThan(
+        0,
+      );
     });
   });
 
@@ -300,15 +324,17 @@ describe("TransactionDetail", () => {
     renderComponent(pendingTransaction, mockedStore(), "cancel");
 
     await waitFor(() => {
-      expect(screen.getAllByText("Cancel Transaction").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Cancel Transaction").length).toBeGreaterThan(
+        0,
+      );
     });
   });
 
   it("should not call sendRawTransaction for Ledger account replacement", async () => {
     const StorageUtil = (await import("@/utilities/storageUtil")).default;
-    (StorageUtil.isLedgerAccount as Mock<any>).mockResolvedValueOnce(true);
+    vi.mocked(StorageUtil.isLedgerAccount).mockResolvedValueOnce(true);
 
-    const mockSendRawTransaction = vi.fn<any>();
+    const mockSendRawTransaction = vi.fn();
     const store = mockedStore({
       qrlStore: {
         sendRawTransaction: mockSendRawTransaction,
@@ -327,19 +353,21 @@ describe("TransactionDetail", () => {
 
     // Wait for async handleReplacement to complete
     await waitFor(() => {
-      expect(StorageUtil.isLedgerAccount).toHaveBeenCalledWith(pendingTransaction.from);
+      expect(StorageUtil.isLedgerAccount).toHaveBeenCalledWith(
+        pendingTransaction.from,
+      );
     });
 
     expect(mockSendRawTransaction).not.toHaveBeenCalled();
   });
 
   it("should not call signAndSendReplacement when mnemonic is empty", async () => {
-    const mockSign = vi.fn<any>().mockResolvedValue({
+    const mockSign = vi.fn().mockResolvedValue({
       transactionHash: undefined,
       rawTransaction: undefined,
       error: "",
     });
-    const mockGetMnemonic = vi.fn<any>().mockResolvedValue("");
+    const mockGetMnemonic = vi.fn().mockResolvedValue("");
     const store = mockedStore({
       lockStore: {
         getMnemonicPhrases: mockGetMnemonic,
@@ -367,8 +395,8 @@ describe("TransactionDetail", () => {
   });
 
   it("should not call sendRawTransaction when signAndSend returns error", async () => {
-    const mockSendRaw = vi.fn<any>();
-    const mockSign = vi.fn<any>().mockResolvedValue({
+    const mockSendRaw = vi.fn();
+    const mockSign = vi.fn().mockResolvedValue({
       transactionHash: undefined,
       rawTransaction: undefined,
       error: "Insufficient funds for gas",
@@ -398,8 +426,8 @@ describe("TransactionDetail", () => {
   });
 
   it("should handle successful replacement flow", async () => {
-    const mockUpdateTransaction = vi.fn<any>().mockResolvedValue(undefined);
-    const mockAddTransaction = vi.fn<any>().mockResolvedValue(undefined);
+    const mockUpdateTransaction = vi.fn().mockResolvedValue(undefined);
+    const mockAddTransaction = vi.fn().mockResolvedValue(undefined);
 
     const store = mockedStore({
       qrlStore: {
@@ -408,12 +436,13 @@ describe("TransactionDetail", () => {
           rawTransaction: "0xraw123",
           error: "",
         }),
-        sendRawTransaction: async () => ({
-          status: BigInt(1),
-          blockNumber: BigInt(200),
-          gasUsed: BigInt(21000),
-          effectiveGasPrice: BigInt(2000000000),
-        } as any),
+        sendRawTransaction: async () =>
+          ({
+            status: BigInt(1),
+            blockNumber: BigInt(200),
+            gasUsed: BigInt(21000),
+            effectiveGasPrice: BigInt(2000000000),
+          }) as any,
       },
       transactionHistoryStore: {
         updateTransaction: mockUpdateTransaction,

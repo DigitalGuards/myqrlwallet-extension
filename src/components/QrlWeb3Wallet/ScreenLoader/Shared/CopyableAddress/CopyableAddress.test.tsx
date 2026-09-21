@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import CopyableAddress from "./CopyableAddress";
 
-const ADDRESS = "Q830f30ace20b9d3658a74f8cb1195054791c8871";
+const ADDRESS = `Q${"0123456789abcdef".repeat(8)}`;
 
 describe("CopyableAddress", () => {
   afterEach(cleanup);

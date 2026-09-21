@@ -1,5 +1,6 @@
 // List of methods that can be called by the dApp without user interaction
 export const UNRESTRICTED_METHODS = Object.freeze({
+  QRL_WALLET_CAPABILITIES: "qrl_walletCapabilities",
   NET_VERSION: "net_version",
   WALLET_GET_PERMISSIONS: "wallet_getPermissions",
   WALLET_REVOKE_PERMISSIONS: "wallet_revokePermissions",
@@ -14,8 +15,7 @@ export const UNRESTRICTED_METHODS = Object.freeze({
   QRL_GET_BALANCE: "qrl_getBalance",
   QRL_GET_BLOCK_BY_HASH: "qrl_getBlockByHash",
   QRL_GET_BLOCK_BY_NUMBER: "qrl_getBlockByNumber",
-  QRL_GET_BLOCK_TRANSACTION_COUNT_BY_HASH:
-    "qrl_getBlockTransactionCountByHash",
+  QRL_GET_BLOCK_TRANSACTION_COUNT_BY_HASH: "qrl_getBlockTransactionCountByHash",
   QRL_GET_BLOCK_TRANSACTION_COUNT_BY_NUMBER:
     "qrl_getBlockTransactionCountByNumber",
   QRL_GET_CODE: "qrl_getCode",

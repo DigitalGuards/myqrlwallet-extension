@@ -49,14 +49,9 @@ describe("QrlRequestAccount", () => {
     ).toBeInTheDocument();
     expect(checkBox).toBeInTheDocument();
     expect(checkBox).toBeEnabled();
-    expect(screen.getByText("Q20915")).toBeInTheDocument();
-    expect(screen.getByText("094FE")).toBeInTheDocument();
-    expect(screen.getByText("DE91E")).toBeInTheDocument();
-    expect(screen.getByText("FAC68")).toBeInTheDocument();
-    expect(screen.getByText("fD43D")).toBeInTheDocument();
-    expect(screen.getByText("82e9F")).toBeInTheDocument();
-    expect(screen.getByText("ff4da")).toBeInTheDocument();
-    expect(screen.getByText("C7482")).toBeInTheDocument();
+    const accountAddress = "Q20915094FEDE91EFAC68fD43D82e9Fff4daC7482";
+    expect(screen.getByText(accountAddress)).toHaveClass("sr-only");
+    expect(screen.getByTitle(accountAddress)).toBeInTheDocument();
     expect(
       screen.queryByText("Account not available to connect"),
     ).not.toBeInTheDocument();

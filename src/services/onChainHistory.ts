@@ -31,6 +31,7 @@ type ExplorerAggregateTx = {
   /** Decimal string already in QRL units. */
   PaidFees?: string;
   BlockNumber?: string;
+  Status?: string;
 };
 
 // One row of the aggregate's internal-transactions list: value moved by
@@ -61,14 +62,15 @@ const toEntry = (
   row: ExplorerAggregateTx,
   chainId: string,
 ): TransactionHistoryEntry => {
-  const amount = Number(row.Amount);
+  const amount =
+    row.Amount && /^\d+(?:\.\d+)?$/.test(row.Amount) ? row.Amount : "0";
   const timestampSeconds = parseInt(row.TimeStamp ?? "", 16);
   const txHash = row.TxHash ?? "";
   return {
     id: txHash,
     from: row.From ?? "",
     to: row.To ?? "",
-    amount: Number.isFinite(amount) ? amount : 0,
+    amount,
     tokenSymbol: NATIVE_TOKEN.symbol,
     tokenName: NATIVE_TOKEN.name,
     isZrc20Token: false,
@@ -79,7 +81,14 @@ const toEntry = (
     gasUsed: "",
     effectiveGasPrice: "",
     paidFeesQrl: row.PaidFees,
-    status: true,
+    status: row.Status === "0x1",
+    pendingStatus:
+      row.Status === "0x1"
+        ? "confirmed"
+        : row.Status === "0x0"
+          ? "failed"
+          : "unknown",
+    receiptStatusVerified: row.Status === "0x0" || row.Status === "0x1",
     timestamp: Number.isFinite(timestampSeconds) ? timestampSeconds * 1000 : 0,
     chainId,
   };

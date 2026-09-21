@@ -31,8 +31,8 @@ describe("ActiveChain", () => {
 
     expect(screen.getByText("Active chain")).toBeInTheDocument();
     expect(screen.getByText("Mocked Chain Icon")).toBeInTheDocument();
-    expect(screen.getByText("QRL Zond Testnet v2")).toBeInTheDocument();
-    expect(screen.getByText("Chain ID 1337")).toBeInTheDocument();
+    expect(screen.getByText("QRL v3 Private")).toBeInTheDocument();
+    expect(screen.getByText("Chain ID 3151909")).toBeInTheDocument();
     expect(
       screen.getByText("https://qrlwallet.com/api/qrl-rpc/testnet"),
     ).toBeInTheDocument();

@@ -99,7 +99,9 @@ describe("ImportToken", () => {
     expect(
       await screen.findByRole("button", { name: "Import" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Copy full address" }),
+    ).toBeInTheDocument();
     // The picker stays mounted but hidden behind the review card.
     expect(
       screen.getByText("Discovered Token", { ignore: "[hidden] *" }),

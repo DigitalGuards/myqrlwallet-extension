@@ -48,7 +48,7 @@ describe("SettingsPreferences", () => {
   });
 
   it("should call setCurrency when selecting a currency", async () => {
-    const setCurrency = vi.fn<any>(() => Promise.resolve());
+    const setCurrency = vi.fn(() => Promise.resolve());
     renderComponent(mockedStore({ settingsStore: { setCurrency } }));
 
     await userEvent.click(
@@ -68,10 +68,8 @@ describe("SettingsPreferences", () => {
   });
 
   it("should call setDefaultGasTier when selecting a gas tier", async () => {
-    const setDefaultGasTier = vi.fn<any>(() => Promise.resolve());
-    renderComponent(
-      mockedStore({ settingsStore: { setDefaultGasTier } }),
-    );
+    const setDefaultGasTier = vi.fn(() => Promise.resolve());
+    renderComponent(mockedStore({ settingsStore: { setDefaultGasTier } }));
 
     await userEvent.click(
       screen.getByRole("combobox", { name: "Default gas fee" }),

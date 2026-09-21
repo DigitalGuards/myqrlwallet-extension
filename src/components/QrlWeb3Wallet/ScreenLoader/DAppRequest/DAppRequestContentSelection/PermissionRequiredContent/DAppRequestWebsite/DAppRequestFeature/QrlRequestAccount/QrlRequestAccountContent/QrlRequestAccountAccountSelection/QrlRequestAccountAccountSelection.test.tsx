@@ -9,7 +9,19 @@ import QrlRequestAccountAccountSelection from "./QrlRequestAccountAccountSelecti
 
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AccountList/AccountId/AccountId",
-  () => ({ default: () => <div>Mocked Account ID</div> }),
+  () => ({
+    default: ({
+      account,
+      display = "fingerprint",
+    }: {
+      account: string;
+      display?: string;
+    }) => (
+      <div data-testid="mock-account-id" data-display={display}>
+        {account}
+      </div>
+    ),
+  }),
 );
 
 describe("QrlRequestAccountAccountSelection", () => {
@@ -57,7 +69,10 @@ describe("QrlRequestAccountAccountSelection", () => {
     });
     expect(checkBox).toBeInTheDocument();
     expect(checkBox).toBeEnabled();
-    expect(screen.getByText("Mocked Account ID")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-account-id")).toHaveAttribute(
+      "data-display",
+      "fingerprint",
+    );
   });
 
   it("should display the message is no accounts are available", async () => {

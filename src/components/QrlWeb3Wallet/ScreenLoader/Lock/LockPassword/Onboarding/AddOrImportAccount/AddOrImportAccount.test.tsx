@@ -10,20 +10,22 @@ import AddOrImportAccount from "./AddOrImportAccount";
 import { ONBOARDING_STEPS } from "../Onboarding";
 
 vi.mock("@theqrl/web3", () => ({
-  default: vi.fn().mockImplementation(() => ({
-    qrl: {
-      accounts: {
-        create: vi.fn().mockReturnValue({
-          address: "MockedNewAddress",
-          seed: "MockedNewSeed",
-        }),
-        seedToAccount: vi.fn().mockReturnValue({
-          address: "MockedAddress",
-          seed: "MockedSeed",
-        }),
+  default: vi.fn().mockImplementation(function () {
+    return {
+      qrl: {
+        accounts: {
+          create: vi.fn().mockReturnValue({
+            address: "MockedNewAddress",
+            seed: "MockedNewSeed",
+          }),
+          seedToAccount: vi.fn().mockReturnValue({
+            address: "MockedAddress",
+            seed: "MockedSeed",
+          }),
+        },
       },
-    },
-  })),
+    };
+  }),
   Web3BaseWalletAccount: class {},
 }));
 vi.mock(

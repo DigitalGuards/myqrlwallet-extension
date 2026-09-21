@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import RecipientPicker from "./RecipientPicker";
 
 const { localStore } = vi.hoisted(() => {
@@ -46,7 +47,7 @@ describe("RecipientPicker", () => {
   afterEach(cleanup);
 
   const renderComponent = (
-    onSelect = vi.fn<any>(),
+    onSelect = vi.fn(),
     mockedStoreValues = mockedStore(),
   ) =>
     render(
@@ -115,7 +116,11 @@ describe("RecipientPicker", () => {
 
     expect(screen.getByText("Account 2")).toBeInTheDocument();
     expect(
-      screen.getByText(/Q20fB08fF1f1376A14C055E9F56df80563E16722b/),
+      screen.getByText(
+        formatQrlAddressFingerprint(
+          "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+        ),
+      ),
     ).toBeInTheDocument();
   });
 
@@ -184,11 +189,13 @@ describe("RecipientPicker", () => {
       }),
     );
 
-    // With no labels from store, address is shown as both label and address line
-    const matches = screen.getAllByText(
-      /Q20fB08fF1f1376A14C055E9F56df80563E16722b/,
-    );
-    expect(matches.length).toBeGreaterThanOrEqual(1);
+    expect(
+      screen.getByText(
+        formatQrlAddressFingerprint(
+          "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+        ),
+      ),
+    ).toBeInTheDocument();
   });
 
   it("should show 'No contacts saved' on contacts tab", async () => {
@@ -259,12 +266,16 @@ describe("RecipientPicker", () => {
     await userEvent.click(screen.getByText("Recent"));
 
     expect(
-      screen.getByText(/Q20fB08fF1f1376A14C055E9F56df80563E16722b/),
+      screen.getByText(
+        formatQrlAddressFingerprint(
+          "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+        ),
+      ),
     ).toBeInTheDocument();
   });
 
   it("should call onSelect when an address is clicked", async () => {
-    const onSelect = vi.fn<any>();
+    const onSelect = vi.fn();
     const labels: Record<string, string> = {
       Q20B714091cF2a62DADda2847803e3f1B9D2D3779: "Account 1",
       Q20fB08fF1f1376A14C055E9F56df80563E16722b: "Account 2",
@@ -299,7 +310,7 @@ describe("RecipientPicker", () => {
     expect(screen.getByText("Account 2")).toBeInTheDocument();
 
     const addressButton = screen.getByText(
-      /Q20fB08fF1f1376A14C055E9F56df80563E16722b/,
+      formatQrlAddressFingerprint("Q20fB08fF1f1376A14C055E9F56df80563E16722b"),
     );
     await userEvent.click(addressButton.closest("button")!);
 
@@ -309,7 +320,7 @@ describe("RecipientPicker", () => {
   });
 
   it("should call onSelect when a contact is clicked", async () => {
-    const onSelect = vi.fn<any>();
+    const onSelect = vi.fn();
     renderComponent(
       onSelect,
       mockedStore({
@@ -334,7 +345,7 @@ describe("RecipientPicker", () => {
   });
 
   it("should call onSelect when a recent address is clicked", async () => {
-    const onSelect = vi.fn<any>();
+    const onSelect = vi.fn();
     renderComponent(
       onSelect,
       mockedStore({
@@ -365,7 +376,11 @@ describe("RecipientPicker", () => {
 
     await userEvent.click(screen.getByText("Recent"));
     const recentButton = screen
-      .getByText(/Q20fB08fF1f1376A14C055E9F56df80563E16722b/)
+      .getByText(
+        formatQrlAddressFingerprint(
+          "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+        ),
+      )
       .closest("button")!;
     await userEvent.click(recentButton);
 

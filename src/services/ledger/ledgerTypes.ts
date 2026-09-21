@@ -21,7 +21,7 @@ export interface LedgerDeviceInfo {
  * Ledger account - data stored in storage and used for signing.
  */
 export interface LedgerAccount {
-  /** Account address in QRL format (Q + 40 hex characters) */
+  /** Device address; legacy Q + 40 values remain unusable under QIP-55. */
   address: string;
   /** BIP-44 path, e.g., "m/44'/238'/0'/0/0" */
   derivationPath: string;

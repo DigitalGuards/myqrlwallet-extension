@@ -49,7 +49,14 @@ type OtherAccountCardProps = {
 };
 
 const OtherAccountCard = observer(
-  ({ accountAddress, onSwitch, onCopy, onReceive, onHide, onRemove }: OtherAccountCardProps) => {
+  ({
+    accountAddress,
+    onSwitch,
+    onCopy,
+    onReceive,
+    onHide,
+    onRemove,
+  }: OtherAccountCardProps) => {
     const { t } = useTranslation();
     const { accountLabelsStore } = useStore();
     const label = accountLabelsStore.getLabel(accountAddress);
@@ -110,14 +117,14 @@ const OtherAccountCard = observer(
               className="h-6 w-32 text-xs"
               autoFocus
               maxLength={50}
-              aria-label={t('home.editAccountLabel')}
+              aria-label={t("home.editAccountLabel")}
             />
             <Button
               variant="ghost"
               size="icon"
               className="size-5"
               onClick={saveEdit}
-              aria-label={t('home.saveLabel')}
+              aria-label={t("home.saveLabel")}
             >
               <Check className="h-3 w-3" />
             </Button>
@@ -126,7 +133,7 @@ const OtherAccountCard = observer(
               size="icon"
               className="size-5"
               onClick={cancelEdit}
-              aria-label={t('home.cancelEdit')}
+              aria-label={t("home.cancelEdit")}
             >
               <X className="h-3 w-3" />
             </Button>
@@ -137,73 +144,73 @@ const OtherAccountCard = observer(
             <AccountId account={accountAddress} hideLabel={isEditing} />
           </div>
           <div className="shrink-0">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <EllipsisVertical
-                size="16"
-                className="cursor-pointer"
-                data-testid="account-menu"
-              />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuGroup>
-                <DropdownMenuItem
-                  className="cursor-pointer data-[highlighted]:text-secondary"
-                  onClick={() => onSwitch(accountAddress)}
-                >
-                  <div className="flex gap-2">
-                    <ArrowRight size="16" />
-                    <span>{t('home.switch')}</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer data-[highlighted]:text-secondary"
-                  onClick={() => onReceive(accountAddress)}
-                >
-                  <div className="flex gap-2">
-                    <Download size="16" />
-                    <span>{t('home.receive')}</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer data-[highlighted]:text-secondary"
-                  onClick={() => onCopy(accountAddress)}
-                >
-                  <div className="flex gap-2">
-                    <Copy size="16" />
-                    <span>{t('home.copyAddress')}</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer data-[highlighted]:text-secondary"
-                  onClick={startEdit}
-                >
-                  <div className="flex gap-2">
-                    <Pencil size="16" />
-                    <span>{t('home.rename')}</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer data-[highlighted]:text-secondary"
-                  onClick={() => onHide(accountAddress)}
-                >
-                  <div className="flex gap-2">
-                    <EyeOff size="16" />
-                    <span>{t('home.hide')}</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer text-destructive data-[highlighted]:text-destructive"
-                  onClick={() => setRemoveDialogOpen(true)}
-                >
-                  <div className="flex gap-2">
-                    <Trash2 size="16" />
-                    <span>{t('home.remove')}</span>
-                  </div>
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <EllipsisVertical
+                  size="16"
+                  className="cursor-pointer"
+                  data-testid="account-menu"
+                />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    className="cursor-pointer data-[highlighted]:text-secondary"
+                    onClick={() => onSwitch(accountAddress)}
+                  >
+                    <div className="flex gap-2">
+                      <ArrowRight size="16" />
+                      <span>{t("home.switch")}</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="cursor-pointer data-[highlighted]:text-secondary"
+                    onClick={() => onReceive(accountAddress)}
+                  >
+                    <div className="flex gap-2">
+                      <Download size="16" />
+                      <span>{t("home.receive")}</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="cursor-pointer data-[highlighted]:text-secondary"
+                    onClick={() => onCopy(accountAddress)}
+                  >
+                    <div className="flex gap-2">
+                      <Copy size="16" />
+                      <span>{t("home.copyAddress")}</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="cursor-pointer data-[highlighted]:text-secondary"
+                    onClick={startEdit}
+                  >
+                    <div className="flex gap-2">
+                      <Pencil size="16" />
+                      <span>{t("home.rename")}</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="cursor-pointer data-[highlighted]:text-secondary"
+                    onClick={() => onHide(accountAddress)}
+                  >
+                    <div className="flex gap-2">
+                      <EyeOff size="16" />
+                      <span>{t("home.hide")}</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="cursor-pointer text-destructive data-[highlighted]:text-destructive"
+                    onClick={() => setRemoveDialogOpen(true)}
+                  >
+                    <div className="flex gap-2">
+                      <Trash2 size="16" />
+                      <span>{t("home.remove")}</span>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
         <Dialog
@@ -224,7 +231,7 @@ const OtherAccountCard = observer(
               </DialogDescription>
             </DialogHeader>
             <div className="min-w-0">
-              <AccountId account={accountAddress} />
+              <AccountId account={accountAddress} display="full" />
             </div>
             {!!removeError && (
               <p className="text-sm font-medium text-destructive">
@@ -280,8 +287,8 @@ const OtherAccounts = observer(() => {
   const { accounts } = qrlAccounts;
 
   const otherAccountsLabel = activeAccountAddress
-    ? t('home.otherAccountsLabel')
-    : t('home.accountsLabel');
+    ? t("home.otherAccountsLabel")
+    : t("home.accountsLabel");
   const otherAccounts = accounts.filter(
     ({ accountAddress }) =>
       accountAddress !== activeAccountAddress &&

@@ -1,5 +1,7 @@
+import { V3_CHAIN_ID } from "@/configuration/releaseProfile";
 import { Button } from "@/components/UI/Button";
 import { Label } from "@/components/UI/Label";
+import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/UI/tabs";
 import {
   Tooltip,
@@ -11,7 +13,6 @@ import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
-import StringUtil from "@/utilities/stringUtil";
 import { Copy } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -31,6 +32,7 @@ type DAppTransactionReceipt = {
 const { Common } = qrl.accounts;
 
 type TransactionObject = {
+  chainId: string;
   from: string;
   to?: string;
   data?: string;
@@ -68,12 +70,8 @@ const QrlSendTransactionForContent = observer(
     } = dAppRequestStore;
 
     const params = dAppRequestData?.params[0];
-    const accountFromAddress = params?.from;
-    const { prefix: prefixFrom, addressSplit: addressSplitFrom } =
-      StringUtil.getSplitAddress(accountFromAddress);
-    const accountToAddress = params?.to;
-    const { prefix: prefixTo, addressSplit: addressSplitTo } =
-      StringUtil.getSplitAddress(accountToAddress);
+    const accountFromAddress = params?.from ?? "";
+    const accountToAddress = params?.to ?? "";
     const value = BigInt(params?.value ?? 0);
     const gasLimit = BigInt(params?.gas ?? 0);
     const data = params?.data;
@@ -101,6 +99,19 @@ const QrlSendTransactionForContent = observer(
 
     const copyData = () => {
       navigator.clipboard.writeText(data);
+    };
+
+    const ensureSigningContext = async () => {
+      const authorization =
+        await revalidateAuthorizedDAppRequest(dAppRequestData);
+      if (!authorization.canProceed) throw authorization.proceedError;
+      if (
+        qrlInstance !== qrlStore.qrlInstance ||
+        blockchain !== qrlStore.qrlConnection.blockchain ||
+        blockchain.chainId.toLowerCase() !== V3_CHAIN_ID
+      ) {
+        throw new Error("The network changed. Review the request again.");
+      }
     };
 
     const recordTransactionHistory = async ({
@@ -172,6 +183,7 @@ const QrlSendTransactionForContent = observer(
 
         const gasPrice = await qrlInstance?.getGasPrice();
         const transactionObject: TransactionObject = {
+          chainId: V3_CHAIN_ID,
           from,
           ...(to && { to }),
           data,
@@ -190,9 +202,11 @@ const QrlSendTransactionForContent = observer(
 
         let rawTransactionToSend: string | undefined;
 
+        await ensureSigningContext();
         if (isLedgerAccount) {
-          const chainId = await qrlInstance?.getChainId();
-          const common = Common.custom({ chainId: Number(chainId) });
+          const common = Common.custom({
+            chainId: Number(BigInt(V3_CHAIN_ID)),
+          });
 
           const txData: Record<string, unknown> = {
             nonce: `0x${transactionObject.nonce?.toString(16)}`,
@@ -235,6 +249,7 @@ const QrlSendTransactionForContent = observer(
               "Signing account does not match the requested sender",
             );
           }
+          await ensureSigningContext();
           const signedTransaction = await qrlInstance?.accounts.signTransaction(
             transactionObject,
             seed,
@@ -243,6 +258,7 @@ const QrlSendTransactionForContent = observer(
         }
 
         if (rawTransactionToSend) {
+          await ensureSigningContext();
           const transactionReceipt =
             await qrlInstance?.sendSignedTransaction(rawTransactionToSend);
           addToResponseData({
@@ -300,6 +316,7 @@ const QrlSendTransactionForContent = observer(
 
         const gasPrice = await qrlInstance?.getGasPrice();
         const transactionObject: TransactionObject = {
+          chainId: V3_CHAIN_ID,
           from,
           to,
           gas,
@@ -318,9 +335,11 @@ const QrlSendTransactionForContent = observer(
 
         let rawTransactionToSend: string | undefined;
 
+        await ensureSigningContext();
         if (isLedgerAccount) {
-          const chainId = await qrlInstance?.getChainId();
-          const common = Common.custom({ chainId: Number(chainId) });
+          const common = Common.custom({
+            chainId: Number(BigInt(V3_CHAIN_ID)),
+          });
 
           const txData = {
             nonce: `0x${transactionObject.nonce?.toString(16)}`,
@@ -352,6 +371,7 @@ const QrlSendTransactionForContent = observer(
               "Signing account does not match the requested sender",
             );
           }
+          await ensureSigningContext();
           const signedTransaction = await qrlInstance?.accounts.signTransaction(
             transactionObject,
             seed,
@@ -360,6 +380,7 @@ const QrlSendTransactionForContent = observer(
         }
 
         if (rawTransactionToSend) {
+          await ensureSigningContext();
           const transactionReceipt =
             await qrlInstance?.sendSignedTransaction(rawTransactionToSend);
           addToResponseData({
@@ -408,7 +429,10 @@ const QrlSendTransactionForContent = observer(
           <div className="flex flex-col gap-2">
             <div className="flex flex-col gap-1">
               <div>{t("dapp.sendTransaction.fromAddress")}</div>
-              <div className="font-data w-64 font-bold text-identity-accent">{`${prefixFrom} ${addressSplitFrom.join(" ")}`}</div>
+              <FullAddress
+                address={accountFromAddress}
+                className="w-full font-bold text-identity-accent"
+              />
             </div>
             {(transactionType === SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION ||
               transactionType === SEND_TRANSACTION_TYPES.QRL_TRANSFER) && (
@@ -419,7 +443,10 @@ const QrlSendTransactionForContent = observer(
                     ? t("dapp.sendTransaction.contractAddress")
                     : t("dapp.sendTransaction.toAddress")}
                 </div>
-                <div className="font-data w-64 font-bold text-identity-accent">{`${prefixTo} ${addressSplitTo.join(" ")}`}</div>
+                <FullAddress
+                  address={accountToAddress}
+                  className="w-full font-bold text-identity-accent"
+                />
               </div>
             )}
             {(transactionType === SEND_TRANSACTION_TYPES.QRL_TRANSFER ||

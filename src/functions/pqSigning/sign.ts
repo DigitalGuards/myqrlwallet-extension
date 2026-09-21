@@ -5,15 +5,14 @@
  * The digest/ctx scheme is the canonical one shared byte-for-byte by
  * @qrlwallet/connect (src/signing/) and the qrlwallet.com wallet
  * (src/utils/signing/); the vendored fixtures in __fixtures__/canonical.json
- * pin parity in pqSigning.test.ts. Caller supplies the 40-byte hex extended
+ * pin parity in pqSigning.test.ts. Caller supplies the 51-byte hex extended
  * seed (already unlocked); this module owns key derivation, hedged signing,
  * and the rich response shape the SDK verifiers expect.
  */
 
 import * as mldsa from "@theqrl/mldsa87";
-import { MLDSA87, ExtendedSeed } from "@theqrl/wallet.js";
+import { MLDSA87, ExtendedSeed, toChecksumAddress } from "@theqrl/wallet.js";
 import { parseAndValidateSeed } from "@theqrl/web3-qrl-accounts";
-import { toChecksumAddress } from "@theqrl/web3-utils";
 import {
   SCHEME_TAG_MSG,
   SCHEME_TAG_TYPED,
@@ -29,7 +28,7 @@ export interface SignWithSchemeParams {
   digest: Uint8Array;
   /** Per-scheme domain-separation `ctx` (well under FIPS 204's 255-byte cap). */
   ctx: Uint8Array;
-  /** 40-byte hex extended seed (`0x...` or bare hex). */
+  /** 51-byte hex extended seed (`0x...` or bare hex). */
   hexSeed: string;
   /**
    * FIPS 204 §3.4 hedged signing. Default true. Tests force `false` to lock
@@ -88,9 +87,7 @@ export function signWithScheme({
       randomized,
       Uint8Array.from(ctx),
     );
-    // The on-chain Q-address is the first 20 bytes of the wallet identity
-    // with EIP-55 checksum casing (same derivation as the web wallet).
-    const signer = toChecksumAddress(`Q${wallet.getAddressStr().slice(1, 41)}`);
+    const signer = toChecksumAddress(wallet.getAddressStr());
     return {
       signature: sigBuf,
       publicKey: new Uint8Array(wallet.getPK()),
