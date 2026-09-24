@@ -111,9 +111,14 @@ const ImportAccount = observer(() => {
   // screen, and the router stays on this page, so unlocking lands the user
   // back in the import form.
   const goToUnlock = async () => {
+    try {
+      await lockStore.lock();
+    } catch {
+      // Keep the alert and its action so the user can retry.
+      return;
+    }
     setNeedsUnlock(false);
     setFinalizeError("");
-    await lockStore.lock();
   };
 
   return (

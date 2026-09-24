@@ -124,7 +124,7 @@ describe("CreateAccount", () => {
 
     expect(
       await screen.findByText(
-        "Your unlocked session expired. Nothing was saved. Unlock the wallet again and retry.",
+        "Your unlocked session expired. Lock the wallet and unlock it again, then retry.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("Mocked Seed Backup")).not.toBeInTheDocument();
@@ -195,7 +195,7 @@ describe("CreateAccount", () => {
 
     expect(
       await screen.findByText(
-        "Your unlocked session expired. Nothing was saved. Unlock the wallet again and retry.",
+        "Your unlocked session expired. Lock the wallet and unlock it again, then retry.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Mocked Seed Backup")).toBeInTheDocument();

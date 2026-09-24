@@ -339,6 +339,7 @@
   "importAccount.button": "Konto importieren",
   "importAccount.tabMnemonic": "Mnemonic",
   "account.passwordUnavailable": "Ihre entsperrte Sitzung ist abgelaufen. Es wurde nichts gespeichert. Entsperren Sie das Wallet erneut und versuchen Sie es noch einmal.",
+  "account.sessionPasswordExpired": "Ihre entsperrte Sitzung ist abgelaufen. Sperren Sie das Wallet und entsperren Sie es erneut, dann versuchen Sie es noch einmal.",
   "account.passwordUnavailableAction": "Wallet entsperren",
   "importAccount.tabHexSeed": "Hex seed",
   "importAccount.tabWalletFile": "Wallet file",

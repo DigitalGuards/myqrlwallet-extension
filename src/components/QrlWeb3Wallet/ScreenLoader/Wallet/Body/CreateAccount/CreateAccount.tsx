@@ -43,7 +43,7 @@ const CreateAccount = observer(() => {
     try {
       await getWalletPassword();
     } catch {
-      setStartError(t("account.passwordUnavailable"));
+      setStartError(t("account.sessionPasswordExpired"));
       return;
     }
     setStartError("");
@@ -56,7 +56,7 @@ const CreateAccount = observer(() => {
       const password = await getWalletPassword();
       await encryptAccount(account, password);
     } catch {
-      setPersistError(t("account.passwordUnavailable"));
+      setPersistError(t("account.sessionPasswordExpired"));
       return;
     }
     try {
