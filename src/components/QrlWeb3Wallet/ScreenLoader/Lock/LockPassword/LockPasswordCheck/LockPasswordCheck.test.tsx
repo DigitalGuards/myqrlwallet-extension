@@ -28,7 +28,9 @@ describe("LockPasswordCheck", () => {
     expect(
       screen.queryByText("Unlock the wallet with your password"),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText("Enter the wallet password")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Enter the wallet password"),
+    ).not.toBeInTheDocument();
     expect(screen.getByLabelText("Enter password")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
   });
@@ -143,21 +145,17 @@ describe("LockPasswordCheck", () => {
     expect(passwordField).toHaveAttribute("type", "password");
   });
 
-  it("shows the account identity chip with the abbreviated address", () => {
+  it("does not show the account address on the lock screen", () => {
+    const address = "Q2090E9F38771876FB6Fc51a6b464121d3cC093A1";
     renderComponent(
       mockedStore({
-        qrlStore: {
-          activeAccount: {
-            accountAddress: "Q2090E9F38771876FB6Fc51a6b464121d3cC093A1",
-          },
-        },
+        qrlStore: { activeAccount: { accountAddress: address } },
       }),
     );
 
-    const address = "Q2090E9F38771876FB6Fc51a6b464121d3cC093A1";
     expect(
-      screen.getByText(formatQrlAddressFingerprint(address)),
-    ).toBeInTheDocument();
-    expect(screen.getByText(address)).toHaveClass("sr-only");
+      screen.queryByText(formatQrlAddressFingerprint(address)),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(address)).not.toBeInTheDocument();
   });
 });

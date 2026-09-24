@@ -15,7 +15,6 @@ import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { useStore } from "@/stores/store";
-import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
 import ResetWalletDialog from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/ResetWalletDialog/ResetWalletDialog";
@@ -31,22 +30,14 @@ const createFormSchema = (t: TFunction) =>
  * Lock.tsx above it owns the logo, wordmark, and glow.
  */
 const LockPasswordCheck = observer(() => {
-  const { lockStore, qrlStore, accountLabelsStore } = useStore();
+  const { lockStore } = useStore();
   const { unlock } = lockStore;
-  const { activeAccount } = qrlStore;
-  const { accountAddress } = activeAccount;
   const { t } = useTranslation();
   const FormSchema = createFormSchema(t);
 
   const [unlockAttempt, setUnlockAttempt] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
-
-  useEffect(() => {
-    if (accountAddress) {
-      accountLabelsStore.loadLabels();
-    }
-  }, [accountAddress]);
 
   useEffect(() => {
     setTimeout(() => {
@@ -65,8 +56,6 @@ const LockPasswordCheck = observer(() => {
     setError,
     setFocus,
   } = form;
-
-  const label = accountLabelsStore.getLabel(accountAddress);
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     scrollShellToTop();
@@ -93,32 +82,6 @@ const LockPasswordCheck = observer(() => {
         onSubmit={handleSubmit(onSubmit)}
       >
         <div className="page-enter flex w-full flex-col items-center gap-5 text-center">
-          {/* Who is locked: the account identity chip, blue identifies.
-              The row keeps a fixed height even before the address resolves
-              (it lands only after qrlStore's RPC round-trips) so the chip
-              never shifts the focused password field on cold start. */}
-          <div className="flex min-h-[2.125rem] w-full items-center justify-center">
-            {!!accountAddress && (
-              <div
-                className="inline-flex max-w-full items-center gap-2 rounded-full border border-identity-accent/30 bg-identity-accent/[0.08] px-4 py-1.5"
-                title={accountAddress}
-              >
-                {/* text-primary so the glow-dot halo (currentColor) pulses in the action color */}
-                <span className="glow-dot h-2 w-2 shrink-0 rounded-full bg-primary text-primary" />
-                {label ? (
-                  <span className="truncate text-xs text-identity-accent">
-                    {label}
-                  </span>
-                ) : (
-                  <AddressFingerprint
-                    address={accountAddress}
-                    className="text-xs text-identity-accent"
-                  />
-                )}
-              </div>
-            )}
-          </div>
-
           <FormField
             control={control}
             name="password"
