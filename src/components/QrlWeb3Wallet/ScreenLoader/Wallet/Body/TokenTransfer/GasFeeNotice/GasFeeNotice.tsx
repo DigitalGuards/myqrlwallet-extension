@@ -117,7 +117,7 @@ export const GasFeeNotice = observer(
           ) : gasFee.error ? (
             <div>{gasFee.error}</div>
           ) : (
-            <div className="w-full overflow-hidden">
+            <div className="w-full overflow-hidden font-numeric">
               {t('gasFee.estimated', { amount: gasFee?.estimatedGas })}
               {fiatGas && (
                 <span className="ml-1 text-muted-foreground">{fiatGas}</span>

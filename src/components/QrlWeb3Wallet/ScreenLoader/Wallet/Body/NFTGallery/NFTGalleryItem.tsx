@@ -131,7 +131,7 @@ const NFTGalleryItem = observer(
             </div>
           )}
           {balance && balance !== "1" && (
-            <span className="absolute right-1 top-1 rounded bg-background/80 px-1.5 py-0.5 text-xs font-bold">
+            <span className="absolute right-1 top-1 rounded bg-background/80 px-1.5 py-0.5 font-numeric text-xs font-bold">
               ×{balance}
             </span>
           )}

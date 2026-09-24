@@ -130,7 +130,7 @@ const TokenListItem = observer(
           >
             <TokenListItemIcon icon={image ?? ""} symbol={symbol} />
             <span className="flex w-full min-w-0 flex-col gap-1">
-              <span className="truncate text-xs font-bold">{balance}</span>
+              <span className="truncate font-numeric text-xs font-bold">{balance}</span>
               <span className="truncate text-xs">{name}</span>
             </span>
           </button>

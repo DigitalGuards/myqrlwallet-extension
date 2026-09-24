@@ -453,14 +453,14 @@ const QrlSendTransactionForContent = observer(
               value > 0n) && (
               <div className="flex flex-col gap-1">
                 <div>{t("dapp.sendTransaction.value")}</div>
-                <div className="font-bold text-secondary">
+                <div className="font-numeric font-bold text-secondary">
                   {utils.fromPlanck(value, "quanta")} Quanta
                 </div>
               </div>
             )}
             <div className="flex flex-col gap-1">
               <div>{t("dapp.sendTransaction.gasLimit")}</div>
-              <div className="font-bold text-secondary">
+              <div className="font-numeric font-bold text-secondary">
                 {gasLimit.toString()}
               </div>
             </div>

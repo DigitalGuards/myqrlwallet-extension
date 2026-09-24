@@ -764,7 +764,7 @@ const TokenTransfer = observer(() => {
                             <span className="text-xs text-muted-foreground">
                               {t("transfer.percentOfBalance")}
                             </span>
-                            <span className="text-xs text-muted-foreground">
+                            <span className="font-numeric text-xs text-muted-foreground">
                               {sliderValue}%
                             </span>
                           </div>
@@ -804,7 +804,7 @@ const TokenTransfer = observer(() => {
                             settingsStore.showBalanceAndPrice &&
                             priceStore.getPrice(settingsStore.currency) > 0 &&
                             amountForDisplay(field.value || "0").gt(0) && (
-                              <span className="ml-1 text-muted-foreground">
+                              <span className="ml-1 font-numeric text-muted-foreground">
                                 {formatFiatCompact(
                                   field.value,
                                   priceStore.getPrice(settingsStore.currency),

@@ -1,3 +1,4 @@
+import { splitFormattedBalance } from "@/functions/formatBalance";
 import { formatFiatCompact } from "@/functions/formatFiat";
 import { parseBalanceValue } from "@/functions/parseBalanceValue";
 import { useStore } from "@/stores/store";
@@ -34,6 +35,11 @@ const AccountId = observer(
       setAccountBalance(getAccountBalance(account));
     }, [accounts]);
 
+    const { amount: balanceAmount, unit: balanceUnit } =
+      splitFormattedBalance(accountBalance);
+    const displayBalance = balanceUnit
+      ? `${balanceAmount} ${balanceUnit}`
+      : balanceAmount;
     const numericBalance = parseBalanceValue(accountBalance).toNumber();
     const price = priceStore.getPrice(settingsStore.currency);
     const fiatDisplay =
@@ -72,8 +78,8 @@ const AccountId = observer(
               </span>
             )}
           </div>
-          <div className="font-data text-xs text-foreground/90">
-            {accountBalance}
+          <div className="font-numeric text-xs text-foreground/90">
+            {displayBalance}
             {fiatDisplay && (
               <span className="ml-1 text-muted-foreground">{fiatDisplay}</span>
             )}
