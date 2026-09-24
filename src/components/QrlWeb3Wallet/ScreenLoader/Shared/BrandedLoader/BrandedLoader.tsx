@@ -9,7 +9,7 @@ type BrandedLoaderProps = {
 
 /**
  * Branded loader (styles in index.css): with a `progress` fraction it is
- * a determinate ember fill bar; without one it falls back to an
+ * a determinate sky-blue fill bar; without one it falls back to an
  * indeterminate sweeping beam for waits that have no measurable fraction
  * (like waking the service worker). Keeps the loader-icon testid contract
  * from the spinner it replaces.
