@@ -3,7 +3,6 @@ import { Button } from "@/components/UI/Button";
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormMessage,
@@ -94,15 +93,6 @@ const LockPasswordCheck = observer(() => {
         onSubmit={handleSubmit(onSubmit)}
       >
         <div className="page-enter flex w-full flex-col items-center gap-5 text-center">
-          <div>
-            <h3 className="text-xl font-bold tracking-tight">
-              {t("lock.unlock.title")}
-            </h3>
-            <p className="mt-1 break-words text-sm text-muted-foreground">
-              {t("lock.unlock.description")}
-            </p>
-          </div>
-
           {/* Who is locked: the account identity chip, blue identifies.
               The row keeps a fixed height even before the address resolves
               (it lands only after qrlStore's RPC round-trips) so the chip
@@ -140,7 +130,7 @@ const LockPasswordCheck = observer(() => {
                   <FormControl>
                     <Input
                       {...field}
-                      aria-label={field.name}
+                      aria-label={t("lock.unlock.passwordPlaceholder")}
                       autoComplete="current-password"
                       disabled={isSubmitting}
                       placeholder={t("lock.unlock.passwordPlaceholder")}
@@ -163,9 +153,6 @@ const LockPasswordCheck = observer(() => {
                     )}
                   </button>
                 </div>
-                <FormDescription className="text-center text-xs">
-                  {t("lock.unlock.passwordDescription")}
-                </FormDescription>
                 <FormMessage className="text-center" />
               </FormItem>
             )}
