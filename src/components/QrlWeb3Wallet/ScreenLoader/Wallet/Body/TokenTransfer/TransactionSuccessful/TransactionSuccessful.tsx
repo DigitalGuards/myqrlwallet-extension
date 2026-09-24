@@ -60,13 +60,13 @@ export const TransactionSuccessful = ({
             <div className="grid grid-cols-2 gap-8">
               <div className="flex flex-col gap-2">
                 <div>{t('transfer.completedBlockNumber')}</div>
-                <div className="font-bold text-secondary">
+                <div className="font-numeric font-bold text-secondary">
                   {blockNumber.toString()}
                 </div>
               </div>
               <div className="flex flex-col gap-2">
                 <div>{t('transfer.completedGasUsed')}</div>
-                <div className="font-bold text-secondary">
+                <div className="font-numeric font-bold text-secondary">
                   {getOptimalGasFee(
                     utils.fromPlanck(
                       Number(gasUsed) * Number(effectiveGasPrice ?? 0),

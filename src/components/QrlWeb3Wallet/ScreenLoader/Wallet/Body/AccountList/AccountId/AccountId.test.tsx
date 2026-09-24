@@ -40,7 +40,8 @@ describe("AccountId", () => {
         ),
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("10.0 QRL")).toBeInTheDocument();
+    // The row re-applies the shared balance rule, so "10.0" renders as "10.00".
+    expect(screen.getByText("10.00 QRL")).toBeInTheDocument();
   });
 
   it("can preserve the complete grouped address for approval surfaces", () => {

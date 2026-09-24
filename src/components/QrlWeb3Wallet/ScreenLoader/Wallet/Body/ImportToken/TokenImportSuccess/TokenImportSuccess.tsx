@@ -79,17 +79,17 @@ const TokenImportSuccess = observer(
             </div>
             <div className="flex flex-col gap-1">
               <div>{t("importToken.totalSupplyLabel")}</div>
-              <div className="font-bold text-secondary">{totalSupply}</div>
+              <div className="font-numeric font-bold text-secondary">{totalSupply}</div>
             </div>
             <div className="flex flex-col gap-1">
               <div>{t("importToken.balanceLabel")}</div>
-              <div className="font-bold text-secondary">
+              <div className="font-numeric font-bold text-secondary">
                 {getOptimalTokenBalance(balance?.toString() ?? "0", symbol)}
               </div>
             </div>
             <div className="flex flex-col gap-1">
               <div>{t("importToken.decimalsLabel")}</div>
-              <div className="font-bold text-secondary">
+              <div className="font-numeric font-bold text-secondary">
                 {decimals?.toString()}
               </div>
             </div>

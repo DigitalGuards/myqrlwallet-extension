@@ -111,7 +111,7 @@ const TransactionHistoryItem = observer(
                 )}
               </span>
               <span
-                className={`shrink-0 text-sm font-medium tabular-nums ${isIncoming ? "text-success" : ""}`}
+                className={`shrink-0 font-numeric text-sm font-medium ${isIncoming ? "text-success" : ""}`}
                 title={`${exactAmount} ${tokenSymbol}`}
               >
                 {isIncoming ? "+" : ""}
@@ -128,7 +128,7 @@ const TransactionHistoryItem = observer(
                 )}
               </span>
               {fiatDisplay && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="font-numeric text-[10px] text-muted-foreground">
                   {fiatDisplay}
                 </span>
               )}

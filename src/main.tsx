@@ -8,10 +8,13 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import './i18n'
-// Brand fonts, self-hosted (MV3 CSP forbids remote fonts). Explicit
-// /index.css paths so vite rewrites the package-relative woff2 URLs.
+// Brand fonts, self-hosted (MV3 CSP forbids remote fonts): Sora = display,
+// Instrument Sans = body, Inter = numeric (balances/amounts/fees),
+// JetBrains Mono = data (addresses/hashes/seeds). Explicit /index.css paths
+// so vite rewrites the package-relative woff2 URLs.
 import '@fontsource-variable/sora/index.css'
 import '@fontsource-variable/instrument-sans/index.css'
+import '@fontsource-variable/inter/index.css'
 import '@fontsource-variable/jetbrains-mono/index.css'
 import './index.css'
 

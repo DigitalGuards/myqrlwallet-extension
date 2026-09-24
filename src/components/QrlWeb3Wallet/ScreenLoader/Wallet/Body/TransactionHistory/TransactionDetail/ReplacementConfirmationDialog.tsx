@@ -63,14 +63,14 @@ const ReplacementConfirmationDialog = ({
           {originalGasCost && (
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">{t('txDetail.originalGasFee')}</span>
-              <span>{getOptimalGasFee(originalGasCost)}</span>
+              <span className="font-numeric">{getOptimalGasFee(originalGasCost)}</span>
             </div>
           )}
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">
               {t('txDetail.newEstimatedGasFee')}
             </span>
-            <span className="font-medium text-amber-500">
+            <span className="font-numeric font-medium text-amber-500">
               {estimatedNewGasFee
                 ? getOptimalGasFee(estimatedNewGasFee)
                 : t('txDetail.estimating')}

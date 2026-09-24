@@ -94,7 +94,7 @@ const NFTCollectionImportSuccess = observer(
             {balance !== undefined && (
               <div className="flex flex-col gap-1">
                 <div>{t('nft.ownedCount')}</div>
-                <div className="font-bold text-secondary">{balance}</div>
+                <div className="font-numeric font-bold text-secondary">{balance}</div>
               </div>
             )}
           </div>

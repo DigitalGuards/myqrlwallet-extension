@@ -491,11 +491,11 @@ const TransactionDetail = observer(() => {
               <span className="text-xs text-muted-foreground">
                 {t("txDetail.amount")}
               </span>
-              <span className="break-all text-lg font-bold tabular-nums">
+              <span className="break-all font-numeric text-lg font-bold">
                 {exactAmount} {tokenSymbol}
               </span>
               {fiatAmount && (
-                <span className="text-xs text-muted-foreground">
+                <span className="font-numeric text-xs text-muted-foreground">
                   {fiatAmount}
                 </span>
               )}
@@ -522,7 +522,7 @@ const TransactionDetail = observer(() => {
                     <span className="text-xs text-muted-foreground">
                       {t("txDetail.blockNumber")}
                     </span>
-                    <span className="text-sm font-medium">{blockNumber}</span>
+                    <span className="font-numeric text-sm font-medium">{blockNumber}</span>
                   </div>
                   {hasGasBreakdown && (
                     <>
@@ -530,7 +530,7 @@ const TransactionDetail = observer(() => {
                         <span className="text-xs text-muted-foreground">
                           {t("txDetail.gasUsed")}
                         </span>
-                        <span className="text-sm font-medium">
+                        <span className="font-numeric text-sm font-medium">
                           {Number(gasUsed).toLocaleString()}
                         </span>
                       </div>
@@ -538,7 +538,7 @@ const TransactionDetail = observer(() => {
                         <span className="text-xs text-muted-foreground">
                           {t("txDetail.gasPrice")}
                         </span>
-                        <span className="text-sm font-medium">
+                        <span className="font-numeric text-sm font-medium">
                           {getOptimalGasFee(gasPriceQrl)}
                         </span>
                       </div>
@@ -548,13 +548,13 @@ const TransactionDetail = observer(() => {
                     <span className="text-xs text-muted-foreground">
                       {t("txDetail.totalGasFee")}
                     </span>
-                    <span className="text-sm font-medium">
+                    <span className="font-numeric text-sm font-medium">
                       {totalGasFeeQrl === undefined
                         ? "Unavailable"
                         : getOptimalGasFee(totalGasFeeQrl)}
                     </span>
                     {fiatGasFee && (
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="font-numeric text-[10px] text-muted-foreground">
                         {fiatGasFee}
                       </span>
                     )}
@@ -566,13 +566,13 @@ const TransactionDetail = observer(() => {
                     <span className="text-xs text-muted-foreground">
                       {t("txDetail.totalCost")}
                     </span>
-                    <span className="text-sm font-bold">
+                    <span className="font-numeric text-sm font-bold">
                       {totalCost === undefined
                         ? "Unavailable"
                         : getOptimalGasFee(totalCost)}
                     </span>
                     {fiatTotalCost && (
-                      <span className="text-xs text-muted-foreground">
+                      <span className="font-numeric text-xs text-muted-foreground">
                         {fiatTotalCost}
                       </span>
                     )}

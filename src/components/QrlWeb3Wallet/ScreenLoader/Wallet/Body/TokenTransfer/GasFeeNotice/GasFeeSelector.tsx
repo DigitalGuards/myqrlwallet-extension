@@ -270,7 +270,7 @@ export const GasFeeSelector = observer(
                       </TooltipContent>
                     </Tooltip>
                   </div>
-                  <div className="flex flex-col items-end text-right text-xs text-muted-foreground">
+                  <div className="flex flex-col items-end font-numeric text-right text-xs text-muted-foreground">
                     {isLoadingCosts ? (
                       <Loader className="h-3 w-3 animate-spin" />
                     ) : cost ? (

@@ -91,7 +91,7 @@ const NFTDetail = () => {
               {balance && (
                 <div className="flex flex-col gap-1">
                   <div className="text-sm">{t("nft.ownedCount")}</div>
-                  <div className="text-sm font-bold text-secondary">
+                  <div className="font-numeric text-sm font-bold text-secondary">
                     {balance}
                   </div>
                 </div>

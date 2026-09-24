@@ -45,6 +45,8 @@ describe("DAppConnected", () => {
         ),
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("0.0 Quanta")).toBeInTheDocument();
+    // The account row re-applies the shared balance rule, so the store's
+    // "0.0 Quanta" renders as "0.00 Quanta", matching the web wallet.
+    expect(screen.getByText("0.00 Quanta")).toBeInTheDocument();
   });
 });

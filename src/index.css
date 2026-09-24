@@ -176,11 +176,24 @@
 /* Component-layer surfaces: sit below Tailwind utilities so per-card
    overrides (bg-*, border-*) still win. */
 @layer components {
-  /* Data voice: addresses, hashes, balances. */
+  /* Data voice: addresses, hashes, seeds. Anything the user compares
+     character by character stays monospace. */
   .font-data {
     font-family: theme("fontFamily.mono");
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.01em;
+  }
+
+  /* Numeric voice: every balance, amount, fee, fiat value and count.
+     Inter with fixed-width digits so a changing balance does not jitter.
+     font-feature-settings is set explicitly because body turns on "ss01",
+     which in Inter swaps in alternate digit shapes; "tnum" here replaces
+     that list and keeps the digits plain and tabular. */
+  .font-numeric {
+    font-family: theme("fontFamily.numeric");
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+    letter-spacing: normal;
   }
 
   /* Glass surface: the one card treatment used everywhere. Deliberately NO

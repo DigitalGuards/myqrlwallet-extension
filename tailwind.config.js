@@ -21,6 +21,8 @@ module.exports = {
   			sans: ['"Instrument Sans Variable"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
   			display: ['"Sora Variable"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
   			mono: ['"JetBrains Mono Variable"', 'ui-monospace', '"SF Mono"', 'monospace'],
+  			// Numeric voice: balances, amounts, fees, counts.
+  			numeric: ['"Inter Variable"', '"Instrument Sans Variable"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
   		},
   		colors: {
   			border: 'hsl(var(--border))',
