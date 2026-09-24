@@ -4,6 +4,7 @@ import { Separator } from "@/components/UI/Separator";
 import { getExplorerApiBase } from "@/configuration/assetDiscoveryConfig";
 import { NATIVE_TOKEN_UNITS_OF_GAS } from "@/constants/nativeToken";
 import { formatFiatCompact } from "@/functions/formatFiat";
+import { formatTransactionAmount } from "@/functions/formatTransactionAmount";
 import { getOptimalGasFee } from "@/functions/getOptimalGasFee";
 import { useStore } from "@/stores/store";
 import type {
@@ -379,6 +380,9 @@ const TransactionDetail = observer(() => {
       ? undefined
       : new BigNumber(String(amount)).plus(totalGasFeeQrl).toFixed();
 
+  // The detail screen keeps every digit and only drops the padding zeros.
+  const exactAmount = formatTransactionAmount(amount)?.exact ?? String(amount);
+
   const { showBalanceAndPrice, currency } = settingsStore;
   const qrlPrice = priceStore.getPrice(currency);
   const showFiat =
@@ -487,8 +491,8 @@ const TransactionDetail = observer(() => {
               <span className="text-xs text-muted-foreground">
                 {t("txDetail.amount")}
               </span>
-              <span className="text-lg font-bold">
-                {amount} {tokenSymbol}
+              <span className="break-all text-lg font-bold tabular-nums">
+                {exactAmount} {tokenSymbol}
               </span>
               {fiatAmount && (
                 <span className="text-xs text-muted-foreground">

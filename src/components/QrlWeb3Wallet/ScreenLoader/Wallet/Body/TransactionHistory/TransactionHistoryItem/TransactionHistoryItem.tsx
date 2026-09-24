@@ -1,4 +1,5 @@
 import { formatFiatCompact } from "@/functions/formatFiat";
+import { formatTransactionAmount } from "@/functions/formatTransactionAmount";
 import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
@@ -68,6 +69,11 @@ const TransactionHistoryItem = observer(
       transaction.from?.toLowerCase() !== accountAddress;
     const counterpartyAddress = isIncoming ? transaction.from : transaction.to;
 
+    // The list shows the compact form and keeps the exact value on hover.
+    const displayAmount = formatTransactionAmount(amount);
+    const compactAmount = displayAmount?.compact ?? String(amount);
+    const exactAmount = displayAmount?.exact ?? String(amount);
+
     const { showBalanceAndPrice, currency } = settingsStore;
     const qrlPrice = priceStore.getPrice(currency);
     const fiatDisplay =
@@ -105,10 +111,11 @@ const TransactionHistoryItem = observer(
                 )}
               </span>
               <span
-                className={`text-sm font-medium ${isIncoming ? "text-success" : ""}`}
+                className={`shrink-0 text-sm font-medium tabular-nums ${isIncoming ? "text-success" : ""}`}
+                title={`${exactAmount} ${tokenSymbol}`}
               >
                 {isIncoming ? "+" : ""}
-                {amount} {tokenSymbol}
+                {compactAmount} {tokenSymbol}
               </span>
             </div>
             <div className="flex items-center justify-between gap-2">
