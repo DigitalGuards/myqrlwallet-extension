@@ -22,14 +22,14 @@ describe("LockPasswordCheck", () => {
   it("should render the lock password check component", () => {
     renderComponent();
 
-    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
-      "Unlock Wallet",
-    );
+    // The unlock screen stays minimal: no heading or helper copy, the
+    // field's placeholder doubles as its accessible name.
+    expect(screen.queryByRole("heading", { level: 3 })).not.toBeInTheDocument();
     expect(
-      screen.getByText("Unlock the wallet with your password"),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText("password")).toBeInTheDocument();
-    expect(screen.getByText("Enter the wallet password")).toBeInTheDocument();
+      screen.queryByText("Unlock the wallet with your password"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Enter the wallet password")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Enter password")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
   });
 
@@ -44,7 +44,7 @@ describe("LockPasswordCheck", () => {
       }),
     );
 
-    const passwordField = screen.getByLabelText("password");
+    const passwordField = screen.getByLabelText("Enter password");
     await userEvent.type(passwordField, "pass");
     expect(passwordField).toHaveValue("pass");
     const unlockButton = screen.getByRole("button", { name: "Unlock" });
@@ -72,7 +72,7 @@ describe("LockPasswordCheck", () => {
       }),
     );
 
-    const passwordField = screen.getByLabelText("password");
+    const passwordField = screen.getByLabelText("Enter password");
     await userEvent.type(passwordField, "test123456");
     await waitFor(() => {
       expect(
@@ -108,7 +108,7 @@ describe("LockPasswordCheck", () => {
     );
 
     const unlockButton = screen.getByRole("button", { name: "Unlock" });
-    const passwordField = screen.getByLabelText("password");
+    const passwordField = screen.getByLabelText("Enter password");
     await userEvent.type(passwordField, "test123456");
     await waitFor(() => {
       expect(unlockButton).toBeEnabled();
@@ -126,7 +126,7 @@ describe("LockPasswordCheck", () => {
       }),
     );
 
-    const passwordField = screen.getByLabelText("password");
+    const passwordField = screen.getByLabelText("Enter password");
     expect(passwordField).toHaveAttribute("type", "password");
 
     const toggle = screen.getByRole("button", {

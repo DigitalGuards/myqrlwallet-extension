@@ -2,7 +2,7 @@
   "lock.title": "MyQRLWallet",
   "lock.unlock.title": "Unlock Wallet",
   "lock.unlock.description": "Unlock the wallet with your password",
-  "lock.unlock.passwordPlaceholder": "Password",
+  "lock.unlock.passwordPlaceholder": "Enter password",
   "lock.unlock.passwordDescription": "Enter the wallet password",
   "lock.unlock.button": "Unlock",
   "lock.unlock.buttonLoading": "Unlocking",
