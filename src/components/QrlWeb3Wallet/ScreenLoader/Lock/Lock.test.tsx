@@ -29,7 +29,9 @@ describe("Lock", () => {
       }),
     );
 
-    expect(screen.getByText("MyQRLWallet")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "MyQRLWallet" }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("loader-icon")).toBeInTheDocument();
     expect(screen.queryByText("Mocked Lock Password")).not.toBeInTheDocument();
   });
@@ -41,7 +43,9 @@ describe("Lock", () => {
       }),
     );
 
-    expect(screen.getByText("MyQRLWallet")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "MyQRLWallet" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Mocked Lock Password")).toBeInTheDocument();
     expect(screen.queryByTestId("loader-icon")).not.toBeInTheDocument();
   });

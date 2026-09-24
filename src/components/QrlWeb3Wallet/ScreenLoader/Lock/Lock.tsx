@@ -3,6 +3,7 @@ import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import LockPassword from "./LockPassword/LockPassword";
 import BrandedLoader from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/BrandedLoader/BrandedLoader";
+import BrandMark from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/BrandMark/BrandMark";
 
 const Lock = observer(() => {
   const { lockStore } = useStore();
@@ -20,11 +21,7 @@ const Lock = observer(() => {
         className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-primary/20 blur-3xl"
       />
       <div className="relative z-10 flex flex-col items-center gap-4">
-        <img
-          className="h-16 w-16 drop-shadow-[0_0_18px_hsl(var(--primary)/0.35)]"
-          src="icons/qrl/default.png"
-          alt="MyQRLWallet"
-        />
+        <BrandMark className="h-16 w-16 text-primary" title="MyQRLWallet" />
         <h1 className="text-3xl font-bold tracking-tight text-foreground">
           {t("lock.title")}
         </h1>

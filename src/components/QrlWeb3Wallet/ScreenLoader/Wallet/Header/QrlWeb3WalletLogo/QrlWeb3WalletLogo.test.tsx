@@ -17,9 +17,9 @@ describe("QrlWeb3WalletLogo", () => {
   it("should render the qrl web3 wallet logo in the component", () => {
     renderComponent();
 
-    const img = screen.getByAltText("MyQRLWallet Logo");
-    expect(img).toBeInTheDocument();
-    expect(img).toHaveAttribute("src", "icons/qrl/default.png");
-    expect(img).toHaveClass("h-6", "w-6");
+    const mark = screen.getByRole("img", { name: "MyQRLWallet Logo" });
+    expect(mark).toBeInTheDocument();
+    expect(mark.tagName).toBe("svg");
+    expect(mark).toHaveClass("h-6", "w-6");
   });
 });
