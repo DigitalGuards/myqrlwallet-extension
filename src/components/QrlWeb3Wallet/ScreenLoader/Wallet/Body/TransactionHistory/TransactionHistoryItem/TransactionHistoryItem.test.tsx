@@ -56,6 +56,31 @@ describe("TransactionHistoryItem", () => {
     ).toBeInTheDocument();
   });
 
+  it("should render a padded whole amount compactly and keep the exact value on hover", () => {
+    renderComponent(
+      makeSampleEntry({
+        from: OTHER_ACCOUNT,
+        to: ACTIVE_ACCOUNT,
+        amount: "40500.000000000000000000",
+      }),
+    );
+
+    const rendered = screen.getByText("+40,500 QRL");
+    expect(rendered).toBeInTheDocument();
+    expect(rendered).toHaveAttribute("title", "40500 QRL");
+    expect(
+      screen.queryByText("+40500.000000000000000000 QRL"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("should collapse an amount below the display threshold", () => {
+    renderComponent(makeSampleEntry({ amount: "0.000000000000000001" }));
+
+    const rendered = screen.getByText("<0.000001 QRL");
+    expect(rendered).toBeInTheDocument();
+    expect(rendered).toHaveAttribute("title", "0.000000000000000001 QRL");
+  });
+
   it("should render a failed transaction", () => {
     renderComponent(makeSampleEntry({ status: false }));
 
