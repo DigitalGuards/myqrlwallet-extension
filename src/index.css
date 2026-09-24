@@ -4,116 +4,125 @@
 
 @layer base {
   /*
-   * MyQRLWallet design tokens: "Obsidian & Ember", ported from the web
-   * wallet system (myqrlwallet-frontend/src/index.css). One deep warm-ink
-   * surface family, ember orange as the single action color, champagne as
-   * the identity color (addresses, account markers): orange acts,
-   * champagne identifies. Tailwind v3 here, so the tokens live in this
-   * CSS variable layer and are wired through tailwind.config.js.
+   * MyQRLWallet design tokens: "QRL Blue", ported from the web wallet
+   * system (myqrlwallet-frontend/src/index.css). One deep navy surface
+   * family, QRL sky blue as the single action color, pale ice blue as the
+   * identity color (addresses, account markers): sky blue acts, ice blue
+   * identifies. Tailwind v3 here, so the tokens live in this CSS variable
+   * layer and are wired through tailwind.config.js.
    *
    * The rest of the product family (web, desktop, mobile) is dark-only;
-   * the extension keeps its light preference, so :root carries a warm
-   * paper counterpart of the same palette.
+   * the extension keeps its light preference, so :root carries a cool
+   * paper counterpart of the same palette, darkened where WCAG AA on
+   * white demands it.
    */
   :root {
-    --background: 36 25% 96%;
-    --foreground: 235 15% 8%;
+    --background: 210 30% 97%;
+    --foreground: 222 45% 10%;
 
     --card: 0 0% 100%;
-    --card-foreground: 235 15% 8%;
+    --card-foreground: 222 45% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 235 15% 8%;
+    --popover-foreground: 222 45% 10%;
 
-    /* Ember: the single action color */
-    --primary: 24 96% 50%;
-    --primary-foreground: 24 90% 97%;
+    /* QRL sky blue: the single action color, darkened for paper */
+    --primary: 199 85% 32%;
+    --primary-foreground: 205 80% 98%;
 
-    /* QRL Orange kept as the brand accent token (rails, edges, badges) */
-    --secondary: 25 95% 48%;
-    --secondary-foreground: 24 90% 97%;
+    /* Brand accent token (rails, edges, badges), a sibling of primary */
+    --secondary: 200 85% 29%;
+    --secondary-foreground: 205 80% 98%;
 
-    /* Champagne identity color (addresses, account markers), deepened
-       to bronze so it keeps contrast on light surfaces */
-    --identity-accent: 38 45% 34%;
-    --identity-accent-foreground: 38 60% 97%;
+    /* Ice-blue identity color (addresses, account markers), deepened so it
+       keeps contrast on light surfaces */
+    --identity-accent: 199 60% 28%;
+    --identity-accent-foreground: 205 60% 98%;
 
-    --success: 152 55% 34%;
-    --success-foreground: 152 80% 97%;
+    --success: 152 55% 29%;
+    --success-foreground: 152 80% 98%;
 
-    --muted: 36 15% 90%;
-    --muted-foreground: 234 8% 40%;
+    --muted: 215 25% 92%;
+    --muted-foreground: 215 18% 38%;
 
-    --accent: 36 18% 91%;
-    --accent-foreground: 235 15% 8%;
+    --accent: 214 28% 93%;
+    --accent-foreground: 222 45% 10%;
 
-    --constructive: 152 55% 34%;
-    --constructive-foreground: 152 80% 97%;
+    --constructive: 152 55% 29%;
+    --constructive-foreground: 152 80% 98%;
 
-    --destructive: 0 68% 46%;
+    --destructive: 0 65% 42%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 235 10% 86%;
-    --input: 235 10% 82%;
-    --ring: 24 96% 50%;
+    --border: 214 25% 85%;
+    --input: 214 25% 80%;
+    --ring: 199 85% 32%;
 
     --scrollbar-width: thin;
     --scrollbar-track-color: transparent;
     --scrollbar-thumb-color: hsl(var(--muted-foreground) / 0.35);
     --radius: 0.75rem;
 
-    --chart-1: 24 96% 55%;
-    --chart-2: 190 90% 58%;
-    --chart-3: 40 95% 60%;
-    --chart-4: 168 60% 45%;
-    --chart-5: 340 70% 58%;
+    --hero-top: 205 45% 92%;
+
+    --chart-1: 199 78% 42%;
+    --chart-2: 168 60% 34%;
+    --chart-3: 199 60% 28%;
+    --chart-4: 262 65% 52%;
+    --chart-5: 330 65% 45%;
   }
 
   .dark {
-    --background: 235 15% 4%;
-    --foreground: 36 20% 95%;
+    --background: 222 45% 6%;
+    --foreground: 210 30% 96%;
 
-    --card: 235 13% 7%;
-    --card-foreground: 36 20% 95%;
+    --card: 222 38% 9%;
+    --card-foreground: 210 30% 96%;
 
-    --popover: 235 14% 6%;
-    --popover-foreground: 36 20% 95%;
+    --popover: 222 40% 7%;
+    --popover-foreground: 210 30% 96%;
 
-    --primary: 24 96% 55%;
-    --primary-foreground: 24 90% 6%;
+    --primary: 199 78% 55%;
+    --primary-foreground: 205 80% 8%;
 
-    --secondary: 25 95% 53%;
-    --secondary-foreground: 24 90% 6%;
+    --secondary: 200 82% 52%;
+    --secondary-foreground: 205 80% 8%;
 
-    /* Champagne: the identity color (addresses, account markers) and
-       informational states. Orange acts, champagne identifies. */
-    --identity-accent: 38 45% 76%;
-    --identity-accent-foreground: 38 60% 8%;
+    /* Ice blue: the identity color (addresses, account markers) and
+       informational states. Sky blue acts, ice blue identifies. */
+    --identity-accent: 196 60% 78%;
+    --identity-accent-foreground: 205 60% 8%;
 
     --success: 152 55% 48%;
     --success-foreground: 152 80% 8%;
 
-    --muted: 235 10% 12%;
-    --muted-foreground: 234 8% 64%;
+    --muted: 222 30% 13%;
+    --muted-foreground: 215 15% 66%;
 
-    --accent: 235 11% 13%;
-    --accent-foreground: 36 20% 95%;
+    --accent: 222 30% 14%;
+    --accent-foreground: 210 30% 96%;
 
     --constructive: 152 55% 48%;
     --constructive-foreground: 152 80% 8%;
 
-    --destructive: 0 68% 46%;
-    --destructive-foreground: 0 0% 98%;
+    /* Lifted off the palette base (0 70% 55%) so 12px destructive text and
+       destructive text on a /15 tint both clear WCAG AA. The paired
+       foreground is a deep maroon, matching how primary pairs a dark
+       foreground with a bright accent. */
+    --destructive: 0 72% 64%;
+    --destructive-foreground: 0 60% 10%;
 
-    --border: 235 10% 15%;
-    --input: 235 10% 17%;
-    --ring: 24 96% 55%;
+    --border: 220 30% 17%;
+    --input: 220 30% 20%;
+    --ring: 199 78% 55%;
 
-    --chart-1: 24 96% 55%;
-    --chart-2: 190 90% 58%;
-    --chart-3: 40 95% 60%;
-    --chart-4: 168 60% 45%;
-    --chart-5: 340 70% 58%;
+    --hero-top: 205 55% 16%;
+
+    --chart-1: 199 78% 55%;
+    --chart-2: 168 60% 50%;
+    --chart-3: 196 60% 78%;
+    --chart-4: 262 65% 68%;
+    --chart-5: 330 65% 62%;
   }
 }
 
@@ -139,14 +148,14 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Atmosphere behind the wallet surface: grain plus an ember glow up top
-     and a faint cyan glow below, exactly as on qrlwallet.com. Dark theme
-     only: the glows are tuned for ink, not paper. */
+  /* Atmosphere behind the wallet surface: grain plus a sky-blue glow up
+     top and a faint ice glow below, exactly as on qrlwallet.com. Dark
+     theme only: the glows are tuned for ink, not paper. */
   .dark body {
     background-image:
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E"),
-      radial-gradient(30rem 20rem at 15% -8%, hsl(24 96% 55% / 0.1), transparent 62%),
-      radial-gradient(26rem 18rem at 105% 110%, hsl(190 90% 58% / 0.05), transparent 60%);
+      radial-gradient(30rem 20rem at 15% -8%, hsl(199 78% 55% / 0.1), transparent 62%),
+      radial-gradient(26rem 18rem at 105% 110%, hsl(196 60% 78% / 0.05), transparent 60%);
     background-attachment: fixed;
   }
 
@@ -206,18 +215,20 @@
     border: 1px solid hsl(var(--foreground) / 0.08);
     box-shadow:
       0 1px 0 hsl(var(--foreground) / 0.05) inset,
-      0 18px 40px -24px hsl(235 30% 2% / 0.9);
+      0 18px 40px -24px hsl(222 50% 2% / 0.9);
   }
 
-  /* Ember edge treatment for "hero" cards (active account, approvals). */
+  /* Lifted edge treatment for "hero" cards (active account, approvals).
+     Utility name kept from the previous theme so in-flight branches keep
+     applying cleanly; the values are now QRL Blue. */
   .surface-ember {
     background:
-      linear-gradient(180deg, hsl(var(--primary) / 0.07), transparent 46%),
+      linear-gradient(180deg, hsl(var(--hero-top) / 0.85), transparent 46%),
       hsl(var(--card) / 0.86);
     border: 1px solid hsl(var(--primary) / 0.22);
     box-shadow:
       0 1px 0 hsl(var(--primary) / 0.14) inset,
-      0 18px 44px -22px hsl(24 96% 40% / 0.28);
+      0 18px 44px -22px hsl(199 78% 40% / 0.28);
   }
 }
 
@@ -254,8 +265,8 @@
     }
   }
 
-  /* Branded indeterminate loader (BrandedLoader): an ember beam with a
-     battery-blue leading edge sweeping a faint track. */
+  /* Branded indeterminate loader (BrandedLoader): a sky-blue beam with an
+     ice-blue leading edge sweeping a faint track. */
   .loader-track {
     position: relative;
     width: 100%;

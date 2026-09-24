@@ -52,7 +52,7 @@ const Header = () => {
         <ChainBadge displayChainName={false} />
         <QrlWeb3WalletMoreOptions />
       </div>
-      {/* Ember hairline: the brand rail, softened from the old border-b-2 */}
+      {/* Sky-blue hairline: the brand rail, softened from the old border-b-2 */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-primary/70 via-primary/25 to-transparent"
