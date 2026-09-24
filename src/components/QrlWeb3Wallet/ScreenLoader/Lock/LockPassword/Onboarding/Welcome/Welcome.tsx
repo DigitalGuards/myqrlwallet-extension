@@ -1,3 +1,4 @@
+import BrandMark from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/BrandMark/BrandMark";
 import { Button } from "@/components/UI/Button";
 import {
   Card,
@@ -34,10 +35,9 @@ const Welcome = observer(({ selectStep }: WelcomeProps) => {
           your backup for v3.
         </p>
         <div className="flex h-32 w-full items-center gap-5 overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/40 to-secondary/10 px-6">
-          <img
-            src="icons/qrl/default.png"
-            alt="MyQRLWallet"
-            className="h-16 w-16 shrink-0 drop-shadow-md"
+          <BrandMark
+            className="h-16 w-16 shrink-0 text-primary"
+            title="MyQRLWallet"
           />
           <div className="flex flex-col leading-tight">
             <span className="text-xs uppercase tracking-widest text-muted-foreground">
