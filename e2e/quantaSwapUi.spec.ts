@@ -595,7 +595,15 @@ const onboardExtension = async (
     extensionPage.getByRole("heading", { name: "That's All" }),
   ).toBeVisible();
   const closed = extensionPage.waitForEvent("close");
-  await extensionPage.getByRole("button", { name: "Done" }).click();
+  // Done closes the onboarding tab. The close can land while the click is
+  // still settling, which Playwright reports as a closed target; that is
+  // the expected outcome, so only a click on a still-open page may fail.
+  await extensionPage
+    .getByRole("button", { name: "Done" })
+    .click({ noWaitAfter: true })
+    .catch((error: unknown) => {
+      if (!extensionPage.isClosed()) throw error;
+    });
   await closed;
   await expect
     .poll(
