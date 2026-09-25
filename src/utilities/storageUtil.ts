@@ -108,7 +108,19 @@ export type WalletSettings = {
   language?: string;
   defaultGasTier?: GasTier;
   showBalanceAndPrice?: boolean;
+  // Legacy boolean. Older builds re-persisted it on every settings write, so
+  // a stored `false` is not evidence of a user choice. Kept in sync by
+  // settingsStore so a downgrade still reads a sane value; the surface
+  // decision itself uses sidePanelSurface (see scripts/utils/sidePanelSurface.ts).
   sidePanelPreferred?: boolean;
+  // The explicit surface choice, written only when the user picks one from
+  // the header menu or the migration notice. Unset means the default, which
+  // is the side panel wherever the API exists.
+  sidePanelSurface?: "panel" | "popup";
+  // Armed by runtime.onInstalled on an update so existing installs see the
+  // one-time "we moved to the side panel" notice exactly once.
+  sidePanelNoticePending?: boolean;
+  sidePanelNoticeSeen?: boolean;
   notificationsEnabled?: boolean;
   phishingDetectionEnabled?: boolean;
 };

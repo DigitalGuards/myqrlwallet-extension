@@ -37,6 +37,7 @@ const mockedBrowser = {
     },
   },
   runtime: {
+    id: "mock-id",
     sendMessage: vi.fn().mockResolvedValue(undefined),
     getURL: vi.fn((path: string) => `chrome-extension://mock-id/${path}`),
     connect: vi.fn(() => ({
@@ -50,6 +51,10 @@ const mockedBrowser = {
       removeListener: vi.fn(),
     },
     onConnect: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
+    onInstalled: {
       addListener: vi.fn(),
       removeListener: vi.fn(),
     },

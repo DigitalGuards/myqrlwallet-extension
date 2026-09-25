@@ -6,6 +6,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/UI/DropdownMenu";
 import { APP_TAB_FILE } from "@/constants/qrlWeb3Wallet";
+import { SIDE_PANEL_PATH } from "@/scripts/utils/sidePanelPreference";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
 import {
@@ -42,7 +43,7 @@ const QrlWeb3WalletMoreOptions = observer(() => {
   const openAsSidePanel = async () => {
     try {
       await setSidePanelPreferred(true);
-      await chrome.sidePanel.setOptions({ path: "index.html?sidepanel=true" });
+      await chrome.sidePanel.setOptions({ path: SIDE_PANEL_PATH });
       const win = await browser.windows.getCurrent();
       if (win.id !== undefined) {
         await chrome.sidePanel.open({ windowId: win.id });

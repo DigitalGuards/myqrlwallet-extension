@@ -1,5 +1,9 @@
 import i18n from "@/i18n";
 import { LOCK_MANAGER_MESSAGES } from "@/scripts/lockManager/lockManager";
+import {
+  resolveSidePanelPreferred,
+  SIDE_PANEL_PATH,
+} from "@/scripts/utils/sidePanelPreference";
 import type { GasTier } from "@/types/gasFee";
 import StorageUtil from "@/utilities/storageUtil";
 import { action, makeAutoObservable, observable, runInAction } from "mobx";
@@ -11,6 +15,7 @@ const THEME = Object.freeze({
 });
 
 type ThemePreference = "system" | "light" | "dark";
+type SidePanelSurface = "panel" | "popup";
 
 
 class SettingsStore {
@@ -25,7 +30,15 @@ class SettingsStore {
   language = "en";
   defaultGasTier: GasTier = "market";
   showBalanceAndPrice = true;
+  // Resolved surface default. True wherever the side panel API exists and
+  // the user has not explicitly chosen the popup.
   sidePanelPreferred = false;
+  // The explicit choice, undefined until the user makes one.
+  sidePanelSurface: SidePanelSurface | undefined = undefined;
+  // One-time "the wallet moved to the side panel" notice, armed by
+  // runtime.onInstalled for installs that predate this version.
+  sidePanelNoticePending = false;
+  sidePanelNoticeSeen = false;
   notificationsEnabled = true;
   phishingDetectionEnabled = true;
 
@@ -41,6 +54,9 @@ class SettingsStore {
       defaultGasTier: observable,
       showBalanceAndPrice: observable,
       sidePanelPreferred: observable,
+      sidePanelSurface: observable,
+      sidePanelNoticePending: observable,
+      sidePanelNoticeSeen: observable,
       notificationsEnabled: observable,
       phishingDetectionEnabled: observable,
       setThemePreference: action.bound,
@@ -50,6 +66,7 @@ class SettingsStore {
       setDefaultGasTier: action.bound,
       setShowBalanceAndPrice: action.bound,
       setSidePanelPreferred: action.bound,
+      dismissSidePanelNotice: action.bound,
       setNotificationsEnabled: action.bound,
       setPhishingDetectionEnabled: action.bound,
     });
@@ -102,9 +119,10 @@ class SettingsStore {
       if (settings.phishingDetectionEnabled !== undefined) {
         this.phishingDetectionEnabled = settings.phishingDetectionEnabled;
       }
-      if (settings.sidePanelPreferred !== undefined) {
-        this.sidePanelPreferred = settings.sidePanelPreferred;
-      }
+      this.sidePanelSurface = settings.sidePanelSurface;
+      this.sidePanelPreferred = resolveSidePanelPreferred(settings);
+      this.sidePanelNoticePending = settings.sidePanelNoticePending === true;
+      this.sidePanelNoticeSeen = settings.sidePanelNoticeSeen === true;
     });
   }
 
@@ -136,7 +154,12 @@ class SettingsStore {
       language: this.language,
       defaultGasTier: this.defaultGasTier,
       showBalanceAndPrice: this.showBalanceAndPrice,
+      // Kept in sync so a downgrade to an older build still reads a sane
+      // value. The surface decision itself uses sidePanelSurface.
       sidePanelPreferred: this.sidePanelPreferred,
+      sidePanelSurface: this.sidePanelSurface,
+      sidePanelNoticePending: this.sidePanelNoticePending,
+      sidePanelNoticeSeen: this.sidePanelNoticeSeen,
       notificationsEnabled: this.notificationsEnabled,
       phishingDetectionEnabled: this.phishingDetectionEnabled,
     });
@@ -187,8 +210,17 @@ class SettingsStore {
     await this.#persistSettings();
   }
 
+  /**
+   * Records an explicit surface choice. Writing sidePanelSurface is what
+   * distinguishes a real decision from the default, so the toolbar click and
+   * the dApp approval path both follow the user from here on.
+   */
   async setSidePanelPreferred(preferred: boolean) {
     this.sidePanelPreferred = preferred;
+    this.sidePanelSurface = preferred ? "panel" : "popup";
+    // The choice itself answers the notice.
+    this.sidePanelNoticePending = false;
+    this.sidePanelNoticeSeen = true;
     await this.#persistSettings();
     if (
       typeof chrome !== "undefined" &&
@@ -198,10 +230,20 @@ class SettingsStore {
         await chrome.sidePanel.setPanelBehavior({
           openPanelOnActionClick: preferred,
         });
+        if (preferred) {
+          await chrome.sidePanel.setOptions({ path: SIDE_PANEL_PATH });
+        }
       } catch {
         // sidePanel API may not be available in all browsers.
       }
     }
+  }
+
+  /** Clears the one-time migration notice without changing the surface. */
+  async dismissSidePanelNotice() {
+    this.sidePanelNoticePending = false;
+    this.sidePanelNoticeSeen = true;
+    await this.#persistSettings();
   }
 }
 
