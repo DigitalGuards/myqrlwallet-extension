@@ -17,6 +17,7 @@ import {
   createProviderStreamFailureGuard,
 } from "./utils/providerConnectionLifecycle";
 import { checkForLastError } from "./utils/scriptUtils";
+import { handleSidePanelOpenRequest } from "./utils/sidePanelContentBridge";
 
 // NOTE: this script deliberately performs NO RPC. Content-script fetches
 // run under the hosting page's CORS (Chrome 85+), so any network call
@@ -190,15 +191,21 @@ const setupExtensionStreams = () => {
 
 const prepareListeners = () => {
   // listens to messages coming from the service worker(browser.tabs.sendMessage)
-  browser.runtime.onMessage.addListener(async (message: MessageType) => {
-    if (message.name === EXTENSION_MESSAGES.READY) {
-      if (!extensionStream) {
-        setupExtensionStreams();
+  browser.runtime.onMessage.addListener(
+    async (message: MessageType, sender) => {
+      if (message.name === EXTENSION_MESSAGES.REQUEST_OPEN_SIDE_PANEL) {
+        handleSidePanelOpenRequest(message, sender);
+        return "";
       }
-      return "QrlWeb3Wallet: handled service worker ready message";
-    }
-    return "";
-  });
+      if (message.name === EXTENSION_MESSAGES.READY) {
+        if (!extensionStream) {
+          setupExtensionStreams();
+        }
+        return "QrlWeb3Wallet: handled service worker ready message";
+      }
+      return "";
+    },
+  );
 };
 
 const keepServiceWorkerActive = () => {

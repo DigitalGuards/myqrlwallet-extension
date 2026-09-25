@@ -9,6 +9,11 @@ export const EXTENSION_MESSAGES = {
   CONNECTION_READY: "QRL_WALLET_CONNECTION_READY",
   READY: "QRL_WALLET_EXTENSION_READY",
   DAPP_RESPONSE: "QRL_WALLET_DAPP_RESPONSE",
+  // Side-panel gesture roundtrip. The service worker asks the requesting tab
+  // for its user activation, and the frame that holds it answers; see
+  // scripts/utils/sidePanelSurface.ts.
+  REQUEST_OPEN_SIDE_PANEL: "QRL_WALLET_REQUEST_OPEN_SIDE_PANEL",
+  OPEN_SIDE_PANEL: "QRL_WALLET_OPEN_SIDE_PANEL",
 } as const;
 
 export const QRL_POST_MESSAGE_STREAM = {
