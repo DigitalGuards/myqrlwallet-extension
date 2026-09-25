@@ -276,9 +276,11 @@ const getRestrictedMethodResult = async (
   };
 
   // The request must be in session storage BEFORE the surface opens so a
-  // freshly-created popup/window finds it on mount.
+  // freshly-created popup/window/panel finds it on mount.
   await StorageUtil.setDAppsRequestData(request);
-  await openApprovalSurface();
+  // The tab id lets the side-panel path ask that tab to forward the user
+  // gesture; it stays UI-only context and is no part of any trust decision.
+  await openApprovalSurface({ tabId: req.senderData?.tabId });
 
   // Safety timeout: if the popup never connects its lifecycle port (e.g.
   // openPopup() failed) and never posts a DAPP_RESPONSE, fall through here so
@@ -371,7 +373,7 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
     }
     if (isRequestPending) {
       try {
-        await openApprovalSurface();
+        await openApprovalSurface({ tabId: req.senderData?.tabId });
       } finally {
         res.error = providerErrors.unsupportedMethod({
           message: "A request is already pending",

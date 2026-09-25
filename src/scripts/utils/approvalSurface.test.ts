@@ -5,6 +5,36 @@ import {
   handleApprovalWindowRemoved,
   openApprovalSurface,
 } from "./approvalSurface";
+import {
+  handleSidePanelOpenMessage,
+  resetSidePanelOpenerForTests,
+} from "./sidePanelSurface";
+
+const sidePanelOpen = vi.fn(async () => undefined);
+
+// A browser with the side panel API but no panel currently open.
+const installSidePanelApi = () => {
+  (globalThis as Record<string, unknown>).chrome = {
+    sidePanel: { open: sidePanelOpen },
+    runtime: {
+      ContextType: { SIDE_PANEL: "SIDE_PANEL", POPUP: "POPUP" },
+      getContexts: vi.fn(async () => []),
+    },
+  };
+};
+
+// Answers the pending gesture roundtrip as the requesting tab would.
+const answerGestureRoundtrip = async (tabId: number) => {
+  await vi.waitFor(() =>
+    expect(browser.tabs.sendMessage).toHaveBeenCalledTimes(1),
+  );
+  const calls = vi.mocked(browser.tabs.sendMessage).mock.calls;
+  const sent = calls[calls.length - 1]?.[1] as { name: string; nonce: string };
+  handleSidePanelOpenMessage(
+    { name: "QRL_WALLET_OPEN_SIDE_PANEL", nonce: sent.nonce },
+    { id: "mock-id", tab: { id: tabId } } as never,
+  );
+};
 
 const setSettings = (settings: object) => {
   vi.mocked(browser.storage.local.get).mockImplementation(async (key) =>
@@ -19,7 +49,13 @@ describe("openApprovalSurface", () => {
     // Module state (the tracked window id) persists across tests; start
     // each test with the notification window closed.
     handleApprovalWindowRemoved(77);
-    setSettings({});
+    resetSidePanelOpenerForTests();
+    sidePanelOpen.mockClear();
+    sidePanelOpen.mockResolvedValue(undefined);
+    // The default browser for these cases has no side panel API, so the
+    // popup path is the preferred surface.
+    setSettings({ sidePanelSurface: "popup" });
+    vi.mocked(browser.tabs.sendMessage).mockResolvedValue(undefined);
     vi.mocked(browser.action.openPopup).mockResolvedValue(undefined);
     vi.mocked(browser.windows.create).mockResolvedValue({
       id: 77,
@@ -34,6 +70,7 @@ describe("openApprovalSurface", () => {
   });
 
   afterEach(() => {
+    resetSidePanelOpenerForTests();
     delete (globalThis as Record<string, unknown>).chrome;
   });
 
@@ -91,13 +128,63 @@ describe("openApprovalSurface", () => {
     expect(browser.windows.update).not.toHaveBeenCalled();
   });
 
-  it("does nothing in side-panel mode", async () => {
-    setSettings({ sidePanelPreferred: true });
+  it("does nothing when a side panel is already open", async () => {
+    setSettings({});
+    (globalThis as Record<string, unknown>).chrome = {
+      sidePanel: { open: sidePanelOpen },
+      runtime: {
+        ContextType: { SIDE_PANEL: "SIDE_PANEL", POPUP: "POPUP" },
+        getContexts: vi.fn(async (filter: { contextTypes: string[] }) =>
+          filter.contextTypes.includes("SIDE_PANEL")
+            ? [{ contextType: "SIDE_PANEL" }]
+            : [],
+        ),
+      },
+    };
 
-    await openApprovalSurface();
+    await openApprovalSurface({ tabId: 5 });
 
+    expect(sidePanelOpen).not.toHaveBeenCalled();
     expect(browser.action.openPopup).not.toHaveBeenCalled();
     expect(browser.windows.create).not.toHaveBeenCalled();
+  });
+
+  it("opens the side panel for the requesting tab when it is preferred", async () => {
+    setSettings({});
+    installSidePanelApi();
+
+    const pending = openApprovalSurface({ tabId: 5 });
+    await answerGestureRoundtrip(5);
+    await pending;
+
+    expect(sidePanelOpen).toHaveBeenCalledWith({ tabId: 5 });
+    expect(browser.action.openPopup).not.toHaveBeenCalled();
+    expect(browser.windows.create).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the popup when the gesture roundtrip times out", async () => {
+    setSettings({});
+    installSidePanelApi();
+    vi.useFakeTimers();
+
+    const pending = openApprovalSurface({ tabId: 5 });
+    await vi.advanceTimersByTimeAsync(600);
+    await pending;
+    vi.useRealTimers();
+
+    expect(sidePanelOpen).not.toHaveBeenCalled();
+    expect(browser.action.openPopup).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the side panel entirely for an explicit popup choice", async () => {
+    setSettings({ sidePanelSurface: "popup" });
+    installSidePanelApi();
+
+    await openApprovalSurface({ tabId: 5 });
+
+    expect(browser.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(sidePanelOpen).not.toHaveBeenCalled();
+    expect(browser.action.openPopup).toHaveBeenCalledTimes(1);
   });
 
   it("does not open a window when the action popup is already open", async () => {

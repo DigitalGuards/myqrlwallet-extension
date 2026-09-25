@@ -591,5 +591,8 @@
   "loader.phaseNetwork": "Contactando con la red",
   "loader.phaseAccounts": "Obteniendo saldos",
   "loader.phaseSession": "Restaurando tu sesión",
-  "lock.unlock.togglePasswordVisibility": "Alternar visibilidad de la contraseña"
+  "lock.unlock.togglePasswordVisibility": "Alternar visibilidad de la contraseña",
+  "sidePanelNotice.message": "MyQRLWallet ahora se abre en el panel lateral. Puedes volver al modo anterior cuando quieras desde el menú ⋮.",
+  "sidePanelNotice.usePopup": "Usar la ventana emergente",
+  "sidePanelNotice.dismiss": "Cerrar"
 }

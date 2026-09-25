@@ -28,6 +28,12 @@ import {
   registerDAppAccountNotificationStream,
 } from "./utils/dAppAccountNotifications";
 import { initializeContentScriptProviderConnection } from "./utils/providerConnectionLifecycle";
+import {
+  applyEarlySidePanelToolbarBehavior,
+  applySidePanelToolbarBehavior,
+  handleSidePanelInstalled,
+  registerSidePanelOpenListener,
+} from "./utils/sidePanelSurface";
 
 type ContentScriptType = browser.Scripting.RegisteredContentScript;
 
@@ -75,6 +81,15 @@ const prepareListeners = () => {
   });
   // Listening for messages related to the wallet locking.
   browser.runtime.onMessage.addListener(LockManager.lockManagerListener);
+  // Side-panel gesture roundtrip. Registered early so a request that arrives
+  // right after a cold start still finds its listener.
+  registerSidePanelOpenListener();
+  // Existing installs move to the side panel and get the one-time notice.
+  browser.runtime.onInstalled.addListener((details) => {
+    handleSidePanelInstalled(details.reason).catch(() => {
+      // Best effort: a failed notice flag must not break the install.
+    });
+  });
   // Listening for transaction notification requests from the popup.
   // IMPORTANT: Must NOT be async. Returning a Promise from onMessage claims the
   // message channel and prevents lockManagerListener from responding.
@@ -230,21 +245,6 @@ const establishLockManagerConnection = () => {
   });
 };
 
-const applySidePanelPreference = async () => {
-  try {
-    const settings = await StorageUtil.getSettings();
-    await chrome.sidePanel.setPanelBehavior({
-      openPanelOnActionClick: !!settings.sidePanelPreferred,
-    });
-    // Set side panel path with query parameter so the UI can detect side panel mode.
-    await chrome.sidePanel.setOptions({
-      path: "index.html?sidepanel=true",
-    });
-  } catch {
-    // sidePanel API may not be available in all browsers.
-  }
-};
-
 const enforceSessionStorageAccessLevel = async () => {
   // Pin session storage to TRUSTED_CONTEXTS so content scripts cannot read
   // the decrypted-keys backup. TRUSTED_CONTEXTS is the MV3 default; we set it
@@ -260,6 +260,11 @@ const enforceSessionStorageAccessLevel = async () => {
 };
 
 const initializeServiceWorker = async () => {
+  // Before anything else: the toolbar click that woke this worker may be
+  // moments away, and Chrome uses the manifest `default_popup` until the
+  // panel behaviour is set.
+  await applyEarlySidePanelToolbarBehavior();
+
   // Register listeners first so the popup can always communicate with the service worker,
   // even if script registration fails.
   prepareListeners();
@@ -274,7 +279,8 @@ const initializeServiceWorker = async () => {
     console.warn("QrlWeb3Wallet: Failed to register content scripts\n", error);
   }
 
-  await applySidePanelPreference();
+  // Reconcile: applies the persisted preference and pins the panel path.
+  await applySidePanelToolbarBehavior();
 
   // Initialize phishing detection
   await initializePhishingDetector();

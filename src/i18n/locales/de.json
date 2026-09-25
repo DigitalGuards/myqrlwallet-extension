@@ -591,5 +591,8 @@
   "loader.phaseNetwork": "Netzwerk wird kontaktiert",
   "loader.phaseAccounts": "Kontostände werden abgerufen",
   "loader.phaseSession": "Sitzung wird wiederhergestellt",
-  "lock.unlock.togglePasswordVisibility": "Passwortanzeige umschalten"
+  "lock.unlock.togglePasswordVisibility": "Passwortanzeige umschalten",
+  "sidePanelNotice.message": "MyQRLWallet öffnet sich jetzt in der Seitenleiste. Du kannst jederzeit über das ⋮-Menü zurückwechseln.",
+  "sidePanelNotice.usePopup": "Stattdessen das Popup verwenden",
+  "sidePanelNotice.dismiss": "Schließen"
 }
