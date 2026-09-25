@@ -1,4 +1,5 @@
 import { Alert, AlertDescription } from "@/components/UI/Alert";
+import { Button } from "@/components/UI/Button";
 import {
   Card,
   CardContent,
@@ -47,6 +48,7 @@ const ImportAccount = observer(() => {
   const [account, setAccount] = useState<Web3BaseWalletAccount>();
   const [hasAccountImported, setHasAccountImported] = useState(false);
   const [finalizeError, setFinalizeError] = useState("");
+  const [needsUnlock, setNeedsUnlock] = useState(false);
   const { lockStore, qrlStore, accountLabelsStore } = useStore();
   const { encryptAccount, getWalletPassword } = lockStore;
   const { setActiveAccount } = qrlStore;
@@ -57,22 +59,66 @@ const ImportAccount = observer(() => {
   // hex seed via the lock manager keystore).
   const finalizeImport = async (importedAccount: Web3BaseWalletAccount) => {
     scrollShellToTop();
-    setAccount(importedAccount);
-    await setActiveAccount(importedAccount.address);
+    // Fail closed before any write. The unlock session can be usable for
+    // reads and still have no password: after a service-worker restart the
+    // decrypted keys self-heal from session storage (so the wallet reads as
+    // unlocked and no lock screen is shown) while the memory-only password
+    // is gone. Writing the account pointer first left that address in the
+    // accounts list with no keystore, so the import both reported failure
+    // and appeared to have happened.
+    let password: string;
     try {
-      // Fail closed if the password is unavailable (SW restarted, no cached
-      // password): never persist the keystore under an empty password.
-      const password = await getWalletPassword();
+      password = await getWalletPassword();
+    } catch {
+      setNeedsUnlock(true);
+      setFinalizeError(t("account.passwordUnavailable"));
+      return;
+    }
+    setAccount(importedAccount);
+    try {
       await encryptAccount(importedAccount, password);
     } catch {
+      setNeedsUnlock(true);
       setFinalizeError(t("account.passwordUnavailable"));
+      return;
+    }
+    // Pointer after the keystore: an account the wallet points at always has
+    // a key behind it. Safe here because the wallet already has at least one
+    // account, so the service worker never sees the keystores-without-
+    // accounts state that onboarding has to order around.
+    try {
+      await setActiveAccount(importedAccount.address);
+    } catch {
+      setNeedsUnlock(false);
+      setFinalizeError(t("onboarding.account.persistError"));
       return;
     }
     // Name it now so the header reads "Account N" immediately rather than
     // the raw address until some other screen happens to run syncLabels.
-    await accountLabelsStore.ensureLabel(importedAccount.address);
+    // Never strand a persisted import on a naming failure: syncLabels
+    // backstops the label later.
+    await accountLabelsStore
+      .ensureLabel(importedAccount.address)
+      .catch(() => {});
+    setNeedsUnlock(false);
     setFinalizeError("");
     setHasAccountImported(true);
+  };
+
+  // The password being gone means the unlock session is spent, but the
+  // wallet still reads as unlocked so nothing routes the user anywhere.
+  // Locking here is the route: it flips the shell to the real unlock
+  // screen, and the router stays on this page, so unlocking lands the user
+  // back in the import form.
+  const goToUnlock = async () => {
+    try {
+      await lockStore.lock();
+    } catch {
+      // Keep the alert and its action so the user can retry.
+      return;
+    }
+    setNeedsUnlock(false);
+    setFinalizeError("");
   };
 
   return (
@@ -86,7 +132,20 @@ const ImportAccount = observer(() => {
             <BackButton />
             {finalizeError && (
               <Alert variant="destructive" className="mb-4">
-                <AlertDescription>{finalizeError}</AlertDescription>
+                <AlertDescription>
+                  {finalizeError}
+                  {needsUnlock && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-3 w-full"
+                      onClick={goToUnlock}
+                    >
+                      {t("account.passwordUnavailableAction")}
+                    </Button>
+                  )}
+                </AlertDescription>
               </Alert>
             )}
             <Card>

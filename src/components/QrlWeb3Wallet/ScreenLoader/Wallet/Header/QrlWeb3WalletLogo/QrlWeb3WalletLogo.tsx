@@ -1,3 +1,4 @@
+import BrandMark from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/BrandMark/BrandMark";
 import { Label } from "@/components/UI/Label";
 import {
   Tooltip,
@@ -14,14 +15,13 @@ const QrlWeb3WalletLogo = () => {
     <Link to={ROUTES.HOME}>
       <Tooltip delayDuration={0}>
         <TooltipTrigger asChild>
-          <img
-            className="h-6 w-6"
-            src="icons/qrl/default.png"
-            alt="MyQRLWallet Logo"
+          <BrandMark
+            className="h-6 w-6 text-primary"
+            title="MyQRLWallet Logo"
           />
         </TooltipTrigger>
         <TooltipContent side="bottom">
-          <Label>{t('nav.home')}</Label>
+          <Label>{t("nav.home")}</Label>
         </TooltipContent>
       </Tooltip>
     </Link>

@@ -15,7 +15,7 @@ import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 
-// Champagne identifies: the account marker wears the identity color.
+// Ice blue identifies: the account marker wears the identity color.
 const badgeButtonClasses = cva(
   "font-data flex items-center gap-1 rounded-full border-identity-accent/30 text-xs text-identity-accent hover:text-identity-accent",
   {

@@ -42,7 +42,9 @@ describe("Welcome", () => {
     expect(screen.getByText("We are")).toBeInTheDocument();
     expect(screen.getByText("The Quantum")).toBeInTheDocument();
     expect(screen.getByText("Resistant Ledger")).toBeInTheDocument();
-    expect(screen.getByAltText("MyQRLWallet")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "MyQRLWallet" }),
+    ).toBeInTheDocument();
     const continueButton = screen.getByRole("button", { name: "Continue" });
     expect(continueButton).toBeInTheDocument();
     expect(continueButton).toBeEnabled();
