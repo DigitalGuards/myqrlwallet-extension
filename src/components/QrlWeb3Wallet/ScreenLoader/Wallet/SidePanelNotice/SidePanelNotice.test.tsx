@@ -38,7 +38,7 @@ describe("SidePanelNotice", () => {
     renderWith({ sidePanelNoticePending: true, setSidePanelPreferred });
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Use the popup instead" }),
+      screen.getByRole("button", { name: "Switch to the popup" }),
     );
 
     expect(setSidePanelPreferred).toHaveBeenCalledWith(false);

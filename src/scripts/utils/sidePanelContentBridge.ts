@@ -27,8 +27,8 @@ export const handleSidePanelOpenRequest = (
   if (typeof nonce !== "string" || nonce.length === 0) {
     return false;
   }
-  // Chrome routes other extensions to onMessageExternal, so this is a second
-  // fence rather than the only one.
+  // Chrome routes other extensions to onMessageExternal; this check is a
+  // second fence behind that routing.
   if (sender?.id !== undefined && sender.id !== browser.runtime.id) {
     return false;
   }

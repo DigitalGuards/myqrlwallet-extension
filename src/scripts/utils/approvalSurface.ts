@@ -76,8 +76,8 @@ const ensureWindowTracking = () => {
  *  3. The toolbar-anchored action popup.
  *  4. A standalone notification window near the top-right of the focused
  *     browser window, when Chrome refuses openPopup() (it fails silently on
- *     some setups). Re-invocations focus the existing window instead of
- *     stacking new ones.
+ *     some setups). Re-invocations focus the one existing window, so
+ *     windows never stack.
  *
  * The badge is set by the storage listener in the service worker either way.
  * Never throws.

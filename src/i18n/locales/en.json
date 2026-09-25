@@ -593,6 +593,6 @@
   "loader.phaseSession": "Restoring your session",
   "lock.unlock.togglePasswordVisibility": "Toggle password visibility",
   "sidePanelNotice.message": "MyQRLWallet now opens in the side panel. Switch back any time from the ⋮ menu.",
-  "sidePanelNotice.usePopup": "Use the popup instead",
+  "sidePanelNotice.usePopup": "Switch to the popup",
   "sidePanelNotice.dismiss": "Dismiss"
 }
