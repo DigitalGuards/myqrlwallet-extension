@@ -15,7 +15,7 @@ const QRL_TESTNET_DATA = {
   chainId: V3_CHAIN_ID,
   chainName: "QRL v3 Private",
   rpcUrls: [QRL_TESTNET_RPC_PROXY],
-  blockExplorerUrls: ["https://v3.zondscan.com"],
+  blockExplorerUrls: ["https://zondscan.com"],
   nativeCurrency: {
     name: "Quanta",
     symbol: "Quanta",

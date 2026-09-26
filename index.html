@@ -15,14 +15,24 @@
     style="
       margin-right: 0px !important;
       height: 100% !important;
-      min-width: 23rem !important;
+      min-width: 22.5rem !important;
       overflow: hidden !important;
       display: grid !important;
-      justify-items: center !important;
+      grid-template-columns: minmax(0, 1fr) !important;
+      justify-items: stretch !important;
       align-items: stretch !important;
     "
   >
-    <div id="root"></div>
+    <!--
+      The explicit single column is load-bearing. A default implicit grid
+      column is sized from its content, so the shell grew to its widest
+      descendant (about 443px) and a narrower side panel clipped the right
+      of the header row. minmax(0, 1fr) pins the column to the body width,
+      so the shell tracks the panel and the header lays out inside it. Each
+      shell mode centres itself with mx-auto, which is why this stretches
+      rather than centring the item.
+    -->
+    <div id="root" style="width: 100% !important"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

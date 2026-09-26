@@ -48,7 +48,7 @@ const DAppBadge = observer(() => {
   const { hasDAppConnected } = dAppRequestStore;
 
   return (
-    <Link to={ROUTES.DAPP_CONNECTIVITY}>
+    <Link className="shrink-0" to={ROUTES.DAPP_CONNECTIVITY}>
       <Tooltip delayDuration={0}>
         <TooltipTrigger asChild>
           <Button

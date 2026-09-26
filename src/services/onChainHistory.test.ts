@@ -67,7 +67,7 @@ describe("fetchOnChainHistory", () => {
     const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      `https://v3.zondscan.com/api/address/aggregate/${ADDRESS}?page=1&limit=${ON_CHAIN_PAGE_SIZE}`,
+      `https://zondscan.com/api/address/aggregate/${ADDRESS}?page=1&limit=${ON_CHAIN_PAGE_SIZE}`,
     );
     expect(page.totalCount).toBe(82);
     expect(page.entries).toHaveLength(1);
