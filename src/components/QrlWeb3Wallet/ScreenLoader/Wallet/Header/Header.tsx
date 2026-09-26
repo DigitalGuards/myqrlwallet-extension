@@ -44,9 +44,11 @@ const QrlWeb3WalletMoreOptions = withSuspense(
 
 const Header = () => {
   return (
-    <div className="relative z-20 flex h-16 shrink-0 items-center justify-between border-b border-foreground/10 bg-background/85 px-4">
+    <div className="relative z-20 flex h-16 shrink-0 items-center justify-between gap-2 border-b border-foreground/10 bg-background/85 px-3">
       <QrlWeb3WalletLogo />
-      <div className="flex items-center gap-2">
+      {/* min-w-0 lets the account chip truncate so the three status chips and
+          the menu stay inside a narrow side panel. */}
+      <div className="flex min-w-0 items-center gap-1.5">
         <AccountBadge />
         <DAppBadge />
         <ChainBadge displayChainName={false} />

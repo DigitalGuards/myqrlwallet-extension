@@ -53,7 +53,7 @@ describe("discoverTokens", () => {
     const tokens = await discoverTokens(HOLDER, TESTNET_CHAIN_ID);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `https://v3.zondscan.com/api/address/${HOLDER}/tokens?standard=ERC-20`,
+      `https://zondscan.com/api/address/${HOLDER}/tokens?standard=ERC-20`,
     );
     expect(tokens).toEqual([
       {
@@ -141,7 +141,7 @@ describe("discoverNftCollections", () => {
     const collections = await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `https://v3.zondscan.com/api/address/${HOLDER}/nfts`,
+      `https://zondscan.com/api/address/${HOLDER}/nfts`,
     );
     expect(collections).toEqual([
       {

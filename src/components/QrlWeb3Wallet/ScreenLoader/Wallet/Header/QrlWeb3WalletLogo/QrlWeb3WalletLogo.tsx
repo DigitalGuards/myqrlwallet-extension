@@ -12,7 +12,7 @@ import { Link } from "react-router-dom";
 const QrlWeb3WalletLogo = () => {
   const { t } = useTranslation();
   return (
-    <Link to={ROUTES.HOME}>
+    <Link className="shrink-0" to={ROUTES.HOME}>
       <Tooltip delayDuration={0}>
         <TooltipTrigger asChild>
           <BrandMark

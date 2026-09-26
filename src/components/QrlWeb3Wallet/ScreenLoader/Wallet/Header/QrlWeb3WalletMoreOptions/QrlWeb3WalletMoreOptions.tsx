@@ -68,7 +68,7 @@ const QrlWeb3WalletMoreOptions = observer(() => {
       <DropdownMenuTrigger asChild>
         <EllipsisVertical
           size="16"
-          className="cursor-pointer"
+          className="shrink-0 cursor-pointer"
           data-testid="ellipsis-icon"
         />
       </DropdownMenuTrigger>

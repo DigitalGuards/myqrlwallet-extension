@@ -8,9 +8,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/UI/Card";
+import { hasLegacyWalletData } from "@/utilities/legacyWalletData";
 import { MoveRight } from "lucide-react";
 import { ONBOARDING_STEPS, OnboardingStepType } from "../Onboarding";
 import { observer } from "mobx-react-lite";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 type WelcomeProps = {
@@ -19,6 +21,25 @@ type WelcomeProps = {
 
 const Welcome = observer(({ selectStep }: WelcomeProps) => {
   const { t } = useTranslation();
+  // The v3 storage notice only makes sense when there are pre-v3 records to
+  // talk about, so it starts hidden and appears once storage confirms them.
+  // A fresh install therefore never flashes it. Detection never rejects, so
+  // the welcome screen renders either way.
+  const [showLegacyNotice, setShowLegacyNotice] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void hasLegacyWalletData()
+      .then((hasLegacyData) => {
+        if (active) setShowLegacyNotice(hasLegacyData);
+      })
+      // Belt and braces: detection already swallows storage failures, and a
+      // notice is never worth an unhandled rejection on the welcome screen.
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <Card className="surface-ember animate-appear-in">
@@ -29,11 +50,11 @@ const Welcome = observer(({ selectStep }: WelcomeProps) => {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <p className="mb-4 text-sm text-muted-foreground">
-          This release uses a separate v3 Private wallet. Existing v2 wallet
-          records remain stored. Create a new v3 account or explicitly import
-          your backup for v3.
-        </p>
+        {showLegacyNotice && (
+          <p className="mb-4 text-sm text-muted-foreground">
+            {t("welcome.legacyNotice")}
+          </p>
+        )}
         <div className="flex h-32 w-full items-center gap-5 overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/40 to-secondary/10 px-6">
           <BrandMark
             className="h-16 w-16 shrink-0 text-primary"

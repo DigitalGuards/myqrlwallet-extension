@@ -12,7 +12,9 @@ const qrlWalletBodyClasses = cva(
   {
     variants: {
       mode: {
-        popup: ["w-[23rem] h-[600px]"],
+        // mx-auto keeps the fixed-width popup shell centred now that #root
+        // fills the body instead of being centred as a grid item.
+        popup: ["w-[23rem] h-[600px] mx-auto"],
         tab: ["w-full max-w-lg mx-auto h-screen border rounded-lg shadow-2xl"],
         sidepanel: ["w-full max-w-lg mx-auto h-screen"],
       },

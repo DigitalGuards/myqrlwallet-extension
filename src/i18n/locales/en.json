@@ -15,6 +15,7 @@
   "welcome.tagline2": "The Quantum",
   "welcome.tagline3": "Resistant Ledger",
   "welcome.button": "Continue",
+  "welcome.legacyNotice": "This release uses a separate v3 Private wallet. Existing v2 wallet records remain stored. Create a new v3 account or explicitly import your backup for v3.",
   "onboarding.password.title": "Set Wallet Password",
   "onboarding.password.description": "Set a password for this wallet",
   "onboarding.password.placeholder": "Password",

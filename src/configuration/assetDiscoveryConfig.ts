@@ -5,7 +5,7 @@
  * skip discovery and fall back to manual contract-address import.
  */
 const EXPLORER_API_BASES: Record<string, string> = {
-  "0x301825": "https://v3.zondscan.com",
+  "0x301825": "https://zondscan.com",
 };
 
 export const getExplorerApiBase = (chainId: string): string | undefined =>

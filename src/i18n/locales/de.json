@@ -15,6 +15,7 @@
   "welcome.tagline2": "Das Quanten-",
   "welcome.tagline3": "resistente Hauptbuch",
   "welcome.button": "Weiter",
+  "welcome.legacyNotice": "Diese Version verwendet eine separate v3-Private-Wallet. Vorhandene v2-Wallet-Daten bleiben gespeichert. Erstelle ein neues v3-Konto oder importiere dein Backup ausdrücklich für v3.",
   "onboarding.password.title": "Wallet-Passwort Festlegen",
   "onboarding.password.description": "Lege ein Passwort für diese Wallet fest",
   "onboarding.password.placeholder": "Passwort",

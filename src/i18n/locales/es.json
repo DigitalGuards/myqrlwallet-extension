@@ -15,6 +15,7 @@
   "welcome.tagline2": "El Libro Mayor",
   "welcome.tagline3": "Resistente a Cuántica",
   "welcome.button": "Continuar",
+  "welcome.legacyNotice": "Esta versión usa una billetera v3 Private separada. Los registros de la billetera v2 existente permanecen almacenados. Crea una cuenta v3 nueva o importa tu copia de seguridad explícitamente para v3.",
   "onboarding.password.title": "Establecer Contraseña",
   "onboarding.password.description": "Establece una contraseña para esta billetera",
   "onboarding.password.placeholder": "Contraseña",
