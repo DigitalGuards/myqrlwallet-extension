@@ -60,7 +60,7 @@ const ChainBadge = observer(
     const { chainName } = blockchain;
 
     return (
-      <Link to={ROUTES.CHAIN_CONNECTIVITY}>
+      <Link className="shrink-0" to={ROUTES.CHAIN_CONNECTIVITY}>
         <Tooltip delayDuration={0}>
           <TooltipTrigger asChild>
             <Button

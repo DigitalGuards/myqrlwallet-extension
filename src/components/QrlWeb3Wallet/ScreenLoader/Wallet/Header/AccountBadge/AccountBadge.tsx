@@ -16,8 +16,10 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 
 // Ice blue identifies: the account marker wears the identity color.
+// min-w-0 plus px-2 keeps this the chip that gives way when the header runs
+// out of room, so the label ellipsises and the status chips stay whole.
 const badgeButtonClasses = cva(
-  "font-data flex items-center gap-1 rounded-full border-identity-accent/30 text-xs text-identity-accent hover:text-identity-accent",
+  "font-data flex min-w-0 items-center gap-1 rounded-full border-identity-accent/30 px-2 text-xs text-identity-accent hover:text-identity-accent",
   {
     variants: {
       isActive: {
@@ -48,7 +50,7 @@ const AccountBadge = observer(() => {
 
   return (
     !!accountAddress && (
-      <Link to={ROUTES.ACCOUNT_LIST}>
+      <Link className="min-w-0" to={ROUTES.ACCOUNT_LIST}>
         <Tooltip delayDuration={0}>
           <TooltipTrigger asChild>
             <Button
@@ -59,7 +61,7 @@ const AccountBadge = observer(() => {
               })}
               aria-label={`${t("nav.accounts")}: ${accountAddress}`}
             >
-              <Wallet className="h-3 w-3" />
+              <Wallet className="h-3 w-3 shrink-0" />
               {label ? (
                 <span className="max-w-20 truncate">{label}</span>
               ) : (
