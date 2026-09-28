@@ -782,6 +782,9 @@ const TokenTransfer = observer(() => {
                             </span>
                           </div>
                           <Slider
+                            // Radix renders a hidden input per thumb inside
+                            // the surrounding form, so it needs a name.
+                            name="amountPercentOfBalance"
                             aria-label={t("transfer.percentOfBalance")}
                             value={[sliderValue]}
                             min={0}

@@ -117,6 +117,7 @@ const DiscoveredNFTCollections = observer(() => {
               >
                 <Checkbox
                   id={`discovered-collection-${key}`}
+                  name={`discoveredCollection-${key}`}
                   checked={selected.has(key)}
                   onCheckedChange={() => toggleSelection(collection.address)}
                   disabled={isAdding}

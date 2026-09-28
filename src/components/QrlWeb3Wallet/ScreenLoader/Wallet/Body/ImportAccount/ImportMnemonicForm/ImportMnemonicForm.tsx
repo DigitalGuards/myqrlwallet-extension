@@ -93,8 +93,14 @@ const ImportMnemonicForm = observer(
                   <FormControl>
                     <Input
                       {...field}
+                      id="mnemonicPhrases"
                       aria-label={field.name}
+                      // Secret material: never offered to autofill or to a
+                      // password manager, and never corrected on entry.
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
                       disabled={isSubmitting}
                       placeholder={t("mnemonic.phrases")}
                     />

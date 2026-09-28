@@ -108,6 +108,11 @@ const OtherAccountCard = observer(
         {isEditing && (
           <div className="flex items-center gap-1">
             <Input
+              // Several rows can be in edit mode at once, so the account
+              // address keeps each field's id and name unique.
+              id={`accountLabel-${accountAddress}`}
+              name={`accountLabel-${accountAddress}`}
+              autoComplete="off"
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
               onKeyDown={(e) => {

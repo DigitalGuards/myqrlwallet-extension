@@ -265,9 +265,14 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
             <div>
               <Label>{t('chain.qrnsRegistryAddress')}</Label>
               <Input
+                id="qrnsRegistryAddress"
+                name="qrnsRegistryAddress"
                 value={qrnsRegistryAddress}
                 onChange={(e) => setQrnsRegistryAddress(e.target.value)}
                 autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 disabled={isSubmitting}
                 placeholder={t('chain.qrnsRegistryAddressPlaceholder')}
                 type="text"

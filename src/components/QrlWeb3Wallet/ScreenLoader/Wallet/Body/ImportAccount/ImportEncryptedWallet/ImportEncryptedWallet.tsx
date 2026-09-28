@@ -211,6 +211,7 @@ const ImportEncryptedWallet = observer(
               <Input
                 ref={fileInputRef}
                 id="walletFile"
+                name="walletFile"
                 type="file"
                 accept="application/json,.json"
                 aria-label="walletFile"
@@ -262,6 +263,9 @@ const ImportEncryptedWallet = observer(
                   {t("importAccount.walletFileAccountLabel")}
                 </Label>
                 <Select
+                  // Radix renders a native select inside the surrounding
+                  // form, so it needs its own name.
+                  name="walletFileAccount"
                   value={selectedKeystore}
                   onValueChange={setSelectedKeystore}
                   disabled={busy}
@@ -310,7 +314,13 @@ const ImportEncryptedWallet = observer(
                       id="walletFilePassword"
                       type="password"
                       aria-label="walletFilePassword"
+                      // This unlocks an imported keystore, so it is secret
+                      // material rather than a credential a password
+                      // manager should learn or offer to fill.
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
                       disabled={busy}
                       placeholder={t(
                         "importAccount.walletFilePasswordPlaceholder",

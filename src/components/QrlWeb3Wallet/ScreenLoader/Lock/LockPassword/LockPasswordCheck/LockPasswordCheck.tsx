@@ -118,6 +118,11 @@ const LockPasswordCheck = observer(() => {
                   <FormControl>
                     <Input
                       {...field}
+                      // Stable id next to the react-hook-form name, so a
+                      // password manager recognises the wallet unlock field
+                      // across sessions. The generated FormItem id is a
+                      // fresh React useId value on every mount.
+                      id="walletUnlockPassword"
                       aria-label={t("lock.unlock.passwordPlaceholder")}
                       autoComplete="current-password"
                       disabled={isSubmitting || isWaiting}

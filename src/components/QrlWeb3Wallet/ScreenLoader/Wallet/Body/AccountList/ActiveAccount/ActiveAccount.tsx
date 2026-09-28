@@ -80,6 +80,9 @@ const ActiveAccount = observer(() => {
           {isEditing && (
             <div className="flex items-center gap-1">
               <Input
+                id="activeAccountLabel"
+                name="activeAccountLabel"
+                autoComplete="off"
                 value={editValue}
                 onChange={(e) => setEditValue(e.target.value)}
                 onKeyDown={(e) => {
