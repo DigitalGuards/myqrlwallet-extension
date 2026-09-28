@@ -9,6 +9,10 @@ import {
   TooltipTrigger,
 } from "@/components/UI/Tooltip";
 import { NATIVE_TOKEN } from "@/constants/nativeToken";
+import {
+  isWalletLockedError,
+  walletLockedProviderError,
+} from "@/functions/describeExtensionError";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
@@ -16,7 +20,7 @@ import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { Copy } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { SEND_TRANSACTION_TYPES } from "../QrlSendTransaction";
 import { utils, qrl } from "@theqrl/web3";
 import {
@@ -116,9 +120,10 @@ const QrlSendTransactionForContent = observer(
       ledgerStore,
       transactionHistoryStore,
     } = useStore();
-    const { getMnemonicPhrases } = lockStore;
+    const { getMnemonicPhrases, readLockState } = lockStore;
     const { qrlInstance, getGasFeeData, qrlConnection } = qrlStore;
     const { isConnected, blockchain } = qrlConnection;
+    const [isWalletLocked, setIsWalletLocked] = useState(false);
     const {
       dAppRequestData,
       setOnPermissionCallBack,
@@ -527,6 +532,18 @@ const QrlSendTransactionForContent = observer(
           throw new Error("Transaction could not be signed");
         }
       } catch (error) {
+        if (isWalletLockedError(error)) {
+          // getMnemonicPhrases() hit the SW's locked-wallet guard (L1, PR
+          // #71 audit): this surface's own isLocked belief was stale.
+          // Force a re-check so ScreenLoader can swap to the lock screen,
+          // show a translated message here too, and give the dApp a
+          // stable EIP-1193 error; the raw guard text never reaches the
+          // dApp response.
+          setIsWalletLocked(true);
+          void readLockState();
+          addToResponseData({ error: walletLockedProviderError() });
+          return;
+        }
         if (error instanceof TransactionMayStillBeProcessingError) {
           addToResponseData({ error });
           if (pendingTransactionObject) {
@@ -670,6 +687,18 @@ const QrlSendTransactionForContent = observer(
           throw new Error("QRL Transfer transaction could not be signed");
         }
       } catch (error) {
+        if (isWalletLockedError(error)) {
+          // getMnemonicPhrases() hit the SW's locked-wallet guard (L1, PR
+          // #71 audit): this surface's own isLocked belief was stale.
+          // Force a re-check so ScreenLoader can swap to the lock screen,
+          // show a translated message here too, and give the dApp a
+          // stable EIP-1193 error; the raw guard text never reaches the
+          // dApp response.
+          setIsWalletLocked(true);
+          void readLockState();
+          addToResponseData({ error: walletLockedProviderError() });
+          return;
+        }
         if (error instanceof TransactionMayStillBeProcessingError) {
           addToResponseData({ error });
           if (pendingTransactionObject) {
@@ -691,6 +720,11 @@ const QrlSendTransactionForContent = observer(
 
     return (
       <Tabs defaultValue="details" className="w-full">
+        {isWalletLocked && (
+          <div className="mb-2 rounded border border-red-500/60 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300">
+            {t("account.walletLockedError")}
+          </div>
+        )}
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger
             value="details"

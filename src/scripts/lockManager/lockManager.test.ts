@@ -197,7 +197,7 @@ describe("LockManager", () => {
       expect(isLocked).toBe(false);
     });
 
-    it("reports first-run/reset state and clears in-memory keys when no keystores exist", async () => {
+    it("reports first-run/reset state and clears in-memory keys when no keystores exist (both empty)", async () => {
       await unlock();
 
       const { isLocked, hasPasswordSet } = await LockManager.isLocked();
@@ -205,6 +205,43 @@ describe("LockManager", () => {
       expect(isLocked).toBe(true);
       expect(hasPasswordSet).toBe(false);
       expect(() => LockManager.getDecryptedKeys()).toThrow();
+    });
+
+    describe("account pointer written before its keystore (L2)", () => {
+      const seedAccountPointerOnly = () => {
+        // Onboarding.tsx's own write order: setActiveAccount() lands before
+        // encryptAccount()'s keystore write, so this combination (an
+        // account pointer with no matching keystore yet) is a normal
+        // in-flight write during the very first account's creation.
+        localStore[profileStorageKey("ACCOUNTS")] = {
+          ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+        };
+      };
+
+      it("does not clear in-memory keys or report locked while the write is in flight", async () => {
+        seedAccountPointerOnly();
+        await unlock();
+
+        const { isLocked, hasPasswordSet } = await LockManager.isLocked();
+
+        expect(isLocked).toBe(false);
+        expect(hasPasswordSet).toBe(true);
+        // The keys survived: getDecryptedKeys() would throw if they had
+        // been cleared.
+        expect(() => LockManager.getDecryptedKeys()).not.toThrow();
+      });
+
+      it("reports locked (not first-run) with no keys in memory yet", async () => {
+        seedAccountPointerOnly();
+        // A cold worker mid-onboarding: encryptAccount() has not reached
+        // setDecryptedKeys() yet, but this must not be mistaken for the
+        // both-empty first-run case and must not route other surfaces to
+        // onboarding via hasPasswordSet: false.
+        const { isLocked, hasPasswordSet } = await LockManager.isLocked();
+
+        expect(isLocked).toBe(true);
+        expect(hasPasswordSet).toBe(true);
+      });
     });
   });
 

@@ -45,6 +45,20 @@ export default defineConfig({
     clearMocks: true,
     globals: false,
     setupFiles: ["src/__mocks__/i18nTestSetup.ts", "vitest.setup.ts"],
+    // Pinned (L3b, PR #71 audit): with no cap, `npx vitest run` spawns up
+    // to one fork per core. On a box shared with other work, that many
+    // concurrent jsdom environments starved individual tests of CPU time,
+    // and a handful of waitFor()-heavy component tests intermittently hit
+    // their timeout under that contention, both locally and (since CI runs
+    // on similarly shared runners) potentially in CI. 4 keeps real
+    // parallelism while giving each worker enough of a CPU share that a
+    // waitFor() timeout means a real bug, with scheduling noise ruled out.
+    poolOptions: {
+      forks: {
+        maxForks: 4,
+        minForks: 1,
+      },
+    },
     server: {
       deps: {
         inline: ["@theqrl/abi", "@theqrl/qrl-cryptography", "@noble/hashes"],

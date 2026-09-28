@@ -1,3 +1,4 @@
+import { providerErrors } from "@theqrl/qrl-wallet-provider/rpc-errors";
 import type { TFunction } from "i18next";
 
 // Chrome's own message-passing errors when the service worker is between
@@ -19,6 +20,18 @@ const WALLET_LOCKED_MESSAGE = "MyQRLWallet is locked";
 
 export function isWalletLockedError(error: unknown): boolean {
   return error instanceof Error && error.message === WALLET_LOCKED_MESSAGE;
+}
+
+/**
+ * The error a dApp approval surface hands back to the requesting page when
+ * signing/sending hits the wallet-locked guard (L1, PR #71 audit): a
+ * stable EIP-1193 code 4100 (Unauthorized) with a fixed message, so a dApp
+ * never sees the raw SW guard text or whatever shape a generic decrypt
+ * failure would otherwise produce. Every other failure keeps its existing
+ * error code, built by its own call site as before.
+ */
+export function walletLockedProviderError() {
+  return providerErrors.unauthorized({ message: "The wallet is locked" });
 }
 
 /**

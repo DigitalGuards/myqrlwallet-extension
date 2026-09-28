@@ -303,9 +303,36 @@ class LockManager {
   }> {
     const keyStores = await StorageUtil.getKeystores();
     const accounts = await StorageUtil.getStoredAccounts();
+
+    // Onboarding.tsx (the only account-creation path that can ever run
+    // against an empty wallet) writes the account pointer before the
+    // keystore that backs it, so accounts.length > 0 with keyStores still
+    // at 0 is a normal in-flight write: the wallet has an account pending,
+    // it has not been wiped (L2, PR #71 audit). M2's extra IS_LOCKED
+    // polling made landing an isLocked() call in that window far more
+    // likely. Answering from memory here, with no
+    // clear, keeps a concurrent write from self-locking the worker
+    // mid-onboarding. hasPasswordSet reports true: an account pointer
+    // already exists, and reporting false here would route every OTHER
+    // open surface's LockPassword screen into onboarding too. If the
+    // write never completes (the keystore write, or Onboarding's own
+    // rollback of the pointer on failure, both fail), lockStore.unlock()
+    // already fails closed against zero keystores regardless of this
+    // flag - see its own `if (!keyStores.length) return "failed"` guard -
+    // and the lock screen's "Reset the wallet" action is always there as
+    // an escape hatch. CreateAccount.tsx and ImportAccount.tsx persist in
+    // the opposite order (keystore first) and never run against an empty
+    // wallet, so neither can hit this window at all.
+    if (accounts.length > 0 && keyStores.length === 0) {
+      return {
+        isLocked: this.decryptedKeys === undefined,
+        hasPasswordSet: true,
+      };
+    }
+
     const hasPasswordSet = keyStores.length > 0 && accounts.length > 0;
     if (!hasPasswordSet) {
-      // Storage looks like a first-run / partial-reset state. Drop any
+      // Both empty: a genuine first-run / factory-reset state. Drop any
       // in-memory keys but do NOT wipe persistent storage from a query
       // path - the popup's onboarding flow will guide the user. An
       // explicit factory-reset action lives in settings for intentional
