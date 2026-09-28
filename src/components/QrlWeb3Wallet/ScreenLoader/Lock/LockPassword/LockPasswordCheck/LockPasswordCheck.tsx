@@ -42,7 +42,8 @@ const LockPasswordCheck = observer(() => {
   // F7: exponential delay after repeated wrong passwords, shared with
   // SessionPasswordPrompt and SettingsSecurity's change-password (N1) so
   // every password oracle in the extension is gated identically.
-  const { isWaiting, remainingSeconds, recordResult } = useUnlockAttemptGate();
+  const { isWaiting, remainingSeconds, recordResult, refreshWait } =
+    useUnlockAttemptGate();
 
   useEffect(() => {
     setTimeout(() => {
@@ -64,10 +65,13 @@ const LockPasswordCheck = observer(() => {
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     scrollShellToTop();
-    // Defence in depth: the submit button is disabled while waiting, but a
-    // disabled submit button does not reliably block Enter-key submission
-    // in every browser.
-    if (isWaiting) {
+    // R2: re-read the persisted counter first, so this surface's own
+    // isWaiting always reflects the latest state - a concurrently open
+    // surface (e.g. the side panel) may have recorded a failed attempt
+    // since this one last refreshed. Also defence in depth: the submit
+    // button is disabled while waiting, but a disabled submit button does
+    // not reliably block Enter-key submission in every browser.
+    if (await refreshWait()) {
       setUnlockAttempt((attempt) => attempt + 1);
       return;
     }

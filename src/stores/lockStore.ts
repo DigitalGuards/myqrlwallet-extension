@@ -29,22 +29,36 @@ import {
   isQrlAddress,
   LEGACY_QRL_ADDRESS_MIGRATION_ERROR,
 } from "@/utilities/addressUtil";
+import { checkForLastError } from "@/scripts/utils/scriptUtils";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
 import { action, makeAutoObservable, runInAction } from "mobx";
 import browser from "webextension-polyfill";
 
-const PORT_RECONNECT_DELAY = 1000;
+// Exponential backoff for the keep-alive port's reconnect, starting short
+// (a cold SW is usually back within a couple hundred ms) and capping at
+// PORT_RECONNECT_MAX_DELAY_MS, so a genuinely stuck worker settles into a
+// gentle every-few-seconds retry.
+const PORT_RECONNECT_BASE_DELAY_MS = 250;
+const PORT_RECONNECT_MAX_DELAY_MS = 5_000;
+// A port that stays connected this long is treated as a real, stable
+// connection: the backoff resets, so a later, unrelated disconnect starts
+// counting from the short delay again, unaffected by earlier failures from
+// a previous cold start.
+const PORT_STABLE_AFTER_MS = 5_000;
 
 // Session-storage keys written by automated background traffic: a storage
-// change limited to these keys must not trigger
-// readLockState() (which polls the SW and can run the SET_DECRYPTED_KEYS
-// resend path), or the ~30s keep-alive tick and the dApp transaction
-// watcher's bookkeeping would keep this store busy for no reason. Mirrors
-// LockManager's own SESSION_KEYS_KEY/keepAlive keys and
-// dAppTransactionWatcher's watch-list key.
+// change limited to these keys must not trigger readLockState() (which
+// polls the SW), or the keep-alive interval's own write and the dApp
+// transaction watcher's bookkeeping would keep this store busy for no
+// reason. Mirrors LockManager's keep-alive key and
+// dAppTransactionWatcher's watch-list key. The legacy key is included too:
+// LockManager's one-time startup scrub of a pre-upgrade plaintext key
+// backup fires a single storage event for it, which is no more "the user
+// did something" than the other two.
 const AUTOMATED_SESSION_STORAGE_KEYS = new Set([
   profileStorageKey("keepAlive"),
   profileStorageKey("DAPP_TX_WATCHES"),
+  profileStorageKey("_LM_CACHED_KEYS"),
 ]);
 
 // At most one USER_ACTIVITY ping per this many ms, so a user actively
@@ -75,18 +89,9 @@ class LockStore {
   /** 1-based service-worker wake attempt, surfaced by the boot loader. */
   bootAttempt = 1;
   private keepAlivePort?: browser.Runtime.Port;
-  /**
-   * Cached copy of decrypted keys so the popup can re-send them to the SW
-   * if Chrome restarts it (losing its in-memory state).  Cleared on lock().
-   */
-  private cachedKeys?: DecryptedKeyType[];
-  /**
-   * Wallet password held in popup memory only - paired with cachedKeys so
-   * the popup can re-arm the SW after a Chrome-driven restart without
-   * re-prompting the user. Stored separately from `cachedKeys` so leaks of
-   * either store do not necessarily leak both.
-   */
-  private cachedPassword?: string;
+  /** Consecutive keep-alive port reconnect attempts, for the backoff. */
+  private portReconnectAttempt = 0;
+  private portStabilityTimer?: ReturnType<typeof setTimeout>;
   /** Timestamp of the last USER_ACTIVITY ping sent, for throttling. */
   private lastActivityPingAt = 0;
 
@@ -151,6 +156,14 @@ class LockStore {
    * As long as a port is connected, Chrome keeps the MV3 SW alive.
    * This prevents the "Receiving end does not exist" error that occurs
    * when Chrome fails to restart a module-type service worker.
+   *
+   * Kept even though LockManager now also keeps the worker alive on its
+   * own (an in-worker setInterval, started on unlock): that interval only
+   * runs while the wallet is unlocked, so a surface sitting on the lock
+   * screen - deciding on a password, or just left open - would otherwise
+   * have nothing keeping the worker warm between IS_LOCKED polls. This
+   * port covers that case; the interval is the belt to this port's braces
+   * once something is actually unlocked.
    */
   private connectKeepAlive() {
     try {
@@ -158,18 +171,39 @@ class LockStore {
     } catch {
       /* already disconnected */
     }
+    clearTimeout(this.portStabilityTimer);
     try {
       this.keepAlivePort = browser.runtime.connect({
         name: LOCK_MANAGER_MESSAGES.LOCK_MANAGER_KEEP_LIVE,
       });
+      // A port that survives this long is a real connection to a running
+      // worker - reset the backoff so a later, unrelated disconnect is not
+      // penalised by earlier cold-start failures.
+      this.portStabilityTimer = setTimeout(() => {
+        this.portReconnectAttempt = 0;
+      }, PORT_STABLE_AFTER_MS);
       this.keepAlivePort.onDisconnect.addListener(() => {
-        // SW dropped the port - reconnect to wake it back up
-        setTimeout(() => this.connectKeepAlive(), PORT_RECONNECT_DELAY);
+        // Read runtime.lastError so Chrome does not additionally log it as
+        // an "Unchecked runtime.lastError" on top of this reconnect - a
+        // dropped connect while the worker is between wake-ups ("Receiving
+        // end does not exist") is expected here and already handled.
+        checkForLastError();
+        this.scheduleReconnect();
       });
     } catch {
-      // Connection failed (SW not ready yet), retry
-      setTimeout(() => this.connectKeepAlive(), PORT_RECONNECT_DELAY);
+      checkForLastError();
+      this.scheduleReconnect();
     }
+  }
+
+  /** Reconnects the keep-alive port after an exponential backoff. */
+  private scheduleReconnect() {
+    const delay = Math.min(
+      PORT_RECONNECT_BASE_DELAY_MS * 2 ** this.portReconnectAttempt,
+      PORT_RECONNECT_MAX_DELAY_MS,
+    );
+    this.portReconnectAttempt += 1;
+    setTimeout(() => this.connectKeepAlive(), delay);
   }
 
   /**
@@ -228,13 +262,13 @@ class LockStore {
       ) {
         return;
       }
-      // Same for the automated session-storage writes: the keep-alive tick
-      // and the dApp transaction watcher's bookkeeping are not user
-      // activity either (F2). Auto-lock timing itself no longer depends on
-      // this listener - lockManagerListener's own activity allow-list is
-      // authoritative - but calling readLockState() on every such tick was
-      // still needless SW traffic (an IS_LOCKED poll, and potentially the
-      // SET_DECRYPTED_KEYS resend path) for no observable effect.
+      // Same for the automated session-storage writes: the keep-alive
+      // interval's tick and the dApp transaction watcher's bookkeeping are
+      // not user activity either (F2). Auto-lock timing itself does not
+      // depend on this listener - lockManagerListener's own activity
+      // allow-list is authoritative - but calling readLockState() on every
+      // such tick was still needless SW traffic (an IS_LOCKED poll) for no
+      // observable effect.
       if (
         areaName === "session" &&
         changedKeys.every((key) => AUTOMATED_SESSION_STORAGE_KEYS.has(key))
@@ -246,33 +280,16 @@ class LockStore {
   }
 
   async getWalletPassword(): Promise<string> {
-    const requestPassword = async (): Promise<string | undefined> => {
-      try {
-        // The SW rejects (not returns "") when its memory-only password was
-        // lost to a restart; treat both a reject and a falsy value as "gone".
-        return (await browser.runtime.sendMessage({
-          name: LOCK_MANAGER_MESSAGES.GET_WALLET_PASSWORD,
-        })) as string | undefined;
-      } catch {
-        return undefined;
-      }
-    };
-
-    let password = await requestPassword();
-    // If this popup still holds the password + keys from unlock, re-arm the SW
-    // and retry once so adding an account stays a no-friction path after a SW
-    // restart. Only when cachedKeys is present, so we never overwrite the SW's
-    // session-restored keys with an empty set.
-    if (!password && this.cachedPassword && this.cachedKeys) {
-      try {
-        await this.sendWithRetry({
-          name: LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
-          data: { keys: this.cachedKeys, walletPassword: this.cachedPassword },
-        });
-        password = await requestPassword();
-      } catch {
-        // fall through to the guard below
-      }
+    let password: string | undefined;
+    try {
+      // The SW rejects (not returns "") when it is locked or has no
+      // password to give - a fresh service-worker restart looks the same
+      // as an explicit lock from here: both mean re-unlocking is required.
+      password = (await browser.runtime.sendMessage({
+        name: LOCK_MANAGER_MESSAGES.GET_WALLET_PASSWORD,
+      })) as string | undefined;
+    } catch {
+      password = undefined;
     }
     if (!password) {
       // Never let the caller encrypt with "": force a re-unlock instead.
@@ -282,16 +299,13 @@ class LockStore {
   }
 
   async getMnemonicPhrases(accountAddress: string) {
-    const decryptedKeys: DecryptedKeyType[] = await browser.runtime.sendMessage(
-      {
-        name: LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS,
-      },
-    );
-    const accountKey = decryptedKeys?.find(
-      (key) => key?.address?.toLowerCase() === accountAddress?.toLowerCase(),
-    );
-    const mnemonicPhrases: string = accountKey?.mnemonicPhrases ?? "";
-    return mnemonicPhrases;
+    // Exactly the one requested account's key (F4), via the chokepoint
+    // every signing caller shares.
+    const key: DecryptedKeyType = await browser.runtime.sendMessage({
+      name: LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEY_FOR_ADDRESS,
+      data: accountAddress,
+    });
+    return key?.mnemonicPhrases ?? "";
   }
 
   async encryptAccount(account: Web3BaseWalletAccount, password: string) {
@@ -404,69 +418,22 @@ class LockStore {
       // Keys are persisted - SW will pick them up on next unlock.
     }
 
-    this.cachedKeys = result.newKeys as DecryptedKeyType[];
-    this.cachedPassword = normalisedNewPassword;
     return "success";
   }
 
+  /**
+   * Reflects the service worker's own answer directly: no client-side
+   * resend or timestamp comparison any more. Decrypted keys and the wallet
+   * password now vanish together (see LockManager's class doc comment), so
+   * there is nothing left for this store to try to resurrect - if the SW
+   * says locked, the wallet is locked, and the only way forward is
+   * unlock() with the password again.
+   */
   async readLockState() {
     try {
-      let { isLocked, hasPasswordSet } = await browser.runtime.sendMessage({
+      const { isLocked, hasPasswordSet } = await browser.runtime.sendMessage({
         name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
       });
-
-      // A wallet that no longer has keystores + accounts cannot be recovered
-      // by re-sending keys, and doing so would resurrect a wallet another
-      // surface just reset (this store's cache is per-document, so the
-      // surface that ran the reset is not the only one holding keys). Drop
-      // the cache instead.
-      if (!hasPasswordSet && this.cachedKeys) {
-        this.cachedKeys = undefined;
-        this.cachedPassword = undefined;
-      }
-
-      // If the SW lost its in-memory keys (e.g. Chrome restarted it) but we
-      // still have a cached copy from the last successful unlock, re-send them
-      // so the wallet stays unlocked while the popup is open.
-      if (isLocked && hasPasswordSet && this.cachedKeys) {
-        const lockedTs = await StorageUtil.getLockStateTimeStamp(
-          LockState.LOCKED,
-        );
-        const unlockedTs = await StorageUtil.getLockStateTimeStamp(
-          LockState.UNLOCKED,
-        );
-        if (lockedTs > unlockedTs) {
-          // Intentional lock (manual or auto-lock) - don't re-send
-          this.cachedKeys = undefined;
-          this.cachedPassword = undefined;
-        } else {
-          // SW restart - re-send cached keys (and password if known) to
-          // recover. Tagged `recovery: true` (F2/N6): a storage-change
-          // listener triggers this automatically, so it must be excluded
-          // from postponing the auto-lock timer - see
-          // lockManagerListener's allow-list.
-          try {
-            await browser.runtime.sendMessage({
-              name: LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
-              data: this.cachedPassword
-                ? {
-                    keys: this.cachedKeys,
-                    walletPassword: this.cachedPassword,
-                  }
-                : this.cachedKeys,
-              recovery: true,
-            });
-            const recheck = await browser.runtime.sendMessage({
-              name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
-            });
-            isLocked = recheck.isLocked;
-            hasPasswordSet = recheck.hasPasswordSet;
-          } catch {
-            // Re-send failed - accept the locked state
-          }
-        }
-      }
-
       this.isLocked = isLocked;
       this.hasPasswordSet = hasPasswordSet;
       this.isLoading = false;
@@ -477,21 +444,10 @@ class LockStore {
 
   /**
    * Scrub one account's decrypted key after its keystore was removed. The
-   * service worker owns the scrub (it is the only context that can rewrite
-   * the session-storage key backup); this side only drops its own cached
-   * copy, which would otherwise be re-sent to the SW on the next restart
-   * recovery and resurrect the removed account's mnemonic.
-   *
-   * Throws if the SW cannot be reached, so callers can abort before
-   * deleting the keystore rather than leaving plaintext behind.
+   * service worker owns the scrub; it is the only place decrypted keys
+   * live at all now.
    */
   async removeAccountKey(accountAddress: string) {
-    const target = accountAddress.toLowerCase();
-    if (this.cachedKeys) {
-      this.cachedKeys = this.cachedKeys.filter(
-        (key) => key?.address?.toLowerCase() !== target,
-      );
-    }
     await this.sendWithRetry({
       name: LOCK_MANAGER_MESSAGES.REMOVE_ACCOUNT_KEY,
       data: accountAddress,
@@ -500,18 +456,14 @@ class LockStore {
 
   /**
    * Factory reset. The wipe runs in the service worker so that in-memory
-   * keys, the session-storage key backup, the alarms, and local storage all
-   * go in one authoritative step; doing it from here would leave the
-   * session backup (which survives SW restarts by design) holding every
-   * account's plaintext mnemonic.
+   * keys, session storage, the auto-lock alarm, and local storage all go
+   * in one authoritative step.
    *
    * If the SW cannot be reached at all we still wipe what this context can
    * (session + local storage) rather than leaving the user with a wallet
    * they believe is gone.
    */
   async resetWallet() {
-    this.cachedKeys = undefined;
-    this.cachedPassword = undefined;
     try {
       await this.sendWithRetry({
         name: LOCK_MANAGER_MESSAGES.RESET_WALLET,
@@ -525,14 +477,9 @@ class LockStore {
   }
 
   async lock() {
-    this.cachedKeys = undefined;
-    this.cachedPassword = undefined;
     // LockManager.lock() (F6) writes the LOCKED timestamp itself, durably,
-    // before it clears anything - by the time this message resolves every
-    // other open surface's readLockState() already sees it. Writing it a
-    // second time here, unawaited, was a race: this fire-and-forget write
-    // could land after another surface had already read the (still stale)
-    // timestamp and mistaken the lock for a service-worker restart.
+    // before it clears anything, so by the time this message resolves
+    // every other open surface's readLockState() already sees it.
     await browser.runtime.sendMessage({
       name: LOCK_MANAGER_MESSAGES.LOCK,
     });
@@ -679,8 +626,6 @@ class LockStore {
         runInAction(() => {
           this.isLocked = false;
         });
-        this.cachedKeys = decryptedKeys;
-        this.cachedPassword = normalisedPassword;
         StorageUtil.updateLockStateTimeStamp(LockState.UNLOCKED);
         return "success";
       }

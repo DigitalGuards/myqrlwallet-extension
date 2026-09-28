@@ -39,23 +39,36 @@ import {
   registerSidePanelOpenListener,
 } from "./utils/sidePanelSurface";
 
+// Resolved once initializeServiceWorker()'s async setup (side panel
+// reconciliation, content-script registration, phishing detector init)
+// finishes. Event listeners themselves are ALWAYS registered synchronously,
+// below, before that setup even starts - this promise exists purely for a
+// handler's own internal logic to wait on async-initialized state without
+// ever risking the event itself being dropped (the listener is already
+// attached and will fire regardless of whether this has resolved yet).
+let markServiceWorkerReady: () => void = () => {};
+const serviceWorkerReady = new Promise<void>((resolve) => {
+  markServiceWorkerReady = resolve;
+});
+
 // Registered here, synchronously, at module evaluation: MV3 requires an
 // alarm listener to be attached before the script's first `await`, or an
 // alarm firing during a cold start can be missed entirely. QRL_AUTO_LOCK
-// and QRL_KEEP_ALIVE used to be handled by a second listener registered
-// inside prepareListeners(), which sits behind the `await
+// used to be handled by a second listener registered inside
+// prepareListeners(), which sits behind the `await
 // applyEarlySidePanelToolbarBehavior()` in initializeServiceWorker() below;
 // an alarm that woke a cold SW could fire and be dropped before that
 // listener ever attached, and since QRL_AUTO_LOCK is a one-shot alarm
 // nothing would ever recreate it, leaving the wallet unlocked indefinitely.
-// All alarm handling now lives here, dispatched by name.
+// All alarm handling now lives here, dispatched by name. The keep-alive
+// alarm this used to also dispatch is gone: keeping the worker alive is
+// now an in-worker setInterval (LockManager.startKeepAliveInterval),
+// started directly on unlock.
 browser.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === DAPP_TX_WATCH_ALARM_NAME) {
     handleDAppTransactionWatchAlarm();
   } else if (alarm.name === LockManager.AUTO_LOCK_ALARM) {
     LockManager.handleAutoLockAlarm();
-  } else if (alarm.name === LockManager.KEEP_ALIVE_ALARM) {
-    LockManager.handleKeepAliveAlarm();
   } else if (alarm.name === PHISHING_ALARM_NAME) {
     handlePhishingRefreshAlarm();
   }
@@ -90,6 +103,15 @@ const registerScripts = async () => {
   );
 };
 
+// None of these need to wait on serviceWorkerReady: the badge display just
+// reads storage, lockManagerListener only ever touches LockManager's own
+// in-memory state plus browser.storage (already safe by the time any
+// listener can even be registered), the side-panel gesture roundtrip and
+// onInstalled notice are independent of the rest of setup, and the
+// SEND_TX_NOTIFICATION handler only reads settings and calls the
+// notifications API. They are registered synchronously here purely so a
+// message that wakes a dormant worker always finds a listener already
+// attached - see the module-level comment above serviceWorkerReady.
 const prepareListeners = () => {
   // Listening to storage for displaying the badge in the extension.
   browser.storage.onChanged.addListener(async (changes, areaName) => {
@@ -244,6 +266,14 @@ const establishContenScriptConnection = () => {
   browser.runtime.onConnect.addListener(async (port) => {
     // Ensuring the port connected to is the content script
     if (port.name === QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT) {
+      // The connection event itself is never dropped - this listener is
+      // registered synchronously at module evaluation, before
+      // initializeServiceWorker() runs at all. Waiting here delays only
+      // the work inside the handler, until the phishing detector (used by
+      // restrictedMethodsMiddleware for every dApp request) and the rest
+      // of setup have actually finished, so the provider engine wired up
+      // below always has a ready phishing verdict to give.
+      await serviceWorkerReady;
       await initializeContentScriptProviderConnection(
         port,
         setupProviderConnectionEip1193,
@@ -261,10 +291,27 @@ const establishLockManagerConnection = () => {
   });
 };
 
+// Registered synchronously, at module evaluation, for the same reason as
+// the alarms listener above: a message or port connect that wakes a
+// dormant worker (the lockStore keep-alive port, the throttled activity
+// ping, IS_LOCKED, ENCRYPT_ACCOUNT, a dApp's content-script connection)
+// used to arrive before initializeServiceWorker() had gotten past its
+// first `await` (applyEarlySidePanelToolbarBehavior()), where these were
+// previously registered - with zero listeners attached yet, Chrome drops
+// the event and the caller sees "Receiving end does not exist" /
+// "Could not establish connection", exactly the console error a real-device
+// side-panel test surfaced. All three calls below are synchronous
+// (addListener only); none of them wait on anything async themselves.
+prepareListeners();
+establishContenScriptConnection();
+establishLockManagerConnection();
+
 const enforceSessionStorageAccessLevel = async () => {
   // Pin session storage to TRUSTED_CONTEXTS so content scripts cannot read
-  // the decrypted-keys backup. TRUSTED_CONTEXTS is the MV3 default; we set it
-  // explicitly so a future Chromium default change cannot quietly widen us.
+  // it (it only ever holds the non-secret keep-alive timestamp and pending
+  // dApp-request bookkeeping, but the fence stays regardless).
+  // TRUSTED_CONTEXTS is the MV3 default; we set it explicitly so a future
+  // Chromium default change cannot quietly widen us.
   try {
     await chrome.storage.session.setAccessLevel({
       accessLevel: "TRUSTED_CONTEXTS",
@@ -276,18 +323,25 @@ const enforceSessionStorageAccessLevel = async () => {
 };
 
 const initializeServiceWorker = async () => {
+  // All event listeners (alarms, runtime.onMessage, runtime.onConnect,
+  // storage.onChanged, runtime.onInstalled) are already registered above,
+  // synchronously, before this function's first `await` even runs. Nothing
+  // below this point registers a listener - it is all one-time async setup.
+
   // Before anything else: the toolbar click that woke this worker may be
   // moments away, and Chrome uses the manifest `default_popup` until the
   // panel behaviour is set.
   await applyEarlySidePanelToolbarBehavior();
 
-  // Register listeners first so the popup can always communicate with the service worker,
-  // even if script registration fails.
-  prepareListeners();
-  establishContenScriptConnection();
-  establishLockManagerConnection();
-
   await enforceSessionStorageAccessLevel();
+
+  // Startup hygiene: an older build may have left a plaintext key backup in
+  // storage.session (removed entirely as of this version - see
+  // LockManager's class doc comment), or an alarm from the removed
+  // keep-alive-alarm design. Both are best-effort and harmless if there is
+  // nothing to clean up.
+  await LockManager.scrubLegacySessionSecrets();
+  await browser.alarms.clear("QRL_KEEP_ALIVE");
 
   try {
     await registerScripts();
@@ -301,6 +355,10 @@ const initializeServiceWorker = async () => {
   // Initialize phishing detection
   await initializePhishingDetector();
   await setupPhishingRefreshAlarm();
+
+  // Unblocks the content-script connection handler above; see
+  // serviceWorkerReady's module-level comment.
+  markServiceWorkerReady();
 };
 
 // This is the starting point of service worker of qrl web3 wallet.

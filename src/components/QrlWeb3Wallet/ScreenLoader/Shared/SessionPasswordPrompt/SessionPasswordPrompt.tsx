@@ -35,11 +35,18 @@ export type SessionPasswordPromptProps = {
 };
 
 /**
- * Inline re-entry for the "wallet reads unlocked but the memory-only
- * password is gone" gap: after a service-worker restart, decrypted keys
- * self-heal from the session backup (so the wallet shows as unlocked and no
- * lock screen appears), but the wallet password does not, since it is held
- * in memory only. Import and Create both dead-ended here before F1.
+ * Inline re-entry for "the service worker session is gone but this screen
+ * still has unsaved progress": Import and Create both dead-ended here
+ * before F1. Decrypted keys and the wallet password now vanish together on
+ * a service-worker restart (there is no session backup for keys to
+ * self-heal from any more - see LockManager's class doc comment), so this
+ * no longer narrowly targets a lost password while keys survive; it
+ * targets a popup whose cached `lockStore.isLocked` observable has gone
+ * stale relative to the SW's real state (e.g. the SW restarted while this
+ * screen was already open and mid-flow). The React state driving the
+ * pending import/create (the mnemonic, the generated account) lives
+ * entirely in this popup document, so it survives that restart untouched.
+ * Only the SW-side unlock session needs re-establishing.
  *
  * Reuses the exact unlock path (lockStore.unlock -> the popup's worker
  * pool decrypts the stored keystores and verifies the typed password
@@ -61,7 +68,7 @@ const SessionPasswordPrompt = observer(
     const { t } = useTranslation();
     const FormSchema = createFormSchema(t);
     const [showPassword, setShowPassword] = useState(false);
-    const { isWaiting, remainingSeconds, recordResult } =
+    const { isWaiting, remainingSeconds, recordResult, refreshWait } =
       useUnlockAttemptGate();
 
     const form = useForm<z.infer<typeof FormSchema>>({
@@ -76,8 +83,9 @@ const SessionPasswordPrompt = observer(
     } = form;
 
     const onSubmit = async (formData: z.infer<typeof FormSchema>) => {
-      // Defence in depth: see LockPasswordCheck's identical guard.
-      if (isWaiting) return;
+      // R2: re-read the persisted counter first - see LockPasswordCheck's
+      // identical guard.
+      if (await refreshWait()) return;
       try {
         const result = await lockStore.unlock(formData.password);
         const waitUntil = await recordResult(result);

@@ -74,7 +74,8 @@ const SettingsSecurity = observer(() => {
   const [passwordChanged, setPasswordChanged] = useState(false);
   // F7/N1: change-password is a third password oracle (alongside the lock
   // screen and SessionPasswordPrompt) and shares the same throttled gate.
-  const { isWaiting, remainingSeconds, recordResult } = useUnlockAttemptGate();
+  const { isWaiting, remainingSeconds, recordResult, refreshWait } =
+    useUnlockAttemptGate();
 
   const ChangePasswordSchema = createChangePasswordSchema(t);
 
@@ -106,7 +107,9 @@ const SettingsSecurity = observer(() => {
     formData: z.infer<typeof ChangePasswordSchema>,
   ) {
     setPasswordChanged(false);
-    if (isWaiting) return;
+    // R2: re-read the persisted counter first - see LockPasswordCheck's
+    // identical guard.
+    if (await refreshWait()) return;
     try {
       const result = await lockStore.changePassword(
         formData.currentPassword,

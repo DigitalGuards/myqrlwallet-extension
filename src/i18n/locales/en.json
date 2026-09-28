@@ -347,6 +347,8 @@
   "account.reArmPrompt": "Enter your password to continue without losing your progress.",
   "account.reArmButton": "Continue",
   "account.reArmButtonLoading": "Verifying",
+  "account.retryButton": "Retry",
+  "account.transientConnectionError": "Lost the connection to the wallet for a moment. Try again.",
   "importAccount.tabHexSeed": "Hex seed",
   "importAccount.tabWalletFile": "Wallet file",
   "importAccount.pasteHexSeed": "Paste your hex seed",
