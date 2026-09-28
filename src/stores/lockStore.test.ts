@@ -475,6 +475,38 @@ describe("LockStore – throttled user-activity ping (F2)", () => {
       name: "LOCK_MANAGER_USER_ACTIVITY",
     });
   });
+
+  it("also polls IS_LOCKED on the same throttle while unlocked (M2)", async () => {
+    const store = await createLockStore();
+    expect(store.isLocked).toBe(false);
+    mockSendMessage.mockClear();
+
+    document.dispatchEvent(new Event("pointerdown"));
+
+    const lockPolls = mockSendMessage.mock.calls.filter(
+      (call: any) => call[0]?.name === "LOCK_MANAGER_IS_LOCKED",
+    );
+    expect(lockPolls).toHaveLength(1);
+  });
+
+  it("does not poll IS_LOCKED on activity once already locked (M2)", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: true,
+      hasPasswordSet: true,
+    });
+    const module = await import("./lockStore");
+    const store = new module.default();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(store.isLocked).toBe(true);
+    mockSendMessage.mockClear();
+
+    document.dispatchEvent(new Event("pointerdown"));
+
+    const lockPolls = mockSendMessage.mock.calls.filter(
+      (call: any) => call[0]?.name === "LOCK_MANAGER_IS_LOCKED",
+    );
+    expect(lockPolls).toHaveLength(0);
+  });
 });
 
 describe("LockStore – unlock worker fan-out", () => {
@@ -720,9 +752,10 @@ describe("LockStore – keep-alive port reconnect (real-device fix)", () => {
       hasPasswordSet: true,
     });
     const module = await import("./lockStore");
-    new module.default();
+    const store = new module.default();
     await vi.advanceTimersByTimeAsync(300);
     return {
+      store,
       fireDisconnect: () =>
         disconnectListeners[disconnectListeners.length - 1]?.(),
       getConnectCallCount: () => connectCallCount,
@@ -777,5 +810,26 @@ describe("LockStore – keep-alive port reconnect (real-device fix)", () => {
     fireDisconnect();
     await vi.advanceTimersByTimeAsync(250); // back to the short base delay
     expect(getConnectCallCount()).toBe(baseline + 2);
+  });
+
+  it("flips to the lock screen after the worker dies and comes back, without user action (M2)", async () => {
+    const { store, fireDisconnect } =
+      await createLockStoreWithControllablePort();
+    expect(store.isLocked).toBe(false);
+
+    // The worker restarted: its in-memory keys are gone (F4), so every
+    // IS_LOCKED answer from here on reports locked. The disconnect handler
+    // tries readLockState() immediately - the worker is not reachable yet,
+    // so that attempt fails silently and isLocked does not move yet.
+    mockSendMessage.mockRejectedValueOnce(new Error("unreachable"));
+    mockSendMessage.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+    fireDisconnect();
+    expect(store.isLocked).toBe(false);
+
+    // Once the reconnect lands, connectKeepAlive()'s own readLockState()
+    // call gets the true answer: the surface flips to the lock screen with
+    // no user action needed.
+    await vi.advanceTimersByTimeAsync(250);
+    expect(store.isLocked).toBe(true);
   });
 });

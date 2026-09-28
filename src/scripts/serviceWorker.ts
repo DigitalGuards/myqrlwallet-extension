@@ -51,6 +51,22 @@ const serviceWorkerReady = new Promise<void>((resolve) => {
   markServiceWorkerReady = resolve;
 });
 
+// Backstop for the await below (H1, PR #71 audit): initializeServiceWorker()
+// guarantees markServiceWorkerReady() always runs (see its own try/finally),
+// and every individual startup step is now failure-tolerant on top of that,
+// so nothing should ever actually hit this timeout. It exists purely so a
+// future startup step that hangs some other way (not a rejection, an
+// await that never settles) can never wedge a content-script connection
+// indefinitely.
+const SERVICE_WORKER_READY_TIMEOUT_MS = 10_000;
+const waitForServiceWorkerReady = (): Promise<void> =>
+  Promise.race([
+    serviceWorkerReady,
+    new Promise<void>((resolve) =>
+      setTimeout(resolve, SERVICE_WORKER_READY_TIMEOUT_MS),
+    ),
+  ]);
+
 // Registered here, synchronously, at module evaluation: MV3 requires an
 // alarm listener to be attached before the script's first `await`, or an
 // alarm firing during a cold start can be missed entirely. QRL_AUTO_LOCK
@@ -272,8 +288,10 @@ const establishContenScriptConnection = () => {
       // the work inside the handler, until the phishing detector (used by
       // restrictedMethodsMiddleware for every dApp request) and the rest
       // of setup have actually finished, so the provider engine wired up
-      // below always has a ready phishing verdict to give.
-      await serviceWorkerReady;
+      // below always has a ready phishing verdict to give. Racing against
+      // a timeout (see its own comment) still lets this connection proceed
+      // even if a future startup step somehow hangs.
+      await waitForServiceWorkerReady();
       await initializeContentScriptProviderConnection(
         port,
         setupProviderConnectionEip1193,
@@ -322,43 +340,82 @@ const enforceSessionStorageAccessLevel = async () => {
   }
 };
 
+// Runs one startup step without letting its failure stop the steps after
+// it (H1): each step below is independent (side-panel setup, the legacy
+// scrub, content-script registration, phishing detection all touch
+// unrelated state), so one throwing must not skip the rest. Logged, not
+// swallowed silently, so a real regression still shows up in the SW
+// console.
+const runStartupStep = async (
+  label: string,
+  step: () => Promise<unknown> | unknown,
+): Promise<void> => {
+  try {
+    await step();
+  } catch (error) {
+    console.warn(`QrlWeb3Wallet: Startup step "${label}" failed`, error);
+  }
+};
+
 const initializeServiceWorker = async () => {
   // All event listeners (alarms, runtime.onMessage, runtime.onConnect,
   // storage.onChanged, runtime.onInstalled) are already registered above,
   // synchronously, before this function's first `await` even runs. Nothing
   // below this point registers a listener - it is all one-time async setup.
-
-  // Before anything else: the toolbar click that woke this worker may be
-  // moments away, and Chrome uses the manifest `default_popup` until the
-  // panel behaviour is set.
-  await applyEarlySidePanelToolbarBehavior();
-
-  await enforceSessionStorageAccessLevel();
-
-  // Startup hygiene: an older build may have left a plaintext key backup in
-  // storage.session (removed entirely as of this version - see
-  // LockManager's class doc comment), or an alarm from the removed
-  // keep-alive-alarm design. Both are best-effort and harmless if there is
-  // nothing to clean up.
-  await LockManager.scrubLegacySessionSecrets();
-  await browser.alarms.clear("QRL_KEEP_ALIVE");
-
   try {
-    await registerScripts();
-  } catch (error) {
-    console.warn("QrlWeb3Wallet: Failed to register content scripts\n", error);
+    // Before anything else: the toolbar click that woke this worker may be
+    // moments away, and Chrome uses the manifest `default_popup` until the
+    // panel behaviour is set.
+    await runStartupStep(
+      "applyEarlySidePanelToolbarBehavior",
+      applyEarlySidePanelToolbarBehavior,
+    );
+
+    await runStartupStep(
+      "enforceSessionStorageAccessLevel",
+      enforceSessionStorageAccessLevel,
+    );
+
+    // Startup hygiene: an older build may have left a plaintext key backup
+    // in storage.session (removed entirely as of this version - see
+    // LockManager's class doc comment), or an alarm from the removed
+    // keep-alive-alarm design. Both are best-effort and harmless if there
+    // is nothing to clean up.
+    await runStartupStep("scrubLegacySessionSecrets", () =>
+      LockManager.scrubLegacySessionSecrets(),
+    );
+    await runStartupStep("clear legacy QRL_KEEP_ALIVE alarm", () =>
+      browser.alarms.clear("QRL_KEEP_ALIVE"),
+    );
+
+    await runStartupStep("registerScripts", registerScripts);
+
+    // Reconcile: applies the persisted preference and pins the panel path.
+    await runStartupStep(
+      "applySidePanelToolbarBehavior",
+      applySidePanelToolbarBehavior,
+    );
+
+    // Initialize phishing detection. initializePhishingDetector() itself
+    // never rejects (H1: every blocklist source it can draw from is
+    // validated and guarded independently); this wrapper adds a second,
+    // independent layer of defence in depth around a bad blocklist and a
+    // hung serviceWorkerReady.
+    await runStartupStep(
+      "initializePhishingDetector",
+      initializePhishingDetector,
+    );
+    await runStartupStep(
+      "setupPhishingRefreshAlarm",
+      setupPhishingRefreshAlarm,
+    );
+  } finally {
+    // Unblocks the content-script connection handler above; see
+    // serviceWorkerReady's module-level comment. In a `finally` so it
+    // always runs exactly once, no matter which step above failed or
+    // whether one was ever added later without its own guard (H1).
+    markServiceWorkerReady();
   }
-
-  // Reconcile: applies the persisted preference and pins the panel path.
-  await applySidePanelToolbarBehavior();
-
-  // Initialize phishing detection
-  await initializePhishingDetector();
-  await setupPhishingRefreshAlarm();
-
-  // Unblocks the content-script connection handler above; see
-  // serviceWorkerReady's module-level comment.
-  markServiceWorkerReady();
 };
 
 // This is the starting point of service worker of qrl web3 wallet.

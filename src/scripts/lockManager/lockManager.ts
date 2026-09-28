@@ -42,7 +42,6 @@ export const LOCK_MANAGER_MESSAGES = {
   ENCRYPT_ACCOUNT: "ENCRYPT_ACCOUNT",
   LOCK: "LOCK_MANAGER_LOCK",
   LOCK_MANAGER_KEEP_LIVE: "LOCK_MANAGER_KEEP_LIVE",
-  GET_DECRYPTED_KEYS: "GET_DECRYPTED_KEYS",
   // Returns exactly one account's decrypted key. Signing flows (and
   // getMnemonicPhrases) use this so a page that only ever needs one
   // account's mnemonic per signature is never handed the rest of the
@@ -489,8 +488,6 @@ class LockManager {
     } else if (message.name === LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK) {
       await LockManager.setupAutoLockAlarm();
       result = { success: true };
-    } else if (message.name === LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS) {
-      result = LockManager.getDecryptedKeys();
     } else if (
       message.name === LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEY_FOR_ADDRESS
     ) {

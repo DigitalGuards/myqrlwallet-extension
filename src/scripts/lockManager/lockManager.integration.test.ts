@@ -330,9 +330,12 @@ describe("Auto-lock integration scenarios", () => {
       expect(await checkLocked()).toBe(false);
 
       // None of these represent the user actively doing something: a
-      // decrypted-keys read, a lock-state poll, and an automated
+      // single decrypted-key read, a lock-state poll, and an automated
       // tx-notification message. None should postpone the lock.
-      await sendMessage(LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS);
+      await sendMessage(
+        LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEY_FOR_ADDRESS,
+        MOCK_KEYS[0].address,
+      );
       await sendMessage(LOCK_MANAGER_MESSAGES.IS_LOCKED);
       await sendMessage(LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION, {
         status: "confirmed",

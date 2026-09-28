@@ -562,6 +562,21 @@ describe("LockManager", () => {
       expect(result).toEqual(KEY_B);
     });
 
+    it("GET_DECRYPTED_KEYS is not a message this listener answers (L3)", async () => {
+      // The whole-keyring read is gone: every caller now goes through
+      // GET_DECRYPTED_KEY_FOR_ADDRESS, one account at a time. An unknown
+      // message name simply falls through with no result and no key
+      // material anywhere in the response.
+      await unlock([MOCK_KEYS[0], KEY_B]);
+
+      const result = await LockManager.lockManagerListener(
+        { name: "GET_DECRYPTED_KEYS" },
+        TRUSTED_SENDER,
+      );
+
+      expect(result).toBeUndefined();
+    });
+
     describe("auto-lock activity semantics (F2)", () => {
       beforeEach(async () => {
         localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 5 };
@@ -603,11 +618,7 @@ describe("LockManager", () => {
         expect(mockAlarms.create).not.toHaveBeenCalled();
       });
 
-      it("does NOT reset the auto-lock timer on GET_DECRYPTED_KEYS or GET_DECRYPTED_KEY_FOR_ADDRESS reads", async () => {
-        await LockManager.lockManagerListener(
-          { name: LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS },
-          TRUSTED_SENDER,
-        );
+      it("does NOT reset the auto-lock timer on GET_DECRYPTED_KEY_FOR_ADDRESS reads", async () => {
         await LockManager.lockManagerListener(
           {
             name: LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEY_FOR_ADDRESS,

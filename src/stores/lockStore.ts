@@ -94,6 +94,14 @@ class LockStore {
   private portStabilityTimer?: ReturnType<typeof setTimeout>;
   /** Timestamp of the last USER_ACTIVITY ping sent, for throttling. */
   private lastActivityPingAt = 0;
+  /**
+   * Set once connectKeepAlive() has connected the port for the first time.
+   * Distinguishes the constructor's initial connect (already covered by
+   * initialize()'s own IS_LOCKED retry loop, right below it) from a real
+   * reconnect after the worker dropped the port, which is the case M2's
+   * extra readLockState() call exists for.
+   */
+  private hasConnectedKeepAliveOnce = false;
 
   constructor() {
     makeAutoObservable(this, {
@@ -136,6 +144,15 @@ class LockStore {
           // SW not reachable right now - the next activity tick, or the
           // keep-alive port reconnect, will retry. Not worth surfacing.
         });
+      // Riding the same throttle: a cheap IS_LOCKED re-check while this
+      // store still believes it is unlocked (M2), catching a dead worker
+      // even on the rare path where its port's onDisconnect never fires.
+      // IS_LOCKED stays off lockManagerListener's auto-lock activity
+      // allow-list, so this can never re-arm auto-lock itself - only the
+      // USER_ACTIVITY ping above does that.
+      if (!this.isLocked) {
+        this.readLockState();
+      }
     };
     const passiveListener: AddEventListenerOptions = { passive: true };
     document.addEventListener("pointerdown", ping, passiveListener);
@@ -182,12 +199,31 @@ class LockStore {
       this.portStabilityTimer = setTimeout(() => {
         this.portReconnectAttempt = 0;
       }, PORT_STABLE_AFTER_MS);
+      // The worker's in-memory keys never survive its own restart (F4), so
+      // a successful RECONNECT - proof the worker just answered again after
+      // a real disconnect, whether or not it is the same instance as
+      // before - is exactly when a stale isLocked=false belief needs
+      // re-checking (M2): without this, an already-open surface that was
+      // unlocked when the worker died keeps showing the dashboard, with
+      // every action failing, until something else happens to trigger a
+      // poll. The very first connect, from the constructor, is excluded:
+      // initialize()'s own IS_LOCKED retry loop already covers it, and
+      // firing a second, independent poll here at construction time has no
+      // extra value.
+      if (this.hasConnectedKeepAliveOnce) {
+        this.readLockState();
+      }
+      this.hasConnectedKeepAliveOnce = true;
       this.keepAlivePort.onDisconnect.addListener(() => {
         // Read runtime.lastError so Chrome does not additionally log it as
         // an "Unchecked runtime.lastError" on top of this reconnect - a
         // dropped connect while the worker is between wake-ups ("Receiving
         // end does not exist") is expected here and already handled.
         checkForLastError();
+        // The worker may still answer sendMessage for a moment even though
+        // this specific port just dropped (M2); try now, and the reconnect
+        // above covers the case where it does not.
+        this.readLockState();
         this.scheduleReconnect();
       });
     } catch {

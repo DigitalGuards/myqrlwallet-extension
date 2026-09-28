@@ -17,6 +17,7 @@ import {
 } from "@/components/UI/Form";
 import { Input } from "@/components/UI/Input";
 import { Label } from "@/components/UI/Label";
+import { isWalletLockedError } from "@/functions/describeExtensionError";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
 import type { NFTStandard } from "@/types/nft";
@@ -259,6 +260,18 @@ const NFTTransfer = observer(() => {
 
       navigate(ROUTES.TRANSACTION_HISTORY);
     } catch (error) {
+      if (isWalletLockedError(error)) {
+        // The SW's decrypted keys and this surface's own isLocked belief
+        // can fall out of sync for a moment (M2); this signing attempt
+        // hit the real, locked state. Push the screen to the lock view
+        // immediately: the dashboard would otherwise stay up with a form
+        // that can only fail again (L4).
+        void lockStore.readLockState();
+        control.setError("receiverAddress", {
+          message: t("account.walletLockedError"),
+        });
+        return;
+      }
       control.setError("receiverAddress", {
         message: t("transfer.errorOccurred", { error }),
       });
