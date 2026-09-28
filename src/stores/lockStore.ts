@@ -53,6 +53,7 @@ const AUTOMATED_SESSION_STORAGE_KEYS = new Set([
 // moving the mouse or typing in an open surface does not flood the SW with
 // messages; see registerActivityPing().
 const ACTIVITY_PING_THROTTLE_MS = 30_000;
+const KEEP_ALIVE_RETRY_MS = 1_000;
 
 /**
  * Outcome of a password verification (unlock() or changePassword()).
@@ -182,7 +183,7 @@ class LockStore {
    * Idempotent: a second call while already connected is a no-op, so
    * nothing here fights a caller's own connect/disconnect bookkeeping.
    */
-  private connectKeepAlive() {
+  private connectKeepAlive(isRetry = false) {
     if (this.keepAlivePort) return;
     try {
       this.keepAlivePort = browser.runtime.connect({
@@ -205,13 +206,23 @@ class LockStore {
         // loop this design exists to avoid. If the worker actually is
         // still alive for some unrelated reason, the user simply sees the
         // lock screen and a real unlock() call still succeeds against it.
-        this.isLocked = true;
+        runInAction(() => {
+          this.isLocked = true;
+        });
       });
     } catch {
-      // Nothing to connect to right now. Whatever next determines the
-      // wallet is unlocked (the storage listener, the activity poll, a
-      // fresh unlock()) will call this again.
       checkForLastError();
+      // One retry, so a transient connect failure does not leave an
+      // unlocked surface without its worker-death signal until the next
+      // 30 s activity poll. The retry only runs while still unlocked and
+      // unconnected, so it cannot hold a locked wallet's worker awake.
+      if (!isRetry) {
+        setTimeout(() => {
+          if (!this.isLocked && !this.keepAlivePort) {
+            this.connectKeepAlive(true);
+          }
+        }, KEEP_ALIVE_RETRY_MS);
+      }
     }
   }
 
@@ -240,8 +251,11 @@ class LockStore {
         .connect({ name: LOCK_MANAGER_MESSAGES.LOCK_MANAGER_KEEP_LIVE })
         .disconnect();
     } catch {
-      checkForLastError();
+      /* read below */
     }
+    // Disconnecting our own end fires no onDisconnect for us, so a nudge at
+    // a dormant worker would otherwise log "Unchecked runtime.lastError".
+    checkForLastError();
   }
 
   /**

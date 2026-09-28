@@ -864,6 +864,92 @@ describe("LockStore – keep-alive port only while unlocked (real-device regress
     expect(getConnectCallCount()).toBe(beforeUnlock + 1);
   });
 
+  it("retries a failed port connect once, and only while still unlocked", async () => {
+    const { store, getConnectCallCount } =
+      await createLockStoreWithControllablePort({
+        initialIsLocked: true,
+        initialHasPasswordSet: true,
+      });
+    const failingConnect = vi.fn(() => {
+      throw new Error("Could not establish connection.");
+    });
+    const workingConnect = (
+      browser.runtime.connect as any
+    ).getMockImplementation();
+    (browser.runtime.connect as any).mockImplementation(failingConnect);
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+
+    await store.readLockState();
+    expect(failingConnect).toHaveBeenCalledTimes(1);
+
+    // The single retry fails too: no third attempt follows.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(failingConnect).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(failingConnect).toHaveBeenCalledTimes(2);
+
+    // A fresh unlock signal starts over, and a retry that succeeds opens
+    // the port.
+    (browser.runtime.connect as any).mockImplementationOnce(() => {
+      throw new Error("Could not establish connection.");
+    });
+    (browser.runtime.connect as any).mockImplementation(workingConnect);
+    const before = getConnectCallCount();
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+    await store.readLockState();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(getConnectCallCount()).toBe(before + 1);
+  });
+
+  it("drops the pending retry once the wallet locks", async () => {
+    const { store } = await createLockStoreWithControllablePort({
+      initialIsLocked: true,
+      initialHasPasswordSet: true,
+    });
+    const connect = vi.fn(() => {
+      throw new Error("Could not establish connection.");
+    });
+    (browser.runtime.connect as any).mockImplementation(connect);
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+    await store.readLockState();
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: true,
+      hasPasswordSet: true,
+    });
+    await store.readLockState();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads runtime.lastError after the wake nudge, so a dormant worker logs nothing unchecked", async () => {
+    let lastErrorReads = 0;
+    Object.defineProperty(browser.runtime, "lastError", {
+      configurable: true,
+      get: () => {
+        lastErrorReads += 1;
+        return undefined;
+      },
+    });
+
+    await createLockStoreWithControllablePort({
+      initialIsLocked: true,
+      initialHasPasswordSet: true,
+    });
+
+    expect(lastErrorReads).toBeGreaterThan(0);
+  });
+
   it("disconnects the port on lock()", async () => {
     const { store, fireDisconnect, getConnectCallCount } =
       await createLockStoreWithControllablePort();
