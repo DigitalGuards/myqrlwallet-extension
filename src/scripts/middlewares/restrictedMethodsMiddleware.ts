@@ -17,6 +17,7 @@ import { checkDomain } from "../phishing/phishingDetector";
 import { openApprovalSurface } from "../utils/approvalSurface";
 import { resolveTrustedSenderOrigin } from "../utils/dAppAccountNotifications";
 import {
+  buildDAppSendTransactionErrorData,
   checkAccountHasBeenAuthorized,
   checkAccountAndChainHaveBeenAuthorized,
   checkUrlOriginHasBeenConnected,
@@ -460,12 +461,23 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
             case RESTRICTED_METHODS.QRL_SEND_TRANSACTION: {
               const response = restrictedMethodResult?.response;
               const transactionHash = response?.transactionHash;
+              const pendingTransactionHash =
+                extractPendingDAppTransactionHash(response);
               if (transactionHash) {
                 res.result = transactionHash;
               } else {
-                res.error = providerErrors.unsupportedMethod({
+                // rpcErrors.transactionRejected (-32003, EIP-1474) fits a
+                // qrl_sendTransaction that failed to complete (node
+                // rejection, signing failure or broadcast timeout) far
+                // better than unsupportedMethod (4200), which claims the
+                // wallet does not support the method at all. A user
+                // rejection is handled separately above
+                // (providerErrors.userRejectedRequest, 4001) and is
+                // unaffected.
+                // @ts-expect-error - rpcErrors' JsonRpcError type is not assignable to res.error's narrow type
+                res.error = rpcErrors.transactionRejected({
                   message: response?.error?.message,
-                  data: response?.error,
+                  data: buildDAppSendTransactionErrorData(response),
                 });
               }
               // Registers the watch either way: on a result, for the hash
@@ -477,7 +489,7 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
               // throws, so this cannot stop `end()` below from running.
               await registerDAppTransactionWatchIfApproved(
                 req,
-                transactionHash ?? extractPendingDAppTransactionHash(response),
+                transactionHash ?? pendingTransactionHash,
                 authorizedChainId,
               );
               break;

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import {
+  buildDAppSendTransactionErrorData,
   extractPendingDAppTransactionHash,
   registerDAppTransactionWatchIfApproved,
 } from "./restrictedMethodsMiddlewareUtils";
@@ -139,5 +140,47 @@ describe("extractPendingDAppTransactionHash", () => {
     ["null", null],
   ])("returns undefined for %s", (_label, response) => {
     expect(extractPendingDAppTransactionHash(response)).toBeUndefined();
+  });
+});
+
+describe("buildDAppSendTransactionErrorData", () => {
+  // N2: the dApp-visible shape after sanitizeError (scriptUtils.ts) already
+  // ran once in the approval surface's document. That is what
+  // `response.error` looks like by the time the middleware sees it: a
+  // TransactionMayStillBeProcessingError sanitizes to
+  // `{ message, data: { transactionHash, pending } }`.
+  it("hoists the transaction hash to the top level for a may-still-be-processing error", () => {
+    const response = {
+      error: {
+        message: "The transaction was not confirmed within the wait time.",
+        data: { transactionHash: "0xpending", pending: true },
+      },
+    };
+
+    expect(buildDAppSendTransactionErrorData(response)).toEqual({
+      message: "The transaction was not confirmed within the wait time.",
+      // Backwards-compatible: the original nested shape is kept alongside
+      // the hoisted field.
+      data: { transactionHash: "0xpending", pending: true },
+      transactionHash: "0xpending",
+    });
+  });
+
+  it("has no top-level transactionHash for an error that never had one (a node rejection)", () => {
+    const response = {
+      error: { message: "insufficient funds for gas * price + value" },
+    };
+
+    expect(buildDAppSendTransactionErrorData(response)).toEqual({
+      message: "insufficient funds for gas * price + value",
+    });
+  });
+
+  it.each([
+    ["no error at all", { transactionHash: "0xtxhash" }],
+    ["undefined", undefined],
+    ["null", null],
+  ])("returns an empty object for %s", (_label, response) => {
+    expect(buildDAppSendTransactionErrorData(response)).toEqual({});
   });
 });

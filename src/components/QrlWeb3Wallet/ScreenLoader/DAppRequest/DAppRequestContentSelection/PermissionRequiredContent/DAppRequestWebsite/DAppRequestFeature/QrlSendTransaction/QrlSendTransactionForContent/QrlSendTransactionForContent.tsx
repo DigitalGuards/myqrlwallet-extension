@@ -24,9 +24,14 @@ import {
   Eip838ExecutionError,
   TransactionRevertInstructionError,
 } from "@theqrl/web3-errors";
+import { isHexStrict } from "@theqrl/web3-validator";
 import { BlockTags, type TransactionCall } from "@theqrl/web3-types";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import { TimeoutError, withTimeout } from "@/functions/withTimeout";
+import {
+  capSimulationTimeoutMs,
+  floorBroadcastTimeoutMs,
+} from "@/functions/sendBudget";
 
 const { Common } = qrl.accounts;
 
@@ -34,10 +39,15 @@ const { Common } = qrl.accounts;
 // simulation plus the broadcast. requestManager.send() has no timeout of
 // its own, and an unbounded wait here can outlast the middleware's 90 s
 // safety timeout just as badly as waiting for a receipt used to. The two
-// steps share this one budget (see broadcastTransaction), each getting
-// only what the other left behind, so the combined worst case stays well
-// inside the 90 s the middleware allows for the whole approval.
+// steps share this one budget (see broadcastTransaction): the simulation
+// is capped at SIMULATION_TIMEOUT_CAP_MS so it can never eat most of it,
+// and the broadcast is floored at BROADCAST_TIMEOUT_FLOOR_MS so it always
+// gets a real window even in that case. The combined worst case (the cap
+// plus the floor, or the full shared budget, whichever is larger) stays
+// well inside the 90 s the middleware allows for the whole approval.
 const SEND_BUDGET_MS = 30 * 1000;
+const SIMULATION_TIMEOUT_CAP_MS = 15 * 1000;
+const BROADCAST_TIMEOUT_FLOOR_MS = 5 * 1000;
 
 /**
  * Thrown when the broadcast itself timed out. requestManager.send() gives
@@ -62,6 +72,21 @@ export class TransactionMayStillBeProcessingError extends Error {
     return { transactionHash: this.transactionHash, pending: true };
   }
 }
+
+// The Ledger path has no signTransaction result to read a hash from, so it
+// derives one itself with sha3Raw, the same function signTransaction uses
+// internally. sha3Raw falls back to hashing a string's UTF-8 bytes for
+// anything that is not strict hex (@theqrl/web3-utils' sha3), so a
+// malformed raw transaction would otherwise be hashed as if it were text,
+// producing a hash for a "transaction" that was never signed. isHexStrict
+// guards that: a raw transaction that fails it is treated as a signing
+// failure, the same as no raw transaction at all.
+const hashRawTransaction = (rawTransaction: string): string => {
+  if (!isHexStrict(rawTransaction)) {
+    throw new Error("The signed transaction is not valid hex");
+  }
+  return utils.sha3Raw(rawTransaction);
+};
 
 type TransactionObject = {
   chainId: string;
@@ -224,13 +249,17 @@ const QrlSendTransactionForContent = observer(
     ) => {
       const instance = requireQrlInstance();
       await ensureSigningContext();
-      // Simulation and broadcast share one SEND_BUDGET_MS deadline: the
-      // broadcast's own timeout is whatever remains of it once the
-      // simulation has taken its share.
+      // Simulation and broadcast share one SEND_BUDGET_MS deadline, split
+      // explicitly between the two: capping the simulation and flooring
+      // the broadcast keeps a slow simulation from squeezing the broadcast
+      // down to (near) zero.
       const deadline = Date.now() + SEND_BUDGET_MS;
       await simulateTransaction(
         transaction,
-        Math.max(deadline - Date.now(), 0),
+        capSimulationTimeoutMs(
+          deadline - Date.now(),
+          SIMULATION_TIMEOUT_CAP_MS,
+        ),
       );
       try {
         const transactionHash: unknown = await withTimeout(
@@ -238,7 +267,10 @@ const QrlSendTransactionForContent = observer(
             method: "qrl_sendRawTransaction",
             params: [rawTransaction],
           }),
-          Math.max(deadline - Date.now(), 0),
+          floorBroadcastTimeoutMs(
+            deadline - Date.now(),
+            BROADCAST_TIMEOUT_FLOOR_MS,
+          ),
           "Broadcasting the transaction",
         );
         if (typeof transactionHash !== "string" || !transactionHash) {
@@ -290,8 +322,16 @@ const QrlSendTransactionForContent = observer(
               ? value
               : BigInt(value)
             : 0n;
+        // fromPlanck already returns an exact decimal string; wrapping it
+        // in Number() (as this used to) truncates it to float precision,
+        // and signAndSendReplacementTransaction (qrlStore.ts) later feeds
+        // this same field back into toPlanck() to rebuild the value for
+        // Speed Up/cancel. TokenTransfer.tsx stores a wallet-initiated
+        // send's amount as a string for the same reason. The history
+        // screen's own formatTransactionAmount already expects (and
+        // parses) a decimal string, so display is unaffected.
         const amount = isQrlTransfer
-          ? Number(utils.fromPlanck(valueAsBigInt, "quanta"))
+          ? utils.fromPlanck(valueAsBigInt, "quanta")
           : 0;
         const entry: TransactionHistoryEntry = {
           id: transactionHash,
@@ -445,7 +485,7 @@ const QrlSendTransactionForContent = observer(
           // account (sha3Raw of the raw transaction, see
           // @theqrl/web3-qrl-accounts' signTransaction).
           precomputedHash = rawTransactionToSend
-            ? utils.sha3Raw(rawTransactionToSend)
+            ? hashRawTransaction(rawTransactionToSend)
             : undefined;
         } else {
           // Regular account - use mnemonic-based signing
@@ -588,7 +628,7 @@ const QrlSendTransactionForContent = observer(
           // signTransaction result to read a hash from, so it is derived
           // from the raw bytes the same way signTransaction computes one.
           precomputedHash = rawTransactionToSend
-            ? utils.sha3Raw(rawTransactionToSend)
+            ? hashRawTransaction(rawTransactionToSend)
             : undefined;
         } else {
           // Regular account - use mnemonic-based signing

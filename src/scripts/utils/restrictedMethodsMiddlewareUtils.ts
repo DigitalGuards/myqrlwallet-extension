@@ -773,6 +773,31 @@ export const extractPendingDAppTransactionHash = (
 };
 
 /**
+ * Builds the `data` payload for the JSON-RPC error a failed
+ * qrl_sendTransaction gets. `response.error` is already the sanitized
+ * shape (sanitizeError/getSerializableObject, scriptUtils.ts) the approval
+ * surface produced, e.g. `{ message, data: { transactionHash, pending } }`
+ * for a broadcast timeout. That is kept nested as-is for anything already
+ * reading it there, and the transaction hash (if any) is also hoisted to
+ * this object's own top level, so the dApp can read it directly as
+ * `error.data.transactionHash`.
+ */
+export const buildDAppSendTransactionErrorData = (
+  response: unknown,
+): Record<string, unknown> => {
+  const errorPayload = (response as { error?: unknown })?.error;
+  const pendingTransactionHash = extractPendingDAppTransactionHash(response);
+  return {
+    ...(errorPayload && typeof errorPayload === "object"
+      ? (errorPayload as Record<string, unknown>)
+      : {}),
+    ...(pendingTransactionHash && {
+      transactionHash: pendingTransactionHash,
+    }),
+  };
+};
+
+/**
  * Called by restrictedMethodsMiddleware once it has an approved
  * qrl_sendTransaction response, whether that response carries a result
  * hash or (see extractPendingDAppTransactionHash) a still-pending one under
