@@ -161,7 +161,7 @@ describe("QrlSendTransactionForContent", () => {
       },
       ledgerStore: {
         isLedgerAccount: () => false,
-        signAndSerializeTransaction: async () => "0xledgersigned",
+        signAndSerializeTransaction: async () => "0xdeadbeef1111",
         ...overrides.ledgerStore,
       } as any,
       transactionHistoryStore: { ...overrides.transactionHistoryStore },
@@ -500,7 +500,7 @@ describe("QrlSendTransactionForContent", () => {
         .fn()
         .mockResolvedValue("0xledgertxhash");
       const mockAddToResponseData = vi.fn();
-      const mockSignAndSerialize = vi.fn().mockResolvedValue("0xledgersigned");
+      const mockSignAndSerialize = vi.fn().mockResolvedValue("0xdeadbeef1111");
 
       renderComponent(
         createStoreWithCallback({
@@ -529,7 +529,7 @@ describe("QrlSendTransactionForContent", () => {
       expect(mockSignAndSerialize).toHaveBeenCalled();
       expect(mockSendRawTransaction).toHaveBeenCalledWith({
         method: "qrl_sendRawTransaction",
-        params: ["0xledgersigned"],
+        params: ["0xdeadbeef1111"],
       });
       expect(mockAddToResponseData).toHaveBeenCalledWith({
         transactionHash: "0xledgertxhash",
@@ -544,7 +544,7 @@ describe("QrlSendTransactionForContent", () => {
         const addTransaction = vi.fn();
         const signAndSerializeTransaction = vi
           .fn()
-          .mockResolvedValue("0xledgersigned");
+          .mockResolvedValue("0xdeadbeef1111");
 
         renderComponent(
           createStoreWithCallback({
@@ -573,7 +573,7 @@ describe("QrlSendTransactionForContent", () => {
           await settled;
         });
 
-        const expectedHash = sha3Raw("0xledgersigned");
+        const expectedHash = sha3Raw("0xdeadbeef1111");
         expect(addToResponseData).toHaveBeenCalledWith({
           error: expect.objectContaining({
             message: expect.stringContaining(expectedHash),
@@ -586,6 +586,52 @@ describe("QrlSendTransactionForContent", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("fails closed when the Ledger returns a malformed (non-hex) blob", async () => {
+      // sha3Raw falls back to hashing a string's UTF-8 bytes for anything
+      // that is not strict hex, which would produce a hash for a
+      // "transaction" that was never actually signed. isHexStrict must
+      // reject it before that happens.
+      const send = vi.fn();
+      const addToResponseData = vi.fn();
+      const addTransaction = vi.fn();
+      const signAndSerializeTransaction = vi
+        .fn()
+        .mockResolvedValue("not-a-valid-hex-blob");
+
+      renderComponent(
+        createStoreWithCallback({
+          qrlStore: {
+            qrlInstance: {
+              getGasPrice: async () => BigInt(1000),
+              getTransactionCount: async () => 0,
+              getChainId: async () => 1,
+              call: vi.fn().mockResolvedValue("0x"),
+              requestManager: { send },
+            } as any,
+          },
+          addToResponseData,
+          ledgerStore: {
+            isLedgerAccount: () => true,
+            signAndSerializeTransaction,
+          },
+          transactionHistoryStore: { addTransaction },
+        }),
+        { transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER },
+      );
+
+      await act(async () => {
+        await capturedPermissionCallback!(true);
+      });
+
+      expect(send).not.toHaveBeenCalled();
+      expect(addTransaction).not.toHaveBeenCalled();
+      expect(addToResponseData).toHaveBeenCalledWith({
+        error: expect.objectContaining({
+          message: "The signed transaction is not valid hex",
+        }),
+      });
     });
 
     it("should send QRL transfer with legacy gas pricing (non-0x2)", async () => {
@@ -625,6 +671,55 @@ describe("QrlSendTransactionForContent", () => {
         method: "qrl_sendRawTransaction",
         params: ["0xsignedlegacy"],
       });
+    });
+
+    it("records a large transfer amount losslessly, for Speed Up to rebuild exactly", async () => {
+      // Number(fromPlanck(...)) (the previous behaviour) truncates to
+      // float precision; the exact decimal string is what
+      // signAndSendReplacementTransaction (qrlStore.ts) later feeds back
+      // into toPlanck() to rebuild this value for Speed Up/cancel, and
+      // what TokenTransfer.tsx already stores for a wallet-initiated send.
+      const EXACT_QUANTA_AMOUNT = "123456789.123456789123456789";
+      const largeValuePlanckHex = "0x661efdf2e3b19f7c045f15";
+      const addTransaction = vi.fn();
+      const largeTransferRequest = {
+        ...zndTransferRequest,
+        value: largeValuePlanckHex,
+      };
+
+      renderComponent(
+        createStoreWithCallback({
+          requestParams: largeTransferRequest,
+          qrlStore: {
+            qrlInstance: {
+              getGasPrice: async () => BigInt(1000),
+              getTransactionCount: async () => 0,
+              accounts: {
+                seedToAccount: () => ({ address: SENDER_ADDRESS }),
+                signTransaction: async () => ({
+                  rawTransaction: "0xsignedraw",
+                  transactionHash: "0xsignedrawhash",
+                }),
+              },
+              call: vi.fn().mockResolvedValue("0x"),
+              requestManager: {
+                send: vi.fn().mockResolvedValue("0xlargetxhash"),
+              },
+            } as any,
+          },
+          transactionHistoryStore: { addTransaction },
+        }),
+        { transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER },
+      );
+
+      await act(async () => {
+        await capturedPermissionCallback!(true);
+      });
+
+      expect(addTransaction).toHaveBeenCalledWith(
+        SENDER_ADDRESS,
+        expect.objectContaining({ amount: EXACT_QUANTA_AMOUNT }),
+      );
     });
 
     it("should handle error when from is missing", async () => {
@@ -859,7 +954,11 @@ describe("QrlSendTransactionForContent", () => {
         vi.useRealTimers();
       });
 
-      it("fails once the simulation timeout elapses, without broadcasting", async () => {
+      it("fails once the simulation's own 15 s cap elapses, without ever reaching the broadcast", async () => {
+        // N1: a simulation that hangs must never be allowed to eat most of
+        // the shared 30 s budget and leave the broadcast a near-zero
+        // window. It is capped at 15 s (half the total), independent of
+        // how much of the shared deadline is left.
         const call = vi.fn(() => new Promise<never>(() => {}));
         const send = vi.fn();
         const addTransaction = vi.fn();
@@ -867,7 +966,7 @@ describe("QrlSendTransactionForContent", () => {
         renderTransfer(send, { addTransaction }, addToResponseData, call);
 
         const settled = capturedPermissionCallback!(true);
-        await vi.advanceTimersByTimeAsync(30_000);
+        await vi.advanceTimersByTimeAsync(15_000);
         await act(async () => {
           await settled;
         });
@@ -876,7 +975,7 @@ describe("QrlSendTransactionForContent", () => {
         expect(addTransaction).not.toHaveBeenCalled();
         expect(addToResponseData).toHaveBeenCalledWith({
           error: expect.objectContaining({
-            message: "Simulating the transaction timed out after 30000ms",
+            message: "Simulating the transaction timed out after 15000ms",
           }),
         });
       });
@@ -920,13 +1019,14 @@ describe("QrlSendTransactionForContent", () => {
         );
       });
 
-      it("shares a single 30 s budget between the simulation and the broadcast", async () => {
-        // The simulation alone eats 20 s of the shared budget; the
-        // broadcast must be given only the remaining 10 s.
+      it("gives the broadcast only the remaining budget after a successful simulation", async () => {
+        // The simulation takes 10 s of the shared 30 s budget (under its
+        // own 15 s cap, so it succeeds without timing out); only the
+        // remaining 20 s must be given to the broadcast.
         const call = vi.fn(
           () =>
             new Promise((resolve) => {
-              setTimeout(() => resolve("0x"), 20_000);
+              setTimeout(() => resolve("0x"), 10_000);
             }),
         );
         const send = vi.fn(() => new Promise<never>(() => {}));
@@ -935,9 +1035,9 @@ describe("QrlSendTransactionForContent", () => {
         renderTransfer(send, { addTransaction }, addToResponseData, call);
 
         const settled = capturedPermissionCallback!(true);
-        await vi.advanceTimersByTimeAsync(20_000);
-        expect(addToResponseData).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(10_000);
+        expect(addToResponseData).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(20_000);
         await act(async () => {
           await settled;
         });
@@ -969,7 +1069,7 @@ describe("QrlSendTransactionForContent", () => {
             isLedgerAccount: () => true,
             signAndSerializeTransaction: vi
               .fn()
-              .mockResolvedValue("0xledgersigned"),
+              .mockResolvedValue("0xdeadbeef1111"),
           },
           transactionHistoryStore: { addTransaction },
         }),
@@ -1141,9 +1241,9 @@ describe("QrlSendTransactionForContent", () => {
     it("should deploy contract via Ledger account", async () => {
       const mockSendRawTransaction = vi
         .fn()
-        .mockResolvedValue("0xledgerdeployhash");
+        .mockResolvedValue("0xdeadbeef2222hash");
       const mockAddToResponseData = vi.fn();
-      const mockSignAndSerialize = vi.fn().mockResolvedValue("0xledgerdeploy");
+      const mockSignAndSerialize = vi.fn().mockResolvedValue("0xdeadbeef2222");
 
       renderComponent(
         createStoreWithCallback({
@@ -1173,21 +1273,19 @@ describe("QrlSendTransactionForContent", () => {
       expect(mockSignAndSerialize).toHaveBeenCalled();
       expect(mockSendRawTransaction).toHaveBeenCalledWith({
         method: "qrl_sendRawTransaction",
-        params: ["0xledgerdeploy"],
+        params: ["0xdeadbeef2222"],
       });
       expect(mockAddToResponseData).toHaveBeenCalledWith({
-        transactionHash: "0xledgerdeployhash",
+        transactionHash: "0xdeadbeef2222hash",
       });
     });
 
     it("should interact with contract via Ledger account (with to address)", async () => {
       const mockSendRawTransaction = vi
         .fn()
-        .mockResolvedValue("0xledgerinteracthash");
+        .mockResolvedValue("0xdeadbeef3333hash");
       const mockAddToResponseData = vi.fn();
-      const mockSignAndSerialize = vi
-        .fn()
-        .mockResolvedValue("0xledgerinteract");
+      const mockSignAndSerialize = vi.fn().mockResolvedValue("0xdeadbeef3333");
 
       renderComponent(
         createStoreWithCallback({
@@ -1222,7 +1320,7 @@ describe("QrlSendTransactionForContent", () => {
       expect(txDataArg.to).toBe(contractInteractionRequest.to);
       expect(mockSendRawTransaction).toHaveBeenCalledWith({
         method: "qrl_sendRawTransaction",
-        params: ["0xledgerinteract"],
+        params: ["0xdeadbeef3333"],
       });
     });
 
