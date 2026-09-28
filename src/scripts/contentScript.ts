@@ -44,12 +44,16 @@ let disconnectProviderChannel: (() => void) | undefined;
 let detachExtensionPortListeners: (() => void) | undefined;
 let extensionConnectionGeneration = 0;
 let lastStreamRebuildAt = 0;
+let restorePending = false;
 
 /**
- * A page cannot be restored or resumed twice in a row this quickly, so a
- * second signal inside this window is either the pair of events one real
- * restore fires (pageshow and resume) or a page trying to make this script
- * churn runtime ports.
+ * Backstop for a trusted restore signal that arrives with no cache entry
+ * recorded for it, which is the only case the restorePending flag cannot
+ * pair up. It must never be the primary guard: Back, Forward, Back on one
+ * tab restores the same page twice about 20 ms apart, and a human
+ * double-click on Back is 100 to 300 ms, so a wall-clock window wide enough
+ * to be useful would drop a genuine restore and leave the page on a port
+ * the second cache entry already closed.
  */
 const MIN_STREAM_REBUILD_INTERVAL_MS = 500;
 
@@ -110,6 +114,7 @@ const destroyExtensionStreams = () => {
  */
 const resetExtensionStreamsAfterPageRestore = () => {
   lastStreamRebuildAt = Date.now();
+  restorePending = false;
 
   if (extensionStream) destroyExtensionStreams();
 
@@ -126,20 +131,43 @@ const resetExtensionStreamsAfterPageRestore = () => {
 };
 
 /**
- * Gate for the two signals a restored page gets: pageshow with persisted
- * set (back/forward cache) and the Page Lifecycle resume event, which also
- * covers a tab thawed after Chrome froze or discarded it under Memory
- * Saver. Only the browser can fire either for real, so an untrusted event
- * is a page calling dispatchEvent to make this script open runtime ports on
- * demand, which would hold the service worker awake for a locked wallet and
- * re-run the pending-request replay. The rate limit bounds the damage from
- * any signal that slips past isTrusted, and it also absorbs the pair of
- * events that one genuine restore fires.
+ * Only the browser can fire any of these events for real, so an untrusted
+ * one is a page calling dispatchEvent to make this script open runtime
+ * ports on demand, which would hold the service worker awake for a locked
+ * wallet and re-run the pending-request replay.
+ */
+const isBrowserCacheSignal = (event: Event) =>
+  event.isTrusted &&
+  // pagehide and pageshow carry persisted; freeze and resume do not.
+  (!("persisted" in event) || (event as PageTransitionEvent).persisted);
+
+/**
+ * Records that this page is going into the back/forward cache, or is being
+ * frozen, which is the moment the browser closes its extension ports.
+ */
+const onPageCacheEntry = (event: Event) => {
+  if (!isBrowserCacheSignal(event)) return;
+  restorePending = true;
+};
+
+/**
+ * Acts on the signals a restored page gets: pageshow with persisted set
+ * (back/forward cache) and the Page Lifecycle resume event, which also
+ * covers a tab thawed after Chrome froze it under Memory Saver.
+ *
+ * A recorded cache entry is what pairs a rebuild with the restore it
+ * belongs to. One restore fires two of these events and consumes the single
+ * flag, so the second is ignored with no time window involved, and two
+ * genuine restores milliseconds apart each have their own cache entry and
+ * each rebuild.
  */
 const onPageRestoreSignal = (event: Event) => {
-  if (!event.isTrusted) return;
-  if ("persisted" in event && !(event as PageTransitionEvent).persisted) return;
-  if (Date.now() - lastStreamRebuildAt < MIN_STREAM_REBUILD_INTERVAL_MS) return;
+  if (!isBrowserCacheSignal(event)) return;
+  if (
+    !restorePending &&
+    Date.now() - lastStreamRebuildAt < MIN_STREAM_REBUILD_INTERVAL_MS
+  )
+    return;
   resetExtensionStreamsAfterPageRestore();
 };
 
@@ -298,6 +326,8 @@ const initializeContentScript = () => {
     setupPageStreams();
     setupExtensionStreams();
     prepareListeners();
+    window.addEventListener("pagehide", onPageCacheEntry);
+    document.addEventListener("freeze", onPageCacheEntry);
     window.addEventListener("pageshow", onPageRestoreSignal);
     document.addEventListener("resume", onPageRestoreSignal);
     startContentScriptKeepAlive();

@@ -89,23 +89,28 @@ type PortStub = {
 type RestoreSignal = { isTrusted: boolean; persisted?: boolean };
 
 const openedPorts: PortStub[] = [];
-const restoreListeners: Array<(event: RestoreSignal) => void> = [];
-const resumeListeners: Array<(event: RestoreSignal) => void> = [];
+const listenersByType = new Map<
+  string,
+  Array<(event: RestoreSignal) => void>
+>();
+
+const captureListener = (type: string, listener: EventListener) => {
+  const listeners = listenersByType.get(type) ?? [];
+  listeners.push(listener as unknown as (event: RestoreSignal) => void);
+  listenersByType.set(type, listeners);
+};
 
 const loadContentScript = async () => {
-  const onWindow = vi.spyOn(window, "addEventListener").mockImplementation(((
-    type: string,
-    listener: EventListener,
-  ) => {
-    if (type === "pageshow")
-      restoreListeners.push(listener as unknown as (e: RestoreSignal) => void);
-  }) as typeof window.addEventListener);
+  const onWindow = vi
+    .spyOn(window, "addEventListener")
+    .mockImplementation(
+      captureListener as unknown as typeof window.addEventListener,
+    );
   const onDocument = vi
     .spyOn(document, "addEventListener")
-    .mockImplementation(((type: string, listener: EventListener) => {
-      if (type === "resume")
-        resumeListeners.push(listener as unknown as (e: RestoreSignal) => void);
-    }) as typeof document.addEventListener);
+    .mockImplementation(
+      captureListener as unknown as typeof document.addEventListener,
+    );
   try {
     await import("./contentScript");
   } finally {
@@ -114,10 +119,20 @@ const loadContentScript = async () => {
   }
 };
 
-const firePageShow = (event: RestoreSignal) =>
-  restoreListeners.forEach((listener) => listener(event));
-const fireResume = (event: RestoreSignal) =>
-  resumeListeners.forEach((listener) => listener(event));
+const fire = (type: string, event: RestoreSignal) =>
+  (listenersByType.get(type) ?? []).forEach((listener) => listener(event));
+
+const firePageShow = (event: RestoreSignal) => fire("pageshow", event);
+const fireResume = (event: RestoreSignal) => fire("resume", event);
+const firePageHide = (event: RestoreSignal) => fire("pagehide", event);
+const fireFreeze = (event: RestoreSignal) => fire("freeze", event);
+
+/** One genuine back/forward-cache round trip, as the browser fires it. */
+const fireCacheRoundTrip = () => {
+  firePageHide({ isTrusted: true, persisted: true });
+  fireResume({ isTrusted: true });
+  firePageShow({ isTrusted: true, persisted: true });
+};
 
 const lastPort = () => openedPorts[openedPorts.length - 1];
 
@@ -129,8 +144,7 @@ describe("contentScript back/forward-cache restore", () => {
     vi.resetModules();
     vi.useFakeTimers();
     openedPorts.length = 0;
-    restoreListeners.length = 0;
-    resumeListeners.length = 0;
+    listenersByType.clear();
     attachExtensionChannel.mockClear().mockImplementation(() => vi.fn());
     markConnectionReady.mockClear();
     mockOnMessageAddListener.mockReset();
@@ -156,11 +170,13 @@ describe("contentScript back/forward-cache restore", () => {
     vi.useRealTimers();
   });
 
-  it("registers for both restore signals", async () => {
+  it("registers for both cache-entry and both restore signals", async () => {
     await loadContentScript();
 
-    expect(restoreListeners).toHaveLength(1);
-    expect(resumeListeners).toHaveLength(1);
+    expect(listenersByType.get("pagehide")).toHaveLength(1);
+    expect(listenersByType.get("freeze")).toHaveLength(1);
+    expect(listenersByType.get("pageshow")).toHaveLength(1);
+    expect(listenersByType.get("resume")).toHaveLength(1);
   });
 
   it("ignores a pageshow the page dispatched itself", async () => {
@@ -195,17 +211,37 @@ describe("contentScript back/forward-cache restore", () => {
     expect(mockConnect).toHaveBeenCalledTimes(1);
   });
 
-  it("rebuilds once for a real restore and rate-limits a burst", async () => {
+  it("rebuilds once for the pair of events one restore fires", async () => {
     await loadContentScript();
     const firstPort = lastPort();
 
-    firePageShow({ isTrusted: true, persisted: true });
+    fireCacheRoundTrip();
+
     expect(mockConnect).toHaveBeenCalledTimes(2);
     expect(firstPort.disconnect).toHaveBeenCalledTimes(1);
+  });
 
-    // The pair of events one genuine restore fires, then a burst: neither
-    // opens another port inside the rate-limit window.
-    fireResume({ isTrusted: true });
+  it("rebuilds for each of two restores milliseconds apart", async () => {
+    await loadContentScript();
+
+    // Back, Forward, Back on one tab: the same page is cached and restored
+    // twice about 20 ms apart. The second cache entry closes the port the
+    // first restore opened, so skipping the second rebuild would leave the
+    // page on a dead port with no disconnect ever delivered.
+    fireCacheRoundTrip();
+    expect(mockConnect).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(20);
+    fireCacheRoundTrip();
+
+    expect(mockConnect).toHaveBeenCalledTimes(3);
+    expect(openedPorts[1].disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("rate-limits a restore signal with no cache entry behind it", async () => {
+    await loadContentScript();
+
+    // Nothing recorded a cache entry, so only the backstop applies.
     for (let attempt = 0; attempt < 5; attempt += 1) {
       firePageShow({ isTrusted: true, persisted: true });
     }
@@ -214,6 +250,35 @@ describe("contentScript back/forward-cache restore", () => {
     await vi.advanceTimersByTimeAsync(600);
     firePageShow({ isTrusted: true, persisted: true });
     expect(mockConnect).toHaveBeenCalledTimes(3);
+  });
+
+  it("ignores a cache entry the page dispatched itself", async () => {
+    await loadContentScript();
+
+    // An untrusted pagehide must not arm a rebuild that an untrusted
+    // pageshow can then spend.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      firePageHide({ isTrusted: false, persisted: true });
+      firePageShow({ isTrusted: false, persisted: true });
+    }
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+
+    // An untrusted cache entry must not arm a rebuild for a later trusted
+    // signal either: that one still answers to the backstop alone.
+    firePageHide({ isTrusted: false, persisted: true });
+    firePageShow({ isTrusted: true, persisted: true });
+    expect(mockConnect).toHaveBeenCalledTimes(2);
+    firePageShow({ isTrusted: true, persisted: true });
+    expect(mockConnect).toHaveBeenCalledTimes(2);
+  });
+
+  it("rebuilds after a freeze and resume with no navigation", async () => {
+    await loadContentScript();
+
+    fireFreeze({ isTrusted: true });
+    fireResume({ isTrusted: true });
+
+    expect(mockConnect).toHaveBeenCalledTimes(2);
   });
 
   it("rebuilds on a resume from a frozen or discarded tab", async () => {

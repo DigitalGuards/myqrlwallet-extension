@@ -153,7 +153,12 @@ export const createProviderChannelBridge = (pageChannel: Duplex) => {
   let detachExtensionChannel: (() => void) | undefined;
 
   const settleAsReset = (pendingRequest: PendingRequest) => {
-    pageChannel.write(connectionResetResponse(pendingRequest.id));
+    try {
+      pageChannel.write(connectionResetResponse(pendingRequest.id));
+    } catch {
+      // The page stream is already gone, so there is nobody left to answer
+      // and a write error here would surface as a stream failure.
+    }
   };
 
   const expireStalePending = (now: number) => {
@@ -165,13 +170,39 @@ export const createProviderChannelBridge = (pageChannel: Duplex) => {
     }
   };
 
-  const enforcePendingCap = () => {
+  const oldestStalePending = () => {
+    for (const entry of pendingRequests) {
+      if (entry[1].forwardedGeneration !== extensionGeneration) return entry;
+    }
+    return undefined;
+  };
+
+  /**
+   * Keeps the pending map bounded without touching a request the live
+   * connection is still working on: an approval the user has open is the
+   * oldest entry by design, and settling it here would answer the dApp with
+   * an error while the wallet goes on to complete it. When every pending
+   * request belongs to the current connection, the arrival that broke the
+   * cap is the one refused. A live connection is piped straight through, so
+   * that arrival may still reach the service worker; the cap decides which
+   * request the page is answered about, and a page holding this many
+   * unanswered requests at once is abusing the provider either way.
+   */
+  const enforcePendingCap = (incoming?: {
+    key: string;
+    request: PendingRequest;
+  }) => {
     while (pendingRequests.size > MAX_PENDING_REQUESTS) {
-      const oldest = pendingRequests.entries().next().value;
-      if (!oldest) return;
-      const [key, pendingRequest] = oldest;
-      pendingRequests.delete(key);
-      settleAsReset(pendingRequest);
+      const stale = oldestStalePending();
+      if (stale) {
+        pendingRequests.delete(stale[0]);
+        settleAsReset(stale[1]);
+        continue;
+      }
+      if (!incoming || !pendingRequests.has(incoming.key)) return;
+      pendingRequests.delete(incoming.key);
+      settleAsReset(incoming.request);
+      return;
     }
   };
 
@@ -192,7 +223,11 @@ export const createProviderChannelBridge = (pageChannel: Duplex) => {
       pendingRequest.forwardedGeneration = extensionGeneration;
 
     expireStalePending(Date.now());
-    enforcePendingCap();
+    enforcePendingCap(
+      request && pendingRequest
+        ? { key: request.key, request: pendingRequest }
+        : undefined,
+    );
   };
 
   pageChannel.on("data", onPageData);

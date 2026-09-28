@@ -416,6 +416,30 @@ test("provider survives a back/forward-cache round trip", async () => {
       )
       .toContainEqual([]);
 
+    // Back, Forward, Back on one tab caches and restores this page a second
+    // time only milliseconds after the first. That second cache entry closes
+    // the port the first restore opened, so a rebuild suppressed as a
+    // duplicate would leave the page on a dead port with no disconnect ever
+    // delivered.
+    const restoreStartedAt = Date.now();
+    await dAppPage.goForward({ waitUntil: "commit" });
+    await dAppPage.goBack({ waitUntil: "commit" });
+    await expect
+      .poll(() =>
+        dAppPage.evaluate(() => (window as unknown as DAppWindow).pageShows),
+      )
+      .toEqual([false, true, true]);
+    const secondRestoreGapMs = Date.now() - restoreStartedAt;
+
+    await beginRequest(dAppPage, "afterSecondRestore", "web3_clientVersion");
+    await expect(requestResult(dAppPage, "afterSecondRestore")).resolves.toBe(
+      "myqrlwallet-e2e",
+    );
+    // A wall-clock duplicate filter would have to be shorter than this gap
+    // to let the second rebuild through, and a human double-click on Back is
+    // 100 to 300 ms, so the pairing cannot be done on time alone.
+    expect(secondRestoreGapMs).toBeLessThan(2_000);
+
     // Restoring a page reuses its JavaScript context, so the in-page script
     // must not have run a second time.
     expect(
@@ -428,7 +452,13 @@ test("provider survives a back/forward-cache round trip", async () => {
       await dAppPage.evaluate(
         () => (window as unknown as DAppWindow).requestSettlements,
       ),
-    ).toEqual({ before: 1, inFlight: 1, inFlightWrite: 1, after: 1 });
+    ).toEqual({
+      before: 1,
+      inFlight: 1,
+      inFlightWrite: 1,
+      after: 1,
+      afterSecondRestore: 1,
+    });
     // One user action can reach the node at most once. The orphaned first
     // attempt may still finish inside the worker after the hold is released;
     // what must never happen is a second broadcast from the replay.

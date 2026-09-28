@@ -464,6 +464,83 @@ describe("createProviderChannelBridge", () => {
     page.destroy();
   });
 
+  it("refuses the newest request when every pending one is live", async () => {
+    const page = new ProbeChannel();
+    const extension = new ProbeChannel();
+    const bridge = createProviderChannelBridge(page);
+    const disconnect = bridge.attachExtensionChannel(extension);
+    expect(bridge.markConnectionReady()).toBe(0);
+
+    // Every request here reaches the live connection, so the oldest is an
+    // approval the wallet is still working on. Settling that one would
+    // answer the dApp with an error while the wallet completes it.
+    for (let index = 0; index <= MAX_PENDING_REQUESTS; index += 1) {
+      page.emitInbound({
+        jsonrpc: "2.0",
+        id: index,
+        method: index === 0 ? "qrl_sendTransaction" : "qrl_blockNumber",
+      });
+    }
+    // The live connection is piped straight through, so the request that
+    // broke the cap still reaches the worker. What the cap decides is which
+    // request the page is told about, and that is the newest one.
+    await vi.waitFor(() =>
+      expect(extension.writes).toHaveLength(MAX_PENDING_REQUESTS + 1),
+    );
+
+    expect(page.writes).toEqual([
+      {
+        jsonrpc: "2.0",
+        id: MAX_PENDING_REQUESTS,
+        error: {
+          code: -32603,
+          message: "Connection to the wallet was reset; please retry",
+        },
+      },
+    ]);
+    // The long-running approval is untouched and still answerable.
+    extension.emitInbound({ jsonrpc: "2.0", id: 0, result: "0xhash" });
+    await vi.waitFor(() => expect(page.writes).toHaveLength(2));
+    expect(page.writes[1]).toEqual({
+      jsonrpc: "2.0",
+      id: 0,
+      result: "0xhash",
+    });
+
+    disconnect();
+    extension.destroy();
+    bridge.destroy();
+    page.destroy();
+  });
+
+  it("stays quiet when the page stream is gone before a request is settled", async () => {
+    const page = new ProbeChannel();
+    const firstExtension = new ProbeChannel();
+    const bridge = createProviderChannelBridge(page);
+    const disconnectFirst = bridge.attachExtensionChannel(firstExtension);
+    expect(bridge.markConnectionReady()).toBe(0);
+
+    const broadcast = {
+      jsonrpc: "2.0",
+      id: "tx",
+      method: "qrl_sendRawTransaction",
+    };
+    page.emitInbound(broadcast);
+    await vi.waitFor(() => expect(firstExtension.writes).toEqual([broadcast]));
+
+    disconnectFirst();
+    firstExtension.destroy();
+    page.destroy();
+
+    const secondExtension = new ProbeChannel();
+    const disconnectSecond = bridge.attachExtensionChannel(secondExtension);
+    expect(() => bridge.markConnectionReady()).not.toThrow();
+
+    disconnectSecond();
+    secondExtension.destroy();
+    bridge.destroy();
+  });
+
   it("settles a request orphaned for longer than the pending TTL", async () => {
     const page = new ProbeChannel();
     const extension = new ProbeChannel();
