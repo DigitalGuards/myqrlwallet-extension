@@ -41,6 +41,7 @@ let extensionMux: ObjectMultiplex;
 let extensionChannel: Substream;
 let providerChannelBridge: ReturnType<typeof createProviderChannelBridge>;
 let disconnectProviderChannel: (() => void) | undefined;
+let detachExtensionPortListeners: (() => void) | undefined;
 let extensionConnectionGeneration = 0;
 
 const setupPageStreams = () => {
@@ -68,6 +69,9 @@ const destroyExtensionStreams = () => {
   disconnectProviderChannel?.();
   disconnectProviderChannel = undefined;
 
+  detachExtensionPortListeners?.();
+  detachExtensionPortListeners = undefined;
+
   extensionMux.removeAllListeners();
   extensionMux.destroy();
 
@@ -75,6 +79,39 @@ const destroyExtensionStreams = () => {
   extensionChannel.destroy();
 
   extensionStream = null;
+};
+
+/**
+ * Chrome closes every extension port held by a page the moment that page
+ * enters the back/forward cache, and it reports the close to the service
+ * worker alone: "The page keeping the extension port is moved into
+ * back/forward cache, so the message channel is closed." The page side is
+ * frozen when that happens and is never handed the matching onDisconnect,
+ * not even once the page is restored. Without the signal this script keeps
+ * believing its port is live and writes dApp traffic into a channel the
+ * browser already tore down, so after a back/forward restore every request
+ * hangs forever and accountsChanged/chainChanged stop arriving.
+ *
+ * A restore is therefore the only notice the page gets, so treat it as the
+ * disconnect that already happened and rebuild the extension streams. The
+ * provider bridge replays whatever is still pending onto the new
+ * connection, so a request left in flight at cache entry settles as well.
+ * Nothing here touches the page streams or the in-page provider, so the
+ * provider is neither re-announced nor re-initialized.
+ */
+const resetExtensionStreamsAfterPageRestore = () => {
+  if (extensionStream) destroyExtensionStreams();
+
+  try {
+    extensionPort.disconnect();
+  } catch {
+    // The browser closed this port at cache entry; nothing left to close.
+  }
+
+  // Bumping the generation inside setupExtensionStreams turns a late
+  // onDisconnect for the retired port into a no-op, so a browser that
+  // does deliver it cannot open a second connection on top of this one.
+  setupExtensionStreams();
 };
 
 /**
@@ -165,6 +202,10 @@ const setupExtensionStreams = () => {
   };
   connectedPort.onMessage.addListener(onPortMessage);
   connectedPort.onDisconnect.addListener(onDisconnect);
+  detachExtensionPortListeners = () => {
+    connectedPort.onMessage.removeListener(onPortMessage);
+    connectedPort.onDisconnect.removeListener(onDisconnect);
+  };
   extensionStream = new ExtensionPortStream(connectedPort);
 
   // create and connect channel muxers
@@ -228,6 +269,9 @@ const initializeContentScript = () => {
     setupPageStreams();
     setupExtensionStreams();
     prepareListeners();
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted) resetExtensionStreamsAfterPageRestore();
+    });
     startContentScriptKeepAlive();
   } catch (error) {
     console.warn(
