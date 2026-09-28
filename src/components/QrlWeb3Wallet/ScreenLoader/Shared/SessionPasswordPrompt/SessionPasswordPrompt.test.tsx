@@ -39,7 +39,7 @@ describe("SessionPasswordPrompt (F1)", () => {
   });
 
   it("verifies the password through lockStore.unlock and calls onUnlocked on success", async () => {
-    const unlock = vi.fn(async () => true);
+    const unlock = vi.fn(async () => "success" as const);
     const onUnlocked = vi.fn();
     renderComponent(onUnlocked, mockedStore({ lockStore: { unlock } }));
 
@@ -58,7 +58,7 @@ describe("SessionPasswordPrompt (F1)", () => {
   });
 
   it("shows the normal wrong-password error and does not call onUnlocked", async () => {
-    const unlock = vi.fn(async () => false);
+    const unlock = vi.fn(async () => "wrong-password" as const);
     const onUnlocked = vi.fn();
     renderComponent(onUnlocked, mockedStore({ lockStore: { unlock } }));
 
@@ -73,9 +73,58 @@ describe("SessionPasswordPrompt (F1)", () => {
     expect(onUnlocked).not.toHaveBeenCalled();
   });
 
-  it("shows a generic error when unlock itself fails (e.g. the service worker is unreachable)", async () => {
+  it("shows an honest 'could not verify' message for a 'failed' result and does not flip lockStore.isLocked (N2/N8)", async () => {
+    // A "failed" result is not a confirmed wrong password (e.g. the final
+    // IS_LOCKED re-check inside unlock() could not confirm in time). The
+    // caller here is mid-Import/Create with lockStore.isLocked already
+    // false; onUnlocked must not fire (nothing to retry yet) and the
+    // pending screen must not be torn down by a locked flip.
+    const unlock = vi.fn(async () => "failed" as const);
+    const onUnlocked = vi.fn();
+    const store = mockedStore({ lockStore: { unlock, isLocked: false } });
+    renderComponent(onUnlocked, store);
+
+    await userEvent.type(screen.getByLabelText("Enter password"), "pw");
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Could not verify your password. Please try again."),
+      ).toBeInTheDocument();
+    });
+    expect(onUnlocked).not.toHaveBeenCalled();
+    expect(store.lockStore.isLocked).toBe(false);
+  });
+
+  it("surfaces the specific error unlock() throws, e.g. the legacy-address migration guard (N7)", async () => {
     const unlock = vi.fn(async () => {
-      throw new Error("SW unreachable");
+      throw new Error(
+        "Legacy Z-prefixed addresses require migration before unlocking.",
+      );
+    });
+    const onUnlocked = vi.fn();
+    renderComponent(onUnlocked, mockedStore({ lockStore: { unlock } }));
+
+    await userEvent.type(screen.getByLabelText("Enter password"), "pw");
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          "Legacy Z-prefixed addresses require migration before unlocking.",
+        ),
+      ).toBeInTheDocument();
+    });
+    // Not flattened to the generic copy.
+    expect(
+      screen.queryByText("Failed to unlock wallet. Please try again."),
+    ).not.toBeInTheDocument();
+    expect(onUnlocked).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the generic error message when unlock() throws a non-Error value", async () => {
+    const unlock = vi.fn(async () => {
+      throw "SW unreachable";
     });
     const onUnlocked = vi.fn();
     renderComponent(onUnlocked, mockedStore({ lockStore: { unlock } }));

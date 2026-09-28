@@ -12,6 +12,11 @@ type MessageType = {
   // A dApp approval/rejection response uses `action` as its discriminator
   // - see EXTENSION_MESSAGES.DAPP_RESPONSE in dAppRequestStore.ts.
   action?: string;
+  // Set by lockStore.ts's readLockState() when it automatically re-sends
+  // cached keys to recover from an apparent service-worker restart. That
+  // resend is automated background traffic - see the activity allow-list
+  // below.
+  recovery?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data?: any;
 };
@@ -204,6 +209,13 @@ class LockManager {
    * recreates the auto-lock alarm if it is missing while unlocked (guards
    * the gap where an alarm fires during a still-cold start; see
    * serviceWorker.ts's synchronous top-level listener for the primary fix).
+   * Skips the alarm read/create step entirely when auto-lock is "Never".
+   *
+   * Re-checks `decryptedKeys` after every await in the unlocked branch: a
+   * concurrent lock() or resetWallet() can complete while this is still
+   * resolving, and recreating the auto-lock alarm (or writing a fresh
+   * keep-alive timestamp) for a wallet that is no longer unlocked would be
+   * wrong.
    *
    * Locked wallets (including a wiped wallet, one never unlocked this
    * session, or "auto-lock: Never" after a browser restart where session
@@ -218,12 +230,35 @@ class LockManager {
       await this.stopKeepAlive();
       return;
     }
-    const existingAutoLockAlarm = await browser.alarms.get(
-      this.AUTO_LOCK_ALARM,
-    );
-    if (!existingAutoLockAlarm) {
-      await this.setupAutoLockAlarm();
+
+    // "auto-lock: Never" has nothing here to defend against - skip the
+    // alarm read/create work on every ~30s tick and go straight to the
+    // keep-alive write.
+    const settings = await StorageUtil.getSettings();
+    if (this.decryptedKeys === undefined) {
+      // A concurrent lock() (or resetWallet()) completed while this
+      // awaited: no longer unlocked, so touching the auto-lock alarm or
+      // writing a fresh keep-alive timestamp would be wrong.
+      return;
     }
+    const autoLockMinutes = settings.autoLockMinutes ?? 15;
+    if (autoLockMinutes > 0) {
+      const existingAutoLockAlarm = await browser.alarms.get(
+        this.AUTO_LOCK_ALARM,
+      );
+      if (this.decryptedKeys === undefined) {
+        return;
+      }
+      if (!existingAutoLockAlarm) {
+        await browser.alarms.create(this.AUTO_LOCK_ALARM, {
+          delayInMinutes: autoLockMinutes,
+        });
+        if (this.decryptedKeys === undefined) {
+          return;
+        }
+      }
+    }
+
     // Write to session storage to keep the SW alive
     await walletSessionStorage.set({ keepAlive: Date.now() });
   }
@@ -281,7 +316,13 @@ class LockManager {
    */
   static async restoreKeysFromSession(): Promise<boolean> {
     try {
-      const data = await walletSessionStorage.get(this.SESSION_KEYS_KEY);
+      // Queued alongside the writes (backupKeysToSession/clearSessionKeys):
+      // without this, the read could land between two queued writes and
+      // see a value older than one already durably committed, or newer
+      // than one still in flight.
+      const data = await this.queueSessionOp(() =>
+        walletSessionStorage.get(this.SESSION_KEYS_KEY),
+      );
       const keys = data?.[this.SESSION_KEYS_KEY] as
         | DecryptedKeyType[]
         | undefined;
@@ -466,7 +507,14 @@ class LockManager {
       // The popup decrypted the keystores locally and is sending us the results.
       await LockManager.setDecryptedKeysFromPopup(message?.data ?? []);
       await LockManager.startKeepAlive();
-      await LockManager.setupAutoLockAlarm();
+      // N6: a recovery resend (lockStore.ts's automatic re-arm after an
+      // apparent service-worker restart) does not postpone the inactivity
+      // auto-lock - keep-alive still restarts unconditionally, since
+      // Chrome's alarms already survive a real SW restart on their own and
+      // this is just keeping that alarm's schedule current.
+      if (message.recovery !== true) {
+        await LockManager.setupAutoLockAlarm();
+      }
       result = { success: true };
     } else if (message.name === LOCK_MANAGER_MESSAGES.REMOVE_ACCOUNT_KEY) {
       result = await LockManager.removeAccountKey(
@@ -496,11 +544,14 @@ class LockManager {
     // Everything else this global listener happens to overhear - reads
     // (IS_LOCKED, GET_*), keep-alive ticks (which land on their own alarm
     // path), SEND_TX_NOTIFICATION, and any other message - leaves the
-    // timer alone.
+    // timer alone. A SET_DECRYPTED_KEYS carrying `recovery: true` is also
+    // excluded: it is lockStore.ts's own automatic re-send, triggered by an
+    // apparent service-worker restart.
     const isUserActivity =
-      (typeof message.name === "string" &&
+      ((typeof message.name === "string" &&
         AUTO_LOCK_ACTIVITY_MESSAGE_NAMES.has(message.name)) ||
-      message.action === EXTENSION_MESSAGES.DAPP_RESPONSE;
+        message.action === EXTENSION_MESSAGES.DAPP_RESPONSE) &&
+      message.recovery !== true;
     if (isUserActivity && LockManager.decryptedKeys !== undefined) {
       await LockManager.setupAutoLockAlarm();
     }

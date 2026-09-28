@@ -7,6 +7,7 @@ import {
   FormMessage,
 } from "@/components/UI/Form";
 import { Input } from "@/components/UI/Input";
+import { useUnlockAttemptGate } from "@/hooks/useUnlockAttemptGate";
 import { useStore } from "@/stores/store";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { TFunction } from "i18next";
@@ -44,7 +45,15 @@ export type SessionPasswordPromptProps = {
  * pool decrypts the stored keystores and verifies the typed password
  * against them, a wrong password fails the normal way) so re-arming the
  * session here is byte-for-byte the same as a fresh unlock, including the
- * SET_DECRYPTED_KEYS re-arm of the service worker.
+ * SET_DECRYPTED_KEYS re-arm of the service worker and the F7 attempt
+ * limiter shared via useUnlockAttemptGate (N1): this is a password oracle
+ * exactly like the lock screen and must be throttled the same way.
+ *
+ * unlock() returning "failed" here (N2/N8) - an infrastructure hiccup, or
+ * the final SW verification not confirming in time - deliberately does not
+ * flip lockStore.isLocked to true. Doing so would unmount the in-progress
+ * Import/Create screen this component is rendered inside of and discard
+ * the user's progress for a problem that was not a wrong password.
  */
 const SessionPasswordPrompt = observer(
   ({ onUnlocked }: SessionPasswordPromptProps) => {
@@ -52,6 +61,8 @@ const SessionPasswordPrompt = observer(
     const { t } = useTranslation();
     const FormSchema = createFormSchema(t);
     const [showPassword, setShowPassword] = useState(false);
+    const { isWaiting, remainingSeconds, recordResult } =
+      useUnlockAttemptGate();
 
     const form = useForm<z.infer<typeof FormSchema>>({
       resolver: zodResolver(FormSchema),
@@ -65,15 +76,33 @@ const SessionPasswordPrompt = observer(
     } = form;
 
     const onSubmit = async (formData: z.infer<typeof FormSchema>) => {
-      let unlocked: boolean;
+      // Defence in depth: see LockPasswordCheck's identical guard.
+      if (isWaiting) return;
       try {
-        unlocked = await lockStore.unlock(formData.password);
-      } catch {
-        setError("password", { message: t("lock.unlock.errorFailed") });
-        return;
-      }
-      if (!unlocked) {
-        setError("password", { message: t("lock.unlock.errorIncorrect") });
+        const result = await lockStore.unlock(formData.password);
+        const waitUntil = await recordResult(result);
+        if (result === "wrong-password") {
+          setError("password", {
+            message:
+              waitUntil > Date.now()
+                ? t("lock.unlock.errorTooManyAttempts")
+                : t("lock.unlock.errorIncorrect"),
+          });
+          return;
+        }
+        if (result === "failed") {
+          setError("password", {
+            message: t("lock.unlock.errorCouldNotVerify"),
+          });
+          return;
+        }
+      } catch (error) {
+        // Surfaces the specific error unlock() throws (e.g. the
+        // legacy-address migration guard, or the out-of-memory retry
+        // message), each with its own distinct copy (N7).
+        const message =
+          error instanceof Error ? error.message : t("lock.unlock.errorFailed");
+        setError("password", { message });
         return;
       }
       reset();
@@ -102,7 +131,7 @@ const SessionPasswordPrompt = observer(
                       {...field}
                       aria-label={t("lock.unlock.passwordPlaceholder")}
                       autoComplete="current-password"
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || isWaiting}
                       placeholder={t("lock.unlock.passwordPlaceholder")}
                       type={showPassword ? "text" : "password"}
                       className="h-11 rounded-xl pr-12 text-base"
@@ -112,7 +141,7 @@ const SessionPasswordPrompt = observer(
                     type="button"
                     aria-pressed={showPassword}
                     aria-label={t("lock.unlock.togglePasswordVisibility")}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isWaiting}
                     className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-2.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                     onClick={() => setShowPassword((show) => !show)}
                   >
@@ -127,8 +156,13 @@ const SessionPasswordPrompt = observer(
               </FormItem>
             )}
           />
+          {isWaiting && (
+            <p role="alert" className="text-xs text-muted-foreground">
+              {t("lock.unlock.waitMessage", { seconds: remainingSeconds })}
+            </p>
+          )}
           <Button
-            disabled={isSubmitting || !isValid}
+            disabled={isSubmitting || !isValid || isWaiting}
             className="h-11 w-full"
             type="submit"
           >

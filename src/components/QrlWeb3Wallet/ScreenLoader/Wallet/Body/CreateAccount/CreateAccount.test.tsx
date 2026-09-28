@@ -215,7 +215,7 @@ describe("CreateAccount", () => {
         .fn()
         .mockRejectedValueOnce(new Error("WALLET_PASSWORD_UNAVAILABLE"))
         .mockResolvedValue("password");
-      const unlock = vi.fn(async () => true);
+      const unlock = vi.fn(async () => "success" as const);
       renderComponent(
         storeWithCreate({ lockStore: { getWalletPassword, unlock } }),
       );
@@ -246,7 +246,7 @@ describe("CreateAccount", () => {
       const getWalletPassword = vi
         .fn()
         .mockRejectedValue(new Error("WALLET_PASSWORD_UNAVAILABLE"));
-      const unlock = vi.fn(async () => false);
+      const unlock = vi.fn(async () => "wrong-password" as const);
       renderComponent(
         storeWithCreate({ lockStore: { getWalletPassword, unlock } }),
       );
@@ -273,7 +273,7 @@ describe("CreateAccount", () => {
         .mockResolvedValue("password");
       const encryptAccount = vi.fn(async () => {});
       const setActiveAccount = vi.fn(async () => {});
-      const unlock = vi.fn(async () => true);
+      const unlock = vi.fn(async () => "success" as const);
       renderComponent(
         storeWithCreate({
           lockStore: { getWalletPassword, encryptAccount, unlock },
@@ -304,6 +304,86 @@ describe("CreateAccount", () => {
       expect(
         await screen.findByRole("heading", { level: 3 }),
       ).toHaveTextContent("Account created");
+    });
+
+    it("keeps the backup screen and the generated account up on a 'failed' re-arm result (N8)", async () => {
+      const getWalletPassword = vi
+        .fn()
+        .mockResolvedValueOnce("password")
+        .mockRejectedValueOnce(new Error("WALLET_PASSWORD_UNAVAILABLE"));
+      const encryptAccount = vi.fn(async () => {});
+      const unlock = vi.fn(async () => "failed" as const);
+      renderComponent(
+        storeWithCreate({
+          lockStore: { getWalletPassword, encryptAccount, unlock },
+        }),
+      );
+
+      await clickCreate();
+      await act(async () => {
+        await userEvent.click(
+          await screen.findByRole("button", { name: "Confirm backup" }),
+        );
+      });
+      await screen.findByText("Your unlocked session expired.");
+
+      await userEvent.type(screen.getByLabelText("Enter password"), "pw");
+      await act(async () => {
+        await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("Could not verify your password. Please try again."),
+        ).toBeInTheDocument();
+      });
+      // The generated account (and its backup screen) is still here, not
+      // discarded by an incorrect lockStore.isLocked flip.
+      expect(screen.getByText("Mocked Seed Backup")).toBeInTheDocument();
+      expect(screen.getByText(ADDRESS)).toBeInTheDocument();
+      expect(encryptAccount).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a non-password-availability encryptAccount failure (N11)", () => {
+    it("shows the real error and does not offer a re-arm prompt", async () => {
+      const encryptAccount = vi.fn(async () => {
+        throw new Error(
+          "The wallet contains a keystore with an invalid address",
+        );
+      });
+      const setActiveAccount = vi.fn(async () => {});
+      renderComponent(
+        storeWithCreate({
+          lockStore: { encryptAccount },
+          qrlStore: {
+            qrlInstance: { accounts: { create: createdAccount } },
+            setActiveAccount,
+          },
+        }),
+      );
+
+      await clickCreate();
+      await act(async () => {
+        await userEvent.click(
+          await screen.findByRole("button", { name: "Confirm backup" }),
+        );
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(
+            "The wallet contains a keystore with an invalid address",
+          ),
+        ).toBeInTheDocument();
+      });
+      // getWalletPassword() already succeeded (default mock), so this is
+      // not a password-availability problem: no re-arm prompt.
+      expect(
+        screen.queryByRole("button", { name: "Continue" }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Enter password")).not.toBeInTheDocument();
+      expect(setActiveAccount).not.toHaveBeenCalled();
     });
   });
 });

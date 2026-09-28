@@ -85,9 +85,17 @@ const ImportAccount = observer(() => {
     setAccount(importedAccount);
     try {
       await encryptAccount(importedAccount, password);
-    } catch {
-      setNeedsReArm(true);
-      setFinalizeError(t("account.passwordUnavailable"));
+    } catch (error) {
+      // getWalletPassword() already confirmed a usable password moments
+      // ago (N11): a failure here has some other cause, so this shows the
+      // real error. A re-arm prompt here would only re-confirm the same
+      // already-usable password.
+      setNeedsReArm(false);
+      setFinalizeError(
+        error instanceof Error
+          ? error.message
+          : t("onboarding.account.persistError"),
+      );
       return;
     }
     // Pointer after the keystore: an account the wallet points at always has

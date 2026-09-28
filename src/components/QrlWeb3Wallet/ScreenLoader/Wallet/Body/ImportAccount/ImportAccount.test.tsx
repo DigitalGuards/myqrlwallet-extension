@@ -154,7 +154,9 @@ describe("ImportAccount", () => {
 
     const renderWithExpiredSession = (
       overrides: {
-        unlock?: (password: string) => Promise<boolean>;
+        unlock?: (
+          password: string,
+        ) => Promise<"success" | "wrong-password" | "failed">;
         getWalletPasswordAfterReArm?: () => Promise<string>;
       } = {},
     ) => {
@@ -251,7 +253,7 @@ describe("ImportAccount", () => {
     it("re-arms the session and completes the import in place, without losing the entered mnemonic", async () => {
       const { setActiveAccount, encryptAccount, unlock } =
         renderWithExpiredSession({
-          unlock: vi.fn(async () => true),
+          unlock: vi.fn(async () => "success" as const),
           getWalletPasswordAfterReArm: async () => "the-password",
         });
       await submitMnemonic();
@@ -278,7 +280,9 @@ describe("ImportAccount", () => {
     });
 
     it("shows the normal wrong-password error when the re-arm password is wrong", async () => {
-      renderWithExpiredSession({ unlock: vi.fn(async () => false) });
+      renderWithExpiredSession({
+        unlock: vi.fn(async () => "wrong-password" as const),
+      });
       await submitMnemonic();
       await screen.findByText(
         "Your unlocked session expired and nothing was saved yet.",
@@ -295,6 +299,95 @@ describe("ImportAccount", () => {
       expect(
         screen.queryByText("Mocked Account Import Success"),
       ).not.toBeInTheDocument();
+    });
+
+    it("shows an honest 'could not verify' message and keeps the pending import alive on a 'failed' re-arm result (N8)", async () => {
+      renderWithExpiredSession({
+        unlock: vi.fn(async () => "failed" as const),
+      });
+      await submitMnemonic();
+      await screen.findByText(
+        "Your unlocked session expired and nothing was saved yet.",
+      );
+
+      await userEvent.type(screen.getByLabelText("Enter password"), "pw");
+      await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("Could not verify your password. Please try again."),
+        ).toBeInTheDocument();
+      });
+      // The prompt is still showing (the pending mnemonic/account was not
+      // discarded), so the user can just try again without retyping it.
+      expect(
+        screen.getByRole("button", { name: "Continue" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("Mocked Account Import Success"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("a non-password-availability encryptAccount failure (N11)", () => {
+    const seededAccount = {
+      address: "Q2090E9F38771876FB6Fc51a6b464121d3cC093A1",
+      seed: "",
+      sign: (_data: string | Record<string, unknown>) => ({
+        messageHash: "",
+        signature: "",
+      }),
+      signTransaction: async (_tx: Transaction) => ({
+        messageHash: "",
+        rawTransaction: "",
+        signature: "",
+        transactionHash: "",
+      }),
+      encrypt: async () => {
+        throw new Error("Not implemented");
+      },
+    };
+
+    it("shows the real error and does not offer a re-arm prompt", async () => {
+      const encryptAccount = vi.fn(async () => {
+        throw new Error(
+          "The wallet contains a keystore with an invalid address",
+        );
+      });
+      renderComponent(
+        mockedStore({
+          qrlStore: {
+            qrlInstance: {
+              accounts: {
+                seedToAccount: (_seed: string | Uint8Array) => seededAccount,
+              },
+            },
+          },
+          lockStore: { encryptAccount },
+        }),
+      );
+
+      await userEvent.type(
+        screen.getByRole("textbox", { name: "mnemonicPhrases" }),
+        "knight paddy india glow play chew lame mature sock ill deadly olive blink marble breach hey mile mature tacit mean polo crawl khaya stud number speed viking windy jump subtle mildew sewage",
+      );
+      await userEvent.click(
+        screen.getByRole("button", { name: "Import account" }),
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(
+            "The wallet contains a keystore with an invalid address",
+          ),
+        ).toBeInTheDocument();
+      });
+      // getWalletPassword() already succeeded (default mock), so this is
+      // not a password-availability problem: no re-arm prompt.
+      expect(
+        screen.queryByRole("button", { name: "Continue" }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Enter password")).not.toBeInTheDocument();
     });
   });
 });

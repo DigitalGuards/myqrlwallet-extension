@@ -10,6 +10,7 @@
   "lock.unlock.errorFailed": "Failed to unlock wallet. Please try again.",
   "lock.unlock.errorTooManyAttempts": "Too many failed attempts. Please wait before trying again.",
   "lock.unlock.waitMessage": "Too many failed attempts. Try again in {{seconds}}s.",
+  "lock.unlock.errorCouldNotVerify": "Could not verify your password. Please try again.",
   "lock.unlock.forgotPassword": "Forgot password? Reset the wallet",
   "welcome.title": "Welcome",
   "welcome.description": "Let's start using MyQRLWallet",

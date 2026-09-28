@@ -74,12 +74,27 @@ const CreateAccount = observer(() => {
 
   const onBackupConfirmed = async () => {
     if (!account) return;
+    let password: string;
     try {
-      const password = await getWalletPassword();
-      await encryptAccount(account, password);
+      password = await getWalletPassword();
     } catch {
       setNeedsReArmOnPersist(true);
       setPersistError(t("account.sessionPasswordExpired"));
+      return;
+    }
+    try {
+      await encryptAccount(account, password);
+    } catch (error) {
+      // getWalletPassword() already confirmed a usable password moments
+      // ago (N11): a failure here has some other cause, so this shows the
+      // real error. A re-arm prompt here would only re-confirm the same
+      // already-usable password.
+      setNeedsReArmOnPersist(false);
+      setPersistError(
+        error instanceof Error
+          ? error.message
+          : t("onboarding.account.persistError"),
+      );
       return;
     }
     try {

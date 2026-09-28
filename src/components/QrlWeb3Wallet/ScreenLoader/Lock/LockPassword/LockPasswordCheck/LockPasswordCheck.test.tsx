@@ -70,7 +70,7 @@ describe("LockPasswordCheck", () => {
       mockedStore({
         lockStore: {
           unlock: async (_password: string) => {
-            return false;
+            return "wrong-password" as const;
           },
         },
       }),
@@ -198,7 +198,7 @@ describe("LockPasswordCheck", () => {
       renderComponent(
         mockedStore({
           lockStore: {
-            unlock: async () => false,
+            unlock: async () => "wrong-password" as const,
           },
         }),
       );
@@ -226,7 +226,7 @@ describe("LockPasswordCheck", () => {
       renderComponent(
         mockedStore({
           lockStore: {
-            unlock: async () => false,
+            unlock: async () => "wrong-password" as const,
           },
         }),
       );
@@ -260,7 +260,7 @@ describe("LockPasswordCheck", () => {
     });
 
     it("disables the unlock button once a wait is imposed, so a second click cannot retry early", async () => {
-      const unlock = vi.fn(async () => false);
+      const unlock = vi.fn(async () => "wrong-password" as const);
       mockRecordFailedUnlockAttempt.mockResolvedValue({
         failedAttempts: 6,
         waitUntil: Date.now() + 10_000,
@@ -286,7 +286,7 @@ describe("LockPasswordCheck", () => {
       renderComponent(
         mockedStore({
           lockStore: {
-            unlock: async () => true,
+            unlock: async () => "success" as const,
           },
         }),
       );
@@ -301,6 +301,34 @@ describe("LockPasswordCheck", () => {
         expect(mockClearUnlockAttempts).toHaveBeenCalledTimes(1);
       });
       expect(mockRecordFailedUnlockAttempt).not.toHaveBeenCalled();
+    });
+
+    it("does not record a failed attempt for an inconclusive 'failed' result (N2)", async () => {
+      // e.g. the final IS_LOCKED re-check inside unlock() could not confirm
+      // in time - the worker already verified the password, so this must
+      // never count against the limiter the way a confirmed wrong password
+      // does.
+      renderComponent(
+        mockedStore({
+          lockStore: {
+            unlock: async () => "failed" as const,
+          },
+        }),
+      );
+
+      await userEvent.type(
+        screen.getByLabelText("Enter password"),
+        "correct-password",
+      );
+      await userEvent.click(screen.getByRole("button", { name: "Unlock" }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("Could not verify your password. Please try again."),
+        ).toBeInTheDocument();
+      });
+      expect(mockRecordFailedUnlockAttempt).not.toHaveBeenCalled();
+      expect(mockClearUnlockAttempts).not.toHaveBeenCalled();
     });
   });
 });

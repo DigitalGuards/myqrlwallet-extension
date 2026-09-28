@@ -170,6 +170,9 @@ describe("LockStore – readLockState timestamp check", () => {
       );
       expect(setKeysCalls).toHaveLength(1);
       expect((setKeysCalls[0] as any)[0].data).toEqual(MOCK_KEYS);
+      // N6: tagged so lockManagerListener's activity allow-list excludes
+      // it - this is an automatic recovery resend.
+      expect((setKeysCalls[0] as any)[0].recovery).toBe(true);
 
       // Wallet should now be unlocked
       expect(store.isLocked).toBe(false);
@@ -511,6 +514,57 @@ describe("LockStore – throttled user-activity ping (F2)", () => {
     );
     expect(activityPings).toHaveLength(1);
   });
+
+  it("sends USER_ACTIVITY on a mouse wheel/scroll gesture (N3)", async () => {
+    await createLockStore();
+    mockSendMessage.mockClear();
+
+    document.dispatchEvent(new Event("wheel"));
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      name: "LOCK_MANAGER_USER_ACTIVITY",
+    });
+  });
+
+  it("sends USER_ACTIVITY on a scroll event from a nested scrolling container (N3)", async () => {
+    await createLockStore();
+    mockSendMessage.mockClear();
+
+    // A capturing listener on document sees this even though "scroll" does
+    // not bubble: the scrolling container (e.g. an account/history list)
+    // fires its own scroll event on itself.
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    container.dispatchEvent(new Event("scroll", { bubbles: false }));
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      name: "LOCK_MANAGER_USER_ACTIVITY",
+    });
+
+    document.body.removeChild(container);
+  });
+
+  it("sends USER_ACTIVITY when the document becomes visible again (N3)", async () => {
+    await createLockStore();
+    mockSendMessage.mockClear();
+
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(mockSendMessage).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      name: "LOCK_MANAGER_USER_ACTIVITY",
+    });
+  });
 });
 
 describe("LockStore – unlock worker fan-out", () => {
@@ -596,7 +650,7 @@ describe("LockStore – unlock worker fan-out", () => {
 
     const unlocked = await store.unlock("pw");
 
-    expect(unlocked).toBe(true);
+    expect(unlocked).toBe("success");
     expect(spawned).toBe(2);
     const setKeysCall: any = mockSendMessage.mock.calls.find(
       (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
@@ -604,7 +658,7 @@ describe("LockStore – unlock worker fan-out", () => {
     expect(setKeysCall?.[0]?.data?.keys).toEqual([KEY_A, KEY_B]);
   });
 
-  it("returns false without retrying when a worker reports a wrong password", async () => {
+  it("returns 'wrong-password' without retrying when a worker reports a wrong password", async () => {
     const store = await createLockStore();
     behaviors = [
       () => ({ success: true, keys: [KEY_A], upgraded: [null] }),
@@ -613,12 +667,47 @@ describe("LockStore – unlock worker fan-out", () => {
 
     const unlocked = await store.unlock("bad-pw");
 
-    expect(unlocked).toBe(false);
+    expect(unlocked).toBe("wrong-password");
     expect(spawned).toBe(2);
     const setKeysCalls = mockSendMessage.mock.calls.filter(
       (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
     );
     expect(setKeysCalls).toHaveLength(0);
+  });
+
+  it("returns 'failed' (not 'wrong-password') when there are no keystores to check against (N2)", async () => {
+    localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([]);
+    const store = await createLockStore();
+
+    const unlocked = await store.unlock("pw");
+
+    expect(unlocked).toBe("failed");
+    expect(spawned).toBe(0);
+  });
+
+  it("returns 'failed' (not 'wrong-password') and leaves isLocked untouched when the final IS_LOCKED re-check still reports locked (N2/N8)", async () => {
+    // Mirrors the SessionPasswordPrompt scenario: the store's isLocked is
+    // already false (an in-progress Import/Create screen is showing) when
+    // this runs. A worker already confirmed the password decrypts the
+    // keystore, so a lingering "still locked" answer after SET_DECRYPTED_KEYS
+    // must not be reported as a wrong password, and must not flip isLocked
+    // to true and unmount that screen.
+    const store = await createLockStore();
+    expect(store.isLocked).toBe(false);
+    behaviors = [
+      () => ({ success: true, keys: [KEY_A], upgraded: [null] }),
+      () => ({ success: true, keys: [KEY_B], upgraded: [null] }),
+    ];
+    mockSendMessage.mockResolvedValueOnce({ success: true }); // SET_DECRYPTED_KEYS
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: true,
+      hasPasswordSet: true,
+    }); // final IS_LOCKED re-check
+
+    const unlocked = await store.unlock("pw");
+
+    expect(unlocked).toBe("failed");
+    expect(store.isLocked).toBe(false);
   });
 
   it("requires explicit migration before decrypting a legacy-address keystore", async () => {
@@ -648,7 +737,7 @@ describe("LockStore – unlock worker fan-out", () => {
 
     const unlocked = await store.unlock("pw");
 
-    expect(unlocked).toBe(true);
+    expect(unlocked).toBe("success");
     expect(spawned).toBe(3);
     const setKeysCall: any = mockSendMessage.mock.calls.find(
       (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
@@ -681,7 +770,7 @@ describe("LockStore – unlock worker fan-out", () => {
 
     const unlocked = await store.unlock("pw");
 
-    expect(unlocked).toBe(true);
+    expect(unlocked).toBe("success");
     expect(JSON.parse(localStore[profileStorageKey("KEYSTORES")])).toEqual([
       KEYSTORE_A,
       upgradedB,

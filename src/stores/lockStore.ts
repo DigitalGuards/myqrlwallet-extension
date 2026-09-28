@@ -52,6 +52,22 @@ const AUTOMATED_SESSION_STORAGE_KEYS = new Set([
 // messages; see registerActivityPing().
 const ACTIVITY_PING_THROTTLE_MS = 30_000;
 
+/**
+ * Outcome of a password verification (unlock() or changePassword()).
+ *
+ * "wrong-password" means the worker positively confirmed the typed
+ * password does not decrypt the stored keystore(s) - the only outcome that
+ * should ever count against the F7 unlock-attempt limiter.
+ *
+ * "failed" covers every other way a verification can come back negative
+ * without confirming the password was wrong: an unreachable service
+ * worker, an infrastructure failure in the decrypt workers, or - for
+ * unlock() specifically - the final IS_LOCKED re-check still reporting
+ * locked after a successful SET_DECRYPTED_KEYS. A correct password must
+ * never earn a lockout because of one of these.
+ */
+export type PasswordCheckResult = "success" | "wrong-password" | "failed";
+
 class LockStore {
   hasPasswordSet = true;
   isLoading = true;
@@ -94,12 +110,12 @@ class LockStore {
 
   /**
    * Auto-lock semantics: the wallet locks after N minutes with no user
-   * interaction in ANY open wallet surface (popup, side panel, or tab), not
-   * merely N minutes since the last SET_DECRYPTED_KEYS/ENCRYPT_ACCOUNT
-   * message. A surface left open and actively used (scrolling a list,
-   * typing in a form, clicking around) sends this throttled ping so the SW
-   * can tell that apart from an idle-but-open tab. See lockManager.ts's
-   * USER_ACTIVITY message and its auto-lock activity allow-list.
+   * interaction in ANY open wallet surface (popup, side panel, or tab). A
+   * surface left open and actively used - clicking, typing, scrolling a
+   * list, or simply being the visible tab - sends this throttled ping so
+   * the SW can tell that apart from an idle-but-open one. See
+   * lockManager.ts's USER_ACTIVITY message and its auto-lock activity
+   * allow-list.
    */
   private registerActivityPing() {
     if (typeof document === "undefined") return;
@@ -116,10 +132,18 @@ class LockStore {
           // keep-alive port reconnect, will retry. Not worth surfacing.
         });
     };
-    const listenerOptions: AddEventListenerOptions = { passive: true };
-    document.addEventListener("pointerdown", ping, listenerOptions);
-    document.addEventListener("keydown", ping, listenerOptions);
+    const passiveListener: AddEventListenerOptions = { passive: true };
+    document.addEventListener("pointerdown", ping, passiveListener);
+    document.addEventListener("keydown", ping, passiveListener);
+    document.addEventListener("wheel", ping, passiveListener);
     document.addEventListener("focus", ping, true);
+    // Capture: a scrolling container (e.g. the account/history list) fires
+    // its own scroll event, which does not bubble. A capturing listener on
+    // document still sees it.
+    document.addEventListener("scroll", ping, { passive: true, capture: true });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") ping();
+    });
   }
 
   /**
@@ -291,14 +315,17 @@ class LockStore {
    * re-encrypts them with the new password in a Web Worker, then persists the
    * new keystores and updates the in-memory keys in the service worker.
    *
-   * Returns true on success, false if the old password is wrong.
+   * Returns a PasswordCheckResult: "wrong-password" only when a worker
+   * positively confirmed the old password does not decrypt a keystore;
+   * anything else that stops the change short (no keystores present, an
+   * infrastructure failure in the workers) is "failed".
    */
   async changePassword(
     oldPassword: string,
     newPassword: string,
-  ): Promise<boolean> {
+  ): Promise<PasswordCheckResult> {
     const keyStores = await StorageUtil.getKeystores();
-    if (!keyStores.length) return false;
+    if (!keyStores.length) return "failed";
     if (keyStores.some((keyStore) => isLegacyQrlAddress(keyStore.address))) {
       throw new Error(LEGACY_QRL_ADDRESS_MIGRATION_ERROR);
     }
@@ -333,10 +360,12 @@ class LockStore {
     let responses = await runChangeChunks(
       splitIntoChunks(keyStores, kdfWorkerCount(keyStores.length)),
     );
-    if (responses.some((r) => !r.success && r.wrongPassword)) return false;
+    if (responses.some((r) => !r.success && r.wrongPassword)) {
+      return "wrong-password";
+    }
     if (responses.some((r) => !r.success)) {
-      // Infrastructure failure, not a wrong password: retry sequentially in
-      // one worker (peak memory of the old single-worker path).
+      // An infrastructure failure: retry sequentially in one worker (peak
+      // memory of the old single-worker path).
       responses = await runChangeChunks([keyStores]);
     }
 
@@ -344,7 +373,15 @@ class LockStore {
       (r): r is Extract<ChangePasswordWorkerResponse, { success: true }> =>
         r.success,
     );
-    if (succeeded.length !== responses.length) return false;
+    if (succeeded.length !== responses.length) {
+      // The sequential retry (or, defensively, the original fan-out) still
+      // has a failure. Report it as a confirmed wrong password only when a
+      // worker actually said so; treat anything else as an infrastructure
+      // failure.
+      return responses.some((r) => !r.success && r.wrongPassword)
+        ? "wrong-password"
+        : "failed";
+    }
     const result = {
       newKeystores: succeeded.flatMap((r) => r.newKeystores),
       newKeys: succeeded.flatMap((r) => r.newKeys),
@@ -369,7 +406,7 @@ class LockStore {
 
     this.cachedKeys = result.newKeys as DecryptedKeyType[];
     this.cachedPassword = normalisedNewPassword;
-    return true;
+    return "success";
   }
 
   async readLockState() {
@@ -403,7 +440,11 @@ class LockStore {
           this.cachedKeys = undefined;
           this.cachedPassword = undefined;
         } else {
-          // SW restart - re-send cached keys (and password if known) to recover
+          // SW restart - re-send cached keys (and password if known) to
+          // recover. Tagged `recovery: true` (F2/N6): a storage-change
+          // listener triggers this automatically, so it must be excluded
+          // from postponing the auto-lock timer - see
+          // lockManagerListener's allow-list.
           try {
             await browser.runtime.sendMessage({
               name: LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
@@ -413,6 +454,7 @@ class LockStore {
                     walletPassword: this.cachedPassword,
                   }
                 : this.cachedKeys,
+              recovery: true,
             });
             const recheck = await browser.runtime.sendMessage({
               name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
@@ -526,13 +568,19 @@ class LockStore {
    * keystores decrypt concurrently.
    * After decryption the keys are sent to the SW for in-memory storage.
    *
-   * Returns true on success, false on wrong password.
-   * Throws on communication errors so the UI can show a distinct message.
+   * Returns a PasswordCheckResult: "wrong-password" only when a worker
+   * positively confirmed the typed password does not decrypt a keystore -
+   * the only outcome the F7 unlock-attempt limiter should ever record.
+   * "failed" covers no keystores being present, and the final IS_LOCKED
+   * re-check below still reporting locked after a successful
+   * SET_DECRYPTED_KEYS: a communication/timing outcome, given the worker
+   * already confirmed the password by that point. Throws on communication
+   * errors so the UI can show a distinct message.
    */
-  async unlock(password: string): Promise<boolean> {
+  async unlock(password: string): Promise<PasswordCheckResult> {
     // Read keystores and decrypt in Web Workers (separate threads).
     const keyStores = await StorageUtil.getKeystores();
-    if (!keyStores.length) return false;
+    if (!keyStores.length) return "failed";
     if (keyStores.some((keyStore) => isLegacyQrlAddress(keyStore.address))) {
       throw new Error(LEGACY_QRL_ADDRESS_MIGRATION_ERROR);
     }
@@ -561,17 +609,16 @@ class LockStore {
       splitIntoChunks(keyStores, kdfWorkerCount(keyStores.length)),
     );
     if (responses.some((r) => !r.success && r.wrongPassword)) {
-      return false;
+      return "wrong-password";
     }
     if (responses.some((r) => !r.success)) {
-      // Infrastructure failure (e.g. concurrent WASM argon2id instances
-      // exhausted memory), NOT a wrong password. Retry everything in one
-      // sequential worker, whose peak memory matches the old single-worker
-      // path, before giving up.
+      // An infrastructure failure (e.g. concurrent WASM argon2id instances
+      // exhausted memory). Retry everything in one sequential worker, whose
+      // peak memory matches the old single-worker path, before giving up.
       responses = await runUnlockChunks([keyStores]);
       const retry = responses[0];
       if (retry && !retry.success) {
-        if (retry.wrongPassword) return false;
+        if (retry.wrongPassword) return "wrong-password";
         throw new Error(
           "Unable to decrypt the wallet on this device right now. Close other tabs or apps to free memory and try again.",
         );
@@ -582,7 +629,12 @@ class LockStore {
       (r): r is Extract<UnlockWorkerResponse, { success: true }> => r.success,
     );
     if (succeeded.length !== responses.length) {
-      return false;
+      // Defensive: reachable only if a future change adds a path that ends
+      // up here with a failure not already handled above. Treat it the
+      // same way - a confirmed wrong password only if a worker said so.
+      return responses.some((r) => !r.success && r.wrongPassword)
+        ? "wrong-password"
+        : "failed";
     }
     const decryptedKeys: DecryptedKeyType[] = succeeded.flatMap((r) => r.keys);
 
@@ -623,20 +675,29 @@ class LockStore {
       const { isLocked } = await browser.runtime.sendMessage({
         name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
       });
-      runInAction(() => {
-        this.isLocked = isLocked;
-      });
       if (!isLocked) {
+        runInAction(() => {
+          this.isLocked = false;
+        });
         this.cachedKeys = decryptedKeys;
         this.cachedPassword = normalisedPassword;
         StorageUtil.updateLockStateTimeStamp(LockState.UNLOCKED);
-        return true;
+        return "success";
       }
+      // Still reports locked despite a successful SET_DECRYPTED_KEYS: the
+      // worker already confirmed this password decrypts the keystore, so
+      // this reports as "failed" here. This also deliberately leaves
+      // `isLocked` untouched: a caller re-arming the session mid-flow
+      // (SessionPasswordPrompt) may currently have `isLocked` false from an
+      // earlier session, and flipping this observable would unmount
+      // whatever screen is showing for no confirmed reason (see F1/N8).
+      return "failed";
     } catch {
-      // Verification failed - but keys were sent successfully
+      // Verification failed, but keys were sent successfully and the typed
+      // password already decrypted the keystore: reports as "failed" here
+      // too, leaving `isLocked` untouched for the same reason as above.
+      return "failed";
     }
-
-    return false;
   }
 }
 

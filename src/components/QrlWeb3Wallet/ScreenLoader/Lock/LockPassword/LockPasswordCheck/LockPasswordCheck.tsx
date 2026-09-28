@@ -18,11 +18,7 @@ import { useStore } from "@/stores/store";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
 import ResetWalletDialog from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/ResetWalletDialog/ResetWalletDialog";
-import {
-  clearUnlockAttempts,
-  getUnlockAttemptState,
-  recordFailedUnlockAttempt,
-} from "@/utilities/unlockAttemptLimiter";
+import { useUnlockAttemptGate } from "@/hooks/useUnlockAttemptGate";
 
 const createFormSchema = (t: TFunction) =>
   z.object({
@@ -43,12 +39,10 @@ const LockPasswordCheck = observer(() => {
   const [unlockAttempt, setUnlockAttempt] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
-  // F7: exponential delay after repeated wrong passwords. waitUntil is an
-  // epoch ms read from (and written to) storage.local via
-  // unlockAttemptLimiter, so the delay survives a service-worker restart
-  // and a browser relaunch.
-  const [waitUntil, setWaitUntil] = useState(0);
-  const [remainingSeconds, setRemainingSeconds] = useState(0);
+  // F7: exponential delay after repeated wrong passwords, shared with
+  // SessionPasswordPrompt and SettingsSecurity's change-password (N1) so
+  // every password oracle in the extension is gated identically.
+  const { isWaiting, remainingSeconds, recordResult } = useUnlockAttemptGate();
 
   useEffect(() => {
     setTimeout(() => {
@@ -56,29 +50,6 @@ const LockPasswordCheck = observer(() => {
       setFocus("password");
     }, 0);
   }, [unlockAttempt]);
-
-  useEffect(() => {
-    let cancelled = false;
-    getUnlockAttemptState().then((state) => {
-      if (!cancelled) setWaitUntil(state.waitUntil);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    const tick = () => {
-      const remaining = Math.max(0, Math.ceil((waitUntil - Date.now()) / 1000));
-      setRemainingSeconds(remaining);
-    };
-    tick();
-    if (waitUntil <= Date.now()) return;
-    const interval = setInterval(tick, 250);
-    return () => clearInterval(interval);
-  }, [waitUntil]);
-
-  const isWaiting = remainingSeconds > 0;
 
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
@@ -101,18 +72,20 @@ const LockPasswordCheck = observer(() => {
       return;
     }
     try {
-      const unlocked = await unlock(formData.password);
-      if (!unlocked) {
-        const attemptState = await recordFailedUnlockAttempt();
-        setWaitUntil(attemptState.waitUntil);
+      const result = await unlock(formData.password);
+      const waitUntil = await recordResult(result);
+      if (result === "wrong-password") {
         setError("password", {
           message:
-            attemptState.waitUntil > Date.now()
+            waitUntil > Date.now()
               ? t("lock.unlock.errorTooManyAttempts")
               : t("lock.unlock.errorIncorrect"),
         });
-      } else {
-        await clearUnlockAttempts();
+      } else if (result === "failed") {
+        // An infrastructure failure, or a final unlock verification that
+        // could not be confirmed: say so honestly, distinctly from a
+        // mistyped password.
+        setError("password", { message: t("lock.unlock.errorCouldNotVerify") });
       }
     } catch (error) {
       const message =

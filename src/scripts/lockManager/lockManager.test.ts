@@ -224,6 +224,53 @@ describe("LockManager – keep-alive & auto-lock", () => {
 
       await LockManager.lock();
     });
+
+    it("skips the alarm read entirely when auto-lock is 'Never' (N9)", async () => {
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "0x123" },
+      ]);
+      localStore[profileStorageKey("ACCOUNTS")] = {
+        ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+      };
+      localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 0 };
+      await LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
+      mockAlarms.get.mockClear();
+
+      await LockManager.handleKeepAliveAlarm();
+
+      expect(mockAlarms.get).not.toHaveBeenCalled();
+      expect(sessionStore[profileStorageKey("keepAlive")]).toBeDefined();
+
+      await LockManager.lock();
+    });
+
+    it("bails without recreating the auto-lock alarm or writing keepAlive if lock() completes mid-flight (N5)", async () => {
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "0x123" },
+      ]);
+      localStore[profileStorageKey("ACCOUNTS")] = {
+        ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+      };
+      localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 5 };
+      await LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
+      delete alarmsStore[LockManager.AUTO_LOCK_ALARM];
+
+      // Delay alarms.get so a concurrent lock() can complete first, while
+      // handleKeepAliveAlarm is still awaiting it.
+      let resolveGet: (value: unknown) => void = () => {};
+      const getGate = new Promise((resolve) => {
+        resolveGet = resolve;
+      });
+      mockAlarms.get.mockImplementationOnce(() => getGate);
+
+      const keepAlivePromise = LockManager.handleKeepAliveAlarm();
+      await LockManager.lock();
+      resolveGet(null);
+      await keepAlivePromise;
+
+      expect(alarmsStore[LockManager.AUTO_LOCK_ALARM]).toBeUndefined();
+      expect(sessionStore[profileStorageKey("keepAlive")]).toBeUndefined();
+    });
   });
 
   // ── Session key backup / restore ───────────────────────────────
@@ -270,6 +317,46 @@ describe("LockManager – keep-alive & auto-lock", () => {
       const { isLocked, hasPasswordSet } = await LockManager.isLocked();
       expect(isLocked).toBe(true);
       expect(hasPasswordSet).toBe(false);
+    });
+
+    it("orders restoreKeysFromSession's read after an in-flight backup write (N4)", async () => {
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "0x123" },
+      ]);
+      localStore[profileStorageKey("ACCOUNTS")] = {
+        ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+      };
+
+      // Slow the next session-storage write so it is still in flight when
+      // restoreKeysFromSession's read would otherwise run ahead of it.
+      let resolveWrite: () => void = () => {};
+      const writeGate = new Promise<void>((resolve) => {
+        resolveWrite = resolve;
+      });
+      const sessionSet = browser.storage.session.set as any;
+      sessionSet.mockImplementationOnce((data: Record<string, any>) =>
+        writeGate.then(() => {
+          Object.assign(sessionStore, data);
+        }),
+      );
+
+      const setPromise = LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
+      const restorePromise = LockManager.restoreKeysFromSession();
+
+      // The write has not landed yet - the read must not have run ahead of
+      // it and seen an empty session store.
+      expect(
+        sessionStore[profileStorageKey("_LM_CACHED_KEYS")],
+      ).toBeUndefined();
+
+      resolveWrite();
+      await setPromise;
+      const restored = await restorePromise;
+
+      expect(restored).toBe(true);
+      expect(LockManager.getDecryptedKeys()).toEqual(MOCK_KEYS);
+
+      await LockManager.lock();
     });
   });
 
@@ -493,6 +580,43 @@ describe("LockManager – keep-alive & auto-lock", () => {
           {
             action: "QRL_WALLET_DAPP_RESPONSE",
             data: { hasApproved: true },
+          },
+          TRUSTED_SENDER,
+        );
+
+        expect(mockAlarms.create).toHaveBeenCalledWith(
+          LockManager.AUTO_LOCK_ALARM,
+          { delayInMinutes: 5 },
+        );
+
+        await LockManager.lock();
+      });
+
+      it("should NOT reset the auto-lock timer on a recovery-tagged SET_DECRYPTED_KEYS resend (N6)", async () => {
+        await LockManager.lockManagerListener(
+          {
+            name: LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
+            data: MOCK_KEYS,
+            recovery: true,
+          },
+          TRUSTED_SENDER,
+        );
+
+        // The keep-alive alarm still restarts (harmless/idempotent); only
+        // the auto-lock alarm must not be touched by a recovery resend.
+        expect(mockAlarms.create).not.toHaveBeenCalledWith(
+          LockManager.AUTO_LOCK_ALARM,
+          expect.any(Object),
+        );
+
+        await LockManager.lock();
+      });
+
+      it("should still reset the auto-lock timer on a normal (non-recovery) SET_DECRYPTED_KEYS", async () => {
+        await LockManager.lockManagerListener(
+          {
+            name: LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
+            data: MOCK_KEYS,
           },
           TRUSTED_SENDER,
         );

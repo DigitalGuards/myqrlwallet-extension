@@ -10,6 +10,7 @@
   "lock.unlock.errorFailed": "Error al desbloquear la billetera. Por favor, inténtalo de nuevo.",
   "lock.unlock.errorTooManyAttempts": "Demasiados intentos fallidos. Espera antes de volver a intentarlo.",
   "lock.unlock.waitMessage": "Demasiados intentos fallidos. Vuelve a intentarlo en {{seconds}}s.",
+  "lock.unlock.errorCouldNotVerify": "No se pudo verificar tu contraseña. Vuelve a intentarlo.",
   "lock.unlock.forgotPassword": "¿Olvidaste la contraseña? Restablece la billetera",
   "welcome.title": "Bienvenido",
   "welcome.description": "Comencemos a usar MyQRLWallet",
