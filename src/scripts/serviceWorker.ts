@@ -26,7 +26,7 @@ import {
   setupPhishingRefreshAlarm,
 } from "./phishing/phishingDetector";
 import { checkForLastError } from "./utils/scriptUtils";
-import { setupMultiplex } from "./utils/streamUtils";
+import { isPrematureClose, setupMultiplex } from "./utils/streamUtils";
 import {
   notifyDAppAccountsChanged,
   registerDAppAccountNotificationStream,
@@ -265,7 +265,13 @@ const setupProviderConnectionEip1193 = async (port: browser.Runtime.Port) => {
 
   pipeline(outStream, providerStream, outStream, (err) => {
     unregisterAccountNotifications();
-    console.warn("QrlWeb3Wallet: Error in stream pipeline\n", err);
+    if (isPrematureClose(err)) {
+      // The normal end of a dApp connection; kept at debug level as a
+      // breadcrumb for connection-lifecycle debugging.
+      console.debug("QrlWeb3Wallet: dApp stream closed", err);
+    } else if (err) {
+      console.warn("QrlWeb3Wallet: Error in stream pipeline\n", err);
+    }
     // handle any middleware cleanup
     // @ts-expect-error - _middleware is a private property on JsonRpcEngine not exposed in type definitions
     engine?._middleware?.forEach((mid: { destroy?: () => void }) => {
@@ -282,6 +288,14 @@ const establishContenScriptConnection = () => {
   browser.runtime.onConnect.addListener(async (port) => {
     // Ensuring the port connected to is the content script
     if (port.name === QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT) {
+      // The page side closes this port on tab close, navigation and entry
+      // into the back/forward cache. Reading lastError here keeps each of
+      // those from logging an "Unchecked runtime.lastError".
+      let disconnected = false;
+      port.onDisconnect.addListener(() => {
+        disconnected = true;
+        checkForLastError();
+      });
       // The connection event itself is never dropped - this listener is
       // registered synchronously at module evaluation, before
       // initializeServiceWorker() runs at all. Waiting here delays only
@@ -292,6 +306,9 @@ const establishContenScriptConnection = () => {
       // a timeout (see its own comment) still lets this connection proceed
       // even if a future startup step somehow hangs.
       await waitForServiceWorkerReady();
+      // A tab that closed while this connection waited has nothing left to
+      // wire up, and posting CONNECTION_READY to its dead port would throw.
+      if (disconnected) return;
       await initializeContentScriptProviderConnection(
         port,
         setupProviderConnectionEip1193,

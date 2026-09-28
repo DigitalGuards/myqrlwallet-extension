@@ -556,6 +556,22 @@ describe("LockManager", () => {
         expect(result).toBeUndefined();
       });
 
+      it("ignores the content-script keep-alive: own extension id, web page url", async () => {
+        const setupAutoLockAlarm = vi.spyOn(LockManager, "setupAutoLockAlarm");
+
+        const result = await LockManager.lockManagerListener(
+          { name: "myqrlwallet-content-script-keep-alive" } as any,
+          {
+            id: "mock-extension-id",
+            url: "https://dapp.example/swap",
+          } as any,
+        );
+
+        expect(result).toBeUndefined();
+        expect(setupAutoLockAlarm).not.toHaveBeenCalled();
+        setupAutoLockAlarm.mockRestore();
+      });
+
       it("accepts a trusted extension-page sender", async () => {
         const result = await LockManager.lockManagerListener(
           { name: LOCK_MANAGER_MESSAGES.IS_LOCKED },
