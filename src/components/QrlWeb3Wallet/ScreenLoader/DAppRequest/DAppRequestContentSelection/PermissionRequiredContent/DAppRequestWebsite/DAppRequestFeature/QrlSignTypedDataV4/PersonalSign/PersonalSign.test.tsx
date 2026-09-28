@@ -1,11 +1,18 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import PersonalSign from "./PersonalSign";
+
+vi.mock("@/scripts/utils/restrictedMethodsMiddlewareUtils", () => ({
+  revalidateAuthorizedDAppRequest: vi.fn(async () => ({
+    canProceed: true,
+    proceedError: undefined,
+  })),
+}));
 
 describe("PersonalSign", () => {
   afterEach(cleanup);
@@ -72,5 +79,47 @@ describe("PersonalSign", () => {
     expect(clipboardMock).toHaveBeenCalledWith(
       "Please sign this message to confirm your identity.",
     );
+  });
+
+  it("shows a translated message, re-polls lock state, and sends a stable 4100 error to the dApp when signing hits a locked wallet (L1)", async () => {
+    let capturedPermissionCallback:
+      | ((hasApproved: boolean) => Promise<void>)
+      | null = null;
+    const mockReadLockState = vi.fn().mockResolvedValue(undefined);
+    const addToResponseData = vi.fn();
+
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          dAppRequestData: {
+            params: [message, fromAddress],
+          },
+          setOnPermissionCallBack: (cb: any) => {
+            capturedPermissionCallback = cb;
+          },
+          addToResponseData,
+        },
+        lockStore: {
+          getMnemonicPhrases: vi
+            .fn()
+            .mockRejectedValue(new Error("MyQRLWallet is locked")),
+          readLockState: mockReadLockState,
+        },
+      }),
+    );
+
+    expect(capturedPermissionCallback).not.toBeNull();
+    await act(async () => capturedPermissionCallback!(true));
+
+    expect(
+      screen.getByText("The wallet is locked. Unlock it to continue."),
+    ).toBeInTheDocument();
+    expect(mockReadLockState).toHaveBeenCalled();
+    expect(addToResponseData).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        code: 4100,
+        message: "The wallet is locked",
+      }),
+    });
   });
 });

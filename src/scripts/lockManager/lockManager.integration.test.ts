@@ -1,14 +1,19 @@
 import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
 const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 /**
- * Integration / scenario tests for auto-lock + keep-alive.
+ * Integration / scenario tests for auto-lock timing.
  *
  * These tests simulate the full lifecycle of the lock manager:
- *   unlock → keep-alive ticks → activity resets → alarm fires → wallet locks
+ *   unlock → activity resets → alarm fires → wallet locks
  *
- * The Chrome Alarms API is simulated with a scheduler that fires alarm
- * callbacks when Jest's fake clock advances past the scheduled time.
- * This lets us "fast-forward" 15, 30, or 60 real minutes in milliseconds.
+ * The auto-lock alarm (chrome.alarms) is simulated with a scheduler that
+ * fires alarm callbacks when the fake clock advances past the scheduled
+ * time, letting these tests "fast-forward" 15, 30, or 60 real minutes in
+ * milliseconds. The keep-alive interval (a real, fake-timer-intercepted
+ * setInterval as of this version, no longer a chrome.alarm) runs alongside
+ * these scenarios on its own; it has no bearing on auto-lock timing (F2) and
+ * these tests do not assert on it directly - see lockManager.test.ts's
+ * "keep-alive interval" suite for that.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -151,13 +156,18 @@ const seedStorage = () => {
 const minutes = (m: number) => m * 60_000;
 
 /**
- * Advance Jest fake clock by `ms` then fire any alarms whose scheduled
- * time has been reached.  Dispatches directly to LockManager handlers
- * (mirroring serviceWorker.ts alarm listener). Returns the number of
- * alarms fired.
+ * Advance the fake clock by `ms`, then fire any chrome.alarms whose
+ * scheduled time has been reached, dispatching to LockManager exactly like
+ * serviceWorker.ts's alarm listener. Returns the number of alarms fired.
+ *
+ * Uses the async form of advanceTimersByTime: the keep-alive interval is
+ * now a fake-timer-intercepted setInterval, so it fires on its own as the
+ * clock advances - the async form lets its promise chain (StorageUtil
+ * reads, session writes) actually resolve, keeping the whole tick
+ * complete before the next assertion runs.
  */
 async function advanceAndFireAlarms(ms: number): Promise<number> {
-  vi.advanceTimersByTime(ms);
+  await vi.advanceTimersByTimeAsync(ms);
   let fired = 0;
   const now = Date.now();
   const due = mockPendingAlarms.filter((a) => a.scheduledTime <= now);
@@ -166,8 +176,6 @@ async function advanceAndFireAlarms(ms: number): Promise<number> {
     // Dispatch to LockManager just like serviceWorker.ts does
     if (alarm.name === LockManager.AUTO_LOCK_ALARM) {
       await LockManager.handleAutoLockAlarm();
-    } else if (alarm.name === LockManager.KEEP_ALIVE_ALARM) {
-      await LockManager.handleKeepAliveAlarm();
     }
     fired++;
   }
@@ -188,7 +196,10 @@ async function sendMessage(name: string, data?: any) {
 }
 
 async function unlockWallet() {
-  return sendMessage(LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS, MOCK_KEYS);
+  return sendMessage(LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS, {
+    keys: MOCK_KEYS,
+    walletPassword: "pw",
+  });
 }
 
 /**
@@ -209,12 +220,14 @@ describe("Auto-lock integration scenarios", () => {
     clearStore(mockLocalStore);
     clearStore(mockSessionStore);
     mockPendingAlarms = [];
+    LockManager.stopKeepAliveInterval();
     await LockManager.lock();
     seedStorage();
   });
 
   afterEach(async () => {
     await LockManager.lock();
+    LockManager.stopKeepAliveInterval();
     vi.useRealTimers();
   });
 
@@ -317,9 +330,12 @@ describe("Auto-lock integration scenarios", () => {
       expect(await checkLocked()).toBe(false);
 
       // None of these represent the user actively doing something: a
-      // decrypted-keys read, a lock-state poll, and an automated
+      // single decrypted-key read, a lock-state poll, and an automated
       // tx-notification message. None should postpone the lock.
-      await sendMessage(LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS);
+      await sendMessage(
+        LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEY_FOR_ADDRESS,
+        MOCK_KEYS[0].address,
+      );
       await sendMessage(LOCK_MANAGER_MESSAGES.IS_LOCKED);
       await sendMessage(LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION, {
         status: "confirmed",

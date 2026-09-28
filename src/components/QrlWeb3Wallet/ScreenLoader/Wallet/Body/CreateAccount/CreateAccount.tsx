@@ -1,5 +1,7 @@
 import { Alert, AlertDescription } from "@/components/UI/Alert";
+import { Button } from "@/components/UI/Button";
 import { scrollShellToTop } from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
+import { describeExtensionError } from "@/functions/describeExtensionError";
 import withSuspense from "@/functions/withSuspense";
 import { useStore } from "@/stores/store";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
@@ -42,6 +44,9 @@ const CreateAccount = observer(() => {
   // Same idea, but for the confirm-backup step: `account` is already set by
   // then, so only a flag is needed (no separate ref).
   const [needsReArmOnPersist, setNeedsReArmOnPersist] = useState(false);
+  // Set on any other persist failure (R1): a plain Retry button, no
+  // password field, since the password was already confirmed usable.
+  const [needsRetryOnPersist, setNeedsRetryOnPersist] = useState(false);
 
   const onAccountCreated = async (created?: Web3BaseWalletAccount) => {
     scrollShellToTop();
@@ -79,6 +84,7 @@ const CreateAccount = observer(() => {
       password = await getWalletPassword();
     } catch {
       setNeedsReArmOnPersist(true);
+      setNeedsRetryOnPersist(false);
       setPersistError(t("account.sessionPasswordExpired"));
       return;
     }
@@ -87,13 +93,12 @@ const CreateAccount = observer(() => {
     } catch (error) {
       // getWalletPassword() already confirmed a usable password moments
       // ago (N11): a failure here has some other cause, so this shows the
-      // real error. A re-arm prompt here would only re-confirm the same
-      // already-usable password.
+      // real error behind a plain Retry button (R1). A re-arm prompt here
+      // would only re-confirm the same already-usable password.
       setNeedsReArmOnPersist(false);
+      setNeedsRetryOnPersist(true);
       setPersistError(
-        error instanceof Error
-          ? error.message
-          : t("onboarding.account.persistError"),
+        describeExtensionError(error, t, t("onboarding.account.persistError")),
       );
       return;
     }
@@ -103,12 +108,16 @@ const CreateAccount = observer(() => {
       // shows the raw address until some other screen happens to run
       // syncLabels.
       await accountLabelsStore.ensureLabel(account.address);
-    } catch {
-      setPersistError(t("onboarding.account.persistError"));
+    } catch (error) {
+      setNeedsRetryOnPersist(true);
+      setPersistError(
+        describeExtensionError(error, t, t("onboarding.account.persistError")),
+      );
       return;
     }
     scrollShellToTop();
     setNeedsReArmOnPersist(false);
+    setNeedsRetryOnPersist(false);
     setPersistError("");
     setIsPersisted(true);
   };
@@ -129,11 +138,23 @@ const CreateAccount = observer(() => {
                   setAccount(undefined);
                   setPersistError("");
                   setNeedsReArmOnPersist(false);
+                  setNeedsRetryOnPersist(false);
                 }}
                 error={persistError}
               />
               {needsReArmOnPersist && (
                 <SessionPasswordPrompt onUnlocked={onBackupConfirmed} />
+              )}
+              {needsRetryOnPersist && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 w-full"
+                  onClick={onBackupConfirmed}
+                >
+                  {t("account.retryButton")}
+                </Button>
               )}
             </>
           )

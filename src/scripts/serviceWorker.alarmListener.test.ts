@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Covers the synchronous top-level `browser.alarms.onAlarm` listener in
- * serviceWorker.ts (F3): QRL_AUTO_LOCK and QRL_KEEP_ALIVE must be dispatched
- * from the listener registered before the module's first `await`. A
- * listener registered later, inside prepareListeners() (which sits behind
- * an `await` in initializeServiceWorker()), can miss an alarm that fires
- * while a cold service worker is still starting up.
+ * serviceWorker.ts (F3): QRL_AUTO_LOCK must be dispatched from the listener
+ * registered before the module's first `await`. A listener registered
+ * later, inside prepareListeners() (which sits behind an `await` in
+ * initializeServiceWorker()), can miss an alarm that fires while a cold
+ * service worker is still starting up. QRL_KEEP_ALIVE is gone: keeping the
+ * worker alive is now an in-worker setInterval started on unlock
+ * (LockManager.startKeepAliveInterval).
  *
  * Everything downstream of module evaluation (provider engine wiring,
  * phishing detector, side panel behaviour) is stubbed out: this test's
@@ -14,14 +16,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * worker's boot sequence.
  */
 
-const {
-  mockAddAlarmListener,
-  mockHandleAutoLockAlarm,
-  mockHandleKeepAliveAlarm,
-} = vi.hoisted(() => ({
+const { mockAddAlarmListener, mockHandleAutoLockAlarm } = vi.hoisted(() => ({
   mockAddAlarmListener: vi.fn(),
   mockHandleAutoLockAlarm: vi.fn().mockResolvedValue(undefined),
-  mockHandleKeepAliveAlarm: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("webextension-polyfill", () => ({
@@ -62,10 +59,9 @@ vi.mock("./lockManager/lockManager", () => ({
   __esModule: true,
   default: {
     AUTO_LOCK_ALARM: "QRL_AUTO_LOCK",
-    KEEP_ALIVE_ALARM: "QRL_KEEP_ALIVE",
     handleAutoLockAlarm: mockHandleAutoLockAlarm,
-    handleKeepAliveAlarm: mockHandleKeepAliveAlarm,
     lockManagerListener: vi.fn(),
+    scrubLegacySessionSecrets: vi.fn().mockResolvedValue(undefined),
   },
   LOCK_MANAGER_MESSAGES: {
     PORT: "LOCK_MANGER_PORT",
@@ -141,15 +137,13 @@ describe("serviceWorker alarm dispatch (F3)", () => {
     listener({ name: "QRL_AUTO_LOCK" });
 
     expect(mockHandleAutoLockAlarm).toHaveBeenCalledTimes(1);
-    expect(mockHandleKeepAliveAlarm).not.toHaveBeenCalled();
   });
 
-  it("dispatches QRL_KEEP_ALIVE to LockManager.handleKeepAliveAlarm", async () => {
+  it("no longer registers or dispatches a QRL_KEEP_ALIVE alarm", async () => {
     const listener = await loadModuleAndGetListener();
 
-    listener({ name: "QRL_KEEP_ALIVE" });
-
-    expect(mockHandleKeepAliveAlarm).toHaveBeenCalledTimes(1);
+    // Should be a plain no-op: nothing throws, nothing dispatches.
+    expect(() => listener({ name: "QRL_KEEP_ALIVE" })).not.toThrow();
     expect(mockHandleAutoLockAlarm).not.toHaveBeenCalled();
   });
 
@@ -159,6 +153,22 @@ describe("serviceWorker alarm dispatch (F3)", () => {
     listener({ name: "SOME_OTHER_ALARM" });
 
     expect(mockHandleAutoLockAlarm).not.toHaveBeenCalled();
-    expect(mockHandleKeepAliveAlarm).not.toHaveBeenCalled();
+  });
+
+  it("scrubs any legacy session-storage key backup and clears a leftover QRL_KEEP_ALIVE alarm on startup", async () => {
+    const module = await import("./lockManager/lockManager");
+    const lockManagerMock = module.default as unknown as {
+      scrubLegacySessionSecrets: ReturnType<typeof vi.fn>;
+    };
+    const browserModule = await import("webextension-polyfill");
+    const alarmsClear = (browserModule.default as any).alarms.clear;
+
+    await import("./serviceWorker");
+    // initializeServiceWorker() runs unawaited at module scope; give its
+    // microtask chain a turn to reach the startup-hygiene step.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(lockManagerMock.scrubLegacySessionSecrets).toHaveBeenCalled();
+    expect(alarmsClear).toHaveBeenCalledWith("QRL_KEEP_ALIVE");
   });
 });

@@ -1,6 +1,6 @@
 import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
 const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Plain object stores (hoisting-safe) ────────────────────────────
 const localStore: Record<string, any> = {};
@@ -86,14 +86,10 @@ import browser from "webextension-polyfill";
 import type { DecryptedKeyType } from "@/scripts/lockManager/lockManager";
 import { LEGACY_QRL_ADDRESS_MIGRATION_ERROR } from "@/utilities/addressUtil";
 
-const MOCK_KEYS: DecryptedKeyType[] = [
-  {
-    address: `Q${"a".repeat(128)}`,
-    mnemonicPhrases: "mocked mnemonic",
-  },
-];
-
-describe("LockStore – readLockState timestamp check", () => {
+describe("LockStore – readLockState reflects the SW directly", () => {
+  // No client-side resend or timestamp comparison any more (F4): decrypted
+  // keys and the wallet password vanish together now, so readLockState just
+  // mirrors whatever the service worker answers.
   beforeEach(() => {
     vi.clearAllMocks();
     clearStore(localStore);
@@ -115,132 +111,46 @@ describe("LockStore – readLockState timestamp check", () => {
     return store;
   }
 
-  describe("readLockState with cachedKeys", () => {
-    it("should clear cachedKeys when LOCKED timestamp > UNLOCKED timestamp (intentional lock)", async () => {
-      const store = await createLockStore();
-
-      // Simulate having cached keys (from a previous unlock)
-      (store as any).cachedKeys = MOCK_KEYS;
-
-      // Set timestamps: locked AFTER unlocked = intentional lock
-      localStore[profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP")] = 1000;
-      localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")] = 2000;
-
-      // SW reports locked
-      mockSendMessage.mockResolvedValueOnce({
-        isLocked: true,
-        hasPasswordSet: true,
-      });
-
-      await store.readLockState();
-
-      // cachedKeys should be cleared (not re-sent)
-      expect((store as any).cachedKeys).toBeUndefined();
-      expect(store.isLocked).toBe(true);
-
-      // SET_DECRYPTED_KEYS should NOT have been sent
-      const setKeysCalls = mockSendMessage.mock.calls.filter(
-        (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
-      );
-      expect(setKeysCalls).toHaveLength(0);
+  it("reflects a locked answer directly, with no resend attempt", async () => {
+    const store = await createLockStore();
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: true,
+      hasPasswordSet: true,
     });
 
-    it("should re-send cachedKeys when UNLOCKED timestamp > LOCKED timestamp (SW restart)", async () => {
-      const store = await createLockStore();
+    await store.readLockState();
 
-      (store as any).cachedKeys = MOCK_KEYS;
+    expect(store.isLocked).toBe(true);
+    const setKeysCalls = mockSendMessage.mock.calls.filter(
+      (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
+    );
+    expect(setKeysCalls).toHaveLength(0);
+  });
 
-      // Set timestamps: unlocked AFTER locked = SW restart
-      localStore[profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP")] = 2000;
-      localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")] = 1000;
-
-      // First call: IS_LOCKED returns locked
-      // Second call: SET_DECRYPTED_KEYS succeeds
-      // Third call: IS_LOCKED recheck returns unlocked
-      mockSendMessage
-        .mockResolvedValueOnce({ isLocked: true, hasPasswordSet: true })
-        .mockResolvedValueOnce({ success: true })
-        .mockResolvedValueOnce({ isLocked: false, hasPasswordSet: true });
-
-      await store.readLockState();
-
-      // Keys should have been re-sent
-      const setKeysCalls = mockSendMessage.mock.calls.filter(
-        (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
-      );
-      expect(setKeysCalls).toHaveLength(1);
-      expect((setKeysCalls[0] as any)[0].data).toEqual(MOCK_KEYS);
-      // N6: tagged so lockManagerListener's activity allow-list excludes
-      // it - this is an automatic recovery resend.
-      expect((setKeysCalls[0] as any)[0].recovery).toBe(true);
-
-      // Wallet should now be unlocked
-      expect(store.isLocked).toBe(false);
+  it("reflects an unlocked answer directly", async () => {
+    const store = await createLockStore();
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
     });
 
-    it("should re-send cachedKeys when no timestamps exist (both are 0)", async () => {
-      const store = await createLockStore();
+    await store.readLockState();
 
-      (store as any).cachedKeys = MOCK_KEYS;
+    expect(store.isLocked).toBe(false);
+  });
 
-      // No timestamps in storage - both default to 0
-      // lockedTs (0) is NOT > unlockedTs (0), so keys should be re-sent
+  it("leaves state unchanged (does not throw) when the SW is unreachable", async () => {
+    const store = await createLockStore();
+    const before = store.isLocked;
+    mockSendMessage.mockRejectedValueOnce(new Error("SW not reachable"));
 
-      mockSendMessage
-        .mockResolvedValueOnce({ isLocked: true, hasPasswordSet: true })
-        .mockResolvedValueOnce({ success: true })
-        .mockResolvedValueOnce({ isLocked: false, hasPasswordSet: true });
+    await expect(store.readLockState()).resolves.toBeUndefined();
 
-      await store.readLockState();
-
-      const setKeysCalls = mockSendMessage.mock.calls.filter(
-        (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
-      );
-      expect(setKeysCalls).toHaveLength(1);
-    });
-
-    it("should not re-send keys when there are no cachedKeys", async () => {
-      const store = await createLockStore();
-
-      (store as any).cachedKeys = undefined;
-
-      mockSendMessage.mockResolvedValueOnce({
-        isLocked: true,
-        hasPasswordSet: true,
-      });
-
-      await store.readLockState();
-
-      const setKeysCalls = mockSendMessage.mock.calls.filter(
-        (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
-      );
-      expect(setKeysCalls).toHaveLength(0);
-      expect(store.isLocked).toBe(true);
-    });
-
-    it("should accept locked state when re-send fails", async () => {
-      const store = await createLockStore();
-
-      (store as any).cachedKeys = MOCK_KEYS;
-
-      // Timestamps indicate SW restart
-      localStore[profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP")] = 2000;
-      localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")] = 1000;
-
-      // IS_LOCKED returns locked, SET_DECRYPTED_KEYS fails
-      mockSendMessage
-        .mockResolvedValueOnce({ isLocked: true, hasPasswordSet: true })
-        .mockRejectedValueOnce(new Error("SW not reachable"));
-
-      await store.readLockState();
-
-      expect(store.isLocked).toBe(true);
-    });
+    expect(store.isLocked).toBe(before);
   });
 });
 
 describe("LockStore – destructive paths", () => {
-  const SESSION_KEYS_KEY = profileStorageKey("_LM_CACHED_KEYS");
   const OTHER_KEY: DecryptedKeyType = {
     address: `Q${"b".repeat(128)}`,
     mnemonicPhrases: "second mnemonic",
@@ -269,23 +179,20 @@ describe("LockStore – destructive paths", () => {
   describe("resetWallet", () => {
     it("delegates the wipe to the service worker", async () => {
       const store = await createLockStore();
-      (store as any).cachedKeys = MOCK_KEYS;
-      (store as any).cachedPassword = "pw";
       mockSendMessage.mockResolvedValue({ success: true });
 
       await store.resetWallet();
 
       expect(namesSent()).toContain("LOCK_MANAGER_RESET_WALLET");
-      expect((store as any).cachedKeys).toBeUndefined();
-      expect((store as any).cachedPassword).toBeUndefined();
     });
 
     it("wipes session storage itself when the service worker is unreachable", async () => {
-      // The session area holds the decrypted-key backup, which by design
-      // survives SW restarts: a reset that cleared only local storage would
-      // leave every account's plaintext mnemonic on the device.
+      // Session storage only ever holds non-secret bookkeeping now (the
+      // keep-alive timestamp, pending dApp watch data), but a reset must
+      // still clear it here too when the SW cannot be reached to do its
+      // own authoritative wipe.
       const store = await createLockStore();
-      sessionStore[SESSION_KEYS_KEY] = MOCK_KEYS;
+      sessionStore[profileStorageKey("keepAlive")] = Date.now();
       localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
         { address: "qaaa" },
       ]);
@@ -293,7 +200,7 @@ describe("LockStore – destructive paths", () => {
 
       await store.resetWallet();
 
-      expect(sessionStore[SESSION_KEYS_KEY]).toBeUndefined();
+      expect(sessionStore[profileStorageKey("keepAlive")]).toBeUndefined();
       expect(localStore[profileStorageKey("KEYSTORES")]).toBeUndefined();
     });
 
@@ -313,13 +220,8 @@ describe("LockStore – destructive paths", () => {
   });
 
   describe("readLockState after a reset", () => {
-    it("never re-arms the service worker once the wallet has no keystores", async () => {
-      // A second surface (side panel, tab) still holds keys from before
-      // another surface reset the wallet. Re-sending them would put the
-      // wiped wallet's mnemonics back into the SW and its session backup.
+    it("reflects the reset wallet's locked, no-password state directly", async () => {
       const store = await createLockStore();
-      (store as any).cachedKeys = MOCK_KEYS;
-      (store as any).cachedPassword = "pw";
       vi.clearAllMocks();
       mockSendMessage.mockResolvedValue({
         isLocked: true,
@@ -329,15 +231,14 @@ describe("LockStore – destructive paths", () => {
       await store.readLockState();
 
       expect(namesSent()).not.toContain("SET_DECRYPTED_KEYS");
-      expect((store as any).cachedKeys).toBeUndefined();
-      expect((store as any).cachedPassword).toBeUndefined();
+      expect(store.isLocked).toBe(true);
+      expect(store.hasPasswordSet).toBe(false);
     });
   });
 
   describe("removeAccountKey", () => {
-    it("asks the service worker to scrub the key and drops its own copy", async () => {
+    it("asks the service worker to scrub the key", async () => {
       const store = await createLockStore();
-      (store as any).cachedKeys = [...MOCK_KEYS, OTHER_KEY];
       vi.clearAllMocks();
       mockSendMessage.mockResolvedValue({ success: true });
 
@@ -347,14 +248,12 @@ describe("LockStore – destructive paths", () => {
         (call: any) => call[0]?.name === "LOCK_MANAGER_REMOVE_ACCOUNT_KEY",
       );
       expect(scrub?.[0]?.data).toBe(OTHER_KEY.address);
-      expect((store as any).cachedKeys).toEqual(MOCK_KEYS);
     });
 
     it("throws when the service worker cannot be reached", async () => {
       // The caller deletes the keystore next; failing loudly is what stops
       // it doing that while the SW still holds the plaintext mnemonic.
       const store = await createLockStore();
-      (store as any).cachedKeys = [...MOCK_KEYS, OTHER_KEY];
       mockSendMessage.mockRejectedValue(new Error("SW not reachable"));
 
       await expect(store.removeAccountKey(OTHER_KEY.address)).rejects.toThrow();
@@ -370,8 +269,6 @@ describe("LockStore – destructive paths", () => {
       // the lock for a service-worker restart. Nothing in the surface's
       // own lock() should touch local storage directly any more.
       const store = await createLockStore();
-      (store as any).cachedKeys = MOCK_KEYS;
-      (store as any).cachedPassword = "pw";
       mockSendMessage.mockResolvedValue({ isLocked: true });
 
       await store.lock();
@@ -379,8 +276,6 @@ describe("LockStore – destructive paths", () => {
       expect(
         localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")],
       ).toBeUndefined();
-      expect((store as any).cachedKeys).toBeUndefined();
-      expect((store as any).cachedPassword).toBeUndefined();
       expect(store.isLocked).toBe(true);
     });
   });
@@ -434,13 +329,28 @@ describe("LockStore – storage listener ignores automated traffic (F2)", () => 
     expect(mockSendMessage).not.toHaveBeenCalled();
   });
 
-  it("still calls readLockState for a genuine session change (e.g. the decrypted-keys backup)", async () => {
+  it("does not call readLockState for the one-time legacy key-backup scrub event either", async () => {
+    // LockManager's startup scrub of a pre-upgrade plaintext key backup
+    // (scrubLegacySessionSecrets) fires a single storage event for this
+    // key; it is no more "the user did something" than the other two.
+    const listener = await createLockStoreAndGetStorageListener();
+    mockSendMessage.mockClear();
+
+    await listener(
+      { [profileStorageKey("_LM_CACHED_KEYS")]: { newValue: undefined } },
+      "session",
+    );
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("still calls readLockState for an unrecognized session-storage change", async () => {
     const listener = await createLockStoreAndGetStorageListener();
     mockSendMessage.mockClear();
     mockSendMessage.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
 
     await listener(
-      { [profileStorageKey("_LM_CACHED_KEYS")]: { newValue: MOCK_KEYS } },
+      { [profileStorageKey("SOME_FUTURE_KEY")]: { newValue: "x" } },
       "session",
     );
 
@@ -515,6 +425,32 @@ describe("LockStore – throttled user-activity ping (F2)", () => {
     expect(activityPings).toHaveLength(1);
   });
 
+  it("sends nothing to the worker on any activity event while locked (real-device regression fix)", async () => {
+    // A locked surface has nothing to postpone and nothing to re-verify;
+    // messaging the worker for either reason would wake it right back up
+    // for nothing (observed on real devices: a focus event unrelated to
+    // this store, e.g. from another page opening elsewhere in the same
+    // browser, was enough to resurrect an idle-killed worker indefinitely
+    // while a locked panel sat open).
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: true,
+      hasPasswordSet: true,
+    });
+    const module = await import("./lockStore");
+    new module.default();
+    await new Promise((r) => setTimeout(r, 300));
+    mockSendMessage.mockClear();
+    (browser.runtime.connect as any).mockClear();
+
+    document.dispatchEvent(new Event("pointerdown"));
+    document.dispatchEvent(new Event("keydown"));
+    document.dispatchEvent(new Event("wheel"));
+    document.dispatchEvent(new Event("focus"));
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
+    expect(browser.runtime.connect).not.toHaveBeenCalled();
+  });
+
   it("sends USER_ACTIVITY on a mouse wheel/scroll gesture (N3)", async () => {
     await createLockStore();
     mockSendMessage.mockClear();
@@ -564,6 +500,38 @@ describe("LockStore – throttled user-activity ping (F2)", () => {
     expect(mockSendMessage).toHaveBeenCalledWith({
       name: "LOCK_MANAGER_USER_ACTIVITY",
     });
+  });
+
+  it("also polls IS_LOCKED on the same throttle while unlocked (M2)", async () => {
+    const store = await createLockStore();
+    expect(store.isLocked).toBe(false);
+    mockSendMessage.mockClear();
+
+    document.dispatchEvent(new Event("pointerdown"));
+
+    const lockPolls = mockSendMessage.mock.calls.filter(
+      (call: any) => call[0]?.name === "LOCK_MANAGER_IS_LOCKED",
+    );
+    expect(lockPolls).toHaveLength(1);
+  });
+
+  it("does not poll IS_LOCKED on activity once already locked (M2)", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: true,
+      hasPasswordSet: true,
+    });
+    const module = await import("./lockStore");
+    const store = new module.default();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(store.isLocked).toBe(true);
+    mockSendMessage.mockClear();
+
+    document.dispatchEvent(new Event("pointerdown"));
+
+    const lockPolls = mockSendMessage.mock.calls.filter(
+      (call: any) => call[0]?.name === "LOCK_MANAGER_IS_LOCKED",
+    );
+    expect(lockPolls).toHaveLength(0);
   });
 });
 
@@ -775,5 +743,316 @@ describe("LockStore – unlock worker fan-out", () => {
       KEYSTORE_A,
       upgradedB,
     ]);
+  });
+});
+
+describe("LockStore – keep-alive port only while unlocked (real-device regression fix)", () => {
+  // A locked surface used to hold this port open too, reconnecting on
+  // every disconnect. Chrome idle-kills a dormant worker every ~30s
+  // regardless, so that surface resurrected it forever, running full
+  // startup (phishing detector init etc.) each cycle for a wallet with
+  // nothing to protect - and, in Playwright's CDP-driven e2e suite, kept
+  // resurrecting the exact worker instance a test had just force-closed,
+  // so a poll for that instance's DevTools target to disappear never
+  // observed it gone. The port now only exists while genuinely unlocked;
+  // any disconnect is applied locally as a lock with no reconnect at all.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearStore(localStore);
+    clearStore(sessionStore);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (browser.runtime as any).lastError;
+  });
+
+  async function createLockStoreWithControllablePort(options?: {
+    initialIsLocked?: boolean;
+    initialHasPasswordSet?: boolean;
+  }) {
+    const disconnectListeners: Array<() => void> = [];
+    let connectCallCount = 0;
+    (browser.runtime.connect as any).mockImplementation(() => {
+      connectCallCount += 1;
+      return {
+        onDisconnect: {
+          addListener: (cb: () => void) => {
+            disconnectListeners.push(cb);
+          },
+        },
+        disconnect: vi.fn(),
+      };
+    });
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: options?.initialIsLocked ?? false,
+      hasPasswordSet: options?.initialHasPasswordSet ?? true,
+    });
+    const module = await import("./lockStore");
+    const store = new module.default();
+    await vi.advanceTimersByTimeAsync(300);
+    return {
+      store,
+      fireDisconnect: () =>
+        disconnectListeners[disconnectListeners.length - 1]?.(),
+      getConnectCallCount: () => connectCallCount,
+    };
+  }
+
+  it("reads runtime.lastError on port disconnect so it is never left unchecked", async () => {
+    const { fireDisconnect } = await createLockStoreWithControllablePort();
+    (browser.runtime as any).lastError = {
+      message: "Could not establish connection. Receiving end does not exist.",
+    };
+
+    // checkForLastError() reads browser.runtime.lastError as a side effect
+    // of being called at all - the assertion here is just that handling a
+    // disconnect with lastError set does not throw.
+    expect(() => fireDisconnect()).not.toThrow();
+  });
+
+  it("flips to locked on disconnect, with zero sendMessage or connect calls", async () => {
+    const { store, fireDisconnect, getConnectCallCount } =
+      await createLockStoreWithControllablePort();
+    expect(store.isLocked).toBe(false);
+    mockSendMessage.mockClear();
+    const connectCallsBefore = getConnectCallCount();
+
+    fireDisconnect();
+
+    expect(store.isLocked).toBe(true);
+    expect(mockSendMessage).not.toHaveBeenCalled();
+    // No reconnect, immediately or on a later tick.
+    expect(getConnectCallCount()).toBe(connectCallsBefore);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getConnectCallCount()).toBe(connectCallsBefore);
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("never connects the persistent port while the wallet starts up locked", async () => {
+    const { getConnectCallCount } = await createLockStoreWithControllablePort({
+      initialIsLocked: true,
+      initialHasPasswordSet: true,
+    });
+    // The constructor's own wakeServiceWorker() nudge (a connect,
+    // immediately disconnected: distinct from the persistent port) still
+    // runs regardless of lock state, so this baseline already accounts
+    // for it before the real assertion below.
+    const afterConstruction = getConnectCallCount();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(getConnectCallCount()).toBe(afterConstruction);
+  });
+
+  it("connects the port once readLockState() reports unlocked", async () => {
+    const { store, getConnectCallCount } =
+      await createLockStoreWithControllablePort({
+        initialIsLocked: true,
+        initialHasPasswordSet: true,
+      });
+    const beforeUnlock = getConnectCallCount();
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+
+    await store.readLockState();
+
+    expect(store.isLocked).toBe(false);
+    expect(getConnectCallCount()).toBe(beforeUnlock + 1);
+  });
+
+  it("retries a failed port connect once, and only while still unlocked", async () => {
+    const { store, getConnectCallCount } =
+      await createLockStoreWithControllablePort({
+        initialIsLocked: true,
+        initialHasPasswordSet: true,
+      });
+    const failingConnect = vi.fn(() => {
+      throw new Error("Could not establish connection.");
+    });
+    const workingConnect = (
+      browser.runtime.connect as any
+    ).getMockImplementation();
+    (browser.runtime.connect as any).mockImplementation(failingConnect);
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+
+    await store.readLockState();
+    expect(failingConnect).toHaveBeenCalledTimes(1);
+
+    // The single retry fails too: no third attempt follows.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(failingConnect).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(failingConnect).toHaveBeenCalledTimes(2);
+
+    // A fresh unlock signal starts over, and a retry that succeeds opens
+    // the port.
+    (browser.runtime.connect as any).mockImplementationOnce(() => {
+      throw new Error("Could not establish connection.");
+    });
+    (browser.runtime.connect as any).mockImplementation(workingConnect);
+    const before = getConnectCallCount();
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+    await store.readLockState();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(getConnectCallCount()).toBe(before + 1);
+  });
+
+  it("drops the pending retry once the wallet locks", async () => {
+    const { store } = await createLockStoreWithControllablePort({
+      initialIsLocked: true,
+      initialHasPasswordSet: true,
+    });
+    const connect = vi.fn(() => {
+      throw new Error("Could not establish connection.");
+    });
+    (browser.runtime.connect as any).mockImplementation(connect);
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+    await store.readLockState();
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: true,
+      hasPasswordSet: true,
+    });
+    await store.readLockState();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads runtime.lastError after the wake nudge, so a dormant worker logs nothing unchecked", async () => {
+    let lastErrorReads = 0;
+    Object.defineProperty(browser.runtime, "lastError", {
+      configurable: true,
+      get: () => {
+        lastErrorReads += 1;
+        return undefined;
+      },
+    });
+
+    await createLockStoreWithControllablePort({
+      initialIsLocked: true,
+      initialHasPasswordSet: true,
+    });
+
+    expect(lastErrorReads).toBeGreaterThan(0);
+  });
+
+  it("disconnects the port on lock()", async () => {
+    const { store, fireDisconnect, getConnectCallCount } =
+      await createLockStoreWithControllablePort();
+    const afterConstruction = getConnectCallCount();
+    mockSendMessage.mockResolvedValueOnce({ success: true }); // LOCK
+    mockSendMessage.mockResolvedValueOnce({ isLocked: true }); // IS_LOCKED
+
+    await store.lock();
+
+    expect(store.isLocked).toBe(true);
+    // disconnect() on our own port does not fire our own onDisconnect
+    // listener (only the other end disconnecting does) - firing it
+    // manually here is just confirming there is nothing left to
+    // reconnect.
+    expect(() => fireDisconnect()).not.toThrow();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getConnectCallCount()).toBe(afterConstruction);
+  });
+});
+
+describe("LockStore – unlock still succeeds after a spurious port disconnect", () => {
+  // Per the real-device regression fix: if the keep-alive port drops for
+  // some reason OTHER than the worker actually dying, this store locally
+  // believes it is locked (showing the lock screen) even though the
+  // worker is still alive and holding the same keys. A real unlock()
+  // against that still-alive worker must succeed, and must reconnect the
+  // port again.
+  class StubWorker {
+    onmessage: ((event: { data: Record<string, unknown> }) => void) | null =
+      null;
+    onerror: ((event: unknown) => void) | null = null;
+    postMessage(_request: unknown) {
+      queueMicrotask(() => {
+        this.onmessage?.({
+          data: {
+            success: true,
+            keys: [{ address: `Q${"a".repeat(128)}`, mnemonicPhrases: "m" }],
+            upgraded: [null],
+          },
+        });
+      });
+    }
+    terminate() {}
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearStore(localStore);
+    clearStore(sessionStore);
+    vi.stubGlobal("Worker", StubWorker);
+    Object.defineProperty(navigator, "hardwareConcurrency", {
+      value: 4,
+      configurable: true,
+    });
+    localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+      { address: `Q${"a".repeat(128)}`, crypto: {} },
+    ]);
+  });
+
+  it("unlocks against a live worker and reconnects the port", async () => {
+    const disconnectListeners: Array<() => void> = [];
+    let connectCallCount = 0;
+    (browser.runtime.connect as any).mockImplementation(() => {
+      connectCallCount += 1;
+      return {
+        onDisconnect: {
+          addListener: (cb: () => void) => {
+            disconnectListeners.push(cb);
+          },
+        },
+        disconnect: vi.fn(),
+      };
+    });
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+    const module = await import("./lockStore");
+    const store = new module.default();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(store.isLocked).toBe(false);
+    const connectCallsAfterInitialUnlock = connectCallCount;
+
+    // A spurious disconnect: the worker is still alive (SET_DECRYPTED_KEYS
+    // and IS_LOCKED below both still succeed) even though this specific
+    // port dropped.
+    disconnectListeners[disconnectListeners.length - 1]?.();
+    expect(store.isLocked).toBe(true);
+
+    (mockSendMessage as any).mockImplementation((message: any) => {
+      if (message?.name === "SET_DECRYPTED_KEYS") {
+        return Promise.resolve({ success: true });
+      }
+      if (message?.name === "LOCK_MANAGER_IS_LOCKED") {
+        return Promise.resolve({ isLocked: false, hasPasswordSet: true });
+      }
+      return Promise.resolve({ success: true });
+    });
+
+    const result = await store.unlock("correct-password");
+
+    expect(result).toBe("success");
+    expect(store.isLocked).toBe(false);
+    expect(connectCallCount).toBeGreaterThan(connectCallsAfterInitialUnlock);
   });
 });

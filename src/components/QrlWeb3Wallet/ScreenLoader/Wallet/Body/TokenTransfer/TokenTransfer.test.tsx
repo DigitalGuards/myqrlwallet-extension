@@ -669,6 +669,28 @@ describe("TokenTransfer", () => {
     expect(screen.getByText(/Network timeout/)).toBeInTheDocument();
   });
 
+  it("shows a translated locked-wallet message and re-polls lock state when signing hits a locked wallet (L4)", async () => {
+    const mockReadLockState = vi.fn().mockResolvedValue(undefined);
+
+    renderComponent(
+      mockedStore({
+        lockStore: {
+          getMnemonicPhrases: vi
+            .fn()
+            .mockRejectedValue(new Error("MyQRLWallet is locked")),
+          readLockState: mockReadLockState,
+        },
+      }),
+    );
+
+    await fillAndSubmitForm();
+
+    expect(
+      screen.getByText("The wallet is locked. Unlock it to continue."),
+    ).toBeInTheDocument();
+    expect(mockReadLockState).toHaveBeenCalled();
+  });
+
   it("should sign ZRC20 token and add pending transaction when token details are set from state", async () => {
     const mockSignZrc20Token = vi.fn().mockResolvedValue({
       ...successSignResult,

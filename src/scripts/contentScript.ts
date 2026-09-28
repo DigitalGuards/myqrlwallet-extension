@@ -219,6 +219,20 @@ const keepServiceWorkerActive = () => {
 };
 
 const initializeContentScript = () => {
+  // Content scripts match <all_urls>, which (for content scripts
+  // specifically) includes the chrome-extension: scheme - so this file
+  // also runs on the wallet's own popup/side panel/tab pages. Those pages
+  // never read window.qrlProvider and have no dApp to bridge to, so the
+  // whole provider-bridge setup below - including keepServiceWorkerActive()'s
+  // unconditional interval and this file's own reconnect-on-disconnect
+  // logic - would otherwise resurrect the service worker purely to serve a
+  // page that never needed it (real-device regression, PR #71 audit): once
+  // listeners register synchronously at SW startup (F4), those reconnect
+  // attempts stopped being dropped-and-retried and started succeeding on
+  // the first try, keeping a locked wallet's worker running indefinitely.
+  if (window.location.href.startsWith(browser.runtime.getURL(""))) {
+    return;
+  }
   try {
     setupPageStreams();
     setupExtensionStreams();

@@ -560,6 +560,19 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
         .length,
     ).toBe(clientVersionCallsBeforeRestart + 1);
 
+    // The service worker restart above drops its in-memory decrypted keys
+    // by design (F4): extensionPage's own keep-alive port disconnected
+    // right along with it, so this store already applied that as a local
+    // lock, independent of - and faster than - the worker actually coming
+    // back. A real re-unlock is required before this surface can approve
+    // anything again.
+    await extensionPage.getByRole("button", { name: "Unlock" }).waitFor();
+    await extensionPage.getByLabel("Enter password").fill("e2e-password-only");
+    await extensionPage.getByRole("button", { name: "Unlock" }).click();
+    await expect(
+      extensionPage.getByRole("heading", { name: "Active account" }),
+    ).toBeVisible();
+
     await beginRequest(dAppPage, "qrl_requestAccounts");
     await dAppPage.waitForTimeout(500);
     const earlyRequestState = await dAppPage.evaluate(

@@ -1,3 +1,4 @@
+import { DEFAULT_AUTO_LOCK_MINUTES } from "@/configuration/autoLockConfig";
 import i18n from "@/i18n";
 import { LOCK_MANAGER_MESSAGES } from "@/scripts/lockManager/lockManager";
 import {
@@ -17,7 +18,6 @@ const THEME = Object.freeze({
 type ThemePreference = "system" | "light" | "dark";
 type SidePanelSurface = "panel" | "popup";
 
-
 class SettingsStore {
   isDarkMode: boolean;
   theme: string;
@@ -25,7 +25,7 @@ class SettingsStore {
   isSidePanel = false;
 
   themePreference: ThemePreference = "system";
-  autoLockMinutes = 15;
+  autoLockMinutes = DEFAULT_AUTO_LOCK_MINUTES;
   currency = "USD";
   language = "en";
   defaultGasTier: GasTier = "market";

@@ -272,4 +272,32 @@ describe("NFTTransfer", () => {
       screen.getByText(formatQrlAddressFingerprint(CURRENT_RESOLVED_ACCOUNT)),
     ).toBeInTheDocument();
   });
+
+  it("shows a translated locked-wallet message and re-polls lock state when signing hits a locked wallet (L4)", async () => {
+    const mockReadLockState = vi.fn().mockResolvedValue(undefined);
+    const RECEIVER = `Q${"d".repeat(128)}`;
+
+    renderComponent(
+      defaultState,
+      mockedStore({
+        lockStore: {
+          getMnemonicPhrases: vi
+            .fn()
+            .mockRejectedValue(new Error("MyQRLWallet is locked")),
+          readLockState: mockReadLockState,
+        },
+      }),
+    );
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "receiverAddress" }),
+      RECEIVER,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Send NFT" }));
+
+    expect(
+      await screen.findByText("The wallet is locked. Unlock it to continue."),
+    ).toBeInTheDocument();
+    expect(mockReadLockState).toHaveBeenCalled();
+  });
 });

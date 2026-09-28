@@ -25,6 +25,16 @@ export type UnlockAttemptGate = {
    * too-many-attempts one for this same submission.
    */
   recordResult: (result: PasswordCheckResult) => Promise<number>;
+  /**
+   * Re-reads the persisted counter from storage.local and refreshes
+   * isWaiting/remainingSeconds from it. The mount-time read alone goes
+   * stale the moment a concurrently open surface (e.g. the popup and a
+   * side panel open at once) records a failed attempt of its own; gated
+   * onSubmit handlers should call this first, before checking isWaiting,
+   * so every surface honours the same wait (R2). Returns whether a wait is
+   * now in effect.
+   */
+  refreshWait: () => Promise<boolean>;
 };
 
 /**
@@ -83,9 +93,16 @@ export function useUnlockAttemptGate(): UnlockAttemptGate {
     return waitUntil;
   };
 
+  const refreshWait = async (): Promise<boolean> => {
+    const state = await getUnlockAttemptState();
+    setWaitUntil(state.waitUntil);
+    return state.waitUntil > Date.now();
+  };
+
   return {
     isWaiting: remainingSeconds > 0,
     remainingSeconds,
     recordResult,
+    refreshWait,
   };
 }
