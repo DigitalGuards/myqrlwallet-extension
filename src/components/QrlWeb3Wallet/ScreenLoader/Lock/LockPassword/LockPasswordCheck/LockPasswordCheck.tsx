@@ -18,6 +18,7 @@ import { useStore } from "@/stores/store";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
 import ResetWalletDialog from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/ResetWalletDialog/ResetWalletDialog";
+import { useUnlockAttemptGate } from "@/hooks/useUnlockAttemptGate";
 
 const createFormSchema = (t: TFunction) =>
   z.object({
@@ -38,6 +39,11 @@ const LockPasswordCheck = observer(() => {
   const [unlockAttempt, setUnlockAttempt] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  // F7: exponential delay after repeated wrong passwords, shared with
+  // SessionPasswordPrompt and SettingsSecurity's change-password (N1) so
+  // every password oracle in the extension is gated identically.
+  const { isWaiting, remainingSeconds, recordResult, refreshWait } =
+    useUnlockAttemptGate();
 
   useEffect(() => {
     setTimeout(() => {
@@ -59,12 +65,31 @@ const LockPasswordCheck = observer(() => {
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     scrollShellToTop();
+    // R2: re-read the persisted counter first, so this surface's own
+    // isWaiting always reflects the latest state - a concurrently open
+    // surface (e.g. the side panel) may have recorded a failed attempt
+    // since this one last refreshed. Also defence in depth: the submit
+    // button is disabled while waiting, but a disabled submit button does
+    // not reliably block Enter-key submission in every browser.
+    if (await refreshWait()) {
+      setUnlockAttempt((attempt) => attempt + 1);
+      return;
+    }
     try {
-      const unlocked = await unlock(formData.password);
-      if (!unlocked) {
+      const result = await unlock(formData.password);
+      const waitUntil = await recordResult(result);
+      if (result === "wrong-password") {
         setError("password", {
-          message: t("lock.unlock.errorIncorrect"),
+          message:
+            waitUntil > Date.now()
+              ? t("lock.unlock.errorTooManyAttempts")
+              : t("lock.unlock.errorIncorrect"),
         });
+      } else if (result === "failed") {
+        // An infrastructure failure, or a final unlock verification that
+        // could not be confirmed: say so honestly, distinctly from a
+        // mistyped password.
+        setError("password", { message: t("lock.unlock.errorCouldNotVerify") });
       }
     } catch (error) {
       const message =
@@ -95,7 +120,7 @@ const LockPasswordCheck = observer(() => {
                       {...field}
                       aria-label={t("lock.unlock.passwordPlaceholder")}
                       autoComplete="current-password"
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || isWaiting}
                       placeholder={t("lock.unlock.passwordPlaceholder")}
                       type={showPassword ? "text" : "password"}
                       className="h-12 rounded-xl pr-12 text-base"
@@ -105,7 +130,7 @@ const LockPasswordCheck = observer(() => {
                     type="button"
                     aria-pressed={showPassword}
                     aria-label={t("lock.unlock.togglePasswordVisibility")}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isWaiting}
                     className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-2.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                     onClick={() => setShowPassword((show) => !show)}
                   >
@@ -121,8 +146,16 @@ const LockPasswordCheck = observer(() => {
             )}
           />
 
+          {isWaiting && (
+            // F7: exponential delay after repeated wrong passwords. No
+            // attempt cap and no auto-wipe - this only ever slows retries.
+            <p role="alert" className="text-xs text-muted-foreground">
+              {t("lock.unlock.waitMessage", { seconds: remainingSeconds })}
+            </p>
+          )}
+
           <Button
-            disabled={isSubmitting || !isValid}
+            disabled={isSubmitting || !isValid || isWaiting}
             className="h-11 w-full text-base"
             type="submit"
           >

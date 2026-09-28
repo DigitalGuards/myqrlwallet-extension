@@ -1,14 +1,17 @@
 import { Alert, AlertDescription } from "@/components/UI/Alert";
+import { Button } from "@/components/UI/Button";
 import { scrollShellToTop } from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
+import { describeExtensionError } from "@/functions/describeExtensionError";
 import withSuspense from "@/functions/withSuspense";
 import { useStore } from "@/stores/store";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
 import { observer } from "mobx-react-lite";
-import { lazy, useState } from "react";
+import { lazy, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import StartAccountCreation from "./StartAccountCreation/StartAccountCreation";
 import AccountCreationSuccess from "./AccountCreationSuccess/AccountCreationSuccess";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
+import SessionPasswordPrompt from "../../../Shared/SessionPasswordPrompt/SessionPasswordPrompt";
 
 const SeedBackup = withSuspense(
   lazy(
@@ -33,30 +36,70 @@ const CreateAccount = observer(() => {
   const [isPersisted, setIsPersisted] = useState(false);
   const [startError, setStartError] = useState("");
   const [persistError, setPersistError] = useState("");
+  // F1: shows the inline SessionPasswordPrompt when the session password is
+  // unavailable at the pre-reveal check. Holds the generated account so the
+  // retry can show the same backup screen without regenerating it.
+  const [needsReArmOnStart, setNeedsReArmOnStart] = useState(false);
+  const pendingCreatedAccountRef = useRef<Web3BaseWalletAccount>();
+  // Same idea, but for the confirm-backup step: `account` is already set by
+  // then, so only a flag is needed (no separate ref).
+  const [needsReArmOnPersist, setNeedsReArmOnPersist] = useState(false);
+  // Set on any other persist failure (R1): a plain Retry button, no
+  // password field, since the password was already confirmed usable.
+  const [needsRetryOnPersist, setNeedsRetryOnPersist] = useState(false);
 
   const onAccountCreated = async (created?: Web3BaseWalletAccount) => {
     scrollShellToTop();
     if (!created) return;
+    pendingCreatedAccountRef.current = created;
     // Fail closed before showing anything: with no cached password (SW
     // restarted) the account could never be stored, so do not walk the
-    // user through a backup that ends in an error.
+    // user through a backup that ends in an error. F1: the inline
+    // SessionPasswordPrompt re-arms the session and this function runs
+    // again with the same generated account, which keeps it in play for
+    // the backup step that follows.
     try {
       await getWalletPassword();
     } catch {
+      setNeedsReArmOnStart(true);
       setStartError(t("account.sessionPasswordExpired"));
       return;
     }
+    pendingCreatedAccountRef.current = undefined;
+    setNeedsReArmOnStart(false);
     setStartError("");
     setAccount(created);
   };
 
+  const retryOnAccountCreated = async () => {
+    const pendingAccount = pendingCreatedAccountRef.current;
+    if (!pendingAccount) return;
+    await onAccountCreated(pendingAccount);
+  };
+
   const onBackupConfirmed = async () => {
     if (!account) return;
+    let password: string;
     try {
-      const password = await getWalletPassword();
-      await encryptAccount(account, password);
+      password = await getWalletPassword();
     } catch {
+      setNeedsReArmOnPersist(true);
+      setNeedsRetryOnPersist(false);
       setPersistError(t("account.sessionPasswordExpired"));
+      return;
+    }
+    try {
+      await encryptAccount(account, password);
+    } catch (error) {
+      // getWalletPassword() already confirmed a usable password moments
+      // ago (N11): a failure here has some other cause, so this shows the
+      // real error behind a plain Retry button (R1). A re-arm prompt here
+      // would only re-confirm the same already-usable password.
+      setNeedsReArmOnPersist(false);
+      setNeedsRetryOnPersist(true);
+      setPersistError(
+        describeExtensionError(error, t, t("onboarding.account.persistError")),
+      );
       return;
     }
     try {
@@ -65,11 +108,16 @@ const CreateAccount = observer(() => {
       // shows the raw address until some other screen happens to run
       // syncLabels.
       await accountLabelsStore.ensureLabel(account.address);
-    } catch {
-      setPersistError(t("onboarding.account.persistError"));
+    } catch (error) {
+      setNeedsRetryOnPersist(true);
+      setPersistError(
+        describeExtensionError(error, t, t("onboarding.account.persistError")),
+      );
       return;
     }
     scrollShellToTop();
+    setNeedsReArmOnPersist(false);
+    setNeedsRetryOnPersist(false);
     setPersistError("");
     setIsPersisted(true);
   };
@@ -82,18 +130,44 @@ const CreateAccount = observer(() => {
           isPersisted ? (
             <AccountCreationSuccess account={account} />
           ) : (
-            <SeedBackup
-              account={account}
-              onConfirmed={onBackupConfirmed}
-              onBack={() => setAccount(undefined)}
-              error={persistError}
-            />
+            <>
+              <SeedBackup
+                account={account}
+                onConfirmed={onBackupConfirmed}
+                onBack={() => {
+                  setAccount(undefined);
+                  setPersistError("");
+                  setNeedsReArmOnPersist(false);
+                  setNeedsRetryOnPersist(false);
+                }}
+                error={persistError}
+              />
+              {needsReArmOnPersist && (
+                <SessionPasswordPrompt onUnlocked={onBackupConfirmed} />
+              )}
+              {needsRetryOnPersist && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 w-full"
+                  onClick={onBackupConfirmed}
+                >
+                  {t("account.retryButton")}
+                </Button>
+              )}
+            </>
           )
         ) : (
           <>
             {startError && (
               <Alert variant="destructive" className="mb-4">
-                <AlertDescription>{startError}</AlertDescription>
+                <AlertDescription>
+                  {startError}
+                  {needsReArmOnStart && (
+                    <SessionPasswordPrompt onUnlocked={retryOnAccountCreated} />
+                  )}
+                </AlertDescription>
               </Alert>
             )}
             <StartAccountCreation onAccountCreated={onAccountCreated} />

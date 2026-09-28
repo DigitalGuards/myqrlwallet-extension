@@ -1,14 +1,19 @@
 import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
 const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 /**
- * Integration / scenario tests for auto-lock + keep-alive.
+ * Integration / scenario tests for auto-lock timing.
  *
  * These tests simulate the full lifecycle of the lock manager:
- *   unlock → keep-alive ticks → activity resets → alarm fires → wallet locks
+ *   unlock → activity resets → alarm fires → wallet locks
  *
- * The Chrome Alarms API is simulated with a scheduler that fires alarm
- * callbacks when Jest's fake clock advances past the scheduled time.
- * This lets us "fast-forward" 15, 30, or 60 real minutes in milliseconds.
+ * The auto-lock alarm (chrome.alarms) is simulated with a scheduler that
+ * fires alarm callbacks when the fake clock advances past the scheduled
+ * time, letting these tests "fast-forward" 15, 30, or 60 real minutes in
+ * milliseconds. The keep-alive interval (a real, fake-timer-intercepted
+ * setInterval as of this version, no longer a chrome.alarm) runs alongside
+ * these scenarios on its own; it has no bearing on auto-lock timing (F2) and
+ * these tests do not assert on it directly - see lockManager.test.ts's
+ * "keep-alive interval" suite for that.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -88,11 +93,22 @@ vi.mock("webextension-polyfill", () => ({
         mockPendingAlarms = mockPendingAlarms.filter((a) => a.name !== name);
         return Promise.resolve(true);
       }),
+      get: vi.fn((name: string) =>
+        Promise.resolve(
+          mockPendingAlarms.some((a) => a.name === name)
+            ? { name, scheduledTime: 0 }
+            : null,
+        ),
+      ),
       onAlarm: {
         addListener: vi.fn(),
       },
     },
     runtime: {
+      id: "mock-extension-id",
+      getURL: vi.fn(
+        (path: string) => `chrome-extension://mock-extension-id/${path}`,
+      ),
       onMessage: { addListener: vi.fn() },
       sendMessage: vi.fn(() => Promise.resolve()),
       connect: vi.fn(() => ({
@@ -140,13 +156,18 @@ const seedStorage = () => {
 const minutes = (m: number) => m * 60_000;
 
 /**
- * Advance Jest fake clock by `ms` then fire any alarms whose scheduled
- * time has been reached.  Dispatches directly to LockManager handlers
- * (mirroring serviceWorker.ts alarm listener). Returns the number of
- * alarms fired.
+ * Advance the fake clock by `ms`, then fire any chrome.alarms whose
+ * scheduled time has been reached, dispatching to LockManager exactly like
+ * serviceWorker.ts's alarm listener. Returns the number of alarms fired.
+ *
+ * Uses the async form of advanceTimersByTime: the keep-alive interval is
+ * now a fake-timer-intercepted setInterval, so it fires on its own as the
+ * clock advances - the async form lets its promise chain (StorageUtil
+ * reads, session writes) actually resolve, keeping the whole tick
+ * complete before the next assertion runs.
  */
 async function advanceAndFireAlarms(ms: number): Promise<number> {
-  vi.advanceTimersByTime(ms);
+  await vi.advanceTimersByTimeAsync(ms);
   let fired = 0;
   const now = Date.now();
   const due = mockPendingAlarms.filter((a) => a.scheduledTime <= now);
@@ -155,21 +176,30 @@ async function advanceAndFireAlarms(ms: number): Promise<number> {
     // Dispatch to LockManager just like serviceWorker.ts does
     if (alarm.name === LockManager.AUTO_LOCK_ALARM) {
       await LockManager.handleAutoLockAlarm();
-    } else if (alarm.name === LockManager.KEEP_ALIVE_ALARM) {
-      await LockManager.handleKeepAliveAlarm();
     }
     fired++;
   }
   return fired;
 }
 
+// A legitimate caller: an extension page, matching both the extension id
+// and an extension-origin URL that lockManagerListener's sender guard
+// requires (F9).
+const TRUSTED_SENDER = {
+  id: "mock-extension-id",
+  url: "chrome-extension://mock-extension-id/index.html",
+} as any;
+
 /** Simulate sending a message through the lockManagerListener (like the popup does). */
 async function sendMessage(name: string, data?: any) {
-  return LockManager.lockManagerListener({ name, data });
+  return LockManager.lockManagerListener({ name, data }, TRUSTED_SENDER);
 }
 
 async function unlockWallet() {
-  return sendMessage(LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS, MOCK_KEYS);
+  return sendMessage(LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS, {
+    keys: MOCK_KEYS,
+    walletPassword: "pw",
+  });
 }
 
 /**
@@ -190,12 +220,14 @@ describe("Auto-lock integration scenarios", () => {
     clearStore(mockLocalStore);
     clearStore(mockSessionStore);
     mockPendingAlarms = [];
+    LockManager.stopKeepAliveInterval();
     await LockManager.lock();
     seedStorage();
   });
 
   afterEach(async () => {
     await LockManager.lock();
+    LockManager.stopKeepAliveInterval();
     vi.useRealTimers();
   });
 
@@ -254,9 +286,10 @@ describe("Auto-lock integration scenarios", () => {
       await advanceAndFireAlarms(minutes(10));
       expect(await checkLocked()).toBe(false);
 
-      // Activity at 10 min - a decrypted-keys fetch (e.g. the user signs or
-      // checks a balance) triggers the activity reset in lockManagerListener.
-      await sendMessage(LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS);
+      // Activity at 10 min - the throttled pointer/keyboard/focus ping an
+      // open surface sends (see lockStore.ts) triggers the activity reset
+      // in lockManagerListener (F2).
+      await sendMessage(LOCK_MANAGER_MESSAGES.USER_ACTIVITY);
       // The alarm was recreated with fresh 15 minutes from now
 
       // 10 more minutes (total 20 min from start, but only 10 from last activity)
@@ -276,8 +309,8 @@ describe("Auto-lock integration scenarios", () => {
       for (let i = 0; i < 6; i++) {
         await advanceAndFireAlarms(minutes(10));
         expect(await checkLocked()).toBe(false);
-        // Activity - e.g. user checks balance
-        await sendMessage(LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS);
+        // Activity - e.g. the user is actively using an open surface
+        await sendMessage(LOCK_MANAGER_MESSAGES.USER_ACTIVITY);
       }
 
       // Total 60 minutes of activity - still unlocked
@@ -285,6 +318,32 @@ describe("Auto-lock integration scenarios", () => {
 
       // Now stop activity - should lock after 15 minutes
       const fired = await advanceAndFireAlarms(minutes(15) + 1);
+      expect(fired).toBeGreaterThanOrEqual(1);
+      expect(await checkLocked()).toBe(true);
+    });
+
+    it("should NOT reset the timer on reads or automated traffic (F2)", async () => {
+      await unlockWallet();
+
+      // 10 minutes pass - still well within timeout
+      await advanceAndFireAlarms(minutes(10));
+      expect(await checkLocked()).toBe(false);
+
+      // None of these represent the user actively doing something: a
+      // single decrypted-key read, a lock-state poll, and an automated
+      // tx-notification message. None should postpone the lock.
+      await sendMessage(
+        LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEY_FOR_ADDRESS,
+        MOCK_KEYS[0].address,
+      );
+      await sendMessage(LOCK_MANAGER_MESSAGES.IS_LOCKED);
+      await sendMessage(LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION, {
+        status: "confirmed",
+      });
+
+      // 5 more minutes (total 15 min from unlock, none of it postponed by
+      // the reads above) - should lock right on schedule.
+      const fired = await advanceAndFireAlarms(minutes(5) + 1);
       expect(fired).toBeGreaterThanOrEqual(1);
       expect(await checkLocked()).toBe(true);
     });

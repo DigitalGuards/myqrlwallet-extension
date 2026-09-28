@@ -228,7 +228,7 @@ describe("SettingsSecurity", () => {
     });
 
     it("should call changePassword and show success on correct password", async () => {
-      const changePassword = vi.fn(() => Promise.resolve(true));
+      const changePassword = vi.fn(() => Promise.resolve("success" as const));
       renderComponent(mockedStore({ lockStore: { changePassword } }));
 
       await userEvent.click(
@@ -270,7 +270,9 @@ describe("SettingsSecurity", () => {
     });
 
     it("should show error when current password is incorrect", async () => {
-      const changePassword = vi.fn(() => Promise.resolve(false));
+      const changePassword = vi.fn(() =>
+        Promise.resolve("wrong-password" as const),
+      );
       renderComponent(mockedStore({ lockStore: { changePassword } }));
 
       await userEvent.click(
@@ -309,6 +311,50 @@ describe("SettingsSecurity", () => {
           screen.getByText("Current password is incorrect"),
         ).toBeInTheDocument();
       });
+    });
+
+    it("shows an honest 'could not verify' message for a 'failed' result, distinct from a wrong password (N1/N2)", async () => {
+      const changePassword = vi.fn(() => Promise.resolve("failed" as const));
+      renderComponent(mockedStore({ lockStore: { changePassword } }));
+
+      await userEvent.click(
+        screen.getByRole("button", { name: /Change Password/i }),
+      );
+
+      await userEvent.type(
+        screen.getByLabelText("Current password"),
+        "oldpass12345",
+      );
+      await userEvent.type(
+        screen.getByLabelText("New password"),
+        "newpass12345",
+      );
+      await userEvent.type(
+        screen.getByLabelText("Confirm new password"),
+        "newpass12345",
+      );
+
+      const dialog = screen.getByRole("dialog");
+      const submitButton = within(dialog).getByRole("button", {
+        name: /Change Password/i,
+      });
+      await waitFor(() => {
+        expect(submitButton).toBeEnabled();
+      });
+
+      await userEvent.click(submitButton);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("Could not verify your password. Please try again."),
+        ).toBeInTheDocument();
+      });
+      expect(
+        screen.queryByText("Current password is incorrect"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Password changed successfully"),
+      ).not.toBeInTheDocument();
     });
   });
 });

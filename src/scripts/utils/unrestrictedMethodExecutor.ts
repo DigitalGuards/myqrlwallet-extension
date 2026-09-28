@@ -12,6 +12,7 @@ import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
 import { prepareQip55LogFilter } from "./qip55LogFilter";
 import { getSerializableObject } from "./scriptUtils";
+import LockManager from "../lockManager/lockManager";
 
 /**
  * Executes read-only ("unrestricted") provider methods against the active
@@ -129,6 +130,13 @@ export const executeUnrestrictedMethod = async (
     const networkId = await qrl.net.getId();
     return "0x".concat(networkId.toString(16));
   } else if (method === UNRESTRICTED_METHODS.QRL_ACCOUNTS) {
+    // MetaMask parity (F8): a locked wallet answers qrl_accounts with an
+    // empty array. A dApp that still displays previously-connected
+    // addresses while the wallet is locked cannot act on them - every
+    // write path re-checks the lock state on its own - but showing them at
+    // all is a stale-permission leak the page has no way to detect.
+    const { isLocked } = await LockManager.isLocked();
+    if (isLocked) return [];
     const connectedAccountsData =
       await StorageUtil.getDAppsConnectedAccountsData(
         new URL(req?.senderData?.url ?? "").origin,

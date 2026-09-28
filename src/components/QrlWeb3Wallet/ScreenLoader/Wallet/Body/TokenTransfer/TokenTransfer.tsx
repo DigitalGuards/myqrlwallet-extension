@@ -18,6 +18,7 @@ import { Input } from "@/components/UI/Input";
 import { Label } from "@/components/UI/Label";
 import { Slider } from "@/components/UI/Slider";
 import { NATIVE_TOKEN } from "@/constants/nativeToken";
+import { isWalletLockedError } from "@/functions/describeExtensionError";
 import { formatFiatCompact } from "@/functions/formatFiat";
 import { parseBalanceValue } from "@/functions/parseBalanceValue";
 import { ROUTES } from "@/router/router";
@@ -327,6 +328,18 @@ const TokenTransfer = observer(() => {
       await resetForm();
       navigate(ROUTES.TRANSACTION_HISTORY);
     } catch (error) {
+      if (isWalletLockedError(error)) {
+        // The SW's decrypted keys and this surface's own isLocked belief
+        // can fall out of sync for a moment (M2); this signing attempt
+        // hit the real, locked state. Push the screen to the lock view
+        // immediately: the dashboard would otherwise stay up with a form
+        // that can only fail again (L4).
+        void lockStore.readLockState();
+        control.setError("amount", {
+          message: t("account.walletLockedError"),
+        });
+        return;
+      }
       control.setError("amount", {
         message: t("transfer.errorOccurred", { error }),
       });

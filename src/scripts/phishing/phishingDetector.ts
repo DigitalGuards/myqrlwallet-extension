@@ -52,14 +52,57 @@ async function fetchRemoteConfig(): Promise<PhishingConfig | null> {
   }
 }
 
+// Shape-checks a value before it is trusted as a phishing blocklist: a
+// corrupted or hand-edited storage.local entry must be discarded before it
+// ever reaches createDetector, whose own failure mode (H1) used to leave
+// initializePhishingDetector() throwing and skipped the bundled fallback.
+function isValidPhishingConfig(value: unknown): value is PhishingConfig {
+  if (typeof value !== "object" || value === null) return false;
+  const config = value as Record<string, unknown>;
+  const isStringArrayOrUndefined = (field: unknown) =>
+    field === undefined ||
+    (Array.isArray(field) && field.every((item) => typeof item === "string"));
+  return (
+    isStringArrayOrUndefined(config.whitelist) &&
+    isStringArrayOrUndefined(config.blacklist) &&
+    isStringArrayOrUndefined(config.fuzzylist) &&
+    (config.tolerance === undefined || typeof config.tolerance === "number")
+  );
+}
+
 async function getCachedConfig(): Promise<CachedConfig | null> {
-  const data = await browser.storage.local.get(PHISHING_CACHE_KEY);
-  return (data?.[PHISHING_CACHE_KEY] as CachedConfig) ?? null;
+  try {
+    const data = await browser.storage.local.get(PHISHING_CACHE_KEY);
+    const cached = data?.[PHISHING_CACHE_KEY] as CachedConfig | undefined;
+    if (
+      !cached ||
+      typeof cached.timestamp !== "number" ||
+      !isValidPhishingConfig(cached.config)
+    ) {
+      return null;
+    }
+    return cached;
+  } catch (error) {
+    console.warn(
+      "QrlWeb3Wallet: Failed to read the cached phishing blocklist",
+      error,
+    );
+    return null;
+  }
 }
 
 async function setCachedConfig(config: PhishingConfig): Promise<void> {
-  const cached: CachedConfig = { config, timestamp: Date.now() };
-  await browser.storage.local.set({ [PHISHING_CACHE_KEY]: cached });
+  try {
+    const cached: CachedConfig = { config, timestamp: Date.now() };
+    await browser.storage.local.set({ [PHISHING_CACHE_KEY]: cached });
+  } catch (error) {
+    // Non-fatal: the freshly fetched config is still used in-memory for
+    // this session even if persisting it for next time failed.
+    console.warn(
+      "QrlWeb3Wallet: Failed to persist the phishing blocklist cache",
+      error,
+    );
+  }
 }
 
 function createDetector(config: PhishingConfig) {
@@ -73,6 +116,25 @@ function createDetector(config: PhishingConfig) {
       version: 1,
     },
   ]);
+}
+
+// Never lets a bad blocklist (remote, cached, or even the bundled snapshot)
+// throw out of initializePhishingDetector(): H1's failure mode was exactly
+// that, which left the module-level serviceWorkerReady promise in
+// serviceWorker.ts unresolved and every dApp connection waiting on it
+// hanging forever.
+function createDetectorSafely(
+  config: PhishingConfig,
+): InstanceType<typeof PhishingDetector> | null {
+  try {
+    return createDetector(config);
+  } catch (error) {
+    console.warn(
+      "QrlWeb3Wallet: Failed to build the phishing detector from a blocklist",
+      error,
+    );
+    return null;
+  }
 }
 
 // Exponential-backoff retry schedule when initial fetch + cache fetch both fail
@@ -89,13 +151,24 @@ function scheduleRetry(): void {
   if (retryTimeoutHandle !== undefined) {
     clearTimeout(retryTimeoutHandle);
   }
-  const delay = RETRY_DELAYS_MS[Math.min(retryAttempt, RETRY_DELAYS_MS.length - 1)];
+  const delay =
+    RETRY_DELAYS_MS[Math.min(retryAttempt, RETRY_DELAYS_MS.length - 1)];
   retryTimeoutHandle = setTimeout(() => {
     retryAttempt += 1;
     void initializePhishingDetector();
   }, delay);
 }
 
+/**
+ * Builds (or rebuilds) the phishing detector. Never rejects (H1): every
+ * source it can draw a blocklist from - a fresh remote fetch, the
+ * persistent cache, and the bundled snapshot - is validated and guarded
+ * independently, so a bad response or a corrupted cache entry simply falls
+ * through to the next source, with the function itself never throwing.
+ * serviceWorker.ts awaits this before resolving serviceWorkerReady, and a
+ * rejection there would leave every dApp connection waiting on that
+ * promise hanging forever.
+ */
 export async function initializePhishingDetector(): Promise<void> {
   if (detectorInstance === null) {
     detectorStatus = "initializing";
@@ -106,27 +179,49 @@ export async function initializePhishingDetector(): Promise<void> {
 
   if (isCacheStale) {
     const remoteConfig = await fetchRemoteConfig();
-    if (remoteConfig) {
-      await setCachedConfig(remoteConfig);
-      detectorInstance = createDetector(remoteConfig);
+    if (remoteConfig && isValidPhishingConfig(remoteConfig)) {
+      const detector = createDetectorSafely(remoteConfig);
+      if (detector) {
+        await setCachedConfig(remoteConfig);
+        detectorInstance = detector;
+        detectorStatus = "ready";
+        retryAttempt = 0;
+        return;
+      }
+    }
+  }
+
+  if (cached?.config) {
+    const detector = createDetectorSafely(cached.config);
+    if (detector) {
+      detectorInstance = detector;
       detectorStatus = "ready";
       retryAttempt = 0;
       return;
     }
   }
 
-  if (cached?.config) {
-    detectorInstance = createDetector(cached.config);
+  // Remote fetch and persistent cache were both unavailable, invalid, or
+  // failed to build a detector. Fall back to the bundled snapshot so a
+  // baseline blocklist is available whenever possible, then schedule a
+  // retry to refresh against the live upstream.
+  const fallbackDetector = createDetectorSafely(
+    bundledPhishingConfig as PhishingConfig,
+  );
+  if (fallbackDetector) {
+    detectorInstance = fallbackDetector;
     detectorStatus = "ready";
-    retryAttempt = 0;
-    return;
+  } else {
+    // Every source failed to even build a detector. The bundled snapshot
+    // getting here should be effectively impossible in practice; nothing
+    // above may throw regardless of how it happens. checkDomain() already
+    // fails open when detectorInstance is null and reports this status, so
+    // dApp approval still gets a real answer, with the degraded state
+    // visible for the UI to warn on: the result never implies a clean
+    // check on its own.
+    detectorInstance = null;
+    detectorStatus = "unavailable";
   }
-
-  // Remote fetch and persistent cache both failed. Fall back to the
-  // bundled snapshot so a baseline blocklist is always available, then
-  // schedule a retry to refresh against the live upstream.
-  detectorInstance = createDetector(bundledPhishingConfig as PhishingConfig);
-  detectorStatus = "ready";
   scheduleRetry();
 }
 

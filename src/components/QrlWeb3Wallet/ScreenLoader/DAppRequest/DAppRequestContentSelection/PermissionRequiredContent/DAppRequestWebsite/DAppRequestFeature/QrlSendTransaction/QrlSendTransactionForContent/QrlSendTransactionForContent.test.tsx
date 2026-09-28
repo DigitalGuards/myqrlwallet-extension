@@ -1426,6 +1426,46 @@ describe("QrlSendTransactionForContent", () => {
     });
   });
 
+  describe("wallet-locked signing (L1)", () => {
+    it.each([
+      [SEND_TRANSACTION_TYPES.QRL_TRANSFER, zndTransferRequest],
+      [SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION, contractInteractionRequest],
+    ])(
+      "shows a translated message, re-polls lock state, and sends a stable 4100 error to the dApp (%s)",
+      async (transactionType, requestParams) => {
+        const mockReadLockState = vi.fn().mockResolvedValue(undefined);
+        const addToResponseData = vi.fn();
+
+        renderComponent(
+          createStoreWithCallback({
+            requestParams,
+            addToResponseData,
+            lockStore: {
+              getMnemonicPhrases: vi
+                .fn()
+                .mockRejectedValue(new Error("MyQRLWallet is locked")),
+              readLockState: mockReadLockState,
+            },
+          }),
+          { transactionType },
+        );
+
+        await act(async () => capturedPermissionCallback!(true));
+
+        expect(
+          screen.getByText("The wallet is locked. Unlock it to continue."),
+        ).toBeInTheDocument();
+        expect(mockReadLockState).toHaveBeenCalled();
+        expect(addToResponseData).toHaveBeenCalledWith({
+          error: expect.objectContaining({
+            code: 4100,
+            message: "The wallet is locked",
+          }),
+        });
+      },
+    );
+  });
+
   describe("copyData", () => {
     it("should copy data to clipboard when copy button is clicked", async () => {
       const mockWriteText = vi.fn();

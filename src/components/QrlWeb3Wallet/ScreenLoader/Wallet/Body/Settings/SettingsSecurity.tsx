@@ -1,10 +1,5 @@
 import { Button } from "@/components/UI/Button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/UI/Card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { Checkbox } from "@/components/UI/Checkbox";
 import {
   Dialog,
@@ -30,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/UI/Select";
 import { Separator } from "@/components/UI/Separator";
+import { useUnlockAttemptGate } from "@/hooks/useUnlockAttemptGate";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -54,13 +50,10 @@ const createChangePasswordSchema = (t: TFunction) =>
         .string()
         .min(12, t("onboarding.password.validationMinLength")),
     })
-    .refine(
-      (fields) => fields.newPassword === fields.confirmNewPassword,
-      {
-        message: t("onboarding.password.validationMismatch"),
-        path: ["confirmNewPassword"],
-      },
-    );
+    .refine((fields) => fields.newPassword === fields.confirmNewPassword, {
+      message: t("onboarding.password.validationMismatch"),
+      path: ["confirmNewPassword"],
+    });
 
 const SettingsSecurity = observer(() => {
   const navigate = useNavigate();
@@ -79,6 +72,10 @@ const SettingsSecurity = observer(() => {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [passwordChanged, setPasswordChanged] = useState(false);
+  // F7/N1: change-password is a third password oracle (alongside the lock
+  // screen and SessionPasswordPrompt) and shares the same throttled gate.
+  const { isWaiting, remainingSeconds, recordResult, refreshWait } =
+    useUnlockAttemptGate();
 
   const ChangePasswordSchema = createChangePasswordSchema(t);
 
@@ -110,18 +107,39 @@ const SettingsSecurity = observer(() => {
     formData: z.infer<typeof ChangePasswordSchema>,
   ) {
     setPasswordChanged(false);
-    const success = await lockStore.changePassword(
-      formData.currentPassword,
-      formData.newPassword,
-    );
-    if (success) {
-      setPasswordChanged(true);
-      form.reset();
-    } else {
+    // R2: re-read the persisted counter first - see LockPasswordCheck's
+    // identical guard.
+    if (await refreshWait()) return;
+    try {
+      const result = await lockStore.changePassword(
+        formData.currentPassword,
+        formData.newPassword,
+      );
+      const waitUntil = await recordResult(result);
+      if (result === "wrong-password") {
+        form.setError("currentPassword", {
+          message:
+            waitUntil > Date.now()
+              ? t("lock.unlock.errorTooManyAttempts")
+              : t("settings.security.incorrectPassword"),
+        });
+        return;
+      }
+      if (result === "failed") {
+        form.setError("currentPassword", {
+          message: t("lock.unlock.errorCouldNotVerify"),
+        });
+        return;
+      }
+    } catch (error) {
       form.setError("currentPassword", {
-        message: t("settings.security.incorrectPassword"),
+        message:
+          error instanceof Error ? error.message : t("lock.unlock.errorFailed"),
       });
+      return;
     }
+    setPasswordChanged(true);
+    form.reset();
   }
 
   const AUTO_LOCK_OPTIONS = [
@@ -269,8 +287,10 @@ const SettingsSecurity = observer(() => {
                         aria-label={t("settings.security.currentPassword")}
                         type="password"
                         autoComplete="current-password"
-                        disabled={isSubmitting}
-                        placeholder={t("settings.security.currentPasswordPlaceholder")}
+                        disabled={isSubmitting || isWaiting}
+                        placeholder={t(
+                          "settings.security.currentPasswordPlaceholder",
+                        )}
                       />
                     </FormControl>
                     <FormMessage />
@@ -288,8 +308,10 @@ const SettingsSecurity = observer(() => {
                         aria-label={t("settings.security.newPassword")}
                         type="password"
                         autoComplete="new-password"
-                        disabled={isSubmitting}
-                        placeholder={t("settings.security.newPasswordPlaceholder")}
+                        disabled={isSubmitting || isWaiting}
+                        placeholder={t(
+                          "settings.security.newPasswordPlaceholder",
+                        )}
                       />
                     </FormControl>
                     <FormMessage />
@@ -307,16 +329,23 @@ const SettingsSecurity = observer(() => {
                         aria-label={t("settings.security.confirmNewPassword")}
                         type="password"
                         autoComplete="new-password"
-                        disabled={isSubmitting}
-                        placeholder={t("settings.security.confirmNewPasswordPlaceholder")}
+                        disabled={isSubmitting || isWaiting}
+                        placeholder={t(
+                          "settings.security.confirmNewPasswordPlaceholder",
+                        )}
                       />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+              {isWaiting && (
+                <p role="alert" className="text-xs text-muted-foreground">
+                  {t("lock.unlock.waitMessage", { seconds: remainingSeconds })}
+                </p>
+              )}
               <Button
-                disabled={isSubmitting || !isValid}
+                disabled={isSubmitting || !isValid || isWaiting}
                 className="w-full"
                 type="submit"
               >

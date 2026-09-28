@@ -6,6 +6,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/UI/Tooltip";
+import {
+  isWalletLockedError,
+  walletLockedProviderError,
+} from "@/functions/describeExtensionError";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
@@ -17,13 +21,13 @@ import { Buffer } from "buffer";
 import { Copy } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 
 const PersonalSign = observer(() => {
   const { t } = useTranslation();
   const { lockStore, qrlStore, dAppRequestStore } = useStore();
-  const { getMnemonicPhrases } = lockStore;
+  const { getMnemonicPhrases, readLockState } = lockStore;
   const { qrlInstance, qrlConnection } = qrlStore;
   const { isConnected } = qrlConnection;
   const {
@@ -32,6 +36,7 @@ const PersonalSign = observer(() => {
     setCanProceed,
     addToResponseData,
   } = dAppRequestStore;
+  const [isWalletLocked, setIsWalletLocked] = useState(false);
 
   const params = dAppRequestData?.params;
   const rawMessage: string = params?.[0] ?? "";
@@ -101,6 +106,17 @@ const PersonalSign = observer(() => {
         throw new Error("Message data could not be signed");
       }
     } catch (error) {
+      if (isWalletLockedError(error)) {
+        // getMnemonicPhrases() hit the SW's locked-wallet guard (L1, PR
+        // #71 audit): this surface's own isLocked belief was stale. Force
+        // a re-check so ScreenLoader can swap to the lock screen, show a
+        // translated message here too, and give the dApp a stable
+        // EIP-1193 error; the raw guard text never reaches the dApp response.
+        setIsWalletLocked(true);
+        void readLockState();
+        addToResponseData({ error: walletLockedProviderError() });
+        return;
+      }
       addToResponseData({ error });
     }
   };
@@ -111,6 +127,11 @@ const PersonalSign = observer(() => {
 
   return (
     <div className="flex flex-col gap-2 rounded-md p-2">
+      {isWalletLocked && (
+        <div className="rounded border border-red-500/60 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300">
+          {t("account.walletLockedError")}
+        </div>
+      )}
       <div className="flex flex-col gap-1">
         <div>{t("dapp.signature.fromAddress")}</div>
         <FullAddress
