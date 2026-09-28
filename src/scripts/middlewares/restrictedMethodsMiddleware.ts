@@ -284,8 +284,8 @@ const getRestrictedMethodResult = async (
 
   // Safety timeout: if the popup never connects its lifecycle port (e.g.
   // openPopup() failed) and never posts a DAPP_RESPONSE, fall through here so
-  // isRequestPending eventually resets. Most popup-close paths now resolve
-  // via the lifecycle-port disconnect handler below.
+  // isRequestPending eventually resets. Once the port connects, its
+  // disconnect handler covers every close path and the timer is cleared.
   const POPUP_RESPONSE_TIMEOUT_MS = 90 * 1000;
 
   return new Promise((resolve) => {
@@ -309,6 +309,10 @@ const getRestrictedMethodResult = async (
       if (port.name === DAPP_REQUEST_PORT_NAME) {
         popupPort = port;
         port.onDisconnect.addListener(handlePortDisconnect);
+        // The popup answers only after a transaction is mined, which with
+        // 60 s slots can alone outlast the safety timeout. A connected popup
+        // is waited for until it responds or closes.
+        clearTimeout(timeoutHandle);
       }
     }
     async function handlePortDisconnect() {
