@@ -35,7 +35,9 @@ const CardTitle = React.forwardRef<
   <h3
     ref={ref}
     className={cn(
-      "text-2xl font-semibold leading-none tracking-tight",
+      // Titles can be a bare 64-byte address or a long token name with no
+      // break opportunity; anywhere-wrapping keeps them inside the card.
+      "text-2xl font-semibold leading-tight tracking-tight [overflow-wrap:anywhere]",
       className,
     )}
     {...props}
