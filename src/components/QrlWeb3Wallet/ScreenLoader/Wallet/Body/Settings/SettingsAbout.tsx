@@ -133,12 +133,6 @@ const SettingsAbout = observer(() => {
               <div className="flex flex-col gap-2">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">
-                    {t("settings.about.version")}
-                  </span>
-                  <span>{WALLET_VERSION}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">
                     {t("settings.about.network")}
                   </span>
                   <span>{networkName}</span>

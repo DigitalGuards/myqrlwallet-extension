@@ -471,7 +471,6 @@
   "resetWallet.resetting": "Restableciendo...",
   "resetWallet.failed": "El restablecimiento no se completó. Puede que queden datos de la billetera en este dispositivo. Por favor, inténtalo de nuevo.",
   "settings.about.title": "Acerca de",
-  "settings.about.version": "Versión",
   "settings.about.network": "Red",
   "settings.about.chainId": "ID de Cadena",
   "settings.about.accounts": "Cuentas",

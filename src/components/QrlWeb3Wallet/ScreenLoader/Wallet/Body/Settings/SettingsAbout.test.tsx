@@ -78,7 +78,8 @@ describe("SettingsAbout", () => {
       }),
     );
 
-    expect(screen.getByText("Version")).toBeInTheDocument();
+    // The version is shown once, in the "MyQRLWallet Version x.y.z" line.
+    expect(screen.queryByText("Version")).not.toBeInTheDocument();
     expect(screen.getByText("QRL Testnet")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();

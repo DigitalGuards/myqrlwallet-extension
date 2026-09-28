@@ -471,7 +471,6 @@
   "resetWallet.resetting": "Setze zurück...",
   "resetWallet.failed": "Das Zurücksetzen wurde nicht abgeschlossen. Möglicherweise sind noch Wallet-Daten auf diesem Gerät. Bitte versuche es erneut.",
   "settings.about.title": "Über",
-  "settings.about.version": "Version",
   "settings.about.network": "Netzwerk",
   "settings.about.chainId": "Ketten-ID",
   "settings.about.accounts": "Konten",

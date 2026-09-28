@@ -471,7 +471,6 @@
   "resetWallet.resetting": "Resetting...",
   "resetWallet.failed": "The reset did not complete. Some wallet data may still be on this device. Please try again.",
   "settings.about.title": "About",
-  "settings.about.version": "Version",
   "settings.about.network": "Network",
   "settings.about.chainId": "Chain ID",
   "settings.about.accounts": "Accounts",
