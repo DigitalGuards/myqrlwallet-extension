@@ -291,22 +291,40 @@ class TransactionHistoryStore {
           );
           if (update.receiptStatusVerified) {
             const newStatus = update.pendingStatus;
+            // Re-read storage immediately before writing: the service
+            // worker's own dApp-transaction watcher (dAppTransactionWatcher.ts)
+            // can confirm the same hash out-of-band between this interval
+            // starting and now, from `this.transactions`'s own stale
+            // snapshot. Notifying again for a hash already terminal in
+            // storage would double the desktop notification.
+            const freshEntry = (
+              await StorageUtil.getTransactionHistory(accountAddress)
+            ).find(
+              (entry) =>
+                entry.transactionHash.toLowerCase() ===
+                tx.transactionHash.toLowerCase(),
+            );
+            const alreadyTerminal =
+              freshEntry?.pendingStatus === "confirmed" ||
+              freshEntry?.pendingStatus === "failed";
             await this.updateTransaction(
               accountAddress,
               tx.transactionHash,
               update,
             );
-            browser.runtime
-              .sendMessage({
-                name: LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION,
-                data: {
-                  status: newStatus,
-                  amount: tx.amount,
-                  tokenSymbol: tx.tokenSymbol,
-                  txHash: tx.transactionHash,
-                },
-              })
-              .catch(() => {});
+            if (!alreadyTerminal) {
+              browser.runtime
+                .sendMessage({
+                  name: LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION,
+                  data: {
+                    status: newStatus,
+                    amount: tx.amount,
+                    tokenSymbol: tx.tokenSymbol,
+                    txHash: tx.transactionHash,
+                  },
+                })
+                .catch(() => {});
+            }
           }
         } catch (error) {
           console.error(`Polling error for ${tx.transactionHash}:`, error);

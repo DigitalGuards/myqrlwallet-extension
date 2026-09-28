@@ -27,7 +27,9 @@ import { getSerializableObject } from "./scriptUtils";
  * from page CORS via the manifest's host_permissions.
  */
 
-const getQrlProperties = async () => {
+// Exported for dAppTransactionWatcher.ts, which needs the same
+// service-worker-only, CORS-exempt RPC access to poll receipts.
+export const getQrlProperties = async () => {
   const { defaultRpcUrl, defaultWsRpcUrl } =
     await StorageUtil.getActiveBlockChain();
   const qrlHttpProvider = new Web3.providers.HttpProvider(defaultRpcUrl);
