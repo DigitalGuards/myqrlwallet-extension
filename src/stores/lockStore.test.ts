@@ -425,6 +425,32 @@ describe("LockStore – throttled user-activity ping (F2)", () => {
     expect(activityPings).toHaveLength(1);
   });
 
+  it("sends nothing to the worker on any activity event while locked (real-device regression fix)", async () => {
+    // A locked surface has nothing to postpone and nothing to re-verify;
+    // messaging the worker for either reason would wake it right back up
+    // for nothing (observed on real devices: a focus event unrelated to
+    // this store, e.g. from another page opening elsewhere in the same
+    // browser, was enough to resurrect an idle-killed worker indefinitely
+    // while a locked panel sat open).
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: true,
+      hasPasswordSet: true,
+    });
+    const module = await import("./lockStore");
+    new module.default();
+    await new Promise((r) => setTimeout(r, 300));
+    mockSendMessage.mockClear();
+    (browser.runtime.connect as any).mockClear();
+
+    document.dispatchEvent(new Event("pointerdown"));
+    document.dispatchEvent(new Event("keydown"));
+    document.dispatchEvent(new Event("wheel"));
+    document.dispatchEvent(new Event("focus"));
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
+    expect(browser.runtime.connect).not.toHaveBeenCalled();
+  });
+
   it("sends USER_ACTIVITY on a mouse wheel/scroll gesture (N3)", async () => {
     await createLockStore();
     mockSendMessage.mockClear();
@@ -720,7 +746,16 @@ describe("LockStore – unlock worker fan-out", () => {
   });
 });
 
-describe("LockStore – keep-alive port reconnect (real-device fix)", () => {
+describe("LockStore – keep-alive port only while unlocked (real-device regression fix)", () => {
+  // A locked surface used to hold this port open too, reconnecting on
+  // every disconnect. Chrome idle-kills a dormant worker every ~30s
+  // regardless, so that surface resurrected it forever, running full
+  // startup (phishing detector init etc.) each cycle for a wallet with
+  // nothing to protect - and, in Playwright's CDP-driven e2e suite, kept
+  // resurrecting the exact worker instance a test had just force-closed,
+  // so a poll for that instance's DevTools target to disappear never
+  // observed it gone. The port now only exists while genuinely unlocked;
+  // any disconnect is applied locally as a lock with no reconnect at all.
   beforeEach(() => {
     vi.clearAllMocks();
     clearStore(localStore);
@@ -733,7 +768,10 @@ describe("LockStore – keep-alive port reconnect (real-device fix)", () => {
     delete (browser.runtime as any).lastError;
   });
 
-  async function createLockStoreWithControllablePort() {
+  async function createLockStoreWithControllablePort(options?: {
+    initialIsLocked?: boolean;
+    initialHasPasswordSet?: boolean;
+  }) {
     const disconnectListeners: Array<() => void> = [];
     let connectCallCount = 0;
     (browser.runtime.connect as any).mockImplementation(() => {
@@ -748,8 +786,8 @@ describe("LockStore – keep-alive port reconnect (real-device fix)", () => {
       };
     });
     mockSendMessage.mockResolvedValueOnce({
-      isLocked: false,
-      hasPasswordSet: true,
+      isLocked: options?.initialIsLocked ?? false,
+      hasPasswordSet: options?.initialHasPasswordSet ?? true,
     });
     const module = await import("./lockStore");
     const store = new module.default();
@@ -774,62 +812,161 @@ describe("LockStore – keep-alive port reconnect (real-device fix)", () => {
     expect(() => fireDisconnect()).not.toThrow();
   });
 
-  it("reconnects with an increasing backoff on repeated disconnects", async () => {
-    const { fireDisconnect, getConnectCallCount } =
-      await createLockStoreWithControllablePort();
-    const baseline = getConnectCallCount();
-
-    fireDisconnect();
-    // Nothing yet: the first reconnect is scheduled after the short base
-    // delay (250ms).
-    expect(getConnectCallCount()).toBe(baseline);
-    await vi.advanceTimersByTimeAsync(250);
-    expect(getConnectCallCount()).toBe(baseline + 1);
-
-    // Immediately disconnect again (before the port had a chance to look
-    // "stable") - the second reconnect must wait longer than the first.
-    fireDisconnect();
-    await vi.advanceTimersByTimeAsync(250);
-    expect(getConnectCallCount()).toBe(baseline + 1); // still pending
-    await vi.advanceTimersByTimeAsync(250); // total 500ms since the 2nd disconnect
-    expect(getConnectCallCount()).toBe(baseline + 2);
-  });
-
-  it("resets the backoff once a port has stayed connected for a while", async () => {
-    const { fireDisconnect, getConnectCallCount } =
-      await createLockStoreWithControllablePort();
-    const baseline = getConnectCallCount();
-
-    fireDisconnect();
-    await vi.advanceTimersByTimeAsync(250); // 1st reconnect, base delay
-    expect(getConnectCallCount()).toBe(baseline + 1);
-
-    // Let the new connection sit long enough to be treated as stable.
-    await vi.advanceTimersByTimeAsync(5_000);
-
-    fireDisconnect();
-    await vi.advanceTimersByTimeAsync(250); // back to the short base delay
-    expect(getConnectCallCount()).toBe(baseline + 2);
-  });
-
-  it("flips to the lock screen after the worker dies and comes back, without user action (M2)", async () => {
-    const { store, fireDisconnect } =
+  it("flips to locked on disconnect, with zero sendMessage or connect calls", async () => {
+    const { store, fireDisconnect, getConnectCallCount } =
       await createLockStoreWithControllablePort();
     expect(store.isLocked).toBe(false);
+    mockSendMessage.mockClear();
+    const connectCallsBefore = getConnectCallCount();
 
-    // The worker restarted: its in-memory keys are gone (F4), so every
-    // IS_LOCKED answer from here on reports locked. The disconnect handler
-    // tries readLockState() immediately - the worker is not reachable yet,
-    // so that attempt fails silently and isLocked does not move yet.
-    mockSendMessage.mockRejectedValueOnce(new Error("unreachable"));
-    mockSendMessage.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
     fireDisconnect();
-    expect(store.isLocked).toBe(false);
 
-    // Once the reconnect lands, connectKeepAlive()'s own readLockState()
-    // call gets the true answer: the surface flips to the lock screen with
-    // no user action needed.
-    await vi.advanceTimersByTimeAsync(250);
     expect(store.isLocked).toBe(true);
+    expect(mockSendMessage).not.toHaveBeenCalled();
+    // No reconnect, immediately or on a later tick.
+    expect(getConnectCallCount()).toBe(connectCallsBefore);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getConnectCallCount()).toBe(connectCallsBefore);
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("never connects the persistent port while the wallet starts up locked", async () => {
+    const { getConnectCallCount } = await createLockStoreWithControllablePort({
+      initialIsLocked: true,
+      initialHasPasswordSet: true,
+    });
+    // The constructor's own wakeServiceWorker() nudge (a connect,
+    // immediately disconnected: distinct from the persistent port) still
+    // runs regardless of lock state, so this baseline already accounts
+    // for it before the real assertion below.
+    const afterConstruction = getConnectCallCount();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(getConnectCallCount()).toBe(afterConstruction);
+  });
+
+  it("connects the port once readLockState() reports unlocked", async () => {
+    const { store, getConnectCallCount } =
+      await createLockStoreWithControllablePort({
+        initialIsLocked: true,
+        initialHasPasswordSet: true,
+      });
+    const beforeUnlock = getConnectCallCount();
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+
+    await store.readLockState();
+
+    expect(store.isLocked).toBe(false);
+    expect(getConnectCallCount()).toBe(beforeUnlock + 1);
+  });
+
+  it("disconnects the port on lock()", async () => {
+    const { store, fireDisconnect, getConnectCallCount } =
+      await createLockStoreWithControllablePort();
+    const afterConstruction = getConnectCallCount();
+    mockSendMessage.mockResolvedValueOnce({ success: true }); // LOCK
+    mockSendMessage.mockResolvedValueOnce({ isLocked: true }); // IS_LOCKED
+
+    await store.lock();
+
+    expect(store.isLocked).toBe(true);
+    // disconnect() on our own port does not fire our own onDisconnect
+    // listener (only the other end disconnecting does) - firing it
+    // manually here is just confirming there is nothing left to
+    // reconnect.
+    expect(() => fireDisconnect()).not.toThrow();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getConnectCallCount()).toBe(afterConstruction);
+  });
+});
+
+describe("LockStore – unlock still succeeds after a spurious port disconnect", () => {
+  // Per the real-device regression fix: if the keep-alive port drops for
+  // some reason OTHER than the worker actually dying, this store locally
+  // believes it is locked (showing the lock screen) even though the
+  // worker is still alive and holding the same keys. A real unlock()
+  // against that still-alive worker must succeed, and must reconnect the
+  // port again.
+  class StubWorker {
+    onmessage: ((event: { data: Record<string, unknown> }) => void) | null =
+      null;
+    onerror: ((event: unknown) => void) | null = null;
+    postMessage(_request: unknown) {
+      queueMicrotask(() => {
+        this.onmessage?.({
+          data: {
+            success: true,
+            keys: [{ address: `Q${"a".repeat(128)}`, mnemonicPhrases: "m" }],
+            upgraded: [null],
+          },
+        });
+      });
+    }
+    terminate() {}
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearStore(localStore);
+    clearStore(sessionStore);
+    vi.stubGlobal("Worker", StubWorker);
+    Object.defineProperty(navigator, "hardwareConcurrency", {
+      value: 4,
+      configurable: true,
+    });
+    localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+      { address: `Q${"a".repeat(128)}`, crypto: {} },
+    ]);
+  });
+
+  it("unlocks against a live worker and reconnects the port", async () => {
+    const disconnectListeners: Array<() => void> = [];
+    let connectCallCount = 0;
+    (browser.runtime.connect as any).mockImplementation(() => {
+      connectCallCount += 1;
+      return {
+        onDisconnect: {
+          addListener: (cb: () => void) => {
+            disconnectListeners.push(cb);
+          },
+        },
+        disconnect: vi.fn(),
+      };
+    });
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+    const module = await import("./lockStore");
+    const store = new module.default();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(store.isLocked).toBe(false);
+    const connectCallsAfterInitialUnlock = connectCallCount;
+
+    // A spurious disconnect: the worker is still alive (SET_DECRYPTED_KEYS
+    // and IS_LOCKED below both still succeed) even though this specific
+    // port dropped.
+    disconnectListeners[disconnectListeners.length - 1]?.();
+    expect(store.isLocked).toBe(true);
+
+    (mockSendMessage as any).mockImplementation((message: any) => {
+      if (message?.name === "SET_DECRYPTED_KEYS") {
+        return Promise.resolve({ success: true });
+      }
+      if (message?.name === "LOCK_MANAGER_IS_LOCKED") {
+        return Promise.resolve({ isLocked: false, hasPasswordSet: true });
+      }
+      return Promise.resolve({ success: true });
+    });
+
+    const result = await store.unlock("correct-password");
+
+    expect(result).toBe("success");
+    expect(store.isLocked).toBe(false);
+    expect(connectCallCount).toBeGreaterThan(connectCallsAfterInitialUnlock);
   });
 });

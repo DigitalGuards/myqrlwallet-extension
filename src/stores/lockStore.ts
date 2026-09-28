@@ -34,18 +34,6 @@ import { Web3BaseWalletAccount } from "@theqrl/web3";
 import { action, makeAutoObservable, runInAction } from "mobx";
 import browser from "webextension-polyfill";
 
-// Exponential backoff for the keep-alive port's reconnect, starting short
-// (a cold SW is usually back within a couple hundred ms) and capping at
-// PORT_RECONNECT_MAX_DELAY_MS, so a genuinely stuck worker settles into a
-// gentle every-few-seconds retry.
-const PORT_RECONNECT_BASE_DELAY_MS = 250;
-const PORT_RECONNECT_MAX_DELAY_MS = 5_000;
-// A port that stays connected this long is treated as a real, stable
-// connection: the backoff resets, so a later, unrelated disconnect starts
-// counting from the short delay again, unaffected by earlier failures from
-// a previous cold start.
-const PORT_STABLE_AFTER_MS = 5_000;
-
 // Session-storage keys written by automated background traffic: a storage
 // change limited to these keys must not trigger readLockState() (which
 // polls the SW), or the keep-alive interval's own write and the dApp
@@ -88,20 +76,18 @@ class LockStore {
   isLocked = true;
   /** 1-based service-worker wake attempt, surfaced by the boot loader. */
   bootAttempt = 1;
+  /**
+   * Only ever open while this store believes the wallet is genuinely
+   * unlocked (real-device regression fix, PR #71 audit): a worker restart
+   * always drops the wallet's in-memory keys (F4), so a surface sitting on
+   * the LOCK screen has nothing left to keep alive, and holding this port
+   * there just resurrects the worker every time Chrome idle-kills it
+   * (~30s), forever, running full startup (phishing detector init etc.)
+   * each cycle for no reason. See connectKeepAlive()/disconnectKeepAlive().
+   */
   private keepAlivePort?: browser.Runtime.Port;
-  /** Consecutive keep-alive port reconnect attempts, for the backoff. */
-  private portReconnectAttempt = 0;
-  private portStabilityTimer?: ReturnType<typeof setTimeout>;
   /** Timestamp of the last USER_ACTIVITY ping sent, for throttling. */
   private lastActivityPingAt = 0;
-  /**
-   * Set once connectKeepAlive() has connected the port for the first time.
-   * Distinguishes the constructor's initial connect (already covered by
-   * initialize()'s own IS_LOCKED retry loop, right below it) from a real
-   * reconnect after the worker dropped the port, which is the case M2's
-   * extra readLockState() call exists for.
-   */
-  private hasConnectedKeepAliveOnce = false;
 
   constructor() {
     makeAutoObservable(this, {
@@ -116,7 +102,10 @@ class LockStore {
       resetWallet: action.bound,
     });
 
-    this.connectKeepAlive();
+    // A one-shot nudge here: the lock state is not known yet, so nothing
+    // should linger and hold the worker awake before the persistent port
+    // (connected later, once genuinely unlocked) has any reason to exist.
+    this.wakeServiceWorker();
     this.initialize();
     this.registerActivityPing();
   }
@@ -133,6 +122,14 @@ class LockStore {
   private registerActivityPing() {
     if (typeof document === "undefined") return;
     const ping = () => {
+      // A locked surface has nothing to postpone (auto-lock timing is
+      // moot once already locked) and nothing to re-verify via the
+      // IS_LOCKED re-check below - and messaging the worker for either
+      // reason would wake it right back up. A stray focus/scroll/etc.
+      // event on a locked surface (real-device regression, PR #71 audit:
+      // observed firing purely from another page opening elsewhere in
+      // the same browser context) must never reach the worker at all.
+      if (this.isLocked) return;
       const now = Date.now();
       if (now - this.lastActivityPingAt < ACTIVITY_PING_THROTTLE_MS) {
         return;
@@ -141,18 +138,16 @@ class LockStore {
       browser.runtime
         .sendMessage({ name: LOCK_MANAGER_MESSAGES.USER_ACTIVITY })
         .catch(() => {
-          // SW not reachable right now - the next activity tick, or the
-          // keep-alive port reconnect, will retry. Not worth surfacing.
+          // SW not reachable right now - the next activity tick will
+          // retry. Not worth surfacing.
         });
-      // Riding the same throttle: a cheap IS_LOCKED re-check while this
-      // store still believes it is unlocked (M2), catching a dead worker
-      // even on the rare path where its port's onDisconnect never fires.
-      // IS_LOCKED stays off lockManagerListener's auto-lock activity
-      // allow-list, so this can never re-arm auto-lock itself - only the
-      // USER_ACTIVITY ping above does that.
-      if (!this.isLocked) {
-        this.readLockState();
-      }
+      // Riding the same throttle: a cheap IS_LOCKED re-check (M2),
+      // catching a dead worker even on the rare path where its port's
+      // onDisconnect never fires. IS_LOCKED stays off
+      // lockManagerListener's auto-lock activity allow-list, so this can
+      // never re-arm auto-lock itself - only the USER_ACTIVITY ping above
+      // does that.
+      this.readLockState();
     };
     const passiveListener: AddEventListenerOptions = { passive: true };
     document.addEventListener("pointerdown", ping, passiveListener);
@@ -169,77 +164,105 @@ class LockStore {
   }
 
   /**
-   * Keep a long-lived port open to the service worker.
-   * As long as a port is connected, Chrome keeps the MV3 SW alive.
-   * This prevents the "Receiving end does not exist" error that occurs
-   * when Chrome fails to restart a module-type service worker.
+   * Connects the long-lived keep-alive port. As long as a port is
+   * connected, Chrome keeps the MV3 SW alive, which is what stands between
+   * a surface sitting on the wallet dashboard and a "Receiving end does
+   * not exist" error the moment Chrome idle-kills a dormant worker.
    *
-   * Kept even though LockManager now also keeps the worker alive on its
-   * own (an in-worker setInterval, started on unlock): that interval only
-   * runs while the wallet is unlocked, so a surface sitting on the lock
-   * screen - deciding on a password, or just left open - would otherwise
-   * have nothing keeping the worker warm between IS_LOCKED polls. This
-   * port covers that case; the interval is the belt to this port's braces
-   * once something is actually unlocked.
+   * Only ever called once this store has just learned, from an
+   * authoritative source (readLockState()'s own IS_LOCKED reply, or
+   * unlock()'s success path), that the wallet is genuinely unlocked - see
+   * applyLockState(). Calling it unconditionally used to be the real-device
+   * regression this class doc now warns about: a LOCKED surface holding
+   * this port open gets idle-killed and immediately resurrected by Chrome
+   * every ~30s, running the worker's full startup sequence (phishing
+   * detector init etc.) each cycle, forever, for a wallet with nothing to
+   * protect.
+   *
+   * Idempotent: a second call while already connected is a no-op, so
+   * nothing here fights a caller's own connect/disconnect bookkeeping.
    */
   private connectKeepAlive() {
-    try {
-      this.keepAlivePort?.disconnect();
-    } catch {
-      /* already disconnected */
-    }
-    clearTimeout(this.portStabilityTimer);
+    if (this.keepAlivePort) return;
     try {
       this.keepAlivePort = browser.runtime.connect({
         name: LOCK_MANAGER_MESSAGES.LOCK_MANAGER_KEEP_LIVE,
       });
-      // A port that survives this long is a real connection to a running
-      // worker - reset the backoff so a later, unrelated disconnect is not
-      // penalised by earlier cold-start failures.
-      this.portStabilityTimer = setTimeout(() => {
-        this.portReconnectAttempt = 0;
-      }, PORT_STABLE_AFTER_MS);
-      // The worker's in-memory keys never survive its own restart (F4), so
-      // a successful RECONNECT - proof the worker just answered again after
-      // a real disconnect, whether or not it is the same instance as
-      // before - is exactly when a stale isLocked=false belief needs
-      // re-checking (M2): without this, an already-open surface that was
-      // unlocked when the worker died keeps showing the dashboard, with
-      // every action failing, until something else happens to trigger a
-      // poll. The very first connect, from the constructor, is excluded:
-      // initialize()'s own IS_LOCKED retry loop already covers it, and
-      // firing a second, independent poll here at construction time has no
-      // extra value.
-      if (this.hasConnectedKeepAliveOnce) {
-        this.readLockState();
-      }
-      this.hasConnectedKeepAliveOnce = true;
       this.keepAlivePort.onDisconnect.addListener(() => {
         // Read runtime.lastError so Chrome does not additionally log it as
-        // an "Unchecked runtime.lastError" on top of this reconnect - a
-        // dropped connect while the worker is between wake-ups ("Receiving
-        // end does not exist") is expected here and already handled.
+        // an "Unchecked runtime.lastError" - a dropped port while the
+        // worker is between wake-ups is expected and already handled here.
         checkForLastError();
-        // The worker may still answer sendMessage for a moment even though
-        // this specific port just dropped (M2); try now, and the reconnect
-        // above covers the case where it does not.
-        this.readLockState();
-        this.scheduleReconnect();
+        this.keepAlivePort = undefined;
+        // Design invariant carried over from F4/M2: the worker's in-memory
+        // keys never survive its own restart, so losing this port for any
+        // reason means the wallet is locked from here until a real
+        // unlock. Apply that state transition directly - the same one
+        // readLockState() would apply, so ScreenLoader's existing effect
+        // still swaps to the lock screen - with no message sent to a
+        // worker that may or may not even be running right now, and no
+        // reconnect: reconnecting immediately is exactly the resurrection
+        // loop this design exists to avoid. If the worker actually is
+        // still alive for some unrelated reason, the user simply sees the
+        // lock screen and a real unlock() call still succeeds against it.
+        this.isLocked = true;
       });
     } catch {
+      // Nothing to connect to right now. Whatever next determines the
+      // wallet is unlocked (the storage listener, the activity poll, a
+      // fresh unlock()) will call this again.
       checkForLastError();
-      this.scheduleReconnect();
     }
   }
 
-  /** Reconnects the keep-alive port after an exponential backoff. */
-  private scheduleReconnect() {
-    const delay = Math.min(
-      PORT_RECONNECT_BASE_DELAY_MS * 2 ** this.portReconnectAttempt,
-      PORT_RECONNECT_MAX_DELAY_MS,
-    );
-    this.portReconnectAttempt += 1;
-    setTimeout(() => this.connectKeepAlive(), delay);
+  /** Closes the keep-alive port, if one is open. Idempotent. */
+  private disconnectKeepAlive() {
+    const port = this.keepAlivePort;
+    this.keepAlivePort = undefined;
+    try {
+      port?.disconnect();
+    } catch {
+      /* already disconnected */
+    }
+  }
+
+  /**
+   * One-shot nudge to wake a possibly-cold worker: connects a port, then
+   * immediately lets it go. Deliberately not the persistent keep-alive
+   * port above - this needs to run in ANY lock state (a message retry, or
+   * the very first contact from a freshly opened surface, can happen
+   * before the lock state is even known), and must never linger and hold
+   * a locked wallet's worker awake.
+   */
+  private wakeServiceWorker() {
+    try {
+      browser.runtime
+        .connect({ name: LOCK_MANAGER_MESSAGES.LOCK_MANAGER_KEEP_LIVE })
+        .disconnect();
+    } catch {
+      checkForLastError();
+    }
+  }
+
+  /**
+   * Single chokepoint for applying a freshly learned lock state (from
+   * readLockState()'s IS_LOCKED reply, the boot-time retry ladder, or
+   * unlock()'s own success path): updates the observables ScreenLoader
+   * reacts to, and connects or disconnects the keep-alive port to match,
+   * so the port can never end up open while this store believes the
+   * wallet is locked.
+   */
+  private applyLockState(isLocked: boolean, hasPasswordSet: boolean) {
+    runInAction(() => {
+      this.isLocked = isLocked;
+      this.hasPasswordSet = hasPasswordSet;
+      this.isLoading = false;
+    });
+    if (!isLocked && hasPasswordSet) {
+      this.connectKeepAlive();
+    } else {
+      this.disconnectKeepAlive();
+    }
   }
 
   /**
@@ -247,8 +270,8 @@ class LockStore {
    * then start the storage listener.
    */
   private async initialize() {
-    // Give the port connection a moment to wake the SW. Kept short: on a
-    // warm SW every ms here is pure added latency before first paint.
+    // Give the wake nudge a moment to reach the SW. Kept short: on a warm
+    // SW every ms here is pure added latency before first paint.
     await new Promise((r) => setTimeout(r, 50));
 
     for (let i = 0; i < 14; i++) {
@@ -259,17 +282,13 @@ class LockStore {
         const { isLocked, hasPasswordSet } = await browser.runtime.sendMessage({
           name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
         });
-        runInAction(() => {
-          this.isLocked = isLocked;
-          this.hasPasswordSet = hasPasswordSet;
-          this.isLoading = false;
-        });
+        this.applyLockState(isLocked, hasPasswordSet);
         break;
       } catch {
-        // Also try reconnecting the port to wake the SW. Backoff starts at
-        // 150ms so a cold SW is caught quickly; 14 tries keeps the same
-        // ~16s overall window the old 10x300ms ladder had.
-        this.connectKeepAlive();
+        // Nudge again to wake the SW. Backoff starts at 150ms so a cold SW
+        // is caught quickly; 14 tries keeps the same ~16s overall window
+        // the old 10x300ms ladder had.
+        this.wakeServiceWorker();
         await new Promise((r) => setTimeout(r, 150 * (i + 1)));
       }
     }
@@ -470,11 +489,11 @@ class LockStore {
       const { isLocked, hasPasswordSet } = await browser.runtime.sendMessage({
         name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
       });
-      this.isLocked = isLocked;
-      this.hasPasswordSet = hasPasswordSet;
-      this.isLoading = false;
+      this.applyLockState(isLocked, hasPasswordSet);
     } catch {
-      // SW not reachable – will be retried via port reconnect or storage listener
+      // SW not reachable - will be retried via the storage listener or the
+      // next activity poll. If a keep-alive port is open, its own
+      // onDisconnect handles the case where the worker is genuinely gone.
     }
   }
 
@@ -523,11 +542,19 @@ class LockStore {
       name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
     });
     this.isLocked = isLocked;
+    // lock() closes the keep-alive port itself immediately here, on
+    // purpose: waiting on the port's own onDisconnect (or Chrome's idle
+    // timer) to eventually drop it would leave it open for a while after
+    // an explicit lock.
+    this.disconnectKeepAlive();
   }
 
   /**
-   * Send a message to the service worker with automatic retries.
-   * Each retry also reconnects the keep-alive port to ensure the SW is awake.
+   * Send a message to the service worker with automatic retries. Each
+   * retry also nudges the worker awake with wakeServiceWorker(); this
+   * runs in any lock state (e.g. Reset the wallet from the lock screen),
+   * which is why it goes through the one-shot nudge here and never the
+   * persistent keep-alive port.
    */
   private async sendWithRetry(
     message: Record<string, unknown>,
@@ -538,7 +565,7 @@ class LockStore {
         return await browser.runtime.sendMessage(message);
       } catch (error) {
         if (attempt === maxRetries) throw error;
-        this.connectKeepAlive();
+        this.wakeServiceWorker();
         await new Promise((r) => setTimeout(r, 500 * attempt));
       }
     }
@@ -662,6 +689,10 @@ class LockStore {
         runInAction(() => {
           this.isLocked = false;
         });
+        // Genuinely unlocked now: reopen the keep-alive port (real-device
+        // fix, PR #71 audit) so Chrome does not idle-kill this worker
+        // instance out from under an active session.
+        this.connectKeepAlive();
         StorageUtil.updateLockStateTimeStamp(LockState.UNLOCKED);
         return "success";
       }

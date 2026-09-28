@@ -53,12 +53,9 @@ export default defineConfig({
     // on similarly shared runners) potentially in CI. 4 keeps real
     // parallelism while giving each worker enough of a CPU share that a
     // waitFor() timeout means a real bug, with scheduling noise ruled out.
-    poolOptions: {
-      forks: {
-        maxForks: 4,
-        minForks: 1,
-      },
-    },
+    // `maxWorkers` (not the removed `poolOptions.forks.maxForks`) is the
+    // Vitest 4 way to cap this.
+    maxWorkers: 4,
     server: {
       deps: {
         inline: ["@theqrl/abi", "@theqrl/qrl-cryptography", "@noble/hashes"],
