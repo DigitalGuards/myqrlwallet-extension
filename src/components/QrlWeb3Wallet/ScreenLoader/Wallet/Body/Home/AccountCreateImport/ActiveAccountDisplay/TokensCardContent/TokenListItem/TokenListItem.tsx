@@ -39,6 +39,10 @@ type TokenListItemProps = {
   decimals?: number;
   image: string;
   balance: string;
+  /** Exact on-chain integer balance, carried to the send form so its guard
+   *  and Max work in base units. The 4-decimal display string is for
+   *  display only. */
+  balanceBaseUnits?: string;
   name: string;
   symbol: string;
   triggerReRender?: () => void;
@@ -51,6 +55,7 @@ const TokenListItem = observer(
     decimals,
     image,
     balance,
+    balanceBaseUnits,
     name,
     symbol,
     triggerReRender,
@@ -82,6 +87,7 @@ const TokenListItem = observer(
             tokenDecimals: decimals,
             tokenImage: image,
             tokenBalance: balance,
+            tokenBalanceBaseUnits: balanceBaseUnits,
             tokenName: name,
             tokenSymbol: symbol,
           },
@@ -130,7 +136,9 @@ const TokenListItem = observer(
           >
             <TokenListItemIcon icon={image ?? ""} symbol={symbol} />
             <span className="flex w-full min-w-0 flex-col gap-1">
-              <span className="truncate font-numeric text-xs font-bold">{balance}</span>
+              <span className="truncate font-numeric text-xs font-bold">
+                {balance}
+              </span>
               <span className="truncate text-xs">{name}</span>
             </span>
           </button>

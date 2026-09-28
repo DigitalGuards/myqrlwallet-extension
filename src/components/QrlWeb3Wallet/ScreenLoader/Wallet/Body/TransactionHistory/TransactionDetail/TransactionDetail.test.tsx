@@ -330,6 +330,117 @@ describe("TransactionDetail", () => {
     });
   });
 
+  describe("replacement ordering", () => {
+    const signedReplacement = {
+      transactionHash: "0xreplacement",
+      rawTransaction: "0xraw",
+      error: "",
+    };
+
+    const openAndConfirmSpeedUp = async () => {
+      await userEvent.click(screen.getByText("Speed Up"));
+      await waitFor(() => {
+        expect(screen.getByText("Speed Up Transaction")).toBeInTheDocument();
+      });
+      const dialogButtons = screen.getAllByText("Speed Up");
+      await userEvent.click(dialogButtons[dialogButtons.length - 1]);
+    };
+
+    it("leaves the original untouched when the broadcast is rejected", async () => {
+      const updateTransaction = vi.fn().mockResolvedValue(undefined);
+      renderComponent(
+        pendingTransaction,
+        mockedStore({
+          qrlStore: {
+            signAndSendReplacementTransaction: vi
+              .fn()
+              .mockResolvedValue(signedReplacement),
+            sendRawTransaction: vi
+              .fn()
+              .mockRejectedValue(new Error("replacement underpriced")),
+          },
+          transactionHistoryStore: { updateTransaction },
+        }),
+      );
+
+      await openAndConfirmSpeedUp();
+
+      // The original is still the only live transaction, so it must not
+      // read as "Replaced" with nothing behind it.
+      await waitFor(() => {
+        expect(updateTransaction).toHaveBeenCalled();
+      });
+      const markedReplaced = updateTransaction.mock.calls.some(
+        (call) => call[2]?.pendingStatus === "replaced",
+      );
+      expect(markedReplaced).toBe(false);
+    });
+
+    it("marks the original replaced once the node accepts the broadcast", async () => {
+      const updateTransaction = vi.fn().mockResolvedValue(undefined);
+      renderComponent(
+        pendingTransaction,
+        mockedStore({
+          qrlStore: {
+            signAndSendReplacementTransaction: vi
+              .fn()
+              .mockResolvedValue(signedReplacement),
+            sendRawTransaction: vi.fn(
+              async (_raw: string, onBroadcast?: (hash: string) => void) => {
+                onBroadcast?.("0xreplacement");
+                return undefined;
+              },
+            ),
+          },
+          transactionHistoryStore: { updateTransaction },
+        }),
+      );
+
+      await openAndConfirmSpeedUp();
+
+      await waitFor(() => {
+        expect(updateTransaction).toHaveBeenCalledWith(
+          pendingTransaction.from,
+          pendingTransaction.transactionHash,
+          expect.objectContaining({
+            pendingStatus: "replaced",
+            replacementTransactionHash: "0xreplacement",
+          }),
+        );
+      });
+    });
+
+    it("does not settle the replacement on a receipt for another hash", async () => {
+      const updateTransaction = vi.fn().mockResolvedValue(undefined);
+      renderComponent(
+        pendingTransaction,
+        mockedStore({
+          qrlStore: {
+            signAndSendReplacementTransaction: vi
+              .fn()
+              .mockResolvedValue(signedReplacement),
+            sendRawTransaction: vi.fn().mockResolvedValue({
+              status: 1n,
+              blockNumber: 9n,
+              transactionHash: "0xsomethingelse",
+            }),
+          },
+          transactionHistoryStore: { updateTransaction },
+        }),
+      );
+
+      await openAndConfirmSpeedUp();
+
+      await waitFor(() => {
+        expect(updateTransaction).toHaveBeenCalled();
+      });
+      const confirmed = updateTransaction.mock.calls.some(
+        (call) => call[2]?.pendingStatus === "confirmed",
+      );
+      expect(confirmed).toBe(false);
+    });
+  });
+
   it("should not call sendRawTransaction for Ledger account replacement", async () => {
     const StorageUtil = (await import("@/utilities/storageUtil")).default;
     vi.mocked(StorageUtil.isLedgerAccount).mockResolvedValueOnce(true);

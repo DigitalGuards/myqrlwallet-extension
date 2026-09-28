@@ -9,6 +9,7 @@ import {
   TooltipTrigger,
 } from "@/components/UI/Tooltip";
 import { NATIVE_TOKEN } from "@/constants/nativeToken";
+import { SIGNING_NONCE_BLOCK_TAG } from "@/constants/transactionNonce";
 import {
   isWalletLockedError,
   walletLockedProviderError,
@@ -438,7 +439,10 @@ const QrlSendTransactionForContent = observer(
           data,
           gas,
           value,
-          nonce: await qrlInstance?.getTransactionCount(from),
+          nonce: await qrlInstance?.getTransactionCount(
+            from,
+            SIGNING_NONCE_BLOCK_TAG,
+          ),
         };
         pendingTransactionObject = transactionObject;
         if (type === "0x2") {
@@ -604,7 +608,10 @@ const QrlSendTransactionForContent = observer(
           to,
           gas,
           value,
-          nonce: await qrlInstance?.getTransactionCount(from),
+          nonce: await qrlInstance?.getTransactionCount(
+            from,
+            SIGNING_NONCE_BLOCK_TAG,
+          ),
         };
         pendingTransactionObject = transactionObject;
 

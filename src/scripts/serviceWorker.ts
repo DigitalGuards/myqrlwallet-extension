@@ -25,6 +25,7 @@ import {
   PHISHING_ALARM_NAME,
   setupPhishingRefreshAlarm,
 } from "./phishing/phishingDetector";
+import { showTransactionNotification } from "./utils/transactionNotification";
 import { checkForLastError } from "./utils/scriptUtils";
 import { isPrematureClose, setupMultiplex } from "./utils/streamUtils";
 import {
@@ -161,34 +162,7 @@ const prepareListeners = () => {
     if (message.name !== LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION) {
       return;
     }
-    (async () => {
-      const settings = await StorageUtil.getSettings();
-      if (
-        !settings.notificationsEnabled &&
-        settings.notificationsEnabled !== undefined
-      ) {
-        return;
-      }
-      const { status, amount, tokenSymbol, txHash } = message.data ?? {};
-      const isConfirmed = status === "confirmed";
-      const title = isConfirmed
-        ? "Transaction Confirmed"
-        : "Transaction Failed";
-      const body =
-        amount !== undefined && tokenSymbol
-          ? `Your transaction of ${amount} ${tokenSymbol} ${isConfirmed ? "was confirmed" : "failed"}.`
-          : `Your transaction ${isConfirmed ? "was confirmed" : "failed"}.`;
-      try {
-        await browser.notifications.create(`tx-${txHash ?? Date.now()}`, {
-          type: "basic",
-          iconUrl: browser.runtime.getURL("icons/qrl/48.png"),
-          title,
-          message: body,
-        });
-      } catch (error) {
-        console.error("QrlWeb3Wallet: Failed to create notification:", error);
-      }
-    })();
+    void showTransactionNotification(message.data ?? {});
   });
 };
 

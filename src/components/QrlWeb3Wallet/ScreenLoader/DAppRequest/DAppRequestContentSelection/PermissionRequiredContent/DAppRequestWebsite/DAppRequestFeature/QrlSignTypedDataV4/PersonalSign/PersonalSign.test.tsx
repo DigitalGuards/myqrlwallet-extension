@@ -5,7 +5,14 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "@/components/UI/Tooltip";
+import { toChecksumAddress } from "@theqrl/wallet.js";
 import PersonalSign from "./PersonalSign";
+
+// The mocked lock store hands back an address where a mnemonic belongs, so
+// the real derivation would throw before signing is ever reached.
+vi.mock("@/functions/getHexSeedFromMnemonic", () => ({
+  getHexSeedFromMnemonic: () => `0x${"ab".repeat(51)}`,
+}));
 
 vi.mock("@/scripts/utils/restrictedMethodsMiddlewareUtils", () => ({
   revalidateAuthorizedDAppRequest: vi.fn(async () => ({
@@ -54,6 +61,52 @@ describe("PersonalSign", () => {
     const copyButton = screen.getByRole("button", { name: "Copy message" });
     expect(copyButton).toBeInTheDocument();
     expect(copyButton).toBeEnabled();
+  });
+
+  it("shows unprefixed hex verbatim, because that is what gets signed", async () => {
+    // hashMessage hex-decodes only 0x-prefixed input, so this request signs
+    // ten literal characters. Decoding it for display showed "Hello" over a
+    // signature of "48656c6c6f".
+    const unprefixedHex = "48656c6c6f";
+    const signerAddress = toChecksumAddress(`Q${"a".repeat(128)}`);
+    const sign = vi.fn(() => ({ signature: "0xsig" }));
+    let capturedPermissionCallback:
+      | ((hasApproved: boolean) => Promise<void>)
+      | null = null;
+
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          qrlInstance: {
+            accounts: {
+              seedToAccount: () => ({ address: signerAddress }),
+              sign,
+            },
+          } as never,
+        },
+        dAppRequestStore: {
+          dAppRequestData: {
+            params: [unprefixedHex, signerAddress],
+          },
+          setOnPermissionCallBack: (
+            callback: (hasApproved: boolean) => Promise<void>,
+          ) => {
+            capturedPermissionCallback = callback;
+          },
+        },
+      }),
+    );
+
+    expect(screen.getByText(unprefixedHex)).toBeInTheDocument();
+    expect(screen.queryByText("Hello")).not.toBeInTheDocument();
+
+    expect(capturedPermissionCallback).not.toBeNull();
+    await act(async () => {
+      await capturedPermissionCallback!(true);
+    });
+
+    // The displayed text and the signed payload are the same string.
+    expect(sign).toHaveBeenCalledWith(unprefixedHex, expect.any(String));
   });
 
   it("should copy the message to clipboard", async () => {

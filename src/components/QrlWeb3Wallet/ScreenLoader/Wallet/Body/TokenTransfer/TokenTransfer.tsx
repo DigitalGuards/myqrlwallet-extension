@@ -18,6 +18,7 @@ import { Input } from "@/components/UI/Input";
 import { Label } from "@/components/UI/Label";
 import { Slider } from "@/components/UI/Slider";
 import { NATIVE_TOKEN } from "@/constants/nativeToken";
+import { SIGNING_NONCE_BLOCK_TAG } from "@/constants/transactionNonce";
 import { isWalletLockedError } from "@/functions/describeExtensionError";
 import { formatFiatCompact } from "@/functions/formatFiat";
 import { parseBalanceValue } from "@/functions/parseBalanceValue";
@@ -55,17 +56,39 @@ function amountForDisplay(value: string): BigNumber {
   return new BigNumber(/^(?:\d+\.?\d*|\.\d+)$/.test(value) ? value : "0");
 }
 
-const createFormSchema = (t: TFunction) =>
+const createFormSchema = (t: TFunction, decimals: number) =>
   z
     .object({
       receiverAddress: z.string().min(1, t("validation.receiverRequired")),
       amount: z
         .string()
-        .regex(/^(?:\d+\.?\d*|\.\d+)$/, t("validation.amountPositive"))
+        // A comma decimal separator is the single most common way to fail
+        // the pattern below, and "Amount should be more than 0" told the
+        // user nothing about it. Named before the generic check.
+        .refine(
+          (value) => !value.includes(","),
+          t("validation.amountCommaSeparator"),
+        )
         .refine(
           (value) =>
             /^(?:\d+\.?\d*|\.\d+)$/.test(value) && new BigNumber(value).gt(0),
           t("validation.amountPositive"),
+        )
+        // Checked while the user types. toTokenBaseUnits throws on a
+        // value with more decimal places than the token has, which used to
+        // surface as a raw exception in the error banner after the user had
+        // already pressed Send.
+        .refine(
+          (value) => {
+            if (!/^(?:\d+\.?\d*|\.\d+)$/.test(value)) return true;
+            try {
+              toTokenBaseUnits(value, decimals);
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          t("validation.amountTooManyDecimals", { decimals }),
         ),
     })
     .refine(
@@ -78,9 +101,19 @@ const createFormSchema = (t: TFunction) =>
       },
     );
 
+type TransferTokenDetails = {
+  isZrc20Token: boolean;
+  tokenContractAddress: string;
+  tokenDecimals: number;
+  tokenImage: string;
+  tokenBalance: string;
+  tokenBalanceBaseUnits?: string;
+  tokenName: string;
+  tokenSymbol: string;
+};
+
 const TokenTransfer = observer(() => {
   const { t } = useTranslation();
-  const FormSchema = createFormSchema(t);
   const { state } = useLocation();
   const navigate = useNavigate();
   const {
@@ -110,6 +143,10 @@ const TokenTransfer = observer(() => {
   const [tokenDecimals, setTokenDecimals] = useState(0);
   const [tokenImage, setTokenImage] = useState(NATIVE_TOKEN.image);
   const [tokenBalance, setTokenBalance] = useState("");
+  // Exact on-chain integer balance for the selected ZRC-20. Every guard
+  // and the Max button work off this; `tokenBalance` above is the
+  // 4-decimal display string, for display.
+  const [tokenBalanceBaseUnits, setTokenBalanceBaseUnits] = useState("");
   const [tokenName, setTokenName] = useState(NATIVE_TOKEN.name);
   const [tokenSymbol, setTokenSymbol] = useState(NATIVE_TOKEN.symbol);
   const [estimatedGasFee, setEstimatedGasFee] = useState("");
@@ -129,6 +166,10 @@ const TokenTransfer = observer(() => {
   } | null>(null);
   const [qrnsResolving, setQrnsResolving] = useState(false);
   const [qrnsError, setQrnsError] = useState<string | null>(null);
+  const [gasEstimateError, setGasEstimateError] = useState("");
+
+  const amountDecimals = isZrc20Token ? tokenDecimals : 18;
+  const FormSchema = createFormSchema(t, amountDecimals);
 
   type SignResult = {
     transactionHash?: string;
@@ -171,7 +212,10 @@ const TokenTransfer = observer(() => {
         gasFeeOverrides?.tier === "advanced" && gasFeeOverrides.gasLimit
           ? gasFeeOverrides.gasLimit
           : NATIVE_TOKEN_UNITS_OF_GAS;
-      const nonce = await qrlInstance?.getTransactionCount(accountAddress);
+      const nonce = await qrlInstance?.getTransactionCount(
+        accountAddress,
+        SIGNING_NONCE_BLOCK_TAG,
+      );
       const chainId = await qrlInstance?.getChainId();
 
       const common = Common.custom({ chainId: Number(chainId) });
@@ -212,6 +256,12 @@ const TokenTransfer = observer(() => {
   const signZrc20TokenLocal = async (
     formData: z.infer<typeof FormSchema>,
   ): Promise<SignResult> => {
+    if (ledgerStore.isLedgerAccount(accountAddress)) {
+      // The device app has no contract-call signing path yet, and without
+      // this the flow fell through to an empty key and failed with a
+      // generic "could not be signed" message.
+      return { error: t("transfer.errorLedgerTokenUnsupported") };
+    }
     const mnemonicPhrases = await getMnemonicPhrases(accountAddress);
     return await signZrc20Token(
       accountAddress,
@@ -226,7 +276,6 @@ const TokenTransfer = observer(() => {
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     try {
-      toTokenBaseUnits(formData.amount, isZrc20Token ? tokenDecimals : 18);
       if (isQrnsName(formData.receiverAddress)) {
         if (!resolvedAddress) {
           control.setError("receiverAddress", {
@@ -391,12 +440,13 @@ const TokenTransfer = observer(() => {
           await StorageUtil.getTransactionValues();
         const tokenDetailsFromStorage = storedTransactionValues?.tokenDetails;
         const tokenDetailsFromState = state?.tokenDetails;
-        let tokenDetails = {
+        let tokenDetails: TransferTokenDetails = {
           isZrc20Token,
           tokenContractAddress,
           tokenDecimals,
           tokenImage,
           tokenBalance,
+          tokenBalanceBaseUnits,
           tokenName,
           tokenSymbol,
         };
@@ -408,6 +458,9 @@ const TokenTransfer = observer(() => {
           setTokenDecimals(tokenDetailsFromState?.tokenDecimals);
           setTokenImage(tokenDetailsFromState?.tokenImage);
           setTokenBalance(tokenDetailsFromState?.tokenBalance);
+          setTokenBalanceBaseUnits(
+            tokenDetailsFromState?.tokenBalanceBaseUnits ?? "",
+          );
           setTokenName(tokenDetailsFromState?.tokenName);
           setTokenSymbol(tokenDetailsFromState?.tokenSymbol);
           tokenDetails = { ...tokenDetailsFromState };
@@ -419,6 +472,9 @@ const TokenTransfer = observer(() => {
           setTokenDecimals(tokenDetailsFromStorage?.tokenDecimals);
           setTokenImage(tokenDetailsFromStorage?.tokenImage);
           setTokenBalance(tokenDetailsFromStorage?.tokenBalance);
+          setTokenBalanceBaseUnits(
+            tokenDetailsFromStorage?.tokenBalanceBaseUnits ?? "",
+          );
           setTokenName(tokenDetailsFromStorage?.tokenName);
           setTokenSymbol(tokenDetailsFromStorage?.tokenSymbol);
           tokenDetails = { ...tokenDetailsFromStorage };
@@ -443,6 +499,7 @@ const TokenTransfer = observer(() => {
           tokenDecimals,
           tokenImage,
           tokenBalance,
+          tokenBalanceBaseUnits,
           tokenName,
           tokenSymbol,
         },
@@ -456,37 +513,61 @@ const TokenTransfer = observer(() => {
     tokenDecimals,
     tokenImage,
     tokenBalance,
+    tokenBalanceBaseUnits,
     tokenName,
     tokenSymbol,
   ]);
 
   const watchedAmount = watch("amount");
   useEffect(() => {
-    if (
-      !watchedAmount ||
-      !amountForDisplay(watchedAmount).gt(0) ||
-      !estimatedGasFee
-    ) {
+    if (!watchedAmount || !amountForDisplay(watchedAmount).gt(0)) {
       setBalanceError("");
       return;
     }
 
-    const gasFee = new BigNumber(estimatedGasFee);
     const sendAmount = amountForDisplay(watchedAmount);
     const nativeBalance = parseBalanceValue(getAccountBalance(accountAddress));
 
     if (isZrc20Token) {
-      const tokenBal = parseBalanceValue(tokenBalance);
-      if (sendAmount.greaterThan(tokenBal)) {
+      // Compared in base units: the display balance is rounded to four
+      // decimals, so a real balance of 0.00005 of an 8-decimal token read
+      // as 0 and every send of it was refused.
+      if (tokenBalanceBaseUnits) {
+        let requested: bigint | undefined;
+        try {
+          requested = toTokenBaseUnits(watchedAmount, tokenDecimals);
+        } catch {
+          // More decimal places than the token has; the schema reports it.
+          requested = undefined;
+        }
+        if (
+          requested !== undefined &&
+          requested > BigInt(tokenBalanceBaseUnits)
+        ) {
+          setBalanceError(
+            t("transfer.errorInsufficientToken", { tokenSymbol }),
+          );
+          return;
+        }
+      } else if (sendAmount.greaterThan(parseBalanceValue(tokenBalance))) {
         setBalanceError(t("transfer.errorInsufficientToken", { tokenSymbol }));
         return;
       }
-      if (gasFee.greaterThan(nativeBalance)) {
+      // The fee is spent from the native balance, so it is only checked
+      // once an estimate exists.
+      if (
+        estimatedGasFee &&
+        new BigNumber(estimatedGasFee).greaterThan(nativeBalance)
+      ) {
         setBalanceError(t("transfer.errorInsufficientGas"));
         return;
       }
     } else {
-      const totalCost = sendAmount.plus(gasFee);
+      if (!estimatedGasFee) {
+        setBalanceError("");
+        return;
+      }
+      const totalCost = sendAmount.plus(new BigNumber(estimatedGasFee));
       if (totalCost.greaterThan(nativeBalance)) {
         setBalanceError(t("transfer.errorInsufficientBalance"));
         return;
@@ -498,6 +579,8 @@ const TokenTransfer = observer(() => {
     watchedAmount,
     estimatedGasFee,
     tokenBalance,
+    tokenBalanceBaseUnits,
+    tokenDecimals,
     isZrc20Token,
     accountAddress,
   ]);
@@ -528,7 +611,16 @@ const TokenTransfer = observer(() => {
   // Balance available for the amount itself. Tokens spend gas from the
   // native balance, so their full token balance is sendable.
   const maxSendable = useMemo(() => {
-    if (isZrc20Token) return parseBalanceValue(tokenBalance);
+    if (isZrc20Token) {
+      // Exact, so Max spends the whole balance. The rounded display
+      // value used to leave dust behind.
+      if (tokenBalanceBaseUnits) {
+        return new BigNumber(tokenBalanceBaseUnits).dividedBy(
+          new BigNumber(10).pow(tokenDecimals),
+        );
+      }
+      return parseBalanceValue(tokenBalance);
+    }
     const balance = parseBalanceValue(getAccountBalance(accountAddress));
     const reserve = new BigNumber(nativeGasReserve || "0");
     const sendable = balance.minus(reserve);
@@ -536,6 +628,8 @@ const TokenTransfer = observer(() => {
   }, [
     isZrc20Token,
     tokenBalance,
+    tokenBalanceBaseUnits,
+    tokenDecimals,
     accountAddress,
     nativeGasReserve,
     getAccountBalance,
@@ -561,6 +655,16 @@ const TokenTransfer = observer(() => {
       shouldDirty: true,
     });
   };
+
+  // Max is a percentage of a balance that moves: raising the gas tier
+  // raises the reserve, so the amount picked under the old, cheaper tier is
+  // no longer sendable. Re-applied while the slider still sits at 100%.
+  const applyPercentageRef = useRef(applyPercentage);
+  applyPercentageRef.current = applyPercentage;
+  useEffect(() => {
+    if (sliderValue !== 100 || isZrc20Token) return;
+    applyPercentageRef.current(100);
+  }, [nativeGasReserve, isZrc20Token]);
 
   // Typing an amount moves the slider to match.
   useEffect(() => {
@@ -848,6 +952,7 @@ const TokenTransfer = observer(() => {
                     disabled={isSubmitting}
                     onOverridesChange={setGasFeeOverrides}
                     onGasFeeCalculated={setEstimatedGasFee}
+                    onEstimateError={setGasEstimateError}
                   />
                 </div>
               </div>
@@ -867,6 +972,7 @@ const TokenTransfer = observer(() => {
                   isSubmitting ||
                   !isValid ||
                   !!balanceError ||
+                  !!gasEstimateError ||
                   qrnsResolving ||
                   (isQrnsName(watchedReceiver) && !resolvedAddress)
                 }

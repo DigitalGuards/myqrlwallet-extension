@@ -70,6 +70,17 @@ const { getQrlProperties } = vi.hoisted(() => ({
 
 vi.mock("./unrestrictedMethodExecutor", () => ({ getQrlProperties }));
 
+const { mockShowTransactionNotification } = vi.hoisted(() => ({
+  mockShowTransactionNotification: vi.fn().mockResolvedValue(undefined),
+}));
+
+// The watcher runs in the service worker, so it calls the notification
+// helper directly. Mocked here to observe that call.
+vi.mock("./transactionNotification", () => ({
+  showTransactionNotification: (...args: unknown[]) =>
+    mockShowTransactionNotification(...args),
+}));
+
 const { mockIsLocked } = vi.hoisted(() => ({
   mockIsLocked: vi.fn(),
 }));
@@ -191,7 +202,7 @@ describe("dAppTransactionWatcher", () => {
       await handleDAppTransactionWatchAlarm();
 
       expect(updateTransactionHistoryEntry).toHaveBeenCalledTimes(1);
-      expect(mockSendMessage).toHaveBeenCalledTimes(1);
+      expect(mockShowTransactionNotification).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -228,15 +239,17 @@ describe("dAppTransactionWatcher", () => {
         HASH,
         expect.objectContaining({ pendingStatus: "confirmed", status: true }),
       );
-      expect(mockSendMessage).toHaveBeenCalledWith({
-        name: "SEND_TX_NOTIFICATION",
-        data: {
-          status: "confirmed",
-          amount: "1.5",
-          tokenSymbol: "Quanta",
-          txHash: HASH,
-        },
+      // Called directly. Chrome does not deliver a context's own runtime
+      // messages back to it, so the service worker's own
+      // SEND_TX_NOTIFICATION listener would never have seen a message sent
+      // from here.
+      expect(mockShowTransactionNotification).toHaveBeenCalledWith({
+        status: "confirmed",
+        amount: "1.5",
+        tokenSymbol: "Quanta",
+        txHash: HASH,
       });
+      expect(mockSendMessage).not.toHaveBeenCalled();
       // Resolved watches are dropped, which is why the alarm is cleared
       // once nothing is left to watch.
       expect(mockAlarms.clear).toHaveBeenCalledWith(DAPP_TX_WATCH_ALARM_NAME);
@@ -259,11 +272,10 @@ describe("dAppTransactionWatcher", () => {
         HASH,
         expect.objectContaining({ pendingStatus: "failed", status: false }),
       );
-      expect(mockSendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ status: "failed" }),
-        }),
+      expect(mockShowTransactionNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "failed" }),
       );
+      expect(mockSendMessage).not.toHaveBeenCalled();
     });
 
     it("leaves an unmined transaction queued for the next tick", async () => {
@@ -275,7 +287,7 @@ describe("dAppTransactionWatcher", () => {
       await handleDAppTransactionWatchAlarm();
 
       expect(updateTransactionHistoryEntry).not.toHaveBeenCalled();
-      expect(mockSendMessage).not.toHaveBeenCalled();
+      expect(mockShowTransactionNotification).not.toHaveBeenCalled();
       // Not yet resolved: the alarm must stay armed for the next tick.
       expect(mockAlarms.clear).not.toHaveBeenCalledWith(
         DAPP_TX_WATCH_ALARM_NAME,
@@ -466,7 +478,7 @@ describe("dAppTransactionWatcher", () => {
         HASH,
         expect.objectContaining({ pendingStatus: "confirmed" }),
       );
-      expect(mockSendMessage).not.toHaveBeenCalled();
+      expect(mockShowTransactionNotification).not.toHaveBeenCalled();
     });
 
     it("skips the notification, but still drops the watch, when the history poller already confirmed it first", async () => {
@@ -488,7 +500,7 @@ describe("dAppTransactionWatcher", () => {
       await handleDAppTransactionWatchAlarm();
 
       expect(updateTransactionHistoryEntry).toHaveBeenCalled();
-      expect(mockSendMessage).not.toHaveBeenCalled();
+      expect(mockShowTransactionNotification).not.toHaveBeenCalled();
       expect(mockAlarms.clear).toHaveBeenCalledWith(DAPP_TX_WATCH_ALARM_NAME);
     });
   });
