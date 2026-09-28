@@ -346,6 +346,21 @@ test("provider survives a back/forward-cache round trip", async () => {
       .poll(() => fixture.callsTo("qrl_blockNumber"))
       .toBe(blockCallsBeforeRoundTrip + 1);
 
+    // A state-changing request in flight at the same moment must NOT be
+    // replayed: only the page freezes, so the service worker may well have
+    // carried it out while the answer was dropped on the closed port.
+    // qrl_sendRawTransaction checks the network before it broadcasts, so
+    // holding qrl_getBlockByNumber parks it inside the worker with nothing
+    // sent yet.
+    const networkCallsBeforeRoundTrip = fixture.callsTo("qrl_getBlockByNumber");
+    fixture.holdRpc("qrl_getBlockByNumber");
+    await beginRequest(dAppPage, "inFlightWrite", "qrl_sendRawTransaction", [
+      "0x02f8650182031825808082520894000000000000000000000000000000000000000080c0",
+    ]);
+    await expect
+      .poll(() => fixture.callsTo("qrl_getBlockByNumber"))
+      .toBe(networkCallsBeforeRoundTrip + 1);
+
     await dAppPage.goto(`${fixture.origin}/away`);
     // A restore from the back/forward cache fires no load event, so commit
     // is as far as this navigation can be awaited.
@@ -356,9 +371,21 @@ test("provider survives a back/forward-cache round trip", async () => {
       )
       .toEqual([false, true]);
 
+    // The read is replayed onto the rebuilt connection.
     await expect
       .poll(() => fixture.callsTo("qrl_blockNumber"), { timeout: 20_000 })
       .toBe(blockCallsBeforeRoundTrip + 2);
+
+    // The write is settled toward the page with a definite error, and it is
+    // never handed to the service worker again.
+    await expect(requestResult(dAppPage, "inFlightWrite")).rejects.toThrow(
+      /Connection to the wallet was reset/,
+    );
+    expect(fixture.callsTo("qrl_getBlockByNumber")).toBe(
+      networkCallsBeforeRoundTrip + 1,
+    );
+    expect(fixture.callsTo("qrl_sendRawTransaction")).toBe(0);
+
     fixture.releaseHeldRpc();
     await expect(requestResult(dAppPage, "inFlight")).resolves.toBe("0x1");
 
@@ -401,7 +428,11 @@ test("provider survives a back/forward-cache round trip", async () => {
       await dAppPage.evaluate(
         () => (window as unknown as DAppWindow).requestSettlements,
       ),
-    ).toEqual({ before: 1, inFlight: 1, after: 1 });
+    ).toEqual({ before: 1, inFlight: 1, inFlightWrite: 1, after: 1 });
+    // One user action can reach the node at most once. The orphaned first
+    // attempt may still finish inside the worker after the hold is released;
+    // what must never happen is a second broadcast from the replay.
+    expect(fixture.callsTo("qrl_sendRawTransaction")).toBeLessThanOrEqual(1);
     expect(providerLifecycleErrors).toEqual([]);
   } finally {
     await context.close();

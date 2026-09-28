@@ -43,6 +43,15 @@ let providerChannelBridge: ReturnType<typeof createProviderChannelBridge>;
 let disconnectProviderChannel: (() => void) | undefined;
 let detachExtensionPortListeners: (() => void) | undefined;
 let extensionConnectionGeneration = 0;
+let lastStreamRebuildAt = 0;
+
+/**
+ * A page cannot be restored or resumed twice in a row this quickly, so a
+ * second signal inside this window is either the pair of events one real
+ * restore fires (pageshow and resume) or a page trying to make this script
+ * churn runtime ports.
+ */
+const MIN_STREAM_REBUILD_INTERVAL_MS = 500;
 
 const setupPageStreams = () => {
   // the transport-specific streams for communication between inpage and background
@@ -100,6 +109,8 @@ const destroyExtensionStreams = () => {
  * provider is neither re-announced nor re-initialized.
  */
 const resetExtensionStreamsAfterPageRestore = () => {
+  lastStreamRebuildAt = Date.now();
+
   if (extensionStream) destroyExtensionStreams();
 
   try {
@@ -112,6 +123,24 @@ const resetExtensionStreamsAfterPageRestore = () => {
   // onDisconnect for the retired port into a no-op, so a browser that
   // does deliver it cannot open a second connection on top of this one.
   setupExtensionStreams();
+};
+
+/**
+ * Gate for the two signals a restored page gets: pageshow with persisted
+ * set (back/forward cache) and the Page Lifecycle resume event, which also
+ * covers a tab thawed after Chrome froze or discarded it under Memory
+ * Saver. Only the browser can fire either for real, so an untrusted event
+ * is a page calling dispatchEvent to make this script open runtime ports on
+ * demand, which would hold the service worker awake for a locked wallet and
+ * re-run the pending-request replay. The rate limit bounds the damage from
+ * any signal that slips past isTrusted, and it also absorbs the pair of
+ * events that one genuine restore fires.
+ */
+const onPageRestoreSignal = (event: Event) => {
+  if (!event.isTrusted) return;
+  if ("persisted" in event && !(event as PageTransitionEvent).persisted) return;
+  if (Date.now() - lastStreamRebuildAt < MIN_STREAM_REBUILD_INTERVAL_MS) return;
+  resetExtensionStreamsAfterPageRestore();
 };
 
 /**
@@ -269,9 +298,8 @@ const initializeContentScript = () => {
     setupPageStreams();
     setupExtensionStreams();
     prepareListeners();
-    window.addEventListener("pageshow", (event) => {
-      if (event.persisted) resetExtensionStreamsAfterPageRestore();
-    });
+    window.addEventListener("pageshow", onPageRestoreSignal);
+    document.addEventListener("resume", onPageRestoreSignal);
     startContentScriptKeepAlive();
   } catch (error) {
     console.warn(

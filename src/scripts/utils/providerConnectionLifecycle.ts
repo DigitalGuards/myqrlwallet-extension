@@ -1,4 +1,5 @@
 import { Transform, type Duplex } from "readable-stream";
+import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
 
 export const initializeContentScriptProviderConnection = async <TPort>(
   port: TPort,
@@ -38,10 +39,91 @@ type JsonRpcEnvelope = {
 
 type PendingRequest = {
   envelope: unknown;
+  id: string | number;
+  method: string;
+  createdAt: number;
   forwardedGeneration?: number;
 };
 
-const requestKey = (envelope: unknown) => {
+/**
+ * Unrestricted methods that change state somewhere, so re-running one
+ * performs the action a second time.
+ *
+ * - qrl_sendRawTransaction broadcasts a transaction.
+ * - wallet_revokePermissions rewrites the stored dApp grant.
+ * - qrl_subscribe, qrl_unsubscribe and the qrl_new*Filter family allocate
+ *   or release node-side handles, so a replay leaks or double-frees one.
+ * - qrl_uninstallFilter releases a handle the page may since have reused.
+ * - qrl_getFilterChanges drains its filter's queue, so a replay returns
+ *   events the first call already consumed.
+ */
+const STATE_CHANGING_UNRESTRICTED_METHODS: ReadonlySet<string> = new Set([
+  UNRESTRICTED_METHODS.QRL_SEND_RAW_TRANSACTION,
+  UNRESTRICTED_METHODS.WALLET_REVOKE_PERMISSIONS,
+  UNRESTRICTED_METHODS.QRL_SUBSCRIBE,
+  UNRESTRICTED_METHODS.QRL_UNSUBSCRIBE,
+  UNRESTRICTED_METHODS.QRL_NEW_FILTER,
+  UNRESTRICTED_METHODS.QRL_NEW_BLOCK_FILTER,
+  UNRESTRICTED_METHODS.QRL_NEW_PENDING_TRANSACTION_FILTER,
+  UNRESTRICTED_METHODS.QRL_UNINSTALL_FILTER,
+  UNRESTRICTED_METHODS.QRL_GET_FILTER_CHANGES,
+]);
+
+/**
+ * Methods a request may be replayed with after it already reached the
+ * service worker.
+ *
+ * Only the page freezes when Chrome caches it, and a service-worker restart
+ * likewise leaves the browser running: a request that was already forwarded
+ * may have completed while its answer was dropped on the closed port. For a
+ * read that is harmless, because the second call returns the same kind of
+ * answer. For anything else the replay is a second distinct action: a
+ * second approval prompt for work that already landed, or for the
+ * unrestricted qrl_sendRawTransaction a silent second broadcast.
+ *
+ * The set is therefore the unrestricted method list minus the state
+ * changing entries above. Every restricted method is absent by
+ * construction, since each one needs the user's approval and none of them
+ * can be re-run on the user's behalf. A new entry in UNRESTRICTED_METHODS
+ * lands here automatically, so providerConnectionLifecycle.test.ts pins the
+ * membership and fails until the new method has been classified.
+ */
+export const REPLAY_SAFE_METHODS: ReadonlySet<string> = new Set(
+  Object.values(UNRESTRICTED_METHODS).filter(
+    (method) => !STATE_CHANGING_UNRESTRICTED_METHODS.has(method),
+  ),
+);
+
+/**
+ * A page with this many unanswered provider requests is past any plausible
+ * use, so the oldest are settled to keep the pending map bounded.
+ */
+export const MAX_PENDING_REQUESTS = 100;
+
+/**
+ * How long a request orphaned by a connection that never came back may sit
+ * in the pending map. A request being served by the current connection is
+ * exempt however old it is, because a transaction approval can legitimately
+ * stay on screen for a long time.
+ */
+export const PENDING_REQUEST_TTL_MS = 5 * 60_000;
+
+/**
+ * JSON-RPC internal error. EIP-1193 reserves 4900 "Disconnected" for a
+ * provider that has lost every chain; here the connection has just been
+ * rebuilt and the next request will work, so only this one request is
+ * reported as lost and the dApp is told to try again.
+ */
+const connectionResetResponse = (id: string | number) => ({
+  jsonrpc: "2.0",
+  id,
+  error: {
+    code: -32603,
+    message: "Connection to the wallet was reset; please retry",
+  },
+});
+
+const parseRequest = (envelope: unknown) => {
   if (!envelope || typeof envelope !== "object" || Array.isArray(envelope))
     return undefined;
   const { id, method } = envelope as JsonRpcEnvelope;
@@ -50,7 +132,7 @@ const requestKey = (envelope: unknown) => {
     typeof method !== "string"
   )
     return undefined;
-  return `${typeof id}:${String(id)}`;
+  return { key: `${typeof id}:${String(id)}`, id, method };
 };
 
 const responseKey = (envelope: unknown) => {
@@ -70,16 +152,47 @@ export const createProviderChannelBridge = (pageChannel: Duplex) => {
   let connectionReady = false;
   let detachExtensionChannel: (() => void) | undefined;
 
+  const settleAsReset = (pendingRequest: PendingRequest) => {
+    pageChannel.write(connectionResetResponse(pendingRequest.id));
+  };
+
+  const expireStalePending = (now: number) => {
+    for (const [key, pendingRequest] of pendingRequests) {
+      if (pendingRequest.forwardedGeneration === extensionGeneration) continue;
+      if (now - pendingRequest.createdAt < PENDING_REQUEST_TTL_MS) continue;
+      pendingRequests.delete(key);
+      settleAsReset(pendingRequest);
+    }
+  };
+
+  const enforcePendingCap = () => {
+    while (pendingRequests.size > MAX_PENDING_REQUESTS) {
+      const oldest = pendingRequests.entries().next().value;
+      if (!oldest) return;
+      const [key, pendingRequest] = oldest;
+      pendingRequests.delete(key);
+      settleAsReset(pendingRequest);
+    }
+  };
+
   const onPageData = (envelope: unknown) => {
-    const key = requestKey(envelope);
+    const request = parseRequest(envelope);
     let pendingRequest: PendingRequest | undefined;
-    if (key) {
-      pendingRequest = { envelope };
-      pendingRequests.set(key, pendingRequest);
+    if (request) {
+      pendingRequest = {
+        envelope,
+        id: request.id,
+        method: request.method,
+        createdAt: Date.now(),
+      };
+      pendingRequests.set(request.key, pendingRequest);
     }
 
     if (pendingRequest && connectionReady)
       pendingRequest.forwardedGeneration = extensionGeneration;
+
+    expireStalePending(Date.now());
+    enforcePendingCap();
   };
 
   pageChannel.on("data", onPageData);
@@ -136,9 +249,20 @@ export const createProviderChannelBridge = (pageChannel: Duplex) => {
       connectionReady = true;
       pageChannel.pipe(connectedChannel, { end: false });
       let replayed = 0;
-      for (const pendingRequest of pendingRequests.values()) {
+      for (const [key, pendingRequest] of [...pendingRequests]) {
         if (pendingRequest.forwardedGeneration === extensionGeneration)
           continue;
+        if (
+          pendingRequest.forwardedGeneration !== undefined &&
+          !REPLAY_SAFE_METHODS.has(pendingRequest.method)
+        ) {
+          // The service worker already had this one and may have carried it
+          // out while its answer was dropped on the closed port, so the page
+          // gets a definite error and nothing runs a second time.
+          pendingRequests.delete(key);
+          settleAsReset(pendingRequest);
+          continue;
+        }
         pendingRequest.forwardedGeneration = extensionGeneration;
         connectedChannel.write(pendingRequest.envelope);
         replayed += 1;

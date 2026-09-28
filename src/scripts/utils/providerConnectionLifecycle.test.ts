@@ -1,10 +1,14 @@
 import { WindowPostMessageStream } from "@theqrl/qrl-wallet-provider/post-message-stream";
 import { Duplex } from "readable-stream";
 import { describe, expect, it, vi } from "vitest";
+import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import {
   createProviderChannelBridge,
   createProviderStreamFailureGuard,
   initializeContentScriptProviderConnection,
+  MAX_PENDING_REQUESTS,
+  PENDING_REQUEST_TTL_MS,
+  REPLAY_SAFE_METHODS,
 } from "./providerConnectionLifecycle";
 
 class ProbeChannel extends Duplex {
@@ -236,7 +240,7 @@ describe("createProviderChannelBridge", () => {
     page.destroy();
   });
 
-  it("replays each pending ID once on the replacement generation", async () => {
+  it("replays each pending read ID once on the replacement generation", async () => {
     const page = new ProbeChannel();
     const firstExtension = new ProbeChannel();
     const bridge = createProviderChannelBridge(page);
@@ -246,7 +250,7 @@ describe("createProviderChannelBridge", () => {
     const beforeDisconnect = {
       jsonrpc: "2.0",
       id: 1,
-      method: "beforeDisconnect",
+      method: "qrl_blockNumber",
     };
     page.emitInbound(beforeDisconnect);
     await vi.waitFor(() =>
@@ -258,7 +262,7 @@ describe("createProviderChannelBridge", () => {
     const duringDisconnect = {
       jsonrpc: "2.0",
       id: 2,
-      method: "duringDisconnect",
+      method: "qrl_chainId",
     };
     page.emitInbound(duringDisconnect);
     const secondExtension = new ProbeChannel();
@@ -266,7 +270,7 @@ describe("createProviderChannelBridge", () => {
     const beforeReady = {
       jsonrpc: "2.0",
       id: 3,
-      method: "beforeReady",
+      method: "qrl_getBalance",
     };
     page.emitInbound(beforeReady);
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -296,6 +300,210 @@ describe("createProviderChannelBridge", () => {
     secondExtension.destroy();
     bridge.destroy();
     page.destroy();
+  });
+
+  it("answers a forwarded state-changing request with the reset error", async () => {
+    const page = new ProbeChannel();
+    const firstExtension = new ProbeChannel();
+    const bridge = createProviderChannelBridge(page);
+    const disconnectFirst = bridge.attachExtensionChannel(firstExtension);
+    expect(bridge.markConnectionReady()).toBe(0);
+
+    const broadcast = {
+      jsonrpc: "2.0",
+      id: "tx",
+      method: "qrl_sendRawTransaction",
+      params: ["0xdeadbeef"],
+    };
+    const approval = {
+      jsonrpc: "2.0",
+      id: 7,
+      method: "qrl_sendTransaction",
+      params: [{ value: "0x1" }],
+    };
+    const read = { jsonrpc: "2.0", id: 8, method: "qrl_getTransactionCount" };
+    page.emitInbound(broadcast);
+    page.emitInbound(approval);
+    page.emitInbound(read);
+    await vi.waitFor(() =>
+      expect(firstExtension.writes).toEqual([broadcast, approval, read]),
+    );
+
+    disconnectFirst();
+    firstExtension.destroy();
+    const secondExtension = new ProbeChannel();
+    const disconnectSecond = bridge.attachExtensionChannel(secondExtension);
+
+    // Only the read is safe to run again; the other two already reached the
+    // service worker and may have completed while the port was down.
+    expect(bridge.markConnectionReady()).toBe(1);
+    expect(secondExtension.writes).toEqual([read]);
+    expect(page.writes).toEqual([
+      {
+        jsonrpc: "2.0",
+        id: "tx",
+        error: {
+          code: -32603,
+          message: "Connection to the wallet was reset; please retry",
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        id: 7,
+        error: {
+          code: -32603,
+          message: "Connection to the wallet was reset; please retry",
+        },
+      },
+    ]);
+
+    // A late answer for a locally settled request must never reach the page
+    // a second time.
+    secondExtension.emitInbound({ jsonrpc: "2.0", id: "tx", result: "0xhash" });
+    secondExtension.emitInbound({ jsonrpc: "2.0", id: 8, result: "0x2" });
+    await vi.waitFor(() => expect(page.writes).toHaveLength(3));
+    expect(page.writes[2]).toEqual({ jsonrpc: "2.0", id: 8, result: "0x2" });
+
+    disconnectSecond();
+    secondExtension.destroy();
+    bridge.destroy();
+    page.destroy();
+  });
+
+  it("replays a request the service worker never received whatever its method", async () => {
+    const page = new ProbeChannel();
+    const extension = new ProbeChannel();
+    const bridge = createProviderChannelBridge(page);
+    const disconnect = bridge.attachExtensionChannel(extension);
+    const approval = {
+      jsonrpc: "2.0",
+      id: "never-sent",
+      method: "qrl_sendTransaction",
+    };
+
+    page.emitInbound(approval);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(extension.writes).toEqual([]);
+
+    expect(bridge.markConnectionReady()).toBe(1);
+    expect(extension.writes).toEqual([approval]);
+    expect(page.writes).toEqual([]);
+
+    disconnect();
+    extension.destroy();
+    bridge.destroy();
+    page.destroy();
+  });
+
+  it("pins the replay-safe method set so a new unrestricted method is classified", () => {
+    expect([...REPLAY_SAFE_METHODS].sort()).toEqual(
+      [
+        "net_version",
+        "qrlWallet_getProviderState",
+        "qrl_accounts",
+        "qrl_blockNumber",
+        "qrl_call",
+        "qrl_chainId",
+        "qrl_estimateGas",
+        "qrl_feeHistory",
+        "qrl_gasPrice",
+        "qrl_getBalance",
+        "qrl_getBlockByHash",
+        "qrl_getBlockByNumber",
+        "qrl_getBlockTransactionCountByHash",
+        "qrl_getBlockTransactionCountByNumber",
+        "qrl_getCode",
+        "qrl_getFilterLogs",
+        "qrl_getLogs",
+        "qrl_getProof",
+        "qrl_getStorageAt",
+        "qrl_getTransactionByBlockHashAndIndex",
+        "qrl_getTransactionByBlockNumberAndIndex",
+        "qrl_getTransactionByHash",
+        "qrl_getTransactionCount",
+        "qrl_getTransactionReceipt",
+        "qrl_syncing",
+        "qrl_walletCapabilities",
+        "wallet_getPermissions",
+        "web3_clientVersion",
+      ].sort(),
+    );
+    for (const method of Object.values(RESTRICTED_METHODS)) {
+      expect(REPLAY_SAFE_METHODS.has(method)).toBe(false);
+    }
+  });
+
+  it("settles the oldest pending requests once the cap is passed", async () => {
+    const page = new ProbeChannel();
+    const extension = new ProbeChannel();
+    const bridge = createProviderChannelBridge(page);
+    const disconnect = bridge.attachExtensionChannel(extension);
+
+    for (let index = 0; index <= MAX_PENDING_REQUESTS; index += 1) {
+      page.emitInbound({
+        jsonrpc: "2.0",
+        id: index,
+        method: "qrl_blockNumber",
+      });
+    }
+    await vi.waitFor(() => expect(page.writes).toHaveLength(1));
+    expect(page.writes[0]).toEqual({
+      jsonrpc: "2.0",
+      id: 0,
+      error: {
+        code: -32603,
+        message: "Connection to the wallet was reset; please retry",
+      },
+    });
+    // The capped request is gone, so only the survivors are replayed.
+    expect(bridge.markConnectionReady()).toBe(MAX_PENDING_REQUESTS);
+
+    disconnect();
+    extension.destroy();
+    bridge.destroy();
+    page.destroy();
+  });
+
+  it("settles a request orphaned for longer than the pending TTL", async () => {
+    const page = new ProbeChannel();
+    const extension = new ProbeChannel();
+    const bridge = createProviderChannelBridge(page);
+    const disconnect = bridge.attachExtensionChannel(extension);
+    const orphan = {
+      jsonrpc: "2.0",
+      id: "orphan",
+      method: "qrl_blockNumber",
+    };
+    page.emitInbound(orphan);
+    // The bridge records a request on the stream's data event, so the clock
+    // may only move once that has actually happened.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(page.writes).toEqual([]);
+
+    const clock = vi.spyOn(Date, "now");
+    try {
+      clock.mockReturnValue(Date.now() + PENDING_REQUEST_TTL_MS + 1);
+      page.emitInbound({ jsonrpc: "2.0", id: "fresh", method: "qrl_chainId" });
+      await vi.waitFor(() => expect(page.writes).toHaveLength(1));
+      expect(page.writes[0]).toEqual({
+        jsonrpc: "2.0",
+        id: "orphan",
+        error: {
+          code: -32603,
+          message: "Connection to the wallet was reset; please retry",
+        },
+      });
+      expect(bridge.markConnectionReady()).toBe(1);
+      expect(extension.writes).toEqual([
+        { jsonrpc: "2.0", id: "fresh", method: "qrl_chainId" },
+      ]);
+    } finally {
+      clock.mockRestore();
+      disconnect();
+      extension.destroy();
+      bridge.destroy();
+      page.destroy();
+    }
   });
 
   it("does not replay an already forwarded request on a fresh connection", async () => {
