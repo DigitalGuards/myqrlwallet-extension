@@ -48,8 +48,7 @@ const AccountCreateImport = observer(() => {
   const [tokenCount, setTokenCount] = useState(0);
   const [nftCollectionsCount, setNftCollectionsCount] = useState(0);
   const [discoveredTokenCount, setDiscoveredTokenCount] = useState(0);
-  const [discoveredCollectionCount, setDiscoveredCollectionCount] =
-    useState(0);
+  const [discoveredCollectionCount, setDiscoveredCollectionCount] = useState(0);
 
   // Explorer-side asset discovery: count what the explorer sees on this
   // address but the user has not imported yet, and surface a hint above
@@ -73,9 +72,7 @@ const AccountCreateImport = observer(() => {
         storedTokens.map((token) => token.address.toLowerCase()),
       );
       const existingCollections = new Set(
-        storedCollections.map((collection) =>
-          collection.address.toLowerCase(),
-        ),
+        storedCollections.map((collection) => collection.address.toLowerCase()),
       );
       setDiscoveredTokenCount(
         tokens.filter(
@@ -94,6 +91,11 @@ const AccountCreateImport = observer(() => {
     };
   }, [accountAddress, blockchain]);
 
+  // Send in the Active account card is the one primary action on this
+  // screen. Every import / create entry point below it uses the quiet
+  // outline variant, matching "Import an existing account" and
+  // "Connect Ledger", so three solid blocks of brand blue do not compete
+  // with it in the narrow side panel.
   return (
     <div className="page-enter flex flex-col gap-8">
       {hasActiveAccount && (
@@ -101,7 +103,7 @@ const AccountCreateImport = observer(() => {
           <Card className="surface-ember relative w-full overflow-hidden [background:linear-gradient(180deg,hsl(var(--primary)/0.06),transparent_46%),hsl(var(--card)/0.45)]">
             <div className="relative z-10">
               <CardHeader>
-                <CardTitle>{t('home.activeAccount')}</CardTitle>
+                <CardTitle>{t("home.activeAccount")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <ActiveAccountDisplay />
@@ -114,19 +116,19 @@ const AccountCreateImport = observer(() => {
                 >
                   <Button className="w-full" type="button">
                     <Send className="mr-2 h-4 w-4" />
-                    {t('home.send')}
+                    {t("home.send")}
                   </Button>
                 </Link>
                 <Link className="flex-1" to={ROUTES.TRANSACTION_HISTORY}>
                   <Button className="w-full" type="button" variant="outline">
                     <History className="mr-2 h-4 w-4" />
-                    {t('home.history')}
+                    {t("home.history")}
                   </Button>
                 </Link>
                 <Link className="flex-1" to={ROUTES.RECEIVE}>
                   <Button className="w-full" type="button" variant="secondary">
                     <QrCode className="mr-2 h-4 w-4" />
-                    {t('home.receive')}
+                    {t("home.receive")}
                   </Button>
                 </Link>
               </CardFooter>
@@ -134,7 +136,7 @@ const AccountCreateImport = observer(() => {
           </Card>
           <Card className="w-full">
             <CardHeader>
-              <CardTitle>{t('home.tokens')}</CardTitle>
+              <CardTitle>{t("home.tokens")}</CardTitle>
             </CardHeader>
             {/* hidden (not unmounted) when empty so the list still fetches;
                 an empty CardContent otherwise doubles the header gap.
@@ -154,7 +156,7 @@ const AccountCreateImport = observer(() => {
                 </div>
               )}
               <Link className="w-full" to={ROUTES.IMPORT_TOKEN}>
-                <Button className="w-full" type="button">
+                <Button className="w-full" type="button" variant="outline">
                   {discoveredTokenCount > 0 ? (
                     <>
                       <Plus className="mr-2 h-4 w-4" />
@@ -172,7 +174,7 @@ const AccountCreateImport = observer(() => {
                 <Link className="w-full" to={ROUTES.ALL_ZRC_20_TOKENS}>
                   <Button className="w-full" type="button" variant="outline">
                     <Logs className="mr-2 h-4 w-4" />
-                    {t('home.viewAllTokens')}
+                    {t("home.viewAllTokens")}
                   </Button>
                 </Link>
               )}
@@ -180,7 +182,7 @@ const AccountCreateImport = observer(() => {
           </Card>
           <Card className="w-full">
             <CardHeader>
-              <CardTitle>{t('home.nftCollections')}</CardTitle>
+              <CardTitle>{t("home.nftCollections")}</CardTitle>
             </CardHeader>
             <CardContent className={cn(nftCollectionsCount === 0 && "hidden")}>
               <NFTCollections onCountChange={setNftCollectionsCount} />
@@ -195,7 +197,7 @@ const AccountCreateImport = observer(() => {
                 </div>
               )}
               <Link className="w-full" to={ROUTES.IMPORT_NFT_COLLECTION}>
-                <Button className="w-full" type="button">
+                <Button className="w-full" type="button" variant="outline">
                   {discoveredCollectionCount > 0 ? (
                     <>
                       <Plus className="mr-2 h-4 w-4" />
@@ -223,28 +225,26 @@ const AccountCreateImport = observer(() => {
       )}
       <Card className="w-full">
         <CardHeader>
-          <CardTitle>{t('home.addAccounts')}</CardTitle>
-          <CardDescription>
-            {t('home.addAccountsDescription')}
-          </CardDescription>
+          <CardTitle>{t("home.addAccounts")}</CardTitle>
+          <CardDescription>{t("home.addAccountsDescription")}</CardDescription>
         </CardHeader>
         <CardFooter className="flex-col gap-4">
           <Link className="w-full" to={ROUTES.CREATE_ACCOUNT}>
-            <Button className="w-full" type="button">
+            <Button className="w-full" type="button" variant="outline">
               <Plus className="mr-2 h-4 w-4" />
-              {t('home.createAccount')}
+              {t("home.createAccount")}
             </Button>
           </Link>
           <Link className="w-full" to={ROUTES.IMPORT_ACCOUNT}>
             <Button className="w-full" type="button" variant="outline">
               <Download className="mr-2 h-4 w-4" />
-              {t('home.importAccount')}
+              {t("home.importAccount")}
             </Button>
           </Link>
           <Link className="w-full" to={ROUTES.IMPORT_LEDGER}>
             <Button className="w-full" type="button" variant="outline">
               <Usb className="mr-2 h-4 w-4" />
-              {t('home.connectLedger')}
+              {t("home.connectLedger")}
             </Button>
           </Link>
         </CardFooter>
