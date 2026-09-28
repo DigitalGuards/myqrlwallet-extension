@@ -19,6 +19,15 @@ const mockedBrowser = {
       removeListener: vi.fn(),
     },
   },
+  alarms: {
+    create: vi.fn().mockResolvedValue(undefined),
+    clear: vi.fn().mockResolvedValue(true),
+    get: vi.fn().mockResolvedValue(null),
+    onAlarm: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
+  },
   tabs: {
     query: vi
       .fn()

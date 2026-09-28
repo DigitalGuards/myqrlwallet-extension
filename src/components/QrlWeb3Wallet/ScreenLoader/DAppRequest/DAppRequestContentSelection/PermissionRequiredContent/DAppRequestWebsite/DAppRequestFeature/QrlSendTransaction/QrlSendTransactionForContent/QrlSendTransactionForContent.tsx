@@ -19,9 +19,22 @@ import { useTranslation } from "react-i18next";
 import { useEffect } from "react";
 import { SEND_TRANSACTION_TYPES } from "../QrlSendTransaction";
 import { utils, qrl } from "@theqrl/web3";
+import {
+  ContractExecutionError,
+  Eip838ExecutionError,
+  TransactionRevertInstructionError,
+} from "@theqrl/web3-errors";
+import type { TransactionCall } from "@theqrl/web3-types";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
+import { withTimeout } from "@/functions/withTimeout";
 
 const { Common } = qrl.accounts;
+
+// Bounds how long the popup waits on the node for both the pre-flight
+// simulation and the broadcast itself. requestManager.send() has no timeout
+// of its own, and an unbounded wait here can outlast the middleware's 90 s
+// safety timeout just as badly as waiting for a receipt used to.
+const BROADCAST_TIMEOUT_MS = 30 * 1000;
 
 type TransactionObject = {
   chainId: string;
@@ -106,16 +119,70 @@ const QrlSendTransactionForContent = observer(
       }
     };
 
+    // Mirrors @theqrl/web3-qrl's default checkRevertBeforeSending behaviour
+    // (rpc_method_wrappers.js sendSignedTransaction): qrl_call the
+    // about-to-be-signed transaction first, and on revert fail without ever
+    // broadcasting. getRevertReason/getTransactionError (web3-qrl/utils) are
+    // internal helpers the package does not re-export, so their shaping is
+    // reproduced here from the exported error classes. qrlInstance.call()
+    // runs the identical qrl_call and throws the identical
+    // ContractExecutionError on revert, so the dApp still gets an error of
+    // the same class it always did, and the reverting transaction never
+    // reaches the node's mempool.
+    const simulateTransaction = async (transaction: TransactionObject) => {
+      try {
+        // `to` is optional here (a contract deployment has none), but
+        // TransactionCall's type declares it required; qrl_call accepts an
+        // absent `to` for a deployment simulation the same way sending one
+        // does. TransactionCall's type is simply narrower than the request
+        // it needs to accept here.
+        await withTimeout(
+          qrlInstance!.call(transaction as unknown as TransactionCall),
+          BROADCAST_TIMEOUT_MS,
+          "Simulating the transaction",
+        );
+      } catch (error) {
+        if (
+          error instanceof ContractExecutionError &&
+          error.innerError instanceof Eip838ExecutionError
+        ) {
+          const revertData =
+            typeof error.innerError.data === "string"
+              ? error.innerError.data
+              : undefined;
+          throw new TransactionRevertInstructionError(
+            error.innerError.message,
+            revertData?.slice(0, 10),
+            undefined,
+            revertData?.substring(10),
+          );
+        }
+        throw error;
+      }
+    };
+
     // Answers the dApp as soon as the node accepts the transaction, which is
     // all qrl_sendTransaction owes it. Waiting for the receipt held the dApp
     // for a whole block, and at 60 s slots that ran past the middleware's
-    // 90 s safety timeout. The history poller confirms the transaction.
-    const broadcastTransaction = async (rawTransaction: string) => {
+    // 90 s safety timeout. The service worker's dApp-transaction watcher
+    // (registered by restrictedMethodsMiddleware once it answers) confirms
+    // the transaction and fires the notification, so this surface (and any
+    // notification/popup window it lives in) can close the moment it has
+    // answered.
+    const broadcastTransaction = async (
+      rawTransaction: string,
+      transaction: TransactionObject,
+    ) => {
       await ensureSigningContext();
-      const transactionHash: unknown = await qrlInstance?.requestManager.send({
-        method: "qrl_sendRawTransaction",
-        params: [rawTransaction],
-      });
+      await simulateTransaction(transaction);
+      const transactionHash: unknown = await withTimeout(
+        qrlInstance!.requestManager.send({
+          method: "qrl_sendRawTransaction",
+          params: [rawTransaction],
+        }),
+        BROADCAST_TIMEOUT_MS,
+        "Broadcasting the transaction",
+      );
       if (typeof transactionHash !== "string" || !transactionHash) {
         throw new Error("The node did not return a transaction hash");
       }
@@ -129,6 +196,10 @@ const QrlSendTransactionForContent = observer(
       data,
       transactionHash,
       isQrlTransfer,
+      nonce,
+      maxFeePerGas,
+      maxPriorityFeePerGas,
+      gasLimit,
     }: {
       from?: string;
       to?: string;
@@ -136,6 +207,13 @@ const QrlSendTransactionForContent = observer(
       data?: string;
       transactionHash: string;
       isQrlTransfer: boolean;
+      // Carried through so speed-up/cancel in TransactionDetail has a nonce
+      // and fee baseline for this dApp-originated entry, the same as a
+      // wallet-initiated send (TokenTransfer.tsx).
+      nonce?: bigint;
+      maxFeePerGas?: string;
+      maxPriorityFeePerGas?: bigint;
+      gasLimit?: string;
     }) => {
       if (!from) return;
       try {
@@ -170,15 +248,19 @@ const QrlSendTransactionForContent = observer(
           chainId: blockchain?.chainId ?? "",
           pendingStatus: "pending",
           data: data ?? undefined,
+          nonce: nonce !== undefined ? Number(nonce) : undefined,
+          maxFeePerGas:
+            maxFeePerGas !== undefined
+              ? BigInt(maxFeePerGas).toString()
+              : undefined,
+          maxPriorityFeePerGas:
+            maxPriorityFeePerGas !== undefined
+              ? maxPriorityFeePerGas.toString()
+              : undefined,
+          gasLimit:
+            gasLimit !== undefined ? Number(BigInt(gasLimit)) : undefined,
         };
         await transactionHistoryStore.addTransaction(from, entry);
-        // Reloading with the instance starts the pending-receipt poller.
-        await transactionHistoryStore.loadHistory(
-          from,
-          qrlInstance as Parameters<
-            typeof transactionHistoryStore.loadHistory
-          >[1],
-        );
       } catch (error) {
         console.error(
           "QrlWeb3Wallet: Failed to record dApp transaction in history",
@@ -271,8 +353,10 @@ const QrlSendTransactionForContent = observer(
         }
 
         if (rawTransactionToSend) {
-          const transactionHash =
-            await broadcastTransaction(rawTransactionToSend);
+          const transactionHash = await broadcastTransaction(
+            rawTransactionToSend,
+            transactionObject,
+          );
           addToResponseData({ transactionHash });
           await recordPendingTransaction({
             from,
@@ -281,6 +365,16 @@ const QrlSendTransactionForContent = observer(
             data,
             transactionHash,
             isQrlTransfer: false,
+            nonce: transactionObject.nonce,
+            maxFeePerGas:
+              transactionObject.type === "0x2"
+                ? transactionObject.maxFeePerGas
+                : undefined,
+            maxPriorityFeePerGas:
+              transactionObject.type === "0x2"
+                ? transactionObject.maxPriorityFeePerGas
+                : undefined,
+            gasLimit: transactionObject.gas,
           });
         } else {
           throw new Error("Transaction could not be signed");
@@ -388,8 +482,10 @@ const QrlSendTransactionForContent = observer(
         }
 
         if (rawTransactionToSend) {
-          const transactionHash =
-            await broadcastTransaction(rawTransactionToSend);
+          const transactionHash = await broadcastTransaction(
+            rawTransactionToSend,
+            transactionObject,
+          );
           addToResponseData({ transactionHash });
           await recordPendingTransaction({
             from,
@@ -397,6 +493,16 @@ const QrlSendTransactionForContent = observer(
             value,
             transactionHash,
             isQrlTransfer: true,
+            nonce: transactionObject.nonce,
+            maxFeePerGas:
+              transactionObject.type === "0x2"
+                ? transactionObject.maxFeePerGas
+                : undefined,
+            maxPriorityFeePerGas:
+              transactionObject.type === "0x2"
+                ? transactionObject.maxPriorityFeePerGas
+                : undefined,
+            gasLimit: transactionObject.gas,
           });
         } else {
           throw new Error("QRL Transfer transaction could not be signed");

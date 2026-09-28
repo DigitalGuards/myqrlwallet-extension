@@ -24,6 +24,7 @@ import {
   checkWalletRequestPermissionParams,
   checkWalletSwitchQrlChainParams,
   checkWalletWatchAssetParams,
+  registerDAppTransactionWatchIfApproved,
   updateAccountsAndBlockchainsForUrlOrigin,
 } from "../utils/restrictedMethodsMiddlewareUtils";
 import { DAppRequestType, DAppResponseType } from "./middlewareTypes";
@@ -460,6 +461,11 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
                 restrictedMethodResult?.response?.transactionHash;
               if (transactionHash) {
                 res.result = transactionHash;
+                await registerDAppTransactionWatchIfApproved(
+                  req,
+                  transactionHash,
+                  authorizedChainId,
+                );
               } else {
                 res.error = providerErrors.unsupportedMethod({
                   message: restrictedMethodResult?.response?.error?.message,

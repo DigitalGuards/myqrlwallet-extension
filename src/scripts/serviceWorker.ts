@@ -16,6 +16,10 @@ import { blockUnSupportedMethodsMiddleware } from "./middlewares/blockUnSupporte
 import { restrictedMethodsMiddleware } from "./middlewares/restrictedMethodsMiddleware";
 import { unrestrictedMethodsMiddleware } from "./middlewares/unrestrictedMethodsMiddleware";
 import {
+  DAPP_TX_WATCH_ALARM_NAME,
+  handleDAppTransactionWatchAlarm,
+} from "./utils/dAppTransactionWatcher";
+import {
   handlePhishingRefreshAlarm,
   initializePhishingDetector,
   PHISHING_ALARM_NAME,
@@ -134,6 +138,8 @@ const prepareListeners = () => {
       LockManager.handleKeepAliveAlarm();
     } else if (alarm.name === PHISHING_ALARM_NAME) {
       handlePhishingRefreshAlarm();
+    } else if (alarm.name === DAPP_TX_WATCH_ALARM_NAME) {
+      handleDAppTransactionWatchAlarm();
     }
   });
 };
