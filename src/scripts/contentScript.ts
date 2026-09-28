@@ -41,7 +41,21 @@ let extensionMux: ObjectMultiplex;
 let extensionChannel: Substream;
 let providerChannelBridge: ReturnType<typeof createProviderChannelBridge>;
 let disconnectProviderChannel: (() => void) | undefined;
+let detachExtensionPortListeners: (() => void) | undefined;
 let extensionConnectionGeneration = 0;
+let lastStreamRebuildAt = 0;
+let restorePending = false;
+
+/**
+ * Backstop for a trusted restore signal that arrives with no cache entry
+ * recorded for it, which is the only case the restorePending flag cannot
+ * pair up. It must never be the primary guard: Back, Forward, Back on one
+ * tab restores the same page twice about 20 ms apart, and a human
+ * double-click on Back is 100 to 300 ms, so a wall-clock window wide enough
+ * to be useful would drop a genuine restore and leave the page on a port
+ * the second cache entry already closed.
+ */
+const MIN_STREAM_REBUILD_INTERVAL_MS = 500;
 
 const setupPageStreams = () => {
   // the transport-specific streams for communication between inpage and background
@@ -68,6 +82,9 @@ const destroyExtensionStreams = () => {
   disconnectProviderChannel?.();
   disconnectProviderChannel = undefined;
 
+  detachExtensionPortListeners?.();
+  detachExtensionPortListeners = undefined;
+
   extensionMux.removeAllListeners();
   extensionMux.destroy();
 
@@ -75,6 +92,83 @@ const destroyExtensionStreams = () => {
   extensionChannel.destroy();
 
   extensionStream = null;
+};
+
+/**
+ * Chrome closes every extension port held by a page the moment that page
+ * enters the back/forward cache, and it reports the close to the service
+ * worker alone: "The page keeping the extension port is moved into
+ * back/forward cache, so the message channel is closed." The page side is
+ * frozen when that happens and is never handed the matching onDisconnect,
+ * not even once the page is restored. Without the signal this script keeps
+ * believing its port is live and writes dApp traffic into a channel the
+ * browser already tore down, so after a back/forward restore every request
+ * hangs forever and accountsChanged/chainChanged stop arriving.
+ *
+ * A restore is therefore the only notice the page gets, so treat it as the
+ * disconnect that already happened and rebuild the extension streams. The
+ * provider bridge replays whatever is still pending onto the new
+ * connection, so a request left in flight at cache entry settles as well.
+ * Nothing here touches the page streams or the in-page provider, so the
+ * provider is neither re-announced nor re-initialized.
+ */
+const resetExtensionStreamsAfterPageRestore = () => {
+  lastStreamRebuildAt = Date.now();
+  restorePending = false;
+
+  if (extensionStream) destroyExtensionStreams();
+
+  try {
+    extensionPort.disconnect();
+  } catch {
+    // The browser closed this port at cache entry; nothing left to close.
+  }
+
+  // Bumping the generation inside setupExtensionStreams turns a late
+  // onDisconnect for the retired port into a no-op, so a browser that
+  // does deliver it cannot open a second connection on top of this one.
+  setupExtensionStreams();
+};
+
+/**
+ * Only the browser can fire any of these events for real, so an untrusted
+ * one is a page calling dispatchEvent to make this script open runtime
+ * ports on demand, which would hold the service worker awake for a locked
+ * wallet and re-run the pending-request replay.
+ */
+const isBrowserCacheSignal = (event: Event) =>
+  event.isTrusted &&
+  // pagehide and pageshow carry persisted; freeze and resume do not.
+  (!("persisted" in event) || (event as PageTransitionEvent).persisted);
+
+/**
+ * Records that this page is going into the back/forward cache, or is being
+ * frozen, which is the moment the browser closes its extension ports.
+ */
+const onPageCacheEntry = (event: Event) => {
+  if (!isBrowserCacheSignal(event)) return;
+  restorePending = true;
+};
+
+/**
+ * Acts on the signals a restored page gets: pageshow with persisted set
+ * (back/forward cache) and the Page Lifecycle resume event, which also
+ * covers a tab thawed after Chrome froze it under Memory Saver.
+ *
+ * A recorded cache entry is what pairs a rebuild with the restore it
+ * belongs to. One restore fires two of these events and consumes the single
+ * flag, so the second is ignored with no time window involved, and two
+ * genuine restores milliseconds apart each have their own cache entry and
+ * each rebuild.
+ */
+const onPageRestoreSignal = (event: Event) => {
+  if (!isBrowserCacheSignal(event)) return;
+  if (
+    !restorePending &&
+    Date.now() - lastStreamRebuildAt < MIN_STREAM_REBUILD_INTERVAL_MS
+  )
+    return;
+  resetExtensionStreamsAfterPageRestore();
 };
 
 /**
@@ -165,6 +259,10 @@ const setupExtensionStreams = () => {
   };
   connectedPort.onMessage.addListener(onPortMessage);
   connectedPort.onDisconnect.addListener(onDisconnect);
+  detachExtensionPortListeners = () => {
+    connectedPort.onMessage.removeListener(onPortMessage);
+    connectedPort.onDisconnect.removeListener(onDisconnect);
+  };
   extensionStream = new ExtensionPortStream(connectedPort);
 
   // create and connect channel muxers
@@ -228,6 +326,10 @@ const initializeContentScript = () => {
     setupPageStreams();
     setupExtensionStreams();
     prepareListeners();
+    window.addEventListener("pagehide", onPageCacheEntry);
+    document.addEventListener("freeze", onPageCacheEntry);
+    window.addEventListener("pageshow", onPageRestoreSignal);
+    document.addEventListener("resume", onPageRestoreSignal);
     startContentScriptKeepAlive();
   } catch (error) {
     console.warn(
