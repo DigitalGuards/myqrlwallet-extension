@@ -1,6 +1,5 @@
 import browser from "webextension-polyfill";
 import { QRL_POST_MESSAGE_STREAM } from "../constants/streamConstants";
-import { checkForLastError } from "./scriptUtils";
 
 export const CONTENT_SCRIPT_KEEP_ALIVE_INTERVAL_MS = 3_000;
 
@@ -16,7 +15,9 @@ export const CONTENT_SCRIPT_KEEP_ALIVE_INTERVAL_MS = 3_000;
  *
  * The message carries no data and no activity meaning: the lock manager's
  * listener ignores senders outside extension pages, so it never re-arms
- * auto-lock and never reaches wallet state.
+ * auto-lock and never reaches wallet state. Unlike a port connect, a
+ * runtime message also reaches any open popup or side panel; no UI
+ * context listens for this name.
  */
 export const startContentScriptKeepAlive = () =>
   setInterval(() => {
@@ -24,6 +25,6 @@ export const startContentScriptKeepAlive = () =>
       .sendMessage({ name: QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT_KEEP_ALIVE })
       .catch(() => {
         // A worker between wake-ups answers nothing; the next tick retries.
-        checkForLastError();
+        // The polyfill has already read runtime.lastError by this point.
       });
   }, CONTENT_SCRIPT_KEEP_ALIVE_INTERVAL_MS);

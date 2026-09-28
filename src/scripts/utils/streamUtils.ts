@@ -8,7 +8,10 @@ import { pipeline } from "readable-stream";
  * the normal end of a dApp connection and is not worth a console entry.
  */
 export const isPrematureClose = (error: unknown) =>
-  error instanceof Error && /Premature close/.test(error.message);
+  error instanceof Error &&
+  ((error as Error & { code?: unknown }).code ===
+    "ERR_STREAM_PREMATURE_CLOSE" ||
+    error.message === "Premature close");
 
 // Sets up stream multiplexing for the given stream
 export function setupMultiplex(connectionStream: ExtensionPortStream) {
