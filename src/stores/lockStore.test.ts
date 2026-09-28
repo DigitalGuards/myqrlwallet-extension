@@ -82,6 +82,7 @@ const clearStore = (store: Record<string, any>) => {
   for (const k of Object.keys(store)) delete store[k];
 };
 
+import browser from "webextension-polyfill";
 import type { DecryptedKeyType } from "@/scripts/lockManager/lockManager";
 import { LEGACY_QRL_ADDRESS_MIGRATION_ERROR } from "@/utilities/addressUtil";
 
@@ -355,6 +356,160 @@ describe("LockStore – destructive paths", () => {
 
       await expect(store.removeAccountKey(OTHER_KEY.address)).rejects.toThrow();
     });
+  });
+
+  describe("lock (F6)", () => {
+    it("does not write the LOCKED timestamp itself, trusting the service worker's own write", async () => {
+      // LockManager.lock() (mocked here as a bare success response) now
+      // writes the LOCKED timestamp itself, durably, before clearing
+      // anything. The surface used to also write it, unawaited - a race
+      // that let another open surface see a stale timestamp and mistake
+      // the lock for a service-worker restart. Nothing in the surface's
+      // own lock() should touch local storage directly any more.
+      const store = await createLockStore();
+      (store as any).cachedKeys = MOCK_KEYS;
+      (store as any).cachedPassword = "pw";
+      mockSendMessage.mockResolvedValue({ isLocked: true });
+
+      await store.lock();
+
+      expect(
+        localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")],
+      ).toBeUndefined();
+      expect((store as any).cachedKeys).toBeUndefined();
+      expect((store as any).cachedPassword).toBeUndefined();
+      expect(store.isLocked).toBe(true);
+    });
+  });
+});
+
+describe("LockStore – storage listener ignores automated traffic (F2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearStore(localStore);
+    clearStore(sessionStore);
+  });
+
+  async function createLockStoreAndGetStorageListener() {
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+    const module = await import("./lockStore");
+    new module.default();
+    await new Promise((r) => setTimeout(r, 300));
+
+    const addListenerMock = browser.storage.onChanged.addListener as any;
+    expect(addListenerMock).toHaveBeenCalledTimes(1);
+    return addListenerMock.mock.calls[0][0] as (
+      changes: Record<string, unknown>,
+      areaName: string,
+    ) => Promise<void>;
+  }
+
+  it("does not call readLockState for an automated keepAlive-only session write", async () => {
+    const listener = await createLockStoreAndGetStorageListener();
+    mockSendMessage.mockClear();
+
+    await listener(
+      { [profileStorageKey("keepAlive")]: { newValue: Date.now() } },
+      "session",
+    );
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not call readLockState for an automated dApp-watch-only session write", async () => {
+    const listener = await createLockStoreAndGetStorageListener();
+    mockSendMessage.mockClear();
+
+    await listener(
+      { [profileStorageKey("DAPP_TX_WATCHES")]: { newValue: [] } },
+      "session",
+    );
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("still calls readLockState for a genuine session change (e.g. the decrypted-keys backup)", async () => {
+    const listener = await createLockStoreAndGetStorageListener();
+    mockSendMessage.mockClear();
+    mockSendMessage.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+
+    await listener(
+      { [profileStorageKey("_LM_CACHED_KEYS")]: { newValue: MOCK_KEYS } },
+      "session",
+    );
+
+    expect(mockSendMessage).toHaveBeenCalled();
+  });
+
+  it("still calls readLockState for a local storage change unrelated to the price cache", async () => {
+    const listener = await createLockStoreAndGetStorageListener();
+    mockSendMessage.mockClear();
+    mockSendMessage.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+
+    await listener(
+      { [profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")]: { newValue: 1 } },
+      "local",
+    );
+
+    expect(mockSendMessage).toHaveBeenCalled();
+  });
+});
+
+describe("LockStore – throttled user-activity ping (F2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearStore(localStore);
+    clearStore(sessionStore);
+  });
+
+  async function createLockStore() {
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+    const module = await import("./lockStore");
+    const store = new module.default();
+    await new Promise((r) => setTimeout(r, 300));
+    return store;
+  }
+
+  it("sends USER_ACTIVITY on pointer activity", async () => {
+    await createLockStore();
+    mockSendMessage.mockClear();
+
+    document.dispatchEvent(new Event("pointerdown"));
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      name: "LOCK_MANAGER_USER_ACTIVITY",
+    });
+  });
+
+  it("sends USER_ACTIVITY on keyboard activity", async () => {
+    await createLockStore();
+    mockSendMessage.mockClear();
+
+    document.dispatchEvent(new Event("keydown"));
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      name: "LOCK_MANAGER_USER_ACTIVITY",
+    });
+  });
+
+  it("throttles repeated activity to at most once per 30s", async () => {
+    await createLockStore();
+    mockSendMessage.mockClear();
+
+    document.dispatchEvent(new Event("pointerdown"));
+    document.dispatchEvent(new Event("pointerdown"));
+    document.dispatchEvent(new Event("keydown"));
+
+    const activityPings = mockSendMessage.mock.calls.filter(
+      (call: any) => call[0]?.name === "LOCK_MANAGER_USER_ACTIVITY",
+    );
+    expect(activityPings).toHaveLength(1);
   });
 });
 

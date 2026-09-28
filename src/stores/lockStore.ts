@@ -35,6 +35,23 @@ import browser from "webextension-polyfill";
 
 const PORT_RECONNECT_DELAY = 1000;
 
+// Session-storage keys written by automated background traffic: a storage
+// change limited to these keys must not trigger
+// readLockState() (which polls the SW and can run the SET_DECRYPTED_KEYS
+// resend path), or the ~30s keep-alive tick and the dApp transaction
+// watcher's bookkeeping would keep this store busy for no reason. Mirrors
+// LockManager's own SESSION_KEYS_KEY/keepAlive keys and
+// dAppTransactionWatcher's watch-list key.
+const AUTOMATED_SESSION_STORAGE_KEYS = new Set([
+  profileStorageKey("keepAlive"),
+  profileStorageKey("DAPP_TX_WATCHES"),
+]);
+
+// At most one USER_ACTIVITY ping per this many ms, so a user actively
+// moving the mouse or typing in an open surface does not flood the SW with
+// messages; see registerActivityPing().
+const ACTIVITY_PING_THROTTLE_MS = 30_000;
+
 class LockStore {
   hasPasswordSet = true;
   isLoading = true;
@@ -54,6 +71,8 @@ class LockStore {
    * either store do not necessarily leak both.
    */
   private cachedPassword?: string;
+  /** Timestamp of the last USER_ACTIVITY ping sent, for throttling. */
+  private lastActivityPingAt = 0;
 
   constructor() {
     makeAutoObservable(this, {
@@ -70,6 +89,37 @@ class LockStore {
 
     this.connectKeepAlive();
     this.initialize();
+    this.registerActivityPing();
+  }
+
+  /**
+   * Auto-lock semantics: the wallet locks after N minutes with no user
+   * interaction in ANY open wallet surface (popup, side panel, or tab), not
+   * merely N minutes since the last SET_DECRYPTED_KEYS/ENCRYPT_ACCOUNT
+   * message. A surface left open and actively used (scrolling a list,
+   * typing in a form, clicking around) sends this throttled ping so the SW
+   * can tell that apart from an idle-but-open tab. See lockManager.ts's
+   * USER_ACTIVITY message and its auto-lock activity allow-list.
+   */
+  private registerActivityPing() {
+    if (typeof document === "undefined") return;
+    const ping = () => {
+      const now = Date.now();
+      if (now - this.lastActivityPingAt < ACTIVITY_PING_THROTTLE_MS) {
+        return;
+      }
+      this.lastActivityPingAt = now;
+      browser.runtime
+        .sendMessage({ name: LOCK_MANAGER_MESSAGES.USER_ACTIVITY })
+        .catch(() => {
+          // SW not reachable right now - the next activity tick, or the
+          // keep-alive port reconnect, will retry. Not worth surfacing.
+        });
+    };
+    const listenerOptions: AddEventListenerOptions = { passive: true };
+    document.addEventListener("pointerdown", ping, listenerOptions);
+    document.addEventListener("keydown", ping, listenerOptions);
+    document.addEventListener("focus", ping, true);
   }
 
   /**
@@ -141,17 +191,29 @@ class LockStore {
 
   initializeStorageListener() {
     browser.storage.onChanged.addListener(async (changes, areaName) => {
+      const changedKeys = Object.keys(changes);
+      if (changedKeys.length === 0) return;
       // Ignore the automated 60s price-cache refresh. It is not user
       // activity, so letting it drive readLockState (which pings the SW)
-      // would keep re-arming the inactivity auto-lock and the wallet would
-      // never lock while a surface stays open.
-      const changedKeys = Object.keys(changes);
+      // would be needless traffic on every tick.
       if (
         areaName === "local" &&
-        changedKeys.length > 0 &&
         changedKeys.every(
           (key) => key === profileStorageKey(PRICE_CACHE_IDENTIFIER),
         )
+      ) {
+        return;
+      }
+      // Same for the automated session-storage writes: the keep-alive tick
+      // and the dApp transaction watcher's bookkeeping are not user
+      // activity either (F2). Auto-lock timing itself no longer depends on
+      // this listener - lockManagerListener's own activity allow-list is
+      // authoritative - but calling readLockState() on every such tick was
+      // still needless SW traffic (an IS_LOCKED poll, and potentially the
+      // SET_DECRYPTED_KEYS resend path) for no observable effect.
+      if (
+        areaName === "session" &&
+        changedKeys.every((key) => AUTOMATED_SESSION_STORAGE_KEYS.has(key))
       ) {
         return;
       }
@@ -423,6 +485,12 @@ class LockStore {
   async lock() {
     this.cachedKeys = undefined;
     this.cachedPassword = undefined;
+    // LockManager.lock() (F6) writes the LOCKED timestamp itself, durably,
+    // before it clears anything - by the time this message resolves every
+    // other open surface's readLockState() already sees it. Writing it a
+    // second time here, unawaited, was a race: this fire-and-forget write
+    // could land after another surface had already read the (still stale)
+    // timestamp and mistaken the lock for a service-worker restart.
     await browser.runtime.sendMessage({
       name: LOCK_MANAGER_MESSAGES.LOCK,
     });
@@ -430,7 +498,6 @@ class LockStore {
       name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
     });
     this.isLocked = isLocked;
-    StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
   }
 
   /**

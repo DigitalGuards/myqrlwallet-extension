@@ -4,11 +4,12 @@ import withSuspense from "@/functions/withSuspense";
 import { useStore } from "@/stores/store";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
 import { observer } from "mobx-react-lite";
-import { lazy, useState } from "react";
+import { lazy, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import StartAccountCreation from "./StartAccountCreation/StartAccountCreation";
 import AccountCreationSuccess from "./AccountCreationSuccess/AccountCreationSuccess";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
+import SessionPasswordPrompt from "../../../Shared/SessionPasswordPrompt/SessionPasswordPrompt";
 
 const SeedBackup = withSuspense(
   lazy(
@@ -33,21 +34,42 @@ const CreateAccount = observer(() => {
   const [isPersisted, setIsPersisted] = useState(false);
   const [startError, setStartError] = useState("");
   const [persistError, setPersistError] = useState("");
+  // F1: shows the inline SessionPasswordPrompt when the session password is
+  // unavailable at the pre-reveal check. Holds the generated account so the
+  // retry can show the same backup screen without regenerating it.
+  const [needsReArmOnStart, setNeedsReArmOnStart] = useState(false);
+  const pendingCreatedAccountRef = useRef<Web3BaseWalletAccount>();
+  // Same idea, but for the confirm-backup step: `account` is already set by
+  // then, so only a flag is needed (no separate ref).
+  const [needsReArmOnPersist, setNeedsReArmOnPersist] = useState(false);
 
   const onAccountCreated = async (created?: Web3BaseWalletAccount) => {
     scrollShellToTop();
     if (!created) return;
+    pendingCreatedAccountRef.current = created;
     // Fail closed before showing anything: with no cached password (SW
     // restarted) the account could never be stored, so do not walk the
-    // user through a backup that ends in an error.
+    // user through a backup that ends in an error. F1: the inline
+    // SessionPasswordPrompt re-arms the session and this function runs
+    // again with the same generated account, which keeps it in play for
+    // the backup step that follows.
     try {
       await getWalletPassword();
     } catch {
+      setNeedsReArmOnStart(true);
       setStartError(t("account.sessionPasswordExpired"));
       return;
     }
+    pendingCreatedAccountRef.current = undefined;
+    setNeedsReArmOnStart(false);
     setStartError("");
     setAccount(created);
+  };
+
+  const retryOnAccountCreated = async () => {
+    const pendingAccount = pendingCreatedAccountRef.current;
+    if (!pendingAccount) return;
+    await onAccountCreated(pendingAccount);
   };
 
   const onBackupConfirmed = async () => {
@@ -56,6 +78,7 @@ const CreateAccount = observer(() => {
       const password = await getWalletPassword();
       await encryptAccount(account, password);
     } catch {
+      setNeedsReArmOnPersist(true);
       setPersistError(t("account.sessionPasswordExpired"));
       return;
     }
@@ -70,6 +93,7 @@ const CreateAccount = observer(() => {
       return;
     }
     scrollShellToTop();
+    setNeedsReArmOnPersist(false);
     setPersistError("");
     setIsPersisted(true);
   };
@@ -82,18 +106,32 @@ const CreateAccount = observer(() => {
           isPersisted ? (
             <AccountCreationSuccess account={account} />
           ) : (
-            <SeedBackup
-              account={account}
-              onConfirmed={onBackupConfirmed}
-              onBack={() => setAccount(undefined)}
-              error={persistError}
-            />
+            <>
+              <SeedBackup
+                account={account}
+                onConfirmed={onBackupConfirmed}
+                onBack={() => {
+                  setAccount(undefined);
+                  setPersistError("");
+                  setNeedsReArmOnPersist(false);
+                }}
+                error={persistError}
+              />
+              {needsReArmOnPersist && (
+                <SessionPasswordPrompt onUnlocked={onBackupConfirmed} />
+              )}
+            </>
           )
         ) : (
           <>
             {startError && (
               <Alert variant="destructive" className="mb-4">
-                <AlertDescription>{startError}</AlertDescription>
+                <AlertDescription>
+                  {startError}
+                  {needsReArmOnStart && (
+                    <SessionPasswordPrompt onUnlocked={retryOnAccountCreated} />
+                  )}
+                </AlertDescription>
               </Alert>
             )}
             <StartAccountCreation onAccountCreated={onAccountCreated} />

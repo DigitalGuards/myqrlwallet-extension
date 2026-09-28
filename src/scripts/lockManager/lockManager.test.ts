@@ -71,6 +71,12 @@ vi.mock("webextension-polyfill", () => ({
       }),
       get: vi.fn((name: string) => Promise.resolve(alarmsStore[name] ?? null)),
     },
+    runtime: {
+      id: "mock-extension-id",
+      getURL: vi.fn(
+        (path: string) => `chrome-extension://mock-extension-id/${path}`,
+      ),
+    },
   },
 }));
 
@@ -99,6 +105,14 @@ const MOCK_KEYS: DecryptedKeyType[] = [
   },
 ];
 
+// A legitimate caller: an extension page (popup/side panel/approval
+// window), matching both the extension id and an extension-origin URL that
+// lockManagerListener's sender guard requires (F9).
+const TRUSTED_SENDER = {
+  id: "mock-extension-id",
+  url: "chrome-extension://mock-extension-id/index.html",
+} as any;
+
 describe("LockManager – keep-alive & auto-lock", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -111,13 +125,13 @@ describe("LockManager – keep-alive & auto-lock", () => {
   // ── startKeepAlive / stopKeepAlive (periodic alarm) ────────────
 
   describe("startKeepAlive", () => {
-    it("should create a periodic alarm", async () => {
+    it("should create a periodic alarm at the 30s Chrome alarms floor", async () => {
       await LockManager.startKeepAlive();
 
       expect(mockAlarms.create).toHaveBeenCalledWith(
         LockManager.KEEP_ALIVE_ALARM,
         {
-          periodInMinutes: 0.4,
+          periodInMinutes: 0.5,
         },
       );
     });
@@ -136,13 +150,23 @@ describe("LockManager – keep-alive & auto-lock", () => {
   // ── handleKeepAliveAlarm ───────────────────────────────────────
 
   describe("handleKeepAliveAlarm", () => {
-    it("should write to session storage", async () => {
+    it("should write to session storage while unlocked", async () => {
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "0x123" },
+      ]);
+      localStore[profileStorageKey("ACCOUNTS")] = {
+        ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+      };
+      await LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
+
       await LockManager.handleKeepAliveAlarm();
 
       expect(sessionStore[profileStorageKey("keepAlive")]).toBeDefined();
       expect(typeof sessionStore[profileStorageKey("keepAlive")]).toBe(
         "number",
       );
+
+      await LockManager.lock();
     });
 
     it("should restore keys from session if SW restarted", async () => {
@@ -166,13 +190,47 @@ describe("LockManager – keep-alive & auto-lock", () => {
 
       await LockManager.lock();
     });
+
+    it("should stop the keep-alive alarm and skip the session storage write while locked (F10)", async () => {
+      // No keystores/accounts seeded and nothing in the session backup: a
+      // genuinely locked, or never-unlocked, wallet.
+      await LockManager.startKeepAlive();
+      expect(alarmsStore[LockManager.KEEP_ALIVE_ALARM]).toBeDefined();
+
+      await LockManager.handleKeepAliveAlarm();
+
+      expect(sessionStore[profileStorageKey("keepAlive")]).toBeUndefined();
+      expect(alarmsStore[LockManager.KEEP_ALIVE_ALARM]).toBeUndefined();
+    });
+
+    it("should recreate a missing auto-lock alarm while unlocked (F3 defensive recreation)", async () => {
+      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+        { address: "0x123" },
+      ]);
+      localStore[profileStorageKey("ACCOUNTS")] = {
+        ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+      };
+      localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 5 };
+      await LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
+      // Simulate the auto-lock alarm having been dropped (e.g. missed on a
+      // cold start) while the wallet is still unlocked.
+      delete alarmsStore[LockManager.AUTO_LOCK_ALARM];
+
+      await LockManager.handleKeepAliveAlarm();
+
+      expect(alarmsStore[LockManager.AUTO_LOCK_ALARM]).toEqual({
+        delayInMinutes: 5,
+      });
+
+      await LockManager.lock();
+    });
   });
 
   // ── Session key backup / restore ───────────────────────────────
 
   describe("session key backup", () => {
-    it("should backup keys to session storage when keys are set", () => {
-      LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
+    it("should backup keys to session storage when keys are set", async () => {
+      await LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
 
       expect(sessionStore[profileStorageKey("_LM_CACHED_KEYS")]).toEqual(
         MOCK_KEYS,
@@ -180,7 +238,7 @@ describe("LockManager – keep-alive & auto-lock", () => {
     });
 
     it("should clear session keys on lock", async () => {
-      LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
+      await LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
       expect(sessionStore[profileStorageKey("_LM_CACHED_KEYS")]).toBeDefined();
 
       await LockManager.lock();
@@ -265,7 +323,7 @@ describe("LockManager – keep-alive & auto-lock", () => {
         ALL_ACCOUNTS: [MOCK_KEYS[0].address],
       };
 
-      LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
+      await LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
       await LockManager.startKeepAlive();
 
       await LockManager.handleAutoLockAlarm();
@@ -286,7 +344,7 @@ describe("LockManager – keep-alive & auto-lock", () => {
 
   describe("lock", () => {
     it("should clear keys, session backup, keep-alive alarm, and auto-lock alarm", async () => {
-      LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
+      await LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
       await LockManager.startKeepAlive();
       alarmsStore[LockManager.AUTO_LOCK_ALARM] = { delayInMinutes: 5 };
 
@@ -311,6 +369,21 @@ describe("LockManager – keep-alive & auto-lock", () => {
         sessionStore[profileStorageKey("_LM_CACHED_KEYS")],
       ).toBeUndefined();
     });
+
+    it("should write the LOCKED timestamp itself, before clearing keys (F6)", async () => {
+      // The outer beforeEach already ran one lock(), so this captures that
+      // timestamp as a baseline for the comparison below.
+      const before =
+        localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")];
+      await LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
+
+      await LockManager.lock();
+
+      const after =
+        localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")];
+      expect(typeof after).toBe("number");
+      expect(after).toBeGreaterThanOrEqual(before ?? 0);
+    });
   });
 
   // ── lockManagerListener ────────────────────────────────────────
@@ -319,10 +392,13 @@ describe("LockManager – keep-alive & auto-lock", () => {
     it("should start keep-alive and alarm on SET_DECRYPTED_KEYS", async () => {
       localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 10 };
 
-      const result = await LockManager.lockManagerListener({
-        name: LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
-        data: MOCK_KEYS,
-      });
+      const result = await LockManager.lockManagerListener(
+        {
+          name: LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
+          data: MOCK_KEYS,
+        },
+        TRUSTED_SENDER,
+      );
 
       expect(result).toEqual({ success: true });
 
@@ -349,10 +425,13 @@ describe("LockManager – keep-alive & auto-lock", () => {
     it("should handle UPDATE_AUTO_LOCK by recreating alarm", async () => {
       localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 30 };
 
-      const result = await LockManager.lockManagerListener({
-        name: LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK,
-        data: undefined,
-      });
+      const result = await LockManager.lockManagerListener(
+        {
+          name: LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK,
+          data: undefined,
+        },
+        TRUSTED_SENDER,
+      );
 
       expect(result).toEqual({ success: true });
       expect(mockAlarms.create).toHaveBeenCalledWith(
@@ -363,31 +442,119 @@ describe("LockManager – keep-alive & auto-lock", () => {
       );
     });
 
-    it("should reset auto-lock timer on any message while unlocked", async () => {
-      localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 5 };
-      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
-        { address: "0x123" },
-      ]);
-      localStore[profileStorageKey("ACCOUNTS")] = {
-        ALL_ACCOUNTS: [MOCK_KEYS[0].address],
-      };
+    // ── F2: only user-activity messages postpone auto-lock ────────
 
-      LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
-      mockAlarms.create.mockClear();
-
-      await LockManager.lockManagerListener({
-        name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
-        data: undefined,
+    describe("auto-lock activity semantics (F2)", () => {
+      beforeEach(async () => {
+        localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 5 };
+        localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
+          { address: "0x123" },
+        ]);
+        localStore[profileStorageKey("ACCOUNTS")] = {
+          ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+        };
+        await LockManager.setDecryptedKeysFromPopup({
+          keys: MOCK_KEYS,
+          walletPassword: "test-password",
+        });
+        mockAlarms.create.mockClear();
       });
 
-      expect(mockAlarms.create).toHaveBeenCalledWith(
-        LockManager.AUTO_LOCK_ALARM,
-        {
-          delayInMinutes: 5,
-        },
-      );
+      it("should reset the auto-lock timer on USER_ACTIVITY", async () => {
+        await LockManager.lockManagerListener(
+          { name: LOCK_MANAGER_MESSAGES.USER_ACTIVITY },
+          TRUSTED_SENDER,
+        );
 
-      await LockManager.lock();
+        expect(mockAlarms.create).toHaveBeenCalledWith(
+          LockManager.AUTO_LOCK_ALARM,
+          { delayInMinutes: 5 },
+        );
+
+        await LockManager.lock();
+      });
+
+      it("should reset the auto-lock timer on ENCRYPT_ACCOUNT and REMOVE_ACCOUNT_KEY", async () => {
+        await LockManager.lockManagerListener(
+          { name: LOCK_MANAGER_MESSAGES.REMOVE_ACCOUNT_KEY, data: "Qnope" },
+          TRUSTED_SENDER,
+        );
+
+        expect(mockAlarms.create).toHaveBeenCalledWith(
+          LockManager.AUTO_LOCK_ALARM,
+          { delayInMinutes: 5 },
+        );
+
+        await LockManager.lock();
+      });
+
+      it("should reset the auto-lock timer on a dApp approval response, matched by its action field", async () => {
+        await LockManager.lockManagerListener(
+          {
+            action: "QRL_WALLET_DAPP_RESPONSE",
+            data: { hasApproved: true },
+          },
+          TRUSTED_SENDER,
+        );
+
+        expect(mockAlarms.create).toHaveBeenCalledWith(
+          LockManager.AUTO_LOCK_ALARM,
+          { delayInMinutes: 5 },
+        );
+
+        await LockManager.lock();
+      });
+
+      it("should NOT reset the auto-lock timer on IS_LOCKED polling", async () => {
+        await LockManager.lockManagerListener(
+          { name: LOCK_MANAGER_MESSAGES.IS_LOCKED },
+          TRUSTED_SENDER,
+        );
+
+        expect(mockAlarms.create).not.toHaveBeenCalled();
+
+        await LockManager.lock();
+      });
+
+      it("should NOT reset the auto-lock timer on GET_DECRYPTED_KEYS or GET_WALLET_PASSWORD reads", async () => {
+        await LockManager.lockManagerListener(
+          { name: LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS },
+          TRUSTED_SENDER,
+        );
+        await LockManager.lockManagerListener(
+          { name: LOCK_MANAGER_MESSAGES.GET_WALLET_PASSWORD },
+          TRUSTED_SENDER,
+        );
+
+        expect(mockAlarms.create).not.toHaveBeenCalled();
+
+        await LockManager.lock();
+      });
+
+      it("should NOT reset the auto-lock timer on SEND_TX_NOTIFICATION (automated traffic)", async () => {
+        await LockManager.lockManagerListener(
+          {
+            name: LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION,
+            data: { status: "confirmed" },
+          },
+          TRUSTED_SENDER,
+        );
+
+        expect(mockAlarms.create).not.toHaveBeenCalled();
+
+        await LockManager.lock();
+      });
+
+      it("should NOT reset the auto-lock timer on an unrelated message this listener merely overhears", async () => {
+        await LockManager.lockManagerListener(
+          { name: "SOME_OTHER_EXTENSION_MESSAGE", data: {} },
+          TRUSTED_SENDER,
+        );
+
+        expect(mockAlarms.create).not.toHaveBeenCalled();
+
+        await LockManager.lock();
+      });
     });
 
     it("should NOT reset auto-lock timer when wallet is locked", async () => {
@@ -395,10 +562,13 @@ describe("LockManager – keep-alive & auto-lock", () => {
 
       mockAlarms.create.mockClear();
 
-      await LockManager.lockManagerListener({
-        name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
-        data: undefined,
-      });
+      await LockManager.lockManagerListener(
+        {
+          name: LOCK_MANAGER_MESSAGES.USER_ACTIVITY,
+          data: undefined,
+        },
+        TRUSTED_SENDER,
+      );
 
       expect(mockAlarms.create).not.toHaveBeenCalled();
     });
@@ -408,12 +578,15 @@ describe("LockManager – keep-alive & auto-lock", () => {
         { address: "0x123" },
       ]);
       localStore[profileStorageKey("ACCOUNTS")] = { ALL_ACCOUNTS: ["0x123"] };
-      LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
+      await LockManager.setDecryptedKeysFromPopup(MOCK_KEYS);
 
-      await LockManager.lockManagerListener({
-        name: LOCK_MANAGER_MESSAGES.LOCK,
-        data: undefined,
-      });
+      await LockManager.lockManagerListener(
+        {
+          name: LOCK_MANAGER_MESSAGES.LOCK,
+          data: undefined,
+        },
+        TRUSTED_SENDER,
+      );
 
       const { isLocked } = await LockManager.isLocked();
       expect(isLocked).toBe(true);
@@ -421,6 +594,54 @@ describe("LockManager – keep-alive & auto-lock", () => {
       expect(
         sessionStore[profileStorageKey("_LM_CACHED_KEYS")],
       ).toBeUndefined();
+    });
+
+    // ── F9: fail-closed sender guard ───────────────────────────────
+
+    describe("sender guard (F9)", () => {
+      it("rejects a call with no sender", async () => {
+        const result = await LockManager.lockManagerListener({
+          name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
+        });
+
+        expect(result).toBeUndefined();
+      });
+
+      it("rejects a sender from a different extension id", async () => {
+        const result = await LockManager.lockManagerListener(
+          { name: LOCK_MANAGER_MESSAGES.IS_LOCKED },
+          {
+            id: "some-other-extension-id",
+            url: "chrome-extension://mock-extension-id/index.html",
+          } as any,
+        );
+
+        expect(result).toBeUndefined();
+      });
+
+      it("rejects a sender whose url is not extension-origin (e.g. a content script)", async () => {
+        const result = await LockManager.lockManagerListener(
+          { name: LOCK_MANAGER_MESSAGES.IS_LOCKED },
+          {
+            id: "mock-extension-id",
+            url: "https://dapp.example/page",
+          } as any,
+        );
+
+        expect(result).toBeUndefined();
+      });
+
+      it("accepts a trusted extension-page sender", async () => {
+        const result = await LockManager.lockManagerListener(
+          { name: LOCK_MANAGER_MESSAGES.IS_LOCKED },
+          TRUSTED_SENDER,
+        );
+
+        expect(result).toEqual({
+          isLocked: true,
+          hasPasswordSet: false,
+        });
+      });
     });
   });
 
@@ -465,7 +686,7 @@ describe("LockManager – account removal & factory reset", () => {
 
   describe("removeAccountKey", () => {
     it("drops the key from memory and rewrites the session backup", async () => {
-      LockManager.setDecryptedKeysFromPopup({
+      await LockManager.setDecryptedKeysFromPopup({
         keys: [KEY_A, KEY_B],
         walletPassword: "pw",
       });
@@ -499,7 +720,7 @@ describe("LockManager – account removal & factory reset", () => {
     });
 
     it("is case-insensitive about the address", async () => {
-      LockManager.setDecryptedKeysFromPopup({
+      await LockManager.setDecryptedKeysFromPopup({
         keys: [KEY_A, KEY_B],
         walletPassword: "pw",
       });
@@ -511,8 +732,8 @@ describe("LockManager – account removal & factory reset", () => {
   });
 
   describe("resetWallet", () => {
-    beforeEach(() => {
-      LockManager.setDecryptedKeysFromPopup({
+    beforeEach(async () => {
+      await LockManager.setDecryptedKeysFromPopup({
         keys: [KEY_A, KEY_B],
         walletPassword: "pw",
       });

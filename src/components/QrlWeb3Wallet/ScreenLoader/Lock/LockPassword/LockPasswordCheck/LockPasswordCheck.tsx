@@ -18,6 +18,11 @@ import { useStore } from "@/stores/store";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
 import ResetWalletDialog from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/ResetWalletDialog/ResetWalletDialog";
+import {
+  clearUnlockAttempts,
+  getUnlockAttemptState,
+  recordFailedUnlockAttempt,
+} from "@/utilities/unlockAttemptLimiter";
 
 const createFormSchema = (t: TFunction) =>
   z.object({
@@ -38,6 +43,12 @@ const LockPasswordCheck = observer(() => {
   const [unlockAttempt, setUnlockAttempt] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  // F7: exponential delay after repeated wrong passwords. waitUntil is an
+  // epoch ms read from (and written to) storage.local via
+  // unlockAttemptLimiter, so the delay survives a service-worker restart
+  // and a browser relaunch.
+  const [waitUntil, setWaitUntil] = useState(0);
+  const [remainingSeconds, setRemainingSeconds] = useState(0);
 
   useEffect(() => {
     setTimeout(() => {
@@ -45,6 +56,29 @@ const LockPasswordCheck = observer(() => {
       setFocus("password");
     }, 0);
   }, [unlockAttempt]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getUnlockAttemptState().then((state) => {
+      if (!cancelled) setWaitUntil(state.waitUntil);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((waitUntil - Date.now()) / 1000));
+      setRemainingSeconds(remaining);
+    };
+    tick();
+    if (waitUntil <= Date.now()) return;
+    const interval = setInterval(tick, 250);
+    return () => clearInterval(interval);
+  }, [waitUntil]);
+
+  const isWaiting = remainingSeconds > 0;
 
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
@@ -59,12 +93,26 @@ const LockPasswordCheck = observer(() => {
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     scrollShellToTop();
+    // Defence in depth: the submit button is disabled while waiting, but a
+    // disabled submit button does not reliably block Enter-key submission
+    // in every browser.
+    if (isWaiting) {
+      setUnlockAttempt((attempt) => attempt + 1);
+      return;
+    }
     try {
       const unlocked = await unlock(formData.password);
       if (!unlocked) {
+        const attemptState = await recordFailedUnlockAttempt();
+        setWaitUntil(attemptState.waitUntil);
         setError("password", {
-          message: t("lock.unlock.errorIncorrect"),
+          message:
+            attemptState.waitUntil > Date.now()
+              ? t("lock.unlock.errorTooManyAttempts")
+              : t("lock.unlock.errorIncorrect"),
         });
+      } else {
+        await clearUnlockAttempts();
       }
     } catch (error) {
       const message =
@@ -95,7 +143,7 @@ const LockPasswordCheck = observer(() => {
                       {...field}
                       aria-label={t("lock.unlock.passwordPlaceholder")}
                       autoComplete="current-password"
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || isWaiting}
                       placeholder={t("lock.unlock.passwordPlaceholder")}
                       type={showPassword ? "text" : "password"}
                       className="h-12 rounded-xl pr-12 text-base"
@@ -105,7 +153,7 @@ const LockPasswordCheck = observer(() => {
                     type="button"
                     aria-pressed={showPassword}
                     aria-label={t("lock.unlock.togglePasswordVisibility")}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isWaiting}
                     className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-2.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                     onClick={() => setShowPassword((show) => !show)}
                   >
@@ -121,8 +169,16 @@ const LockPasswordCheck = observer(() => {
             )}
           />
 
+          {isWaiting && (
+            // F7: exponential delay after repeated wrong passwords. No
+            // attempt cap and no auto-wipe - this only ever slows retries.
+            <p role="alert" className="text-xs text-muted-foreground">
+              {t("lock.unlock.waitMessage", { seconds: remainingSeconds })}
+            </p>
+          )}
+
           <Button
-            disabled={isSubmitting || !isValid}
+            disabled={isSubmitting || !isValid || isWaiting}
             className="h-11 w-full text-base"
             type="submit"
           >

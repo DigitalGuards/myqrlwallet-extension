@@ -123,9 +123,12 @@ describe("CreateAccount", () => {
     await clickCreate();
 
     expect(
-      await screen.findByText(
-        "Your unlocked session expired. Lock the wallet and unlock it again, then retry.",
-      ),
+      await screen.findByText("Your unlocked session expired."),
+    ).toBeInTheDocument();
+    // F1: an inline re-entry replaces the old alert's dead-end instruction
+    // to go lock and unlock the wallet.
+    expect(
+      screen.getByRole("button", { name: "Continue" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("Mocked Seed Backup")).not.toBeInTheDocument();
   });
@@ -194,12 +197,113 @@ describe("CreateAccount", () => {
     });
 
     expect(
-      await screen.findByText(
-        "Your unlocked session expired. Lock the wallet and unlock it again, then retry.",
-      ),
+      await screen.findByText("Your unlocked session expired."),
     ).toBeInTheDocument();
     expect(screen.getByText("Mocked Seed Backup")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Continue" }),
+    ).toBeInTheDocument();
     expect(encryptAccount).not.toHaveBeenCalled();
     expect(screen.queryByText("Account created")).not.toBeInTheDocument();
+  });
+
+  describe("session re-arm (F1)", () => {
+    it("continues onto the seed backup after the inline password re-arms the session", async () => {
+      // First getWalletPassword call (pre-reveal check) fails; the second,
+      // made by the retry after a successful inline unlock, succeeds.
+      const getWalletPassword = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("WALLET_PASSWORD_UNAVAILABLE"))
+        .mockResolvedValue("password");
+      const unlock = vi.fn(async () => true);
+      renderComponent(
+        storeWithCreate({ lockStore: { getWalletPassword, unlock } }),
+      );
+
+      await clickCreate();
+      expect(
+        await screen.findByText("Your unlocked session expired."),
+      ).toBeInTheDocument();
+
+      await userEvent.type(screen.getByLabelText("Enter password"), "pw");
+      await act(async () => {
+        await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+      });
+
+      expect(unlock).toHaveBeenCalledWith("pw");
+      // The same generated account carries through: no regeneration, and
+      // the backup screen (not another error) is now showing.
+      expect(
+        await screen.findByRole("heading", {
+          level: 3,
+          name: "Mocked Seed Backup",
+        }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(ADDRESS)).toBeInTheDocument();
+    });
+
+    it("shows the normal wrong-password error inline when the re-arm password is wrong", async () => {
+      const getWalletPassword = vi
+        .fn()
+        .mockRejectedValue(new Error("WALLET_PASSWORD_UNAVAILABLE"));
+      const unlock = vi.fn(async () => false);
+      renderComponent(
+        storeWithCreate({ lockStore: { getWalletPassword, unlock } }),
+      );
+
+      await clickCreate();
+      await screen.findByText("Your unlocked session expired.");
+
+      await userEvent.type(screen.getByLabelText("Enter password"), "wrong");
+      await act(async () => {
+        await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+      });
+
+      expect(
+        await screen.findByText("The entered password is incorrect"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Mocked Seed Backup")).not.toBeInTheDocument();
+    });
+
+    it("retries encryptAccount in place after re-arming at the confirm-backup step", async () => {
+      const getWalletPassword = vi
+        .fn()
+        .mockResolvedValueOnce("password")
+        .mockRejectedValueOnce(new Error("WALLET_PASSWORD_UNAVAILABLE"))
+        .mockResolvedValue("password");
+      const encryptAccount = vi.fn(async () => {});
+      const setActiveAccount = vi.fn(async () => {});
+      const unlock = vi.fn(async () => true);
+      renderComponent(
+        storeWithCreate({
+          lockStore: { getWalletPassword, encryptAccount, unlock },
+          qrlStore: {
+            qrlInstance: { accounts: { create: createdAccount } },
+            setActiveAccount,
+          },
+        }),
+      );
+
+      await clickCreate();
+      await act(async () => {
+        await userEvent.click(
+          await screen.findByRole("button", { name: "Confirm backup" }),
+        );
+      });
+      await screen.findByText("Your unlocked session expired.");
+      expect(encryptAccount).not.toHaveBeenCalled();
+
+      await userEvent.type(screen.getByLabelText("Enter password"), "pw");
+      await act(async () => {
+        await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+      });
+
+      expect(unlock).toHaveBeenCalledWith("pw");
+      expect(encryptAccount).toHaveBeenCalledTimes(1);
+      expect(setActiveAccount).toHaveBeenCalledWith(ADDRESS);
+      expect(
+        await screen.findByRole("heading", { level: 3 }),
+      ).toHaveTextContent("Account created");
+    });
   });
 });

@@ -152,28 +152,56 @@ describe("ImportAccount", () => {
       },
     };
 
-    const renderWithExpiredSession = () => {
+    const renderWithExpiredSession = (
+      overrides: {
+        unlock?: (password: string) => Promise<boolean>;
+        getWalletPasswordAfterReArm?: () => Promise<string>;
+      } = {},
+    ) => {
       const setActiveAccount = vi.fn(async () => {});
       const encryptAccount = vi.fn(async () => {});
       const lock = vi.fn(async () => {});
+      const unlock =
+        overrides.unlock ??
+        vi.fn(async () => {
+          throw new Error("unlock not mocked for this test");
+        });
+      let getWalletPasswordCalls = 0;
+      const getWalletPassword = vi.fn(async () => {
+        getWalletPasswordCalls += 1;
+        if (
+          getWalletPasswordCalls === 1 ||
+          !overrides.getWalletPasswordAfterReArm
+        ) {
+          throw new Error("WALLET_PASSWORD_UNAVAILABLE");
+        }
+        return overrides.getWalletPasswordAfterReArm();
+      });
       renderComponent(
         mockedStore({
           qrlStore: {
             setActiveAccount,
             qrlInstance: {
-              accounts: { seedToAccount: (_seed: string | Uint8Array) => seededAccount },
+              accounts: {
+                seedToAccount: (_seed: string | Uint8Array) => seededAccount,
+              },
             },
           },
           lockStore: {
             encryptAccount,
             lock,
-            getWalletPassword: async () => {
-              throw new Error("WALLET_PASSWORD_UNAVAILABLE");
-            },
+            unlock,
+            getWalletPassword,
           },
         }),
       );
-      return { setActiveAccount, encryptAccount, lock };
+      return {
+        setActiveAccount,
+        encryptAccount,
+        lock,
+        unlock,
+        getWalletPassword,
+      };
     };
 
     const submitMnemonic = async () => {
@@ -193,7 +221,7 @@ describe("ImportAccount", () => {
       await waitFor(() => {
         expect(
           screen.getByText(
-            "Your unlocked session expired. Nothing was saved. Unlock the wallet again and retry.",
+            "Your unlocked session expired and nothing was saved yet.",
           ),
         ).toBeInTheDocument();
       });
@@ -204,18 +232,69 @@ describe("ImportAccount", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("should offer a route to the unlock screen and take it", async () => {
-      const { lock } = renderWithExpiredSession();
+    it("shows an inline password field to re-enter the session in place (F1)", async () => {
+      renderWithExpiredSession();
       await submitMnemonic();
 
-      const unlockButton = await screen.findByRole("button", {
-        name: "Unlock wallet",
-      });
-      await userEvent.click(unlockButton);
+      await screen.findByText(
+        "Your unlocked session expired and nothing was saved yet.",
+      );
+      expect(
+        screen.getByRole("button", { name: "Continue" }),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Enter password")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Unlock wallet" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("re-arms the session and completes the import in place, without losing the entered mnemonic", async () => {
+      const { setActiveAccount, encryptAccount, unlock } =
+        renderWithExpiredSession({
+          unlock: vi.fn(async () => true),
+          getWalletPasswordAfterReArm: async () => "the-password",
+        });
+      await submitMnemonic();
+      await screen.findByText(
+        "Your unlocked session expired and nothing was saved yet.",
+      );
+
+      await userEvent.type(screen.getByLabelText("Enter password"), "pw");
+      await userEvent.click(screen.getByRole("button", { name: "Continue" }));
 
       await waitFor(() => {
-        expect(lock).toHaveBeenCalledTimes(1);
+        expect(encryptAccount).toHaveBeenCalledWith(
+          seededAccount,
+          "the-password",
+        );
       });
+      expect(unlock).toHaveBeenCalledWith("pw");
+      expect(setActiveAccount).toHaveBeenCalledWith(seededAccount.address);
+      await waitFor(() => {
+        expect(
+          screen.getByText("Mocked Account Import Success"),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("shows the normal wrong-password error when the re-arm password is wrong", async () => {
+      renderWithExpiredSession({ unlock: vi.fn(async () => false) });
+      await submitMnemonic();
+      await screen.findByText(
+        "Your unlocked session expired and nothing was saved yet.",
+      );
+
+      await userEvent.type(screen.getByLabelText("Enter password"), "wrong");
+      await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("The entered password is incorrect"),
+        ).toBeInTheDocument();
+      });
+      expect(
+        screen.queryByText("Mocked Account Import Success"),
+      ).not.toBeInTheDocument();
     });
   });
 });
