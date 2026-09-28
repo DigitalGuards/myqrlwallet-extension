@@ -68,7 +68,11 @@ const SettingsPreferences = observer(() => {
               <Label className="mb-2 block text-xs text-muted-foreground">
                 {t("settings.preferences.currencyLabel")}
               </Label>
-              <Select value={currency} onValueChange={setCurrency}>
+              <Select
+                name="displayCurrency"
+                value={currency}
+                onValueChange={setCurrency}
+              >
                 <SelectTrigger aria-label="Display currency">
                   <SelectValue />
                 </SelectTrigger>
@@ -86,7 +90,11 @@ const SettingsPreferences = observer(() => {
               <Label className="mb-2 block text-xs text-muted-foreground">
                 {t("settings.preferences.languageLabel")}
               </Label>
-              <Select value={language} onValueChange={setLanguage}>
+              <Select
+                name="displayLanguage"
+                value={language}
+                onValueChange={setLanguage}
+              >
                 <SelectTrigger aria-label="Language">
                   <SelectValue />
                 </SelectTrigger>
@@ -105,6 +113,7 @@ const SettingsPreferences = observer(() => {
                 {t("settings.preferences.gasLabel")}
               </Label>
               <Select
+                name="defaultGasTier"
                 value={defaultGasTier}
                 onValueChange={(v) => setDefaultGasTier(v as GasTier)}
               >

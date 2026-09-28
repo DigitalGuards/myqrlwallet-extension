@@ -270,7 +270,7 @@ export const GasFeeSelector = observer(
                       </TooltipContent>
                     </Tooltip>
                   </div>
-                  <div className="flex flex-col items-end font-numeric text-right text-xs text-muted-foreground">
+                  <div className="flex flex-col items-end text-right font-numeric text-xs text-muted-foreground">
                     {isLoadingCosts ? (
                       <Loader className="h-3 w-3 animate-spin" />
                     ) : cost ? (
@@ -337,8 +337,11 @@ export const GasFeeSelector = observer(
                     {t("gasFee.maxPriorityFee")}
                   </Label>
                   <Input
+                    id="gasMaxPriorityFeePerGas"
+                    name="gasMaxPriorityFeePerGas"
                     type="text"
                     inputMode="numeric"
+                    autoComplete="off"
                     placeholder={t("gasFee.placeholderAuto")}
                     value={advancedValues.maxPriorityFeePerGas}
                     onChange={(e) =>
@@ -356,8 +359,11 @@ export const GasFeeSelector = observer(
                     {t("gasFee.maxFee")}
                   </Label>
                   <Input
+                    id="gasMaxFeePerGas"
+                    name="gasMaxFeePerGas"
                     type="text"
                     inputMode="numeric"
+                    autoComplete="off"
                     placeholder={t("gasFee.placeholderAuto")}
                     value={advancedValues.maxFeePerGas}
                     onChange={(e) =>
@@ -372,8 +378,11 @@ export const GasFeeSelector = observer(
                     {t("gasFee.gasLimit")}
                   </Label>
                   <Input
+                    id="gasLimit"
+                    name="gasLimit"
                     type="text"
                     inputMode="numeric"
+                    autoComplete="off"
                     placeholder={t("gasFee.placeholderAuto")}
                     value={advancedValues.gasLimit}
                     onChange={(e) =>

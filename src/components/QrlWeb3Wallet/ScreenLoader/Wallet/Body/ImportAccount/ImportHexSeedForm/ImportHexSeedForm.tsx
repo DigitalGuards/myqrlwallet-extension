@@ -88,8 +88,14 @@ const ImportHexSeedForm = observer(({ onImported }: ImportHexSeedFormProps) => {
                 <FormControl>
                   <Input
                     {...field}
+                    id="hexSeed"
                     aria-label={field.name}
+                    // Secret material: never offered to autofill or to a
+                    // password manager, and never corrected on entry.
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     disabled={isSubmitting}
                     placeholder={t("importAccount.hexSeedPlaceholder")}
                   />

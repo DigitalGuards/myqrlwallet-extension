@@ -183,6 +183,7 @@ const SettingsSecurity = observer(() => {
                 {t("settings.security.autoLockLabel")}
               </Label>
               <Select
+                name="autoLockMinutes"
                 value={String(autoLockMinutes)}
                 onValueChange={(value) => setAutoLockMinutes(Number(value))}
               >
@@ -203,6 +204,7 @@ const SettingsSecurity = observer(() => {
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="show-balance-price"
+                  name="showBalanceAndPrice"
                   checked={showBalanceAndPrice}
                   onCheckedChange={handleTogglePrice}
                 />
@@ -219,6 +221,7 @@ const SettingsSecurity = observer(() => {
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="notifications-enabled"
+                  name="notificationsEnabled"
                   checked={notificationsEnabled}
                   onCheckedChange={(checked) =>
                     setNotificationsEnabled(checked === true)
@@ -237,6 +240,7 @@ const SettingsSecurity = observer(() => {
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="phishing-detection-enabled"
+                  name="phishingDetectionEnabled"
                   checked={phishingDetectionEnabled}
                   onCheckedChange={(checked) =>
                     setPhishingDetectionEnabled(checked === true)
@@ -284,6 +288,7 @@ const SettingsSecurity = observer(() => {
                     <FormControl>
                       <Input
                         {...field}
+                        id="changePasswordCurrent"
                         aria-label={t("settings.security.currentPassword")}
                         type="password"
                         autoComplete="current-password"
@@ -305,6 +310,7 @@ const SettingsSecurity = observer(() => {
                     <FormControl>
                       <Input
                         {...field}
+                        id="changePasswordNew"
                         aria-label={t("settings.security.newPassword")}
                         type="password"
                         autoComplete="new-password"
@@ -326,6 +332,7 @@ const SettingsSecurity = observer(() => {
                     <FormControl>
                       <Input
                         {...field}
+                        id="changePasswordConfirm"
                         aria-label={t("settings.security.confirmNewPassword")}
                         type="password"
                         autoComplete="new-password"

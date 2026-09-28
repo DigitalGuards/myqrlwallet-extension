@@ -94,7 +94,9 @@ const LockPasswordSetup = ({
                   <FormControl>
                     <Input
                       {...field}
+                      id="walletSetupPassword"
                       aria-label={field.name}
+                      autoComplete="new-password"
                       disabled={isSubmitting}
                       placeholder={t("onboarding.password.placeholder")}
                       type="password"
@@ -113,7 +115,9 @@ const LockPasswordSetup = ({
                   <FormControl>
                     <Input
                       {...field}
+                      id="walletSetupPasswordConfirm"
                       aria-label={field.name}
+                      autoComplete="new-password"
                       disabled={isSubmitting}
                       placeholder={t("onboarding.password.confirmPlaceholder")}
                       type="password"

@@ -52,6 +52,7 @@ const SettingsAppearance = observer(() => {
               {t("settings.appearance.themeLabel")}
             </Label>
             <Select
+              name="themePreference"
               value={themePreference}
               onValueChange={(value) =>
                 setThemePreference(value as "system" | "light" | "dark")
