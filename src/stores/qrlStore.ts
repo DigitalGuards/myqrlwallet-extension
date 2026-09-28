@@ -641,7 +641,7 @@ class QrlStore {
             balance,
             // The exact on-chain integer. `balance` above is a float for
             // display; anything that has to compare or spend the balance
-            // (the send form's guard and its Max) uses this instead, so a
+            // (the send form's guard and its Max) reads this one, so a
             // balance smaller than the display rounding still sends and Max
             // leaves no dust behind.
             balanceBaseUnits: balanceUnformatted.toString(),

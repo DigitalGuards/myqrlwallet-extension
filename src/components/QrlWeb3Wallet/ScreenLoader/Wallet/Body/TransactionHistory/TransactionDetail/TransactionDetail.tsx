@@ -229,12 +229,12 @@ const TransactionDetail = observer(() => {
         return;
       }
 
-      // The original is NOT marked replaced yet: the replacement has only
-      // been signed at this point. A broadcast that the node rejects (an
-      // underpriced replacement, a stale nonce) used to leave the original
-      // reading "Replaced" while it was still the only live transaction,
-      // with nothing to restore it. Marked from the broadcast handler below
-      // instead, once the node has actually taken the replacement.
+      // The broadcast handler below marks the original, once the node has
+      // actually taken the replacement. At this point the replacement has
+      // only been signed, and a broadcast the node rejects (an underpriced
+      // replacement, a stale nonce) used to leave the original reading
+      // "Replaced" while it was still the only live transaction, with
+      // nothing to restore it.
       const markOriginalReplaced = async () => {
         await transactionHistoryStore.updateTransaction(
           transaction.from,

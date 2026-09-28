@@ -265,8 +265,8 @@ describe("TokenTransfer", () => {
         "1",
         expect.any(String),
         // The stored default gas tier is applied on mount, so every send
-        // carries it. Before, the overrides stayed undefined and the store
-        // fell back to market.
+        // carries it. Before this fix the overrides stayed undefined and
+        // the store fell back to market.
         { tier: "market" },
       );
     });
