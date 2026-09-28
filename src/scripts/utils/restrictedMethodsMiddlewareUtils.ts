@@ -19,6 +19,7 @@ import {
   PARENT_CAPABILITIES,
   Permission,
 } from "../middlewares/middlewareTypes";
+import { registerDAppTransactionWatch } from "./dAppTransactionWatcher";
 
 const getFromAddress = (req: JsonRpcRequest<JsonRpcRequest>) => {
   switch (req.method) {
@@ -750,6 +751,64 @@ export const includeChainForUrlOrigin = async ({
     accounts: dAppConnectedData?.accounts ?? [],
     blockchains: updatedBlockchains,
   });
+};
+
+/**
+ * A qrl_sendTransaction response that timed out waiting for the broadcast
+ * (QrlSendTransactionForContent's TransactionMayStillBeProcessingError)
+ * still carries the locally computed hash, under `error.data`, because the
+ * transaction may have reached the node regardless of what the dApp was
+ * told. Reads that hash back out so the watch below still gets registered
+ * for it.
+ */
+export const extractPendingDAppTransactionHash = (
+  response: unknown,
+): string | undefined => {
+  const errorData = (
+    response as { error?: { data?: { transactionHash?: unknown } } }
+  )?.error?.data;
+  return typeof errorData?.transactionHash === "string"
+    ? errorData.transactionHash
+    : undefined;
+};
+
+/**
+ * Called by restrictedMethodsMiddleware once it has an approved
+ * qrl_sendTransaction response, whether that response carries a result
+ * hash or (see extractPendingDAppTransactionHash) a still-pending one under
+ * an error. The approval surface answers the dApp as soon as the
+ * transaction broadcasts (see QrlSendTransactionForContent's own comment),
+ * and its history poller lives in the document that response closes.
+ * Registering the hash here hands confirmation and notification to the
+ * service worker's own watcher, so both still happen whether or not that
+ * surface is still open.
+ *
+ * A no-op for any response without a usable hash or sender, and safe to
+ * await unconditionally: every failure is caught and logged internally.
+ * This runs from restrictedMethodsMiddleware's `finally`, where an
+ * uncaught throw here would stop `end()` from ever running and void an
+ * otherwise-successful response.
+ */
+export const registerDAppTransactionWatchIfApproved = async (
+  req: JsonRpcRequest<JsonRpcRequest>,
+  transactionHash: unknown,
+  authorizedChainId?: string,
+): Promise<void> => {
+  try {
+    if (typeof transactionHash !== "string" || !transactionHash) return;
+    const from = getFromAddress(req);
+    if (typeof from !== "string" || !from) return;
+    await registerDAppTransactionWatch({
+      hash: transactionHash,
+      account: from,
+      chainId: authorizedChainId ?? V3_CHAIN_ID,
+    });
+  } catch (error) {
+    console.error(
+      "QrlWeb3Wallet: Failed to register a dApp transaction watch:",
+      error,
+    );
+  }
 };
 
 export const excludeChainForUrlOrigin = async ({

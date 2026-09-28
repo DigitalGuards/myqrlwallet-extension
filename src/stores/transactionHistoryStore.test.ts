@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import browser from "webextension-polyfill";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 
 const {
@@ -389,6 +390,55 @@ describe("TransactionHistoryStore", () => {
         status: true,
       }),
     );
+
+    store.stopPolling();
+  });
+
+  it("skips the notification, but still refreshes the entry, when it was already confirmed out-of-band", async () => {
+    // Mirrors dAppTransactionWatcher.ts's own guard against the mirror-image
+    // race: the service worker's dApp-transaction watcher can confirm a
+    // hash between this interval starting and this tick running, using
+    // this store's own stale `this.transactions` snapshot. A second
+    // SEND_TX_NOTIFICATION for the same outcome must not fire.
+    const pendingEntry = makeSampleEntry({
+      pendingStatus: "pending",
+      transactionHash: "0xalreadyconfirmed",
+    });
+
+    const mockQrlInstance = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        transactionHash: "0xalreadyconfirmed",
+        status: BigInt(1),
+        blockNumber: BigInt(200),
+        gasUsed: BigInt(21000),
+        effectiveGasPrice: BigInt(2000000000),
+      }),
+    };
+
+    const store = new TransactionHistoryStore();
+    store.transactions = [pendingEntry];
+
+    // Storage already shows this hash as confirmed by the time this tick
+    // reads it, e.g. the watcher got there first.
+    mockGetTransactionHistory.mockResolvedValue([
+      { ...pendingEntry, pendingStatus: "confirmed", status: true },
+    ]);
+    vi.mocked(browser.runtime.sendMessage).mockClear();
+
+    store.startPolling(
+      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      mockQrlInstance,
+    );
+
+    vi.advanceTimersByTime(10000);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mockUpdateTransactionHistoryEntry).toHaveBeenCalledWith(
+      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      "0xalreadyconfirmed",
+      expect.objectContaining({ pendingStatus: "confirmed" }),
+    );
+    expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
 
     store.stopPolling();
   });
