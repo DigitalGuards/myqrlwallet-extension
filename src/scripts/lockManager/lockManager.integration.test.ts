@@ -88,11 +88,22 @@ vi.mock("webextension-polyfill", () => ({
         mockPendingAlarms = mockPendingAlarms.filter((a) => a.name !== name);
         return Promise.resolve(true);
       }),
+      get: vi.fn((name: string) =>
+        Promise.resolve(
+          mockPendingAlarms.some((a) => a.name === name)
+            ? { name, scheduledTime: 0 }
+            : null,
+        ),
+      ),
       onAlarm: {
         addListener: vi.fn(),
       },
     },
     runtime: {
+      id: "mock-extension-id",
+      getURL: vi.fn(
+        (path: string) => `chrome-extension://mock-extension-id/${path}`,
+      ),
       onMessage: { addListener: vi.fn() },
       sendMessage: vi.fn(() => Promise.resolve()),
       connect: vi.fn(() => ({
@@ -163,9 +174,17 @@ async function advanceAndFireAlarms(ms: number): Promise<number> {
   return fired;
 }
 
+// A legitimate caller: an extension page, matching both the extension id
+// and an extension-origin URL that lockManagerListener's sender guard
+// requires (F9).
+const TRUSTED_SENDER = {
+  id: "mock-extension-id",
+  url: "chrome-extension://mock-extension-id/index.html",
+} as any;
+
 /** Simulate sending a message through the lockManagerListener (like the popup does). */
 async function sendMessage(name: string, data?: any) {
-  return LockManager.lockManagerListener({ name, data });
+  return LockManager.lockManagerListener({ name, data }, TRUSTED_SENDER);
 }
 
 async function unlockWallet() {
@@ -254,9 +273,10 @@ describe("Auto-lock integration scenarios", () => {
       await advanceAndFireAlarms(minutes(10));
       expect(await checkLocked()).toBe(false);
 
-      // Activity at 10 min - a decrypted-keys fetch (e.g. the user signs or
-      // checks a balance) triggers the activity reset in lockManagerListener.
-      await sendMessage(LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS);
+      // Activity at 10 min - the throttled pointer/keyboard/focus ping an
+      // open surface sends (see lockStore.ts) triggers the activity reset
+      // in lockManagerListener (F2).
+      await sendMessage(LOCK_MANAGER_MESSAGES.USER_ACTIVITY);
       // The alarm was recreated with fresh 15 minutes from now
 
       // 10 more minutes (total 20 min from start, but only 10 from last activity)
@@ -276,8 +296,8 @@ describe("Auto-lock integration scenarios", () => {
       for (let i = 0; i < 6; i++) {
         await advanceAndFireAlarms(minutes(10));
         expect(await checkLocked()).toBe(false);
-        // Activity - e.g. user checks balance
-        await sendMessage(LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS);
+        // Activity - e.g. the user is actively using an open surface
+        await sendMessage(LOCK_MANAGER_MESSAGES.USER_ACTIVITY);
       }
 
       // Total 60 minutes of activity - still unlocked
@@ -285,6 +305,29 @@ describe("Auto-lock integration scenarios", () => {
 
       // Now stop activity - should lock after 15 minutes
       const fired = await advanceAndFireAlarms(minutes(15) + 1);
+      expect(fired).toBeGreaterThanOrEqual(1);
+      expect(await checkLocked()).toBe(true);
+    });
+
+    it("should NOT reset the timer on reads or automated traffic (F2)", async () => {
+      await unlockWallet();
+
+      // 10 minutes pass - still well within timeout
+      await advanceAndFireAlarms(minutes(10));
+      expect(await checkLocked()).toBe(false);
+
+      // None of these represent the user actively doing something: a
+      // decrypted-keys read, a lock-state poll, and an automated
+      // tx-notification message. None should postpone the lock.
+      await sendMessage(LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEYS);
+      await sendMessage(LOCK_MANAGER_MESSAGES.IS_LOCKED);
+      await sendMessage(LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION, {
+        status: "confirmed",
+      });
+
+      // 5 more minutes (total 15 min from unlock, none of it postponed by
+      // the reads above) - should lock right on schedule.
+      const fired = await advanceAndFireAlarms(minutes(5) + 1);
       expect(fired).toBeGreaterThanOrEqual(1);
       expect(await checkLocked()).toBe(true);
     });

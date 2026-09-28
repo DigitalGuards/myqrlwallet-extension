@@ -41,15 +41,23 @@ import {
 
 // Registered here, synchronously, at module evaluation: MV3 requires an
 // alarm listener to be attached before the script's first `await`, or an
-// alarm firing during a cold start can be missed entirely. The other
-// alarms below share one listener inside prepareListeners(), which already
-// sits behind an `await` in initializeServiceWorker() (a pre-existing gap
-// this fix does not touch); giving all four their own synchronous
-// listeners is a broader change than this one needs, so only the new alarm
-// gets one here.
+// alarm firing during a cold start can be missed entirely. QRL_AUTO_LOCK
+// and QRL_KEEP_ALIVE used to be handled by a second listener registered
+// inside prepareListeners(), which sits behind the `await
+// applyEarlySidePanelToolbarBehavior()` in initializeServiceWorker() below;
+// an alarm that woke a cold SW could fire and be dropped before that
+// listener ever attached, and since QRL_AUTO_LOCK is a one-shot alarm
+// nothing would ever recreate it, leaving the wallet unlocked indefinitely.
+// All alarm handling now lives here, dispatched by name.
 browser.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === DAPP_TX_WATCH_ALARM_NAME) {
     handleDAppTransactionWatchAlarm();
+  } else if (alarm.name === LockManager.AUTO_LOCK_ALARM) {
+    LockManager.handleAutoLockAlarm();
+  } else if (alarm.name === LockManager.KEEP_ALIVE_ALARM) {
+    LockManager.handleKeepAliveAlarm();
+  } else if (alarm.name === PHISHING_ALARM_NAME) {
+    handlePhishingRefreshAlarm();
   }
 });
 
@@ -143,18 +151,6 @@ const prepareListeners = () => {
         console.error("QrlWeb3Wallet: Failed to create notification:", error);
       }
     })();
-  });
-  // Alarm listener for auto-lock and keep-alive. DAPP_TX_WATCH_ALARM_NAME is
-  // handled by its own listener above, registered synchronously rather
-  // than from here.
-  browser.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === LockManager.AUTO_LOCK_ALARM) {
-      LockManager.handleAutoLockAlarm();
-    } else if (alarm.name === LockManager.KEEP_ALIVE_ALARM) {
-      LockManager.handleKeepAliveAlarm();
-    } else if (alarm.name === PHISHING_ALARM_NAME) {
-      handlePhishingRefreshAlarm();
-    }
   });
 };
 

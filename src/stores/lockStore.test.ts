@@ -82,6 +82,7 @@ const clearStore = (store: Record<string, any>) => {
   for (const k of Object.keys(store)) delete store[k];
 };
 
+import browser from "webextension-polyfill";
 import type { DecryptedKeyType } from "@/scripts/lockManager/lockManager";
 import { LEGACY_QRL_ADDRESS_MIGRATION_ERROR } from "@/utilities/addressUtil";
 
@@ -169,6 +170,9 @@ describe("LockStore – readLockState timestamp check", () => {
       );
       expect(setKeysCalls).toHaveLength(1);
       expect((setKeysCalls[0] as any)[0].data).toEqual(MOCK_KEYS);
+      // N6: tagged so lockManagerListener's activity allow-list excludes
+      // it - this is an automatic recovery resend.
+      expect((setKeysCalls[0] as any)[0].recovery).toBe(true);
 
       // Wallet should now be unlocked
       expect(store.isLocked).toBe(false);
@@ -356,6 +360,211 @@ describe("LockStore – destructive paths", () => {
       await expect(store.removeAccountKey(OTHER_KEY.address)).rejects.toThrow();
     });
   });
+
+  describe("lock (F6)", () => {
+    it("does not write the LOCKED timestamp itself, trusting the service worker's own write", async () => {
+      // LockManager.lock() (mocked here as a bare success response) now
+      // writes the LOCKED timestamp itself, durably, before clearing
+      // anything. The surface used to also write it, unawaited - a race
+      // that let another open surface see a stale timestamp and mistake
+      // the lock for a service-worker restart. Nothing in the surface's
+      // own lock() should touch local storage directly any more.
+      const store = await createLockStore();
+      (store as any).cachedKeys = MOCK_KEYS;
+      (store as any).cachedPassword = "pw";
+      mockSendMessage.mockResolvedValue({ isLocked: true });
+
+      await store.lock();
+
+      expect(
+        localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")],
+      ).toBeUndefined();
+      expect((store as any).cachedKeys).toBeUndefined();
+      expect((store as any).cachedPassword).toBeUndefined();
+      expect(store.isLocked).toBe(true);
+    });
+  });
+});
+
+describe("LockStore – storage listener ignores automated traffic (F2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearStore(localStore);
+    clearStore(sessionStore);
+  });
+
+  async function createLockStoreAndGetStorageListener() {
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+    const module = await import("./lockStore");
+    new module.default();
+    await new Promise((r) => setTimeout(r, 300));
+
+    const addListenerMock = browser.storage.onChanged.addListener as any;
+    expect(addListenerMock).toHaveBeenCalledTimes(1);
+    return addListenerMock.mock.calls[0][0] as (
+      changes: Record<string, unknown>,
+      areaName: string,
+    ) => Promise<void>;
+  }
+
+  it("does not call readLockState for an automated keepAlive-only session write", async () => {
+    const listener = await createLockStoreAndGetStorageListener();
+    mockSendMessage.mockClear();
+
+    await listener(
+      { [profileStorageKey("keepAlive")]: { newValue: Date.now() } },
+      "session",
+    );
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not call readLockState for an automated dApp-watch-only session write", async () => {
+    const listener = await createLockStoreAndGetStorageListener();
+    mockSendMessage.mockClear();
+
+    await listener(
+      { [profileStorageKey("DAPP_TX_WATCHES")]: { newValue: [] } },
+      "session",
+    );
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("still calls readLockState for a genuine session change (e.g. the decrypted-keys backup)", async () => {
+    const listener = await createLockStoreAndGetStorageListener();
+    mockSendMessage.mockClear();
+    mockSendMessage.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+
+    await listener(
+      { [profileStorageKey("_LM_CACHED_KEYS")]: { newValue: MOCK_KEYS } },
+      "session",
+    );
+
+    expect(mockSendMessage).toHaveBeenCalled();
+  });
+
+  it("still calls readLockState for a local storage change unrelated to the price cache", async () => {
+    const listener = await createLockStoreAndGetStorageListener();
+    mockSendMessage.mockClear();
+    mockSendMessage.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+
+    await listener(
+      { [profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")]: { newValue: 1 } },
+      "local",
+    );
+
+    expect(mockSendMessage).toHaveBeenCalled();
+  });
+});
+
+describe("LockStore – throttled user-activity ping (F2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearStore(localStore);
+    clearStore(sessionStore);
+  });
+
+  async function createLockStore() {
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+    const module = await import("./lockStore");
+    const store = new module.default();
+    await new Promise((r) => setTimeout(r, 300));
+    return store;
+  }
+
+  it("sends USER_ACTIVITY on pointer activity", async () => {
+    await createLockStore();
+    mockSendMessage.mockClear();
+
+    document.dispatchEvent(new Event("pointerdown"));
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      name: "LOCK_MANAGER_USER_ACTIVITY",
+    });
+  });
+
+  it("sends USER_ACTIVITY on keyboard activity", async () => {
+    await createLockStore();
+    mockSendMessage.mockClear();
+
+    document.dispatchEvent(new Event("keydown"));
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      name: "LOCK_MANAGER_USER_ACTIVITY",
+    });
+  });
+
+  it("throttles repeated activity to at most once per 30s", async () => {
+    await createLockStore();
+    mockSendMessage.mockClear();
+
+    document.dispatchEvent(new Event("pointerdown"));
+    document.dispatchEvent(new Event("pointerdown"));
+    document.dispatchEvent(new Event("keydown"));
+
+    const activityPings = mockSendMessage.mock.calls.filter(
+      (call: any) => call[0]?.name === "LOCK_MANAGER_USER_ACTIVITY",
+    );
+    expect(activityPings).toHaveLength(1);
+  });
+
+  it("sends USER_ACTIVITY on a mouse wheel/scroll gesture (N3)", async () => {
+    await createLockStore();
+    mockSendMessage.mockClear();
+
+    document.dispatchEvent(new Event("wheel"));
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      name: "LOCK_MANAGER_USER_ACTIVITY",
+    });
+  });
+
+  it("sends USER_ACTIVITY on a scroll event from a nested scrolling container (N3)", async () => {
+    await createLockStore();
+    mockSendMessage.mockClear();
+
+    // A capturing listener on document sees this even though "scroll" does
+    // not bubble: the scrolling container (e.g. an account/history list)
+    // fires its own scroll event on itself.
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    container.dispatchEvent(new Event("scroll", { bubbles: false }));
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      name: "LOCK_MANAGER_USER_ACTIVITY",
+    });
+
+    document.body.removeChild(container);
+  });
+
+  it("sends USER_ACTIVITY when the document becomes visible again (N3)", async () => {
+    await createLockStore();
+    mockSendMessage.mockClear();
+
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(mockSendMessage).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      name: "LOCK_MANAGER_USER_ACTIVITY",
+    });
+  });
 });
 
 describe("LockStore – unlock worker fan-out", () => {
@@ -441,7 +650,7 @@ describe("LockStore – unlock worker fan-out", () => {
 
     const unlocked = await store.unlock("pw");
 
-    expect(unlocked).toBe(true);
+    expect(unlocked).toBe("success");
     expect(spawned).toBe(2);
     const setKeysCall: any = mockSendMessage.mock.calls.find(
       (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
@@ -449,7 +658,7 @@ describe("LockStore – unlock worker fan-out", () => {
     expect(setKeysCall?.[0]?.data?.keys).toEqual([KEY_A, KEY_B]);
   });
 
-  it("returns false without retrying when a worker reports a wrong password", async () => {
+  it("returns 'wrong-password' without retrying when a worker reports a wrong password", async () => {
     const store = await createLockStore();
     behaviors = [
       () => ({ success: true, keys: [KEY_A], upgraded: [null] }),
@@ -458,12 +667,47 @@ describe("LockStore – unlock worker fan-out", () => {
 
     const unlocked = await store.unlock("bad-pw");
 
-    expect(unlocked).toBe(false);
+    expect(unlocked).toBe("wrong-password");
     expect(spawned).toBe(2);
     const setKeysCalls = mockSendMessage.mock.calls.filter(
       (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
     );
     expect(setKeysCalls).toHaveLength(0);
+  });
+
+  it("returns 'failed' (not 'wrong-password') when there are no keystores to check against (N2)", async () => {
+    localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([]);
+    const store = await createLockStore();
+
+    const unlocked = await store.unlock("pw");
+
+    expect(unlocked).toBe("failed");
+    expect(spawned).toBe(0);
+  });
+
+  it("returns 'failed' (not 'wrong-password') and leaves isLocked untouched when the final IS_LOCKED re-check still reports locked (N2/N8)", async () => {
+    // Mirrors the SessionPasswordPrompt scenario: the store's isLocked is
+    // already false (an in-progress Import/Create screen is showing) when
+    // this runs. A worker already confirmed the password decrypts the
+    // keystore, so a lingering "still locked" answer after SET_DECRYPTED_KEYS
+    // must not be reported as a wrong password, and must not flip isLocked
+    // to true and unmount that screen.
+    const store = await createLockStore();
+    expect(store.isLocked).toBe(false);
+    behaviors = [
+      () => ({ success: true, keys: [KEY_A], upgraded: [null] }),
+      () => ({ success: true, keys: [KEY_B], upgraded: [null] }),
+    ];
+    mockSendMessage.mockResolvedValueOnce({ success: true }); // SET_DECRYPTED_KEYS
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: true,
+      hasPasswordSet: true,
+    }); // final IS_LOCKED re-check
+
+    const unlocked = await store.unlock("pw");
+
+    expect(unlocked).toBe("failed");
+    expect(store.isLocked).toBe(false);
   });
 
   it("requires explicit migration before decrypting a legacy-address keystore", async () => {
@@ -493,7 +737,7 @@ describe("LockStore – unlock worker fan-out", () => {
 
     const unlocked = await store.unlock("pw");
 
-    expect(unlocked).toBe(true);
+    expect(unlocked).toBe("success");
     expect(spawned).toBe(3);
     const setKeysCall: any = mockSendMessage.mock.calls.find(
       (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
@@ -526,7 +770,7 @@ describe("LockStore – unlock worker fan-out", () => {
 
     const unlocked = await store.unlock("pw");
 
-    expect(unlocked).toBe(true);
+    expect(unlocked).toBe("success");
     expect(JSON.parse(localStore[profileStorageKey("KEYSTORES")])).toEqual([
       KEYSTORE_A,
       upgradedB,

@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
 
-const { getConnectedAccounts, getChainId, getNetworkId, requestManagerSend } =
-  vi.hoisted(() => ({
-    getConnectedAccounts: vi.fn(),
-    getChainId: vi.fn(),
-    getNetworkId: vi.fn(),
-    requestManagerSend: vi.fn(),
-  }));
+const {
+  getConnectedAccounts,
+  getChainId,
+  getNetworkId,
+  requestManagerSend,
+  mockIsLocked,
+} = vi.hoisted(() => ({
+  getConnectedAccounts: vi.fn(),
+  getChainId: vi.fn(),
+  getNetworkId: vi.fn(),
+  requestManagerSend: vi.fn(),
+  mockIsLocked: vi.fn(),
+}));
 
 vi.mock("@/utilities/storageUtil", () => ({
   default: {
@@ -17,6 +23,12 @@ vi.mock("@/utilities/storageUtil", () => ({
     }),
     getDAppsConnectedAccountsData: getConnectedAccounts,
   },
+}));
+
+// The real LockManager pulls in the @theqrl/web3 crypto graph; qrl_accounts
+// only needs its isLocked() answer (F8).
+vi.mock("../lockManager/lockManager", () => ({
+  default: { isLocked: (...args: any[]) => mockIsLocked(...args) },
 }));
 
 vi.mock("@theqrl/web3", () => {
@@ -175,5 +187,49 @@ describe("QIP-55 log RPC methods", () => {
     ).rejects.toThrow("exact VM64 form");
 
     expect(requestManagerSend).not.toHaveBeenCalled();
+  });
+});
+
+describe("qrl_accounts (F8)", () => {
+  const request = (origin: string) =>
+    ({
+      id: 1,
+      jsonrpc: "2.0",
+      method: UNRESTRICTED_METHODS.QRL_ACCOUNTS,
+      senderData: { url: origin },
+    }) as never;
+
+  beforeEach(() => {
+    mockIsLocked.mockReset();
+    getConnectedAccounts.mockReset();
+  });
+
+  it("returns an empty array while the wallet is locked, even for a connected origin", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+    getConnectedAccounts.mockResolvedValue({ accounts: ["QConnected"] });
+
+    await expect(
+      executeUnrestrictedMethod(request("https://connected.example")),
+    ).resolves.toEqual([]);
+    // Never leaks the connected-accounts lookup for a locked wallet.
+    expect(getConnectedAccounts).not.toHaveBeenCalled();
+  });
+
+  it("returns the connected accounts once unlocked", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: false, hasPasswordSet: true });
+    getConnectedAccounts.mockResolvedValue({ accounts: ["QConnected"] });
+
+    await expect(
+      executeUnrestrictedMethod(request("https://connected.example")),
+    ).resolves.toEqual(["QConnected"]);
+  });
+
+  it("returns an empty array while unlocked with no connection for the origin", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: false, hasPasswordSet: true });
+    getConnectedAccounts.mockResolvedValue(undefined);
+
+    await expect(
+      executeUnrestrictedMethod(request("https://stranger.example")),
+    ).resolves.toEqual([]);
   });
 });

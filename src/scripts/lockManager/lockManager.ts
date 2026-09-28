@@ -4,12 +4,21 @@ import { Bytes } from "@theqrl/web3";
 import { encryptKeystore } from "@/crypto/keystoreCrypto";
 import { getMnemonicFromHexSeed } from "@/functions/getMnemonicFromHexSeed";
 import { isQrlAddress } from "@/utilities/addressUtil";
+import { EXTENSION_MESSAGES } from "../constants/streamConstants";
 import browser from "webextension-polyfill";
 
 type MessageType = {
-  name: string;
+  name?: string;
+  // A dApp approval/rejection response uses `action` as its discriminator
+  // - see EXTENSION_MESSAGES.DAPP_RESPONSE in dAppRequestStore.ts.
+  action?: string;
+  // Set by lockStore.ts's readLockState() when it automatically re-sends
+  // cached keys to recover from an apparent service-worker restart. That
+  // resend is automated background traffic - see the activity allow-list
+  // below.
+  recovery?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  data: any;
+  data?: any;
 };
 
 export type EncryptAccountType = {
@@ -45,7 +54,27 @@ export const LOCK_MANAGER_MESSAGES = {
   RESET_WALLET: "LOCK_MANAGER_RESET_WALLET",
   UPDATE_AUTO_LOCK: "LOCK_MANAGER_UPDATE_AUTO_LOCK",
   SEND_TX_NOTIFICATION: "SEND_TX_NOTIFICATION",
+  // A throttled ping the open surfaces send on pointer/keyboard/focus
+  // activity, purely so the auto-lock timer can tell "the user is actively
+  // using an open surface" apart from automated traffic (keep-alive ticks,
+  // IS_LOCKED polling, background notifications). Carries no data.
+  USER_ACTIVITY: "LOCK_MANAGER_USER_ACTIVITY",
 } as const;
+
+// Message names that represent a deliberate user action or a user-initiated
+// write, and therefore postpone the inactivity auto-lock. Everything else -
+// reads (GET_*, IS_LOCKED), automated background traffic (keep-alive ticks,
+// SEND_TX_NOTIFICATION), and unrelated messages this listener merely
+// overhears - must NOT postpone it, or the wallet never locks while any
+// surface is left open. See lockManagerListener() below for the dApp
+// approval/rejection exception, which is keyed by its own `action` field.
+const AUTO_LOCK_ACTIVITY_MESSAGE_NAMES: ReadonlySet<string> = new Set([
+  LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS,
+  LOCK_MANAGER_MESSAGES.ENCRYPT_ACCOUNT,
+  LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK,
+  LOCK_MANAGER_MESSAGES.REMOVE_ACCOUNT_KEY,
+  LOCK_MANAGER_MESSAGES.USER_ACTIVITY,
+]);
 
 /**
  * The lock manager, which is part of the extension service worker handles lock related data and functions.
@@ -66,8 +95,35 @@ class LockManager {
   static readonly AUTO_LOCK_ALARM = "QRL_AUTO_LOCK";
   static readonly KEEP_ALIVE_ALARM = "QRL_KEEP_ALIVE";
   private static readonly SESSION_KEYS_KEY = "_LM_CACHED_KEYS";
+  // Every read/write against the session-storage key backup runs through
+  // this chain, one at a time, in call order. Without it a lock() that
+  // clears the backup can race a slightly earlier, still-in-flight
+  // backupKeysToSession() write: the clear finishes first, the stale write
+  // lands after, and the wallet reads as unlocked again on the next SW
+  // restart even though the user just locked it.
+  private static sessionOpQueue: Promise<unknown> = Promise.resolve();
 
+  private static queueSessionOp<T>(op: () => Promise<T>): Promise<T> {
+    const result = this.sessionOpQueue.then(op, op);
+    // Keep the chain alive even if this op rejected, so later ops still
+    // run; the rejection itself still reaches whoever awaited `result`.
+    this.sessionOpQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  /**
+   * Locking is the one path every other surface's restart-recovery logic
+   * has to trust, so the LOCKED timestamp is written first, durably, before
+   * anything else: readLockState() on another open surface compares it
+   * against the UNLOCKED timestamp to tell an intentional lock from a
+   * service-worker restart, and by the time this returns that comparison
+   * can no longer see a stale (pre-lock) answer.
+   */
   static async lock() {
+    await StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
     this.clearDecryptedKeys();
     this.walletPassword = undefined;
     await this.clearSessionKeys();
@@ -94,7 +150,10 @@ class LockManager {
       await this.clearSessionKeys();
       return { success: true };
     }
-    this.setDecryptedKeys(
+    // Awaited: the caller (and the popup's ack) must not resolve before the
+    // scrub of the session backup is durable, or a service-worker restart
+    // right after could still restore the removed account's mnemonic.
+    await this.setDecryptedKeys(
       this.decryptedKeys.filter(
         (key) => key?.address?.toLowerCase() !== target,
       ),
@@ -117,7 +176,12 @@ class LockManager {
   static async resetWallet() {
     this.clearDecryptedKeys();
     this.walletPassword = undefined;
-    await walletSessionStorage.clear();
+    // Routed through the same queue as backupKeysToSession()/
+    // clearSessionKeys(): an in-flight backup write from just before the
+    // reset is ordered strictly before the clear, so the clear is always
+    // the last write and a key backup cannot resurrect for a wallet that
+    // no longer exists.
+    await this.queueSessionOp(() => walletSessionStorage.clear());
     await this.stopKeepAlive();
     await this.clearAutoLockAlarm();
     await StorageUtil.clearAllData();
@@ -127,7 +191,10 @@ class LockManager {
 
   static async startKeepAlive() {
     await browser.alarms.create(this.KEEP_ALIVE_ALARM, {
-      periodInMinutes: 0.4, // ~24 seconds - under Chrome's 30s kill threshold
+      // Chrome's alarms API clamps periodInMinutes below 30 seconds (0.5)
+      // up to 0.5 in packaged extensions anyway; asking for less than the
+      // floor just made the requested period read wrong.
+      periodInMinutes: 0.5,
     });
   }
 
@@ -137,14 +204,61 @@ class LockManager {
 
   /**
    * Called when the keep-alive alarm fires.
-   * Writes to session storage to reset Chrome's inactivity timer.
-   * Also restores keys from session backup if SW was restarted.
+   * Writes to session storage to reset Chrome's inactivity timer, restores
+   * keys from the session backup if the SW was restarted, and defensively
+   * recreates the auto-lock alarm if it is missing while unlocked (guards
+   * the gap where an alarm fires during a still-cold start; see
+   * serviceWorker.ts's synchronous top-level listener for the primary fix).
+   * Skips the alarm read/create step entirely when auto-lock is "Never".
+   *
+   * Re-checks `decryptedKeys` after every await in the unlocked branch: a
+   * concurrent lock() or resetWallet() can complete while this is still
+   * resolving, and recreating the auto-lock alarm (or writing a fresh
+   * keep-alive timestamp) for a wallet that is no longer unlocked would be
+   * wrong.
+   *
+   * Locked wallets (including a wiped wallet, one never unlocked this
+   * session, or "auto-lock: Never" after a browser restart where session
+   * storage is already empty) have nothing left to keep alive: the alarm
+   * stops itself here. A later SET_DECRYPTED_KEYS starts it again.
    */
   static async handleKeepAliveAlarm() {
-    // Restore keys from session backup if SW restarted (lost in-memory keys)
     if (this.decryptedKeys === undefined) {
       await this.restoreKeysFromSession();
     }
+    if (this.decryptedKeys === undefined) {
+      await this.stopKeepAlive();
+      return;
+    }
+
+    // "auto-lock: Never" has nothing here to defend against - skip the
+    // alarm read/create work on every ~30s tick and go straight to the
+    // keep-alive write.
+    const settings = await StorageUtil.getSettings();
+    if (this.decryptedKeys === undefined) {
+      // A concurrent lock() (or resetWallet()) completed while this
+      // awaited: no longer unlocked, so touching the auto-lock alarm or
+      // writing a fresh keep-alive timestamp would be wrong.
+      return;
+    }
+    const autoLockMinutes = settings.autoLockMinutes ?? 15;
+    if (autoLockMinutes > 0) {
+      const existingAutoLockAlarm = await browser.alarms.get(
+        this.AUTO_LOCK_ALARM,
+      );
+      if (this.decryptedKeys === undefined) {
+        return;
+      }
+      if (!existingAutoLockAlarm) {
+        await browser.alarms.create(this.AUTO_LOCK_ALARM, {
+          delayInMinutes: autoLockMinutes,
+        });
+        if (this.decryptedKeys === undefined) {
+          return;
+        }
+      }
+    }
+
     // Write to session storage to keep the SW alive
     await walletSessionStorage.set({ keepAlive: Date.now() });
   }
@@ -166,24 +280,28 @@ class LockManager {
   }
 
   static async handleAutoLockAlarm() {
+    // lock() writes the LOCKED timestamp itself, first, before anything
+    // else - no need to duplicate the write here.
     await this.lock();
-    await StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
   }
 
   /**
    * Backup decrypted keys to session storage.
    * Session storage survives SW restarts but clears on browser close.
+   * Queued: see sessionOpQueue.
    */
   private static async backupKeysToSession() {
-    if (this.decryptedKeys) {
-      await walletSessionStorage.set({
-        [this.SESSION_KEYS_KEY]: this.decryptedKeys,
-      });
-    }
+    const snapshot = this.decryptedKeys;
+    if (!snapshot) return;
+    await this.queueSessionOp(() =>
+      walletSessionStorage.set({ [this.SESSION_KEYS_KEY]: snapshot }),
+    );
   }
 
   private static async clearSessionKeys() {
-    await walletSessionStorage.remove(this.SESSION_KEYS_KEY);
+    await this.queueSessionOp(() =>
+      walletSessionStorage.remove(this.SESSION_KEYS_KEY),
+    );
   }
 
   /**
@@ -198,7 +316,13 @@ class LockManager {
    */
   static async restoreKeysFromSession(): Promise<boolean> {
     try {
-      const data = await walletSessionStorage.get(this.SESSION_KEYS_KEY);
+      // Queued alongside the writes (backupKeysToSession/clearSessionKeys):
+      // without this, the read could land between two queued writes and
+      // see a value older than one already durably committed, or newer
+      // than one still in flight.
+      const data = await this.queueSessionOp(() =>
+        walletSessionStorage.get(this.SESSION_KEYS_KEY),
+      );
       const keys = data?.[this.SESSION_KEYS_KEY] as
         | DecryptedKeyType[]
         | undefined;
@@ -258,9 +382,9 @@ class LockManager {
    * array (the latter for SW-restart re-sends, where the popup may have
    * lost the password but still has cached keys).
    */
-  static setDecryptedKeysFromPopup(
+  static async setDecryptedKeysFromPopup(
     payload: SetDecryptedKeysPayload | DecryptedKeyType[],
-  ) {
+  ): Promise<void> {
     const keys = Array.isArray(payload) ? payload : payload.keys;
     if (keys.some((key) => !isQrlAddress(key?.address))) {
       throw new Error("Refusing to cache a key with an invalid QIP-55 address");
@@ -268,7 +392,9 @@ class LockManager {
     if (!Array.isArray(payload) && payload.walletPassword) {
       this.walletPassword = payload.walletPassword;
     }
-    this.setDecryptedKeys(
+    // Awaited: the caller must not report success before the session
+    // backup write for these keys is durable (see sessionOpQueue).
+    await this.setDecryptedKeys(
       Array.from(
         new Map(
           keys.map((item) => [item.address.toLowerCase(), item]),
@@ -305,7 +431,7 @@ class LockManager {
     };
     this.walletPassword = password;
     const existingKeys = this.decryptedKeys ?? [];
-    this.setDecryptedKeys(
+    await this.setDecryptedKeys(
       Array.from(
         new Map(
           [...existingKeys, newKey].map((item) => [
@@ -317,9 +443,11 @@ class LockManager {
     );
   }
 
-  private static setDecryptedKeys(decryptedKeys: DecryptedKeyType[]) {
+  private static async setDecryptedKeys(
+    decryptedKeys: DecryptedKeyType[],
+  ): Promise<void> {
     this.decryptedKeys = decryptedKeys;
-    this.backupKeysToSession();
+    await this.backupKeysToSession();
   }
 
   static getWalletPassword() {
@@ -353,30 +481,40 @@ class LockManager {
     message: MessageType,
     sender?: browser.Runtime.MessageSender,
   ) {
-    // Reject any same-extension caller that is not an extension page (popup,
-    // options, side panel). Content scripts are part of the same extension
-    // but run with `sender.url === <page-url>`; the only legitimate callers
-    // for these messages are extension pages, whose `sender.url` starts with
-    // the extension's own origin. Defence in depth: today no content script
-    // sends LOCK_MANAGER messages, but a future code-path that forwards
-    // arbitrary messages should not be able to read decrypted keys.
-    if (sender !== undefined) {
-      const extensionUrlPrefix = browser.runtime.getURL("");
-      if (
-        typeof sender.url === "string" &&
-        !sender.url.startsWith(extensionUrlPrefix)
-      ) {
-        return undefined;
-      }
+    // Fail closed: the only legitimate callers are same-extension code
+    // running in an extension-origin document (popup, options, side panel,
+    // approval window) or the service worker's own context sending a
+    // message to itself. Both report `sender.id` equal to this extension's
+    // own id and a `sender.url` under the extension's own origin. A caller
+    // missing either - undefined sender (should not happen for the real
+    // onMessage listener), a different extension, or a content script
+    // running with the page's origin - never reaches decrypted keys or the
+    // wallet password. Model: sidePanelContentBridge.ts's sender check.
+    const extensionUrlPrefix = browser.runtime.getURL("");
+    if (
+      sender === undefined ||
+      typeof sender.id !== "string" ||
+      sender.id !== browser.runtime.id ||
+      typeof sender.url !== "string" ||
+      !sender.url.startsWith(extensionUrlPrefix)
+    ) {
+      return undefined;
     }
     let result;
     if (message.name === LOCK_MANAGER_MESSAGES.IS_LOCKED) {
       result = await LockManager.isLocked();
     } else if (message.name === LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS) {
       // The popup decrypted the keystores locally and is sending us the results.
-      LockManager.setDecryptedKeysFromPopup(message?.data ?? []);
+      await LockManager.setDecryptedKeysFromPopup(message?.data ?? []);
       await LockManager.startKeepAlive();
-      await LockManager.setupAutoLockAlarm();
+      // N6: a recovery resend (lockStore.ts's automatic re-arm after an
+      // apparent service-worker restart) does not postpone the inactivity
+      // auto-lock - keep-alive still restarts unconditionally, since
+      // Chrome's alarms already survive a real SW restart on their own and
+      // this is just keeping that alarm's schedule current.
+      if (message.recovery !== true) {
+        await LockManager.setupAutoLockAlarm();
+      }
       result = { success: true };
     } else if (message.name === LOCK_MANAGER_MESSAGES.REMOVE_ACCOUNT_KEY) {
       result = await LockManager.removeAccountKey(
@@ -395,10 +533,26 @@ class LockManager {
       result = LockManager.getWalletPassword();
     } else if (message.name === LOCK_MANAGER_MESSAGES.ENCRYPT_ACCOUNT) {
       result = await LockManager.encryptAccount(message?.data ?? {});
+    } else if (message.name === LOCK_MANAGER_MESSAGES.USER_ACTIVITY) {
+      result = { success: true };
     }
 
-    // Any message while wallet is unlocked resets the auto-lock timer.
-    if (LockManager.decryptedKeys !== undefined) {
+    // Only a deliberate user action or user-initiated write postpones the
+    // inactivity auto-lock: the allow-list above, plus the dApp
+    // approval/rejection response, the one activity signal carrying an
+    // `action` field (see MessageType above) as its discriminator.
+    // Everything else this global listener happens to overhear - reads
+    // (IS_LOCKED, GET_*), keep-alive ticks (which land on their own alarm
+    // path), SEND_TX_NOTIFICATION, and any other message - leaves the
+    // timer alone. A SET_DECRYPTED_KEYS carrying `recovery: true` is also
+    // excluded: it is lockStore.ts's own automatic re-send, triggered by an
+    // apparent service-worker restart.
+    const isUserActivity =
+      ((typeof message.name === "string" &&
+        AUTO_LOCK_ACTIVITY_MESSAGE_NAMES.has(message.name)) ||
+        message.action === EXTENSION_MESSAGES.DAPP_RESPONSE) &&
+      message.recovery !== true;
+    if (isUserActivity && LockManager.decryptedKeys !== undefined) {
       await LockManager.setupAutoLockAlarm();
     }
 

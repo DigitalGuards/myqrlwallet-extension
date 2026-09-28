@@ -189,7 +189,7 @@ const mockedStoreValues: StoreType = {
     isLocked: false,
     readLockState: async () => {},
     unlock: async (password: string) => {
-      return !!password;
+      return password ? "success" : "wrong-password";
     },
     encryptAccount: async (
       _account: Web3BaseWalletAccount,
@@ -205,7 +205,7 @@ const mockedStoreValues: StoreType = {
       return accountAddress;
     },
     changePassword: async () => {
-      return true;
+      return "success";
     },
     removeAccountKey: async (_accountAddress: string) => {},
     resetWallet: async () => {},
