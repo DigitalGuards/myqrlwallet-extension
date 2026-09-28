@@ -175,10 +175,22 @@ describe("serviceWorker listener registration survives a stuck async init", () =
       (call: any) => call[0],
     );
 
-    const mockPort = { name: "myqrlwallet-content-script" };
+    const disconnectListeners: Array<() => void> = [];
+    const mockPort = {
+      name: "myqrlwallet-content-script",
+      onDisconnect: {
+        addListener: (cb: () => void) => disconnectListeners.push(cb),
+      },
+    };
     for (const listener of connectListeners) {
       listener(mockPort);
     }
+
+    // The disconnect handler is attached at once, before init resolves, so
+    // a tab that closes or enters the back/forward cache in that window
+    // still has its runtime.lastError read.
+    expect(disconnectListeners).toHaveLength(1);
+    expect(() => disconnectListeners[0]()).not.toThrow();
 
     // The event was accepted: the listener ran, and is now awaiting
     // serviceWorkerReady internally. Since initializeServiceWorker() never

@@ -128,7 +128,10 @@ async function connectContentScriptAndWait() {
   const connectListeners = onConnectAddListener.mock.calls.map(
     (call: any) => call[0],
   );
-  const mockPort = { name: "myqrlwallet-content-script" };
+  const mockPort = {
+    name: "myqrlwallet-content-script",
+    onDisconnect: { addListener: vi.fn() },
+  };
   for (const listener of connectListeners) {
     await listener(mockPort);
   }

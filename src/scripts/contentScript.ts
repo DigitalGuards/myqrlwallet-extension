@@ -16,6 +16,7 @@ import {
   createProviderChannelBridge,
   createProviderStreamFailureGuard,
 } from "./utils/providerConnectionLifecycle";
+import { startContentScriptKeepAlive } from "./utils/contentScriptKeepAlive";
 import { checkForLastError } from "./utils/scriptUtils";
 import { handleSidePanelOpenRequest } from "./utils/sidePanelContentBridge";
 
@@ -208,22 +209,12 @@ const prepareListeners = () => {
   );
 };
 
-const keepServiceWorkerActive = () => {
-  setInterval(() => {
-    browser.runtime
-      .connect({
-        name: QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT_KEEP_ALIVE,
-      })
-      .postMessage(QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT_KEEP_ALIVE);
-  }, 3000);
-};
-
 const initializeContentScript = () => {
   // Content scripts match <all_urls>, which (for content scripts
   // specifically) includes the chrome-extension: scheme - so this file
   // also runs on the wallet's own popup/side panel/tab pages. Those pages
   // never read window.qrlProvider and have no dApp to bridge to, so the
-  // whole provider-bridge setup below - including keepServiceWorkerActive()'s
+  // whole provider-bridge setup below - including startContentScriptKeepAlive()'s
   // unconditional interval and this file's own reconnect-on-disconnect
   // logic - would otherwise resurrect the service worker purely to serve a
   // page that never needed it (real-device regression, PR #71 audit): once
@@ -237,7 +228,7 @@ const initializeContentScript = () => {
     setupPageStreams();
     setupExtensionStreams();
     prepareListeners();
-    keepServiceWorkerActive();
+    startContentScriptKeepAlive();
   } catch (error) {
     console.warn(
       "QrlWeb3Wallet: Failed to initialize the content script\n",
