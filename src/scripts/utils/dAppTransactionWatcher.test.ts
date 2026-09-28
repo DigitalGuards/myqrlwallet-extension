@@ -70,6 +70,19 @@ const { getQrlProperties } = vi.hoisted(() => ({
 
 vi.mock("./unrestrictedMethodExecutor", () => ({ getQrlProperties }));
 
+const { mockIsLocked } = vi.hoisted(() => ({
+  mockIsLocked: vi.fn(),
+}));
+
+// The real LockManager pulls in the @theqrl/web3 crypto graph and reads
+// keystores from storage; this watcher only needs its isLocked() answer
+// (F7), the same narrow surface restrictedMethodsMiddleware.test.ts mocks.
+vi.mock("../lockManager/lockManager", () => ({
+  __esModule: true,
+  default: { isLocked: (...args: unknown[]) => mockIsLocked(...args) },
+  LOCK_MANAGER_MESSAGES: { SEND_TX_NOTIFICATION: "SEND_TX_NOTIFICATION" },
+}));
+
 import browser from "webextension-polyfill";
 import {
   DAPP_TX_WATCH_ALARM_NAME,
@@ -85,12 +98,29 @@ const mockAlarms = browser.alarms as unknown as {
 const mockSendMessage = browser.runtime.sendMessage as ReturnType<typeof vi.fn>;
 
 const HASH = "0xabc123";
+const HASH_2 = "0xdef456";
 const ACCOUNT = `Q${"a".repeat(128)}`;
 const CHAIN_ID = "0x301825";
 
 const clearStore = (store: Record<string, unknown>) => {
   for (const key of Object.keys(store)) delete store[key];
 };
+
+/** A promise plus its own resolve, for controlling exactly when a mocked
+ *  async call settles across an await boundary inside the code under test. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+const minedReceipt = (hash: string) => ({
+  status: 1n,
+  blockNumber: 5n,
+  transactionHash: hash,
+});
 
 describe("dAppTransactionWatcher", () => {
   beforeEach(() => {
@@ -103,8 +133,10 @@ describe("dAppTransactionWatcher", () => {
         transactionHash: HASH,
         amount: "1.5",
         tokenSymbol: "Quanta",
+        pendingStatus: "pending",
       },
     ]);
+    mockIsLocked.mockResolvedValue({ isLocked: false, hasPasswordSet: true });
   });
 
   describe("registerDAppTransactionWatch", () => {
@@ -129,7 +161,7 @@ describe("dAppTransactionWatcher", () => {
         chainId: CHAIN_ID,
       });
       await registerDAppTransactionWatch({
-        hash: "0xdef456",
+        hash: HASH_2,
         account: ACCOUNT,
         chainId: CHAIN_ID,
       });
@@ -153,11 +185,7 @@ describe("dAppTransactionWatcher", () => {
       // notify twice.
       getQrlProperties.mockResolvedValue({
         qrl: {
-          getTransactionReceipt: vi.fn().mockResolvedValue({
-            status: 1n,
-            blockNumber: 5n,
-            transactionHash: HASH,
-          }),
+          getTransactionReceipt: vi.fn().mockResolvedValue(minedReceipt(HASH)),
         },
       });
       await handleDAppTransactionWatchAlarm();
@@ -168,9 +196,9 @@ describe("dAppTransactionWatcher", () => {
   });
 
   describe("handleDAppTransactionWatchAlarm", () => {
-    const register = () =>
+    const register = (hash = HASH) =>
       registerDAppTransactionWatch({
-        hash: HASH,
+        hash,
         account: ACCOUNT,
         chainId: CHAIN_ID,
       });
@@ -186,9 +214,7 @@ describe("dAppTransactionWatcher", () => {
       getQrlProperties.mockResolvedValue({
         qrl: {
           getTransactionReceipt: vi.fn().mockResolvedValue({
-            status: 1n,
-            blockNumber: 5n,
-            transactionHash: HASH,
+            ...minedReceipt(HASH),
             gasUsed: 21000n,
             effectiveGasPrice: 100n,
           }),
@@ -220,11 +246,9 @@ describe("dAppTransactionWatcher", () => {
       await register();
       getQrlProperties.mockResolvedValue({
         qrl: {
-          getTransactionReceipt: vi.fn().mockResolvedValue({
-            status: 0n,
-            blockNumber: 5n,
-            transactionHash: HASH,
-          }),
+          getTransactionReceipt: vi
+            .fn()
+            .mockResolvedValue({ ...minedReceipt(HASH), status: 0n }),
         },
       });
 
@@ -305,6 +329,167 @@ describe("dAppTransactionWatcher", () => {
       expect(mockAlarms.clear).not.toHaveBeenCalledWith(
         DAPP_TX_WATCH_ALARM_NAME,
       );
+    });
+
+    it("keeps a watch queued when the receipt fetch itself times out", async () => {
+      await register();
+      getQrlProperties.mockResolvedValue({
+        qrl: { getTransactionReceipt: () => new Promise(() => {}) },
+      });
+
+      vi.useFakeTimers();
+      try {
+        const tick = handleDAppTransactionWatchAlarm();
+        await vi.advanceTimersByTimeAsync(10_000);
+        await tick;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(updateTransactionHistoryEntry).not.toHaveBeenCalled();
+      expect(mockAlarms.clear).not.toHaveBeenCalledWith(
+        DAPP_TX_WATCH_ALARM_NAME,
+      );
+    });
+
+    it("fetches getQrlProperties once for two watches checked in the same tick", async () => {
+      await register(HASH);
+      await register(HASH_2);
+      getTransactionHistory.mockResolvedValue([
+        {
+          transactionHash: HASH,
+          amount: "1",
+          tokenSymbol: "Quanta",
+          pendingStatus: "pending",
+        },
+        {
+          transactionHash: HASH_2,
+          amount: "2",
+          tokenSymbol: "Quanta",
+          pendingStatus: "pending",
+        },
+      ]);
+      getQrlProperties.mockResolvedValue({
+        qrl: {
+          getTransactionReceipt: vi.fn((hash: string) =>
+            Promise.resolve(minedReceipt(hash)),
+          ),
+        },
+      });
+
+      await handleDAppTransactionWatchAlarm();
+
+      expect(getQrlProperties).toHaveBeenCalledTimes(1);
+      expect(updateTransactionHistoryEntry).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not run two ticks at once, and does not double-fetch a receipt for one already in flight", async () => {
+      await register();
+      const receipt = deferred<unknown>();
+      const getTransactionReceipt = vi.fn(() => receipt.promise);
+      getQrlProperties.mockResolvedValue({ qrl: { getTransactionReceipt } });
+
+      const firstTick = handleDAppTransactionWatchAlarm();
+      // The alarm firing again before the first tick settles (a slow RPC
+      // outlasting the 30 s period) must be a no-op: the guard leaves the
+      // watch to the tick already running. Asserted only after both
+      // settle: nothing here may throw before `receipt` resolves, or the
+      // first tick's promise (and the module-level in-flight flag with it)
+      // would hang forever and break every later test in this file.
+      const secondTick = handleDAppTransactionWatchAlarm();
+      receipt.resolve(minedReceipt(HASH));
+      await Promise.all([firstTick, secondTick]);
+
+      expect(getTransactionReceipt).toHaveBeenCalledTimes(1);
+      expect(updateTransactionHistoryEntry).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not lose a watch registered while a tick is still running", async () => {
+      await register(HASH);
+      const receipt = deferred<unknown>();
+      getQrlProperties.mockResolvedValue({
+        qrl: { getTransactionReceipt: () => receipt.promise },
+      });
+
+      const tick = handleDAppTransactionWatchAlarm();
+      // A second qrl_sendTransaction gets approved, and registers its own
+      // watch, before the in-flight tick (still waiting on HASH's receipt)
+      // writes anything back.
+      await registerDAppTransactionWatch({
+        hash: HASH_2,
+        account: ACCOUNT,
+        chainId: CHAIN_ID,
+      });
+      receipt.resolve(minedReceipt(HASH));
+      await tick;
+
+      // HASH resolved and was dropped; HASH_2 must still be there for the
+      // next tick to find. The stale snapshot the first tick read before
+      // HASH_2 existed must never be the thing written back.
+      getQrlProperties.mockResolvedValue({
+        qrl: {
+          getTransactionReceipt: vi
+            .fn()
+            .mockResolvedValue(minedReceipt(HASH_2)),
+        },
+      });
+      getTransactionHistory.mockResolvedValue([
+        {
+          transactionHash: HASH_2,
+          amount: "1",
+          tokenSymbol: "Quanta",
+          pendingStatus: "pending",
+        },
+      ]);
+      await handleDAppTransactionWatchAlarm();
+
+      expect(updateTransactionHistoryEntry).toHaveBeenCalledWith(
+        ACCOUNT,
+        HASH_2,
+        expect.objectContaining({ pendingStatus: "confirmed" }),
+      );
+    });
+
+    it("updates history but does not notify while the wallet is locked", async () => {
+      await register();
+      mockIsLocked.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+      getQrlProperties.mockResolvedValue({
+        qrl: {
+          getTransactionReceipt: vi.fn().mockResolvedValue(minedReceipt(HASH)),
+        },
+      });
+
+      await handleDAppTransactionWatchAlarm();
+
+      expect(updateTransactionHistoryEntry).toHaveBeenCalledWith(
+        ACCOUNT,
+        HASH,
+        expect.objectContaining({ pendingStatus: "confirmed" }),
+      );
+      expect(mockSendMessage).not.toHaveBeenCalled();
+    });
+
+    it("skips the notification, but still drops the watch, when the history poller already confirmed it first", async () => {
+      await register();
+      getTransactionHistory.mockResolvedValue([
+        {
+          transactionHash: HASH,
+          amount: "1.5",
+          tokenSymbol: "Quanta",
+          pendingStatus: "confirmed",
+        },
+      ]);
+      getQrlProperties.mockResolvedValue({
+        qrl: {
+          getTransactionReceipt: vi.fn().mockResolvedValue(minedReceipt(HASH)),
+        },
+      });
+
+      await handleDAppTransactionWatchAlarm();
+
+      expect(updateTransactionHistoryEntry).toHaveBeenCalled();
+      expect(mockSendMessage).not.toHaveBeenCalled();
+      expect(mockAlarms.clear).toHaveBeenCalledWith(DAPP_TX_WATCH_ALARM_NAME);
     });
   });
 });

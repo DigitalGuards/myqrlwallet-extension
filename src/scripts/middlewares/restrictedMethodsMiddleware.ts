@@ -24,6 +24,7 @@ import {
   checkWalletRequestPermissionParams,
   checkWalletSwitchQrlChainParams,
   checkWalletWatchAssetParams,
+  extractPendingDAppTransactionHash,
   registerDAppTransactionWatchIfApproved,
   updateAccountsAndBlockchainsForUrlOrigin,
 } from "../utils/restrictedMethodsMiddlewareUtils";
@@ -457,21 +458,28 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
               break;
             }
             case RESTRICTED_METHODS.QRL_SEND_TRANSACTION: {
-              const transactionHash =
-                restrictedMethodResult?.response?.transactionHash;
+              const response = restrictedMethodResult?.response;
+              const transactionHash = response?.transactionHash;
               if (transactionHash) {
                 res.result = transactionHash;
-                await registerDAppTransactionWatchIfApproved(
-                  req,
-                  transactionHash,
-                  authorizedChainId,
-                );
               } else {
                 res.error = providerErrors.unsupportedMethod({
-                  message: restrictedMethodResult?.response?.error?.message,
-                  data: restrictedMethodResult?.response?.error,
+                  message: response?.error?.message,
+                  data: response?.error,
                 });
               }
+              // Registers the watch either way: on a result, for the hash
+              // just answered; on a broadcast-timeout error, for the hash
+              // extracted from it (extractPendingDAppTransactionHash), so
+              // the service worker still confirms and notifies a
+              // transaction that may have landed despite the dApp getting
+              // an error. registerDAppTransactionWatchIfApproved never
+              // throws, so this cannot stop `end()` below from running.
+              await registerDAppTransactionWatchIfApproved(
+                req,
+                transactionHash ?? extractPendingDAppTransactionHash(response),
+                authorizedChainId,
+              );
               break;
             }
             case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4:

@@ -39,6 +39,20 @@ import {
   registerSidePanelOpenListener,
 } from "./utils/sidePanelSurface";
 
+// Registered here, synchronously, at module evaluation: MV3 requires an
+// alarm listener to be attached before the script's first `await`, or an
+// alarm firing during a cold start can be missed entirely. The other
+// alarms below share one listener inside prepareListeners(), which already
+// sits behind an `await` in initializeServiceWorker() (a pre-existing gap
+// this fix does not touch); giving all four their own synchronous
+// listeners is a broader change than this one needs, so only the new alarm
+// gets one here.
+browser.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === DAPP_TX_WATCH_ALARM_NAME) {
+    handleDAppTransactionWatchAlarm();
+  }
+});
+
 type ContentScriptType = browser.Scripting.RegisteredContentScript;
 
 const registerScripts = async () => {
@@ -130,7 +144,9 @@ const prepareListeners = () => {
       }
     })();
   });
-  // Alarm listener for auto-lock and keep-alive.
+  // Alarm listener for auto-lock and keep-alive. DAPP_TX_WATCH_ALARM_NAME is
+  // handled by its own listener above, registered synchronously rather
+  // than from here.
   browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === LockManager.AUTO_LOCK_ALARM) {
       LockManager.handleAutoLockAlarm();
@@ -138,8 +154,6 @@ const prepareListeners = () => {
       LockManager.handleKeepAliveAlarm();
     } else if (alarm.name === PHISHING_ALARM_NAME) {
       handlePhishingRefreshAlarm();
-    } else if (alarm.name === DAPP_TX_WATCH_ALARM_NAME) {
-      handleDAppTransactionWatchAlarm();
     }
   });
 };

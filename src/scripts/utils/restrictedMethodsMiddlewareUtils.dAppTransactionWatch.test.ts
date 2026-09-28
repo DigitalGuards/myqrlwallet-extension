@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
-import { registerDAppTransactionWatchIfApproved } from "./restrictedMethodsMiddlewareUtils";
+import {
+  extractPendingDAppTransactionHash,
+  registerDAppTransactionWatchIfApproved,
+} from "./restrictedMethodsMiddlewareUtils";
 
 const { mockRegisterWatch } = vi.hoisted(() => ({
   mockRegisterWatch: vi.fn().mockResolvedValue(undefined),
@@ -74,4 +77,67 @@ describe("registerDAppTransactionWatchIfApproved", () => {
       expect(mockRegisterWatch).not.toHaveBeenCalled();
     },
   );
+
+  describe("exception safety", () => {
+    afterEach(() => {
+      mockRegisterWatch.mockReset().mockResolvedValue(undefined);
+    });
+
+    // F4: called from restrictedMethodsMiddleware's `finally`, where a
+    // throw would stop `end()` from running and void an otherwise
+    // successful response.
+    it("does not throw, and only logs, when registerDAppTransactionWatch rejects", async () => {
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      mockRegisterWatch.mockRejectedValue(new Error("storage unavailable"));
+
+      await expect(
+        registerDAppTransactionWatchIfApproved(
+          sendTransactionRequest(ACCOUNT),
+          "0xtxhash",
+          "0x301825",
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(consoleError).toHaveBeenCalled();
+      consoleError.mockRestore();
+    });
+  });
+});
+
+describe("extractPendingDAppTransactionHash", () => {
+  it("reads the hash a TransactionMayStillBeProcessingError carries under error.data", () => {
+    expect(
+      extractPendingDAppTransactionHash({
+        error: {
+          message: "may still be processing",
+          data: { transactionHash: "0xpending" },
+        },
+      }),
+    ).toBe("0xpending");
+  });
+
+  it.each([
+    [
+      "a response with a plain result and no error",
+      { transactionHash: "0xtxhash" },
+    ],
+    [
+      "a response with an error but no data",
+      { error: { message: "rejected" } },
+    ],
+    [
+      "a response whose error.data has no transactionHash",
+      { error: { data: { pending: true } } },
+    ],
+    [
+      "a response whose error.data.transactionHash is not a string",
+      { error: { data: { transactionHash: 12345 } } },
+    ],
+    ["undefined", undefined],
+    ["null", null],
+  ])("returns undefined for %s", (_label, response) => {
+    expect(extractPendingDAppTransactionHash(response)).toBeUndefined();
+  });
 });

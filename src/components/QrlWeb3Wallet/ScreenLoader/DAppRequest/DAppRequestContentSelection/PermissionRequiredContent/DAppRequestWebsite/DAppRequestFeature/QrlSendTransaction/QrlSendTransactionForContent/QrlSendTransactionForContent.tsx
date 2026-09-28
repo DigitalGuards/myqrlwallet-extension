@@ -24,17 +24,44 @@ import {
   Eip838ExecutionError,
   TransactionRevertInstructionError,
 } from "@theqrl/web3-errors";
-import type { TransactionCall } from "@theqrl/web3-types";
+import { BlockTags, type TransactionCall } from "@theqrl/web3-types";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
-import { withTimeout } from "@/functions/withTimeout";
+import { TimeoutError, withTimeout } from "@/functions/withTimeout";
 
 const { Common } = qrl.accounts;
 
-// Bounds how long the popup waits on the node for both the pre-flight
-// simulation and the broadcast itself. requestManager.send() has no timeout
-// of its own, and an unbounded wait here can outlast the middleware's 90 s
-// safety timeout just as badly as waiting for a receipt used to.
-const BROADCAST_TIMEOUT_MS = 30 * 1000;
+// Bounds, in total, how long the popup waits on the node for the pre-flight
+// simulation plus the broadcast. requestManager.send() has no timeout of
+// its own, and an unbounded wait here can outlast the middleware's 90 s
+// safety timeout just as badly as waiting for a receipt used to. The two
+// steps share this one budget (see broadcastTransaction), each getting
+// only what the other left behind, so the combined worst case stays well
+// inside the 90 s the middleware allows for the whole approval.
+const SEND_BUDGET_MS = 30 * 1000;
+
+/**
+ * Thrown when the broadcast itself timed out. requestManager.send() gives
+ * no signal on timeout about whether the node actually accepted the
+ * transaction, so it may already be in the mempool; qrl_sendRawTransaction
+ * is not safely retryable without risking a double-spend from a second,
+ * differently-nonced signature. Carrying the locally computed hash lets the
+ * dApp, and the service-worker watch registered for it, check the real
+ * outcome.
+ */
+export class TransactionMayStillBeProcessingError extends Error {
+  constructor(public readonly transactionHash: string) {
+    super(
+      `The transaction was not confirmed within the wait time. It may still be processing. Check its status with hash ${transactionHash} before retrying.`,
+    );
+    this.name = "TransactionMayStillBeProcessingError";
+  }
+  // sanitizeError/getSerializableObject (scriptUtils.ts) forward an error's
+  // own `data` verbatim, which is how the middleware recovers this hash to
+  // register a watch for an approved request that still ended in an error.
+  get data() {
+    return { transactionHash: this.transactionHash, pending: true };
+  }
+}
 
 type TransactionObject = {
   chainId: string;
@@ -106,6 +133,17 @@ const QrlSendTransactionForContent = observer(
       navigator.clipboard.writeText(data);
     };
 
+    // Reads the instance and stops right here with the same shaped error
+    // ensureSigningContext already throws for a changed network. A bare
+    // non-null assertion on a stale (disconnected) instance would crash
+    // with an unrelated TypeError.
+    const requireQrlInstance = () => {
+      if (!qrlInstance) {
+        throw new Error("The network changed. Review the request again.");
+      }
+      return qrlInstance;
+    };
+
     const ensureSigningContext = async () => {
       const authorization =
         await revalidateAuthorizedDAppRequest(dAppRequestData);
@@ -128,8 +166,15 @@ const QrlSendTransactionForContent = observer(
     // runs the identical qrl_call and throws the identical
     // ContractExecutionError on revert, so the dApp still gets an error of
     // the same class it always did, and the reverting transaction never
-    // reaches the node's mempool.
-    const simulateTransaction = async (transaction: TransactionObject) => {
+    // reaches the node's mempool. Queried against the "pending" block so a
+    // transaction that depends on one still in the mempool (an approve
+    // ahead of the swap it authorizes) is not rejected for a state that is
+    // already about to change.
+    const simulateTransaction = async (
+      transaction: TransactionObject,
+      timeoutMs: number,
+    ) => {
+      const instance = requireQrlInstance();
       try {
         // `to` is optional here (a contract deployment has none), but
         // TransactionCall's type declares it required; qrl_call accepts an
@@ -137,8 +182,11 @@ const QrlSendTransactionForContent = observer(
         // does. TransactionCall's type is simply narrower than the request
         // it needs to accept here.
         await withTimeout(
-          qrlInstance!.call(transaction as unknown as TransactionCall),
-          BROADCAST_TIMEOUT_MS,
+          instance.call(
+            transaction as unknown as TransactionCall,
+            BlockTags.PENDING,
+          ),
+          timeoutMs,
           "Simulating the transaction",
         );
       } catch (error) {
@@ -172,21 +220,37 @@ const QrlSendTransactionForContent = observer(
     const broadcastTransaction = async (
       rawTransaction: string,
       transaction: TransactionObject,
+      precomputedHash: string,
     ) => {
+      const instance = requireQrlInstance();
       await ensureSigningContext();
-      await simulateTransaction(transaction);
-      const transactionHash: unknown = await withTimeout(
-        qrlInstance!.requestManager.send({
-          method: "qrl_sendRawTransaction",
-          params: [rawTransaction],
-        }),
-        BROADCAST_TIMEOUT_MS,
-        "Broadcasting the transaction",
+      // Simulation and broadcast share one SEND_BUDGET_MS deadline: the
+      // broadcast's own timeout is whatever remains of it once the
+      // simulation has taken its share.
+      const deadline = Date.now() + SEND_BUDGET_MS;
+      await simulateTransaction(
+        transaction,
+        Math.max(deadline - Date.now(), 0),
       );
-      if (typeof transactionHash !== "string" || !transactionHash) {
-        throw new Error("The node did not return a transaction hash");
+      try {
+        const transactionHash: unknown = await withTimeout(
+          instance.requestManager.send({
+            method: "qrl_sendRawTransaction",
+            params: [rawTransaction],
+          }),
+          Math.max(deadline - Date.now(), 0),
+          "Broadcasting the transaction",
+        );
+        if (typeof transactionHash !== "string" || !transactionHash) {
+          throw new Error("The node did not return a transaction hash");
+        }
+        return transactionHash;
+      } catch (error) {
+        if (error instanceof TimeoutError) {
+          throw new TransactionMayStillBeProcessingError(precomputedHash);
+        }
+        throw error;
       }
-      return transactionHash;
     };
 
     const recordPendingTransaction = async ({
@@ -269,8 +333,53 @@ const QrlSendTransactionForContent = observer(
       }
     };
 
+    // Records the pending entry for either send path, from the
+    // TransactionObject that was signed. Replacement fields (nonce and
+    // fees) are carried only for a plain QRL transfer.
+    // signAndSendReplacementTransaction (qrlStore.ts) decides whether an
+    // entry it is speeding up/cancelling is a contract call solely from
+    // `tokenContractAddress`, which every dApp entry leaves empty; giving a
+    // contract call or deployment a nonce would make TransactionDetail's
+    // Speed Up (canReplace) available for it and have that replacement
+    // logic reconstruct a bare value transfer to `to` with the original
+    // calldata attached, for an interaction, or to an empty `to` for a
+    // deployment (no `to` is ever recorded for one). Withholding the nonce
+    // keeps `canReplace` false for both, exactly as it was before this
+    // broadcast-and-answer flow started recording dApp transactions at all.
+    const recordPendingTransactionForRequest = async (
+      transactionObject: TransactionObject,
+      transactionHash: string,
+      isQrlTransfer: boolean,
+    ) => {
+      await recordPendingTransaction({
+        from: transactionObject.from,
+        to: transactionObject.to,
+        value: transactionObject.value,
+        data: transactionObject.data,
+        transactionHash,
+        isQrlTransfer,
+        nonce: isQrlTransfer ? transactionObject.nonce : undefined,
+        maxFeePerGas:
+          isQrlTransfer && transactionObject.type === "0x2"
+            ? transactionObject.maxFeePerGas
+            : undefined,
+        maxPriorityFeePerGas:
+          isQrlTransfer && transactionObject.type === "0x2"
+            ? transactionObject.maxPriorityFeePerGas
+            : undefined,
+        gasLimit: isQrlTransfer ? transactionObject.gas : undefined,
+      });
+    };
+
     const deployContractOrInteract = async () => {
       const request = dAppRequestData?.params?.[0];
+      // Hoisted above the try so the catch block can still record a pending
+      // entry for a TransactionMayStillBeProcessingError (the broadcast
+      // timeout case): a `const` declared inside `try` is not visible in
+      // `catch`. Kept as a separate variable from the `const` below,
+      // declared as plain TransactionObject, so every use inside the try
+      // stays fully narrowed.
+      let pendingTransactionObject: TransactionObject | undefined;
       try {
         const { from, to, data, gas, type, value } = request;
 
@@ -286,6 +395,7 @@ const QrlSendTransactionForContent = observer(
           value,
           nonce: await qrlInstance?.getTransactionCount(from),
         };
+        pendingTransactionObject = transactionObject;
         if (type === "0x2") {
           const { maxFeePerGas, maxPriorityFeePerGas } = await getGasFeeData();
           transactionObject.type = "0x2";
@@ -296,6 +406,7 @@ const QrlSendTransactionForContent = observer(
         }
 
         let rawTransactionToSend: string | undefined;
+        let precomputedHash: string | undefined;
 
         await ensureSigningContext();
         if (isLedgerAccount) {
@@ -329,6 +440,13 @@ const QrlSendTransactionForContent = observer(
             txData,
             common,
           );
+          // The Ledger returns only the raw signed bytes; hash them
+          // ourselves the same way signTransaction does for a mnemonic
+          // account (sha3Raw of the raw transaction, see
+          // @theqrl/web3-qrl-accounts' signTransaction).
+          precomputedHash = rawTransactionToSend
+            ? utils.sha3Raw(rawTransactionToSend)
+            : undefined;
         } else {
           // Regular account - use mnemonic-based signing
           const mnemonicPhrases = await getMnemonicPhrases(from ?? "");
@@ -350,36 +468,36 @@ const QrlSendTransactionForContent = observer(
             seed,
           );
           rawTransactionToSend = signedTransaction?.rawTransaction;
+          precomputedHash = signedTransaction?.transactionHash;
         }
 
-        if (rawTransactionToSend) {
+        if (rawTransactionToSend && precomputedHash) {
           const transactionHash = await broadcastTransaction(
             rawTransactionToSend,
             transactionObject,
+            precomputedHash,
           );
           addToResponseData({ transactionHash });
-          await recordPendingTransaction({
-            from,
-            to,
-            value,
-            data,
+          await recordPendingTransactionForRequest(
+            transactionObject,
             transactionHash,
-            isQrlTransfer: false,
-            nonce: transactionObject.nonce,
-            maxFeePerGas:
-              transactionObject.type === "0x2"
-                ? transactionObject.maxFeePerGas
-                : undefined,
-            maxPriorityFeePerGas:
-              transactionObject.type === "0x2"
-                ? transactionObject.maxPriorityFeePerGas
-                : undefined,
-            gasLimit: transactionObject.gas,
-          });
+            false,
+          );
         } else {
           throw new Error("Transaction could not be signed");
         }
       } catch (error) {
+        if (error instanceof TransactionMayStillBeProcessingError) {
+          addToResponseData({ error });
+          if (pendingTransactionObject) {
+            await recordPendingTransactionForRequest(
+              pendingTransactionObject,
+              error.transactionHash,
+              false,
+            );
+          }
+          return;
+        }
         addToResponseData({ error });
         console.error(
           transactionType === SEND_TRANSACTION_TYPES.CONTRACT_DEPLOYMENT
@@ -392,6 +510,12 @@ const QrlSendTransactionForContent = observer(
 
     const sendZndTransfer = async () => {
       const request = dAppRequestData?.params?.[0];
+      // Hoisted above the try for the same reason as in
+      // deployContractOrInteract: the catch block needs it for a
+      // TransactionMayStillBeProcessingError, and kept separate from the
+      // `const` below, declared as plain TransactionObject, so every use
+      // inside the try stays fully narrowed.
+      let pendingTransactionObject: TransactionObject | undefined;
       try {
         const { from, to, gas, type, value } = request;
 
@@ -425,6 +549,7 @@ const QrlSendTransactionForContent = observer(
           value,
           nonce: await qrlInstance?.getTransactionCount(from),
         };
+        pendingTransactionObject = transactionObject;
 
         if (type === "0x2") {
           const { maxFeePerGas, maxPriorityFeePerGas } = await getGasFeeData();
@@ -436,6 +561,7 @@ const QrlSendTransactionForContent = observer(
         }
 
         let rawTransactionToSend: string | undefined;
+        let precomputedHash: string | undefined;
 
         await ensureSigningContext();
         if (isLedgerAccount) {
@@ -458,6 +584,12 @@ const QrlSendTransactionForContent = observer(
             txData,
             common,
           );
+          // See deployContractOrInteract: the Ledger path has no
+          // signTransaction result to read a hash from, so it is derived
+          // from the raw bytes the same way signTransaction computes one.
+          precomputedHash = rawTransactionToSend
+            ? utils.sha3Raw(rawTransactionToSend)
+            : undefined;
         } else {
           // Regular account - use mnemonic-based signing
           const mnemonicPhrases = await getMnemonicPhrases(from ?? "");
@@ -479,35 +611,36 @@ const QrlSendTransactionForContent = observer(
             seed,
           );
           rawTransactionToSend = signedTransaction?.rawTransaction;
+          precomputedHash = signedTransaction?.transactionHash;
         }
 
-        if (rawTransactionToSend) {
+        if (rawTransactionToSend && precomputedHash) {
           const transactionHash = await broadcastTransaction(
             rawTransactionToSend,
             transactionObject,
+            precomputedHash,
           );
           addToResponseData({ transactionHash });
-          await recordPendingTransaction({
-            from,
-            to,
-            value,
+          await recordPendingTransactionForRequest(
+            transactionObject,
             transactionHash,
-            isQrlTransfer: true,
-            nonce: transactionObject.nonce,
-            maxFeePerGas:
-              transactionObject.type === "0x2"
-                ? transactionObject.maxFeePerGas
-                : undefined,
-            maxPriorityFeePerGas:
-              transactionObject.type === "0x2"
-                ? transactionObject.maxPriorityFeePerGas
-                : undefined,
-            gasLimit: transactionObject.gas,
-          });
+            true,
+          );
         } else {
           throw new Error("QRL Transfer transaction could not be signed");
         }
       } catch (error) {
+        if (error instanceof TransactionMayStillBeProcessingError) {
+          addToResponseData({ error });
+          if (pendingTransactionObject) {
+            await recordPendingTransactionForRequest(
+              pendingTransactionObject,
+              error.transactionHash,
+              true,
+            );
+          }
+          return;
+        }
         addToResponseData({ error });
         console.error("QRL Transfer failed:", error);
       }
