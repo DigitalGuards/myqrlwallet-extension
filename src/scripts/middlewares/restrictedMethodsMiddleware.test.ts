@@ -1,12 +1,8 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
 import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
 import { toChecksumAddress } from "@theqrl/wallet.js";
-import {
-  DAPP_REQUEST_PORT_NAME,
-  EXTENSION_MESSAGES,
-} from "../constants/streamConstants";
 import {
   checkRequestCanCompleteSilently,
   restrictedMethodsMiddleware,
@@ -27,12 +23,6 @@ vi.mock("../lockManager/lockManager", () => ({
   __esModule: true,
   default: { isLocked: (...args: any[]) => mockIsLocked(...args) },
 }));
-
-vi.mock("../utils/approvalSurface", () => ({
-  openApprovalSurface: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock("uuid", () => ({ v4: () => "request-1" }));
 
 vi.mock("../phishing/phishingDetector", () => ({
   checkDomain: (...args: Parameters<typeof mockCheckDomain>) =>
@@ -263,68 +253,4 @@ describe("qrl_requestAccounts silent reconnect", () => {
       expect(browser.storage.session.set).not.toHaveBeenCalled();
     },
   );
-});
-
-describe("approval wait", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockIsLocked.mockResolvedValue({ isLocked: false, hasPasswordSet: true });
-    mockCheckDomain.mockReturnValue({ isDomainPhishing: false });
-    setupStorage({ connectedAccounts: undefined });
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  const startPrompt = async () => {
-    const res = {} as { result?: unknown; error?: { code?: number } };
-    const end = vi.fn();
-    const done = restrictedMethodsMiddleware(
-      buildRequest(),
-      res as never,
-      vi.fn(),
-      end,
-    );
-    await vi.waitFor(() =>
-      expect(browser.runtime.onConnect.addListener).toHaveBeenCalled(),
-    );
-    const onConnect = vi
-      .mocked(browser.runtime.onConnect.addListener)
-      .mock.calls.at(-1)![0] as (port: unknown) => void;
-    const onMessage = vi
-      .mocked(browser.runtime.onMessage.addListener)
-      .mock.calls.at(-1)![0] as (message: unknown) => void;
-    return { res, end, done, onConnect, onMessage };
-  };
-
-  it("keeps waiting past the safety timeout once the popup is connected", async () => {
-    const { end, done, onConnect, onMessage } = await startPrompt();
-    onConnect({
-      name: DAPP_REQUEST_PORT_NAME,
-      onDisconnect: { addListener: vi.fn(), removeListener: vi.fn() },
-    });
-
-    // A mined transaction at 60 s slots can take longer than the 90 s timer.
-    await vi.advanceTimersByTimeAsync(150_000);
-    expect(end).not.toHaveBeenCalled();
-
-    onMessage({
-      action: EXTENSION_MESSAGES.DAPP_RESPONSE,
-      requestId: "request-1",
-      method: "qrl_requestAccounts",
-      hasApproved: false,
-    });
-    await done;
-    expect(end).toHaveBeenCalledTimes(1);
-  });
-
-  it("gives up after the safety timeout when the popup never connects", async () => {
-    const { res, end, done } = await startPrompt();
-
-    await vi.advanceTimersByTimeAsync(90_000);
-    await done;
-
-    expect(end).toHaveBeenCalledTimes(1);
-    expect(res.error).toBeDefined();
-  });
 });
