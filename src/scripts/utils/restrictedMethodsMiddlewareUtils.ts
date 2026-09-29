@@ -144,6 +144,26 @@ const getTypedDataChainId = (req: JsonRpcRequest<JsonRpcRequest>) => {
   return { isValid: true, chainId: rawTypedData?.domain?.chainId };
 };
 
+/** True when the request carries constructor or call data worth running. */
+const hasTransactionCalldata = (data: unknown): boolean => {
+  if (typeof data !== "string") return false;
+  const trimmed = data.trim().toLowerCase();
+  return trimmed !== "" && trimmed !== "0x";
+};
+
+/** True when the request moves a non-zero amount. */
+const hasPositiveTransactionValue = (value: unknown): boolean => {
+  if (value === undefined || value === null || value === "") return false;
+  if (typeof value === "boolean") return false;
+  try {
+    return BigInt(value as string | number | bigint) > 0n;
+  } catch {
+    // An unparseable amount is not a positive one. The existing parameter
+    // validation and the node both reject it on its own merits.
+    return false;
+  }
+};
+
 /**
  * Enforce the account and chain capability granted to a dApp origin.
  * Transactions and typed-data requests honor their explicit chain IDs.
@@ -174,6 +194,24 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
         proceedError: rpcErrors.invalidParams({
           message:
             "Transaction recipients must use an uppercase-Q QIP-55 address with 128 hexadecimal characters and a valid checksum.",
+        }),
+      };
+    }
+    // A transaction with no recipient is a contract creation. With no
+    // calldata there is no constructor to run, so the funded contract has no
+    // code and nothing can ever move the value out of it again. The wallet
+    // refuses rather than showing an approval for a request whose only
+    // possible outcome is burning the amount (security review finding M2).
+    if (
+      (to === undefined || to === null || to === "") &&
+      !hasTransactionCalldata(transaction?.data) &&
+      hasPositiveTransactionValue(transaction?.value)
+    ) {
+      return {
+        canProceed: false,
+        proceedError: rpcErrors.invalidParams({
+          message:
+            "A transaction with no recipient and no data creates a contract with no code. The amount sent with it could never be recovered.",
         }),
       };
     }

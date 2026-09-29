@@ -1504,3 +1504,215 @@ describe("QrlSendTransactionForContent", () => {
     });
   });
 });
+
+describe("QrlSendTransactionForContent fee disclosure", () => {
+  afterEach(cleanup);
+
+  const ONE_GWEI = BigInt(1_000_000_000);
+
+  const feeStore = ({
+    gas,
+    estimateGas,
+    type = "0x2",
+  }: {
+    gas: string;
+    estimateGas: () => Promise<bigint>;
+    type?: string;
+  }) =>
+    mockedStore({
+      qrlStore: {
+        qrlConnection: { isConnected: true },
+        qrlInstance: {
+          getGasPrice: async () => ONE_GWEI,
+          estimateGas,
+        } as any,
+        getGasFeeData: async () => ({
+          baseFeePerGas: BigInt(0),
+          maxFeePerGas: ONE_GWEI,
+          maxPriorityFeePerGas: BigInt(0),
+        }),
+      },
+      dAppRequestStore: {
+        dAppRequestData: {
+          params: [
+            {
+              chainId: "0x301825",
+              from: SENDER_ADDRESS,
+              to: CONTRACT_ADDRESS,
+              data: "0x60806040",
+              value: "0x0",
+              gas,
+              type,
+            },
+          ],
+        },
+      },
+    });
+
+  const renderFees = (storeValues: ReturnType<typeof mockedStore>) =>
+    render(
+      <StoreProvider value={storeValues}>
+        <MemoryRouter>
+          <TooltipProvider>
+            <QrlSendTransactionForContent
+              transactionType={SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION}
+            />
+          </TooltipProvider>
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+  it("shows the maximum fee from the requested gas limit next to the wallet estimate", async () => {
+    renderFees(
+      feeStore({
+        gas: "0xf4240", // 1,000,000
+        estimateGas: async () => BigInt(21_000),
+      }),
+    );
+
+    // 1,000,000 x 1 gwei, the most the signed transaction could cost.
+    expect(await screen.findByText("0.001 Quanta")).toBeInTheDocument();
+    // 21,000 x 1 gwei, what the wallet expects it to cost.
+    expect(screen.getByText("0.000021 Quanta")).toBeInTheDocument();
+    expect(screen.getByText("Maximum fee")).toBeInTheDocument();
+    expect(screen.getByText("Estimated fee")).toBeInTheDocument();
+    expect(screen.getByText("Wallet gas estimate")).toBeInTheDocument();
+    expect(screen.getByText("21000")).toBeInTheDocument();
+    expect(screen.getByText("1000000")).toBeInTheDocument();
+  });
+
+  it("flags a gas limit far above the wallet estimate without changing it", async () => {
+    renderFees(
+      feeStore({
+        gas: "0xf4240",
+        estimateGas: async () => BigInt(21_000),
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        "The site asks for a gas limit far above the wallet's estimate. Unused gas comes back, so the maximum fee below is the most this can cost.",
+      ),
+    ).toBeInTheDocument();
+    // The requested limit is still the one on screen, untouched.
+    expect(screen.getByText("1000000")).toBeInTheDocument();
+  });
+
+  it("does not flag a gas limit close to the wallet estimate", async () => {
+    renderFees(
+      feeStore({
+        gas: "0xc350", // 50,000
+        estimateGas: async () => BigInt(21_000),
+      }),
+    );
+
+    expect(await screen.findByText("Wallet gas estimate")).toBeVisible();
+    expect(
+      screen.queryByText(
+        "The site asks for a gas limit far above the wallet's estimate. Unused gas comes back, so the maximum fee below is the most this can cost.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("still shows the maximum fee when the node will not estimate gas", async () => {
+    renderFees(
+      feeStore({
+        gas: "0x5208", // 21,000
+        estimateGas: async () => {
+          throw new Error("execution reverted");
+        },
+      }),
+    );
+
+    expect(await screen.findByText("0.000021 Quanta")).toBeInTheDocument();
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Wallet gas estimate")).not.toBeInTheDocument();
+  });
+
+  it("prices a legacy transaction from the gas price instead of the fee market", async () => {
+    const getGasPrice = vi.fn(async () => BigInt(2_000_000_000));
+    const storeValues = feeStore({
+      gas: "0x5208",
+      estimateGas: async () => BigInt(21_000),
+      type: "0x0",
+    });
+    (storeValues.qrlStore.qrlInstance as any).getGasPrice = getGasPrice;
+
+    renderFees(storeValues);
+
+    // 21,000 x 2 gwei.
+    expect(
+      (await screen.findAllByText("0.000042 Quanta")).length,
+    ).toBeGreaterThan(0);
+    expect(getGasPrice).toHaveBeenCalled();
+  });
+});
+
+describe("QrlSendTransactionForContent recipient disclosure", () => {
+  afterEach(cleanup);
+
+  const renderWith = (
+    params: Record<string, unknown>,
+    transactionType: keyof typeof SEND_TRANSACTION_TYPES,
+  ) =>
+    render(
+      <StoreProvider
+        value={mockedStore({
+          dAppRequestStore: { dAppRequestData: { params: [params] } },
+        })}
+      >
+        <MemoryRouter>
+          <TooltipProvider>
+            <QrlSendTransactionForContent transactionType={transactionType} />
+          </TooltipProvider>
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+  it("shows the recipient of an unclassified request that still signs", () => {
+    renderWith(
+      {
+        from: SENDER_ADDRESS,
+        to: RECIPIENT_ADDRESS,
+        gas: "0x1cbb3",
+        type: "0x2",
+      },
+      SEND_TRANSACTION_TYPES.UNKNOWN,
+    );
+
+    expect(
+      screen.getByText(getDisplayAddress(RECIPIENT_ADDRESS)),
+    ).toBeInTheDocument();
+  });
+
+  it("says outright that a request with no recipient creates a contract", () => {
+    renderWith(
+      {
+        from: SENDER_ADDRESS,
+        data: "0x608060405234",
+        gas: "0x1cbb3",
+        type: "0x2",
+      },
+      SEND_TRANSACTION_TYPES.CONTRACT_DEPLOYMENT,
+    );
+
+    expect(
+      screen.getByText("None. This creates a new contract."),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the Data tab for a request that carries no calldata", () => {
+    renderWith(
+      {
+        from: SENDER_ADDRESS,
+        to: RECIPIENT_ADDRESS,
+        gas: "0x1cbb3",
+        type: "0x2",
+      },
+      SEND_TRANSACTION_TYPES.PLAIN_CALL,
+    );
+
+    expect(screen.getByRole("tab", { name: "Details" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Data" })).not.toBeInTheDocument();
+  });
+});

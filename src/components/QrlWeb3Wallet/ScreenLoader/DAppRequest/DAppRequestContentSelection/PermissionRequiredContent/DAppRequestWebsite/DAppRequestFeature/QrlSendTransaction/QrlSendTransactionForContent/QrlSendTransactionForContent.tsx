@@ -2,6 +2,7 @@ import { V3_CHAIN_ID } from "@/configuration/releaseProfile";
 import { Button } from "@/components/UI/Button";
 import { Label } from "@/components/UI/Label";
 import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
+import CalldataSummary from "../CalldataSummary/CalldataSummary";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/UI/tabs";
 import {
   Tooltip,
@@ -52,6 +53,14 @@ const { Common } = qrl.accounts;
 // plus the floor, or the full shared budget, whichever is larger) stays
 // well inside the 90 s the middleware allows for the whole approval.
 const SEND_BUDGET_MS = 30 * 1000;
+
+/**
+ * How far above the wallet's own gas estimate a dApp's gas limit may sit
+ * before the approval screen calls it out. Padding a limit is normal, so
+ * the threshold is deliberately loose; three times the estimate is well
+ * past padding.
+ */
+const GAS_LIMIT_INFLATION_FACTOR = 3n;
 const SIMULATION_TIMEOUT_CAP_MS = 15 * 1000;
 const BROADCAST_TIMEOUT_FLOOR_MS = 5 * 1000;
 
@@ -163,6 +172,74 @@ const QrlSendTransactionForContent = observer(
         setOnPermissionCallBack(onPermissionCallBack);
       }
     }, [isConnected, transactionType, dAppRequestData]);
+
+    // The fee the request could actually cost, rather than only the gas
+    // limit it asks for (security review finding M2). `maxFeePerGas` is read
+    // exactly the way the signing paths below read it, so the maximum shown
+    // here is the maximum that gets signed. The wallet's own estimate is
+    // advisory: it is never written back into the request, so the dApp's
+    // gas limit is still the one sent.
+    const [feeBasis, setFeeBasis] = useState<{
+      maxFeePerGas?: bigint;
+      estimatedGas?: bigint;
+    }>({});
+
+    useEffect(() => {
+      let isCurrent = true;
+      const request = dAppRequestData?.params?.[0];
+      const loadFeeBasis = async () => {
+        if (!qrlInstance || !request) return;
+        let maxFeePerGas: bigint | undefined;
+        try {
+          maxFeePerGas =
+            request.type === "0x2"
+              ? (await getGasFeeData()).maxFeePerGas
+              : await qrlInstance.getGasPrice();
+        } catch {
+          maxFeePerGas = undefined;
+        }
+        let estimatedGas: bigint | undefined;
+        try {
+          const estimate = await qrlInstance.estimateGas(
+            {
+              from: request.from,
+              ...(request.to ? { to: request.to } : {}),
+              ...(request.data ? { data: request.data } : {}),
+              ...(request.value ? { value: request.value } : {}),
+            } as unknown as TransactionCall,
+            BlockTags.PENDING,
+          );
+          estimatedGas = BigInt(estimate);
+        } catch {
+          // A call that reverts under simulation, or a node that will not
+          // estimate, leaves the comparison out instead of blocking the
+          // screen. The maximum fee above does not depend on it.
+          estimatedGas = undefined;
+        }
+        if (!isCurrent) return;
+        setFeeBasis({ maxFeePerGas, estimatedGas });
+      };
+      void loadFeeBasis();
+      return () => {
+        isCurrent = false;
+      };
+    }, [qrlInstance, dAppRequestData]);
+
+    const maximumFee =
+      feeBasis.maxFeePerGas !== undefined
+        ? gasLimit * feeBasis.maxFeePerGas
+        : undefined;
+    const estimatedFee =
+      feeBasis.maxFeePerGas !== undefined && feeBasis.estimatedGas !== undefined
+        ? feeBasis.estimatedGas * feeBasis.maxFeePerGas
+        : undefined;
+    // Flagged, never silently corrected: a limit far above what the call
+    // needs is how a dApp turns an approval into a much larger fee ceiling
+    // than the screen otherwise implies.
+    const isGasLimitInflated =
+      feeBasis.estimatedGas !== undefined &&
+      feeBasis.estimatedGas > 0n &&
+      gasLimit > feeBasis.estimatedGas * GAS_LIMIT_INFLATION_FACTOR;
 
     const copyData = () => {
       navigator.clipboard.writeText(data);
@@ -744,14 +821,19 @@ const QrlSendTransactionForContent = observer(
             {t("account.walletLockedError")}
           </div>
         )}
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList
+          className={`grid w-full ${data ? "grid-cols-2" : "grid-cols-1"}`}
+        >
           <TabsTrigger
             value="details"
             className="w-full data-[state=active]:text-secondary"
           >
             {t("dapp.sendTransaction.tabDetails")}
           </TabsTrigger>
-          {transactionType !== SEND_TRANSACTION_TYPES.QRL_TRANSFER && (
+          {/* A request with no calldata has nothing to put in the Data tab.
+              This used to key off the transfer shape alone, so a plain call
+              opened an empty tab. */}
+          {data && (
             <TabsTrigger
               value="data"
               className="w-full data-[state=active]:text-secondary"
@@ -769,12 +851,15 @@ const QrlSendTransactionForContent = observer(
                 className="w-full font-bold text-identity-accent"
               />
             </div>
-            {(transactionType === SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION ||
-              transactionType === SEND_TRANSACTION_TYPES.QRL_TRANSFER) && (
+            {/* The recipient is shown for every shape. Hiding it for an
+                unclassified request left the one field that says where the
+                value goes off a screen that still signs (finding M2). */}
+            {accountToAddress ? (
               <div className="flex flex-col gap-1">
                 <div>
                   {transactionType ===
-                  SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION
+                    SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION ||
+                  transactionType === SEND_TRANSACTION_TYPES.PLAIN_CALL
                     ? t("dapp.sendTransaction.contractAddress")
                     : t("dapp.sendTransaction.toAddress")}
                 </div>
@@ -782,6 +867,13 @@ const QrlSendTransactionForContent = observer(
                   address={accountToAddress}
                   className="w-full font-bold text-identity-accent"
                 />
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1">
+                <div>{t("dapp.sendTransaction.toAddress")}</div>
+                <div className="font-bold text-secondary">
+                  {t("dapp.sendTransaction.contractCreation")}
+                </div>
               </div>
             )}
             {(transactionType === SEND_TRANSACTION_TYPES.QRL_TRANSFER ||
@@ -793,15 +885,57 @@ const QrlSendTransactionForContent = observer(
                 </div>
               </div>
             )}
+            {data && (
+              <CalldataSummary
+                data={data}
+                contractAddress={accountToAddress}
+                fromAddress={accountFromAddress}
+              />
+            )}
             <div className="flex flex-col gap-1">
               <div>{t("dapp.sendTransaction.gasLimit")}</div>
               <div className="font-numeric font-bold text-secondary">
                 {gasLimit.toString()}
               </div>
+              <div className="text-xs">
+                {t("dapp.sendTransaction.gasLimitSource")}
+              </div>
+            </div>
+            {feeBasis.estimatedGas !== undefined && (
+              <div className="flex flex-col gap-1">
+                <div>{t("dapp.sendTransaction.walletGasEstimate")}</div>
+                <div className="font-numeric font-bold text-secondary">
+                  {feeBasis.estimatedGas.toString()}
+                </div>
+              </div>
+            )}
+            {isGasLimitInflated && (
+              <div
+                role="alert"
+                className="rounded border border-red-500/60 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300"
+              >
+                {t("dapp.sendTransaction.gasLimitInflatedWarning")}
+              </div>
+            )}
+            <div className="flex flex-col gap-1">
+              <div>{t("dapp.sendTransaction.estimatedFee")}</div>
+              <div className="font-numeric font-bold text-secondary">
+                {estimatedFee !== undefined
+                  ? `${utils.fromPlanck(estimatedFee, "quanta")} Quanta`
+                  : t("dapp.sendTransaction.feeUnavailable")}
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <div>{t("dapp.sendTransaction.maximumFee")}</div>
+              <div className="font-numeric font-bold text-secondary">
+                {maximumFee !== undefined
+                  ? `${utils.fromPlanck(maximumFee, "quanta")} Quanta`
+                  : t("dapp.sendTransaction.feeUnavailable")}
+              </div>
             </div>
           </div>
         </TabsContent>
-        {transactionType !== SEND_TRANSACTION_TYPES.QRL_TRANSFER && (
+        {data && (
           <TabsContent value="data" className="rounded-md p-2">
             <div className="flex flex-col gap-1">
               <div>{t("dapp.sendTransaction.data")}</div>
