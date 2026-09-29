@@ -1,6 +1,7 @@
 import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import type { Contact } from "@/types/contact";
 import { Pencil, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 type ContactItemProps = {
   contact: Contact;
@@ -9,6 +10,8 @@ type ContactItemProps = {
 };
 
 const ContactItem = ({ contact, onEdit, onDelete }: ContactItemProps) => {
+  const { t } = useTranslation();
+
   return (
     <div className="flex items-center justify-between rounded-md border p-3">
       <div className="flex min-w-0 flex-col gap-1">
@@ -20,14 +23,16 @@ const ContactItem = ({ contact, onEdit, onDelete }: ContactItemProps) => {
       </div>
       <div className="flex shrink-0 gap-2">
         <button
-          aria-label="Edit contact"
+          type="button"
+          aria-label={t("contacts.editButton")}
           className="rounded p-1 text-muted-foreground transition-colors hover:text-secondary"
           onClick={() => onEdit(contact)}
         >
           <Pencil size={14} />
         </button>
         <button
-          aria-label="Delete contact"
+          type="button"
+          aria-label={t("contacts.deleteButton")}
           className="rounded p-1 text-muted-foreground transition-colors hover:text-destructive"
           onClick={() => onDelete(contact.address)}
         >

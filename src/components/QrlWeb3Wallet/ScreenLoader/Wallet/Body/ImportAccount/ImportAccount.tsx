@@ -59,9 +59,13 @@ const ImportAccount = observer(() => {
   // password field, since the password was already confirmed usable.
   const [needsRetry, setNeedsRetry] = useState(false);
   const pendingAccountRef = useRef<Web3BaseWalletAccount>();
+  // Set when the imported account is already in the wallet. Distinct from
+  // finalizeError: nothing failed, so neither a re-arm prompt nor a retry
+  // button belongs on it.
+  const [duplicateNotice, setDuplicateNotice] = useState("");
   const { lockStore, qrlStore, accountLabelsStore } = useStore();
   const { encryptAccount, getWalletPassword } = lockStore;
-  const { setActiveAccount } = qrlStore;
+  const { setActiveAccount, qrlAccounts } = qrlStore;
 
   // Shared finalize step for every import path (mnemonic, hex seed, wallet
   // file). Each path only has to produce the account; secret persistence stays
@@ -69,6 +73,23 @@ const ImportAccount = observer(() => {
   // hex seed via the lock manager keystore).
   const finalizeImport = async (importedAccount: Web3BaseWalletAccount) => {
     scrollShellToTop();
+    // Re-importing an account the wallet already holds used to run the whole
+    // finalize path and land on the success screen, so a duplicate read as a
+    // fresh import. Addresses are compared lowercased because the import
+    // paths and the stored list disagree on hex casing.
+    const importedAddress = importedAccount.address.toLowerCase();
+    const isDuplicate = qrlAccounts.accounts.some(
+      ({ accountAddress }) => accountAddress.toLowerCase() === importedAddress,
+    );
+    if (isDuplicate) {
+      pendingAccountRef.current = undefined;
+      setNeedsReArm(false);
+      setNeedsRetry(false);
+      setFinalizeError("");
+      setDuplicateNotice(t("importAccount.alreadyImported"));
+      return;
+    }
+    setDuplicateNotice("");
     pendingAccountRef.current = importedAccount;
     // Fail closed before any write. getWalletPassword() throws whenever the
     // service worker is locked - including a stale popup-side isLocked
@@ -150,6 +171,11 @@ const ImportAccount = observer(() => {
         ) : (
           <>
             <BackButton />
+            {duplicateNotice && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertDescription>{duplicateNotice}</AlertDescription>
+              </Alert>
+            )}
             {finalizeError && (
               <Alert variant="destructive" className="mb-4">
                 <AlertDescription>

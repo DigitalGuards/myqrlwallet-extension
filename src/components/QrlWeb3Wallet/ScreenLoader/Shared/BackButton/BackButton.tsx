@@ -1,4 +1,3 @@
-import { Label } from "@/components/UI/Label";
 import { MoveLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -12,16 +11,20 @@ const BackButton = ({ navigationRoute }: BackButtonProps) => {
   const navigate = useNavigate();
 
   return (
-    <div
+    <button
+      type="button"
       data-testid="backButtonTestId"
-      className="flex w-min cursor-pointer items-center gap-2 pb-4 transition-all hover:-ml-1 hover:text-secondary"
+      aria-label={t("common.back")}
+      className="flex w-min items-center gap-2 rounded-md pb-4 transition-all hover:-ml-1 hover:text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       onClick={() =>
         navigationRoute ? navigate(navigationRoute) : navigate(-1)
       }
     >
       <MoveLeft />
-      <Label className="cursor-pointer text-lg">{t('common.back')}</Label>
-    </div>
+      <span className="text-lg font-medium leading-none text-foreground">
+        {t("common.back")}
+      </span>
+    </button>
   );
 };
 

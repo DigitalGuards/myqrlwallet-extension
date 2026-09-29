@@ -3,9 +3,10 @@ import { formatFiatCompact } from "@/functions/formatFiat";
 import { parseBalanceValue } from "@/functions/parseBalanceValue";
 import { useStore } from "@/stores/store";
 import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
-import { Check, Copy, TrendingDown, TrendingUp } from "lucide-react";
+import { useCopy } from "@/hooks/useCopy";
+import { Check, Copy, TrendingDown, TrendingUp, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 /**
  * Hero balance block, styled after the qrlwallet.com Home card: centered
@@ -18,7 +19,8 @@ const ActiveAccountDisplay = observer(() => {
   const { accountAddress } = activeAccount;
   const { showBalanceAndPrice, currency } = settingsStore;
 
-  const [copiedAddress, setCopiedAddress] = useState(false);
+  const { t } = useTranslation();
+  const { copied: copiedAddress, failed: copyFailed, copy } = useCopy();
 
   const accountBalance = getAccountBalance(accountAddress);
   // The store formats balances as "<amount> <unit>"; split them so the unit
@@ -35,20 +37,10 @@ const ActiveAccountDisplay = observer(() => {
   const change24h = priceStore.getChange24h(currency);
   const showChange = showBalanceAndPrice && price > 0 && change24h !== 0;
 
-  const handleCopyAddress = async () => {
-    try {
-      await navigator.clipboard.writeText(accountAddress);
-      setCopiedAddress(true);
-      setTimeout(() => setCopiedAddress(false), 1500);
-    } catch {
-      // clipboard unavailable; nothing to signal
-    }
-  };
-
   return (
     <div className="flex flex-col items-center gap-2 text-center">
       <div className="flex flex-col items-center">
-        <div className="font-numeric animate-appear-in text-3xl font-bold tracking-tight text-foreground">
+        <div className="animate-appear-in font-numeric text-3xl font-bold tracking-tight text-foreground">
           {balanceAmount}
         </div>
         {balanceUnit && (
@@ -77,15 +69,19 @@ const ActiveAccountDisplay = observer(() => {
       <button
         type="button"
         className="mt-1 inline-flex items-center gap-2 rounded-full border border-identity-accent/30 bg-identity-accent/[0.08] px-3 py-1.5 transition-colors hover:bg-identity-accent/[0.14]"
-        aria-label="Copy address"
+        aria-label={
+          copyFailed ? t("common.copyFailed") : t("receive.copyAddress")
+        }
         title={accountAddress}
-        onClick={() => void handleCopyAddress()}
+        onClick={() => void copy(accountAddress)}
       >
         <AddressFingerprint
           address={accountAddress}
           className="text-xs text-identity-accent"
         />
-        {copiedAddress ? (
+        {copyFailed ? (
+          <X className="h-3.5 w-3.5 shrink-0 text-destructive" />
+        ) : copiedAddress ? (
           <Check className="h-3.5 w-3.5 shrink-0 text-success" />
         ) : (
           <Copy className="h-3.5 w-3.5 shrink-0 text-identity-accent/60" />

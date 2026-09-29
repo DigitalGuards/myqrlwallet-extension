@@ -101,13 +101,12 @@ const DAppRequest = observer(() => {
       <div className="relative z-10 flex flex-col items-center space-y-4 p-4">
         {phishingDetectorUnavailable && (
           <div className="w-full max-w-md rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
-            <strong>Phishing protection unavailable.</strong> The wallet
-            could not load its phishing blocklist
+            <strong>{t("dapp.phishingUnavailableTitle")}</strong>{" "}
             {phishingResult?.detectorStatus
-              ? ` (${phishingResult.detectorStatus})`
-              : ""}
-            . The dApp below has not been checked against any blocklist;
-            verify the origin manually before approving.
+              ? t("dapp.phishingUnavailableBodyWithStatus", {
+                  status: phishingResult.detectorStatus,
+                })
+              : t("dapp.phishingUnavailableBody")}
           </div>
         )}
         <DAppRequestContentSelection />

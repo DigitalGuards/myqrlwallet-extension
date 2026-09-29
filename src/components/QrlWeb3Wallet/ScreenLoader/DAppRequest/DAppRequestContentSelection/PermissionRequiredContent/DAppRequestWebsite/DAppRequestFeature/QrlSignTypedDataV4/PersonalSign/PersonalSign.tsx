@@ -155,7 +155,7 @@ const PersonalSign = observer(() => {
                 className="h-7 w-8 hover:text-secondary"
                 variant="outline"
                 size="icon"
-                aria-label="Copy message"
+                aria-label={t("dapp.signature.copyMessage")}
                 onClick={copyMessage}
               >
                 <Copy size="16" />

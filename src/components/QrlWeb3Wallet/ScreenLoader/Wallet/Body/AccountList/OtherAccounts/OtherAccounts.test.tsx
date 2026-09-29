@@ -54,6 +54,14 @@ describe("OtherAccounts", () => {
     await userEvent.click(trigger);
   };
 
+  it("exposes the account menu trigger as a named button", () => {
+    renderComponent(twoAccountStore());
+
+    expect(screen.getByRole("button", { name: "More" })).toBe(
+      screen.getByTestId("account-menu"),
+    );
+  });
+
   it("should render the other accounts component", async () => {
     renderComponent(twoAccountStore());
 

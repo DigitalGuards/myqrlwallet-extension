@@ -21,8 +21,9 @@ import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMetho
 import { useStore } from "@/stores/store";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { sanitizeForDisplay } from "@/utilities/stringUtil";
+import { useCopy } from "@/hooks/useCopy";
 import { Buffer } from "buffer";
-import { Copy } from "lucide-react";
+import { Check, Copy, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { useEffect, useState } from "react";
@@ -37,6 +38,7 @@ import { useEffect, useState } from "react";
  */
 const QrlPqSign = observer(() => {
   const { t } = useTranslation();
+  const { copied, failed: copyFailed, copy } = useCopy();
   const { lockStore, qrlStore, dAppRequestStore } = useStore();
   const { getMnemonicPhrases, readLockState } = lockStore;
   const { qrlInstance, qrlConnection } = qrlStore;
@@ -114,7 +116,7 @@ const QrlPqSign = observer(() => {
   }, []);
 
   const copyMessage = () => {
-    navigator.clipboard.writeText(challenge);
+    void copy(challenge);
   };
 
   const pqSign = async () => {
@@ -225,13 +227,23 @@ const QrlPqSign = observer(() => {
             <Tooltip delayDuration={0}>
               <TooltipTrigger asChild>
                 <Button
-                  className="h-7 w-8 hover:text-secondary"
+                  className={`h-7 w-8 hover:text-secondary ${copyFailed ? "text-destructive" : ""}`}
                   variant="outline"
                   size="icon"
-                  aria-label="Copy message"
+                  aria-label={
+                    copyFailed
+                      ? t("common.copyFailed")
+                      : t("dapp.signature.copyMessage")
+                  }
                   onClick={copyMessage}
                 >
-                  <Copy size="16" />
+                  {copyFailed ? (
+                    <X size="16" />
+                  ) : copied ? (
+                    <Check size="16" />
+                  ) : (
+                    <Copy size="16" />
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="left">

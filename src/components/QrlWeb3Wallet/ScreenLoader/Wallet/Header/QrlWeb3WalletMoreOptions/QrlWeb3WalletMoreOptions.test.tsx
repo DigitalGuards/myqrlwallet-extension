@@ -39,6 +39,27 @@ describe("QrlWeb3WalletMoreOptions", () => {
       </StoreProvider>,
     );
 
+  it("exposes the menu trigger as a named button", async () => {
+    const user = userEvent.setup();
+    renderComponent(
+      mockedStore({
+        lockStore: { lock: async () => {} },
+        settingsStore: { isPopupWindow: true },
+      }),
+    );
+
+    const trigger = screen.getByRole("button", { name: "More" });
+    expect(trigger).toBe(screen.getByTestId("ellipsis-icon"));
+
+    // The trigger used to be a bare svg: unreachable by keyboard.
+    await user.tab();
+    expect(trigger).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(
+      await screen.findByRole("menuitem", { name: "Lock Wallet" }),
+    ).toBeInTheDocument();
+  });
+
   it("should render the qrl web3 wallet more options component", async () => {
     renderComponent(
       mockedStore({
@@ -49,10 +70,12 @@ describe("QrlWeb3WalletMoreOptions", () => {
 
     const moreButton = screen.getByTestId("ellipsis-icon");
     await userEvent.click(moreButton);
-    const openInTabButton = screen.getByRole("button", { name: "Open in tab" });
+    const openInTabButton = screen.getByRole("menuitem", {
+      name: "Open In Tab",
+    });
     expect(openInTabButton).toBeInTheDocument();
     expect(openInTabButton).toBeEnabled();
-    const lockWalletButton = screen.getByRole("button", {
+    const lockWalletButton = screen.getByRole("menuitem", {
       name: "Lock Wallet",
     });
     expect(lockWalletButton).toBeInTheDocument();
@@ -69,11 +92,11 @@ describe("QrlWeb3WalletMoreOptions", () => {
 
     const moreButton = screen.getByTestId("ellipsis-icon");
     await userEvent.click(moreButton);
-    const openInTabButton = screen.queryByRole("button", {
-      name: "Open in tab",
+    const openInTabButton = screen.queryByRole("menuitem", {
+      name: "Open In Tab",
     });
     expect(openInTabButton).not.toBeInTheDocument();
-    const lockWalletButton = screen.getByRole("button", {
+    const lockWalletButton = screen.getByRole("menuitem", {
       name: "Lock Wallet",
     });
     expect(lockWalletButton).toBeInTheDocument();
@@ -90,8 +113,8 @@ describe("QrlWeb3WalletMoreOptions", () => {
 
     const moreButton = screen.getByTestId("ellipsis-icon");
     await userEvent.click(moreButton);
-    const openInTabButton = screen.getByRole("button", {
-      name: "Open in tab",
+    const openInTabButton = screen.getByRole("menuitem", {
+      name: "Open In Tab",
     });
     expect(openInTabButton).toBeInTheDocument();
     expect(openInTabButton).toBeEnabled();
@@ -109,7 +132,7 @@ describe("QrlWeb3WalletMoreOptions", () => {
 
     const moreButton = screen.getByTestId("ellipsis-icon");
     await userEvent.click(moreButton);
-    const contactsButton = screen.getByRole("button", { name: "Contacts" });
+    const contactsButton = screen.getByRole("menuitem", { name: "Contacts" });
     expect(contactsButton).toBeInTheDocument();
     expect(contactsButton).toBeEnabled();
   });
@@ -125,7 +148,7 @@ describe("QrlWeb3WalletMoreOptions", () => {
 
     const moreButton = screen.getByTestId("ellipsis-icon");
     await userEvent.click(moreButton);
-    const lockWalletButton = screen.getByRole("button", {
+    const lockWalletButton = screen.getByRole("menuitem", {
       name: "Lock Wallet",
     });
     expect(lockWalletButton).toBeInTheDocument();

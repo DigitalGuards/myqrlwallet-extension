@@ -169,11 +169,17 @@ const SettingsSecurity = observer(() => {
         <Card className="w-full">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <MoveLeft
-                className="cursor-pointer transition-all hover:text-secondary"
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8 shrink-0 transition-all hover:text-secondary"
+                aria-label={t("common.back")}
                 onClick={() => navigate(ROUTES.SETTINGS)}
                 data-testid="back-arrow"
-              />
+              >
+                <MoveLeft />
+              </Button>
               {t("settings.security.title")}
             </CardTitle>
           </CardHeader>
@@ -187,7 +193,9 @@ const SettingsSecurity = observer(() => {
                 value={String(autoLockMinutes)}
                 onValueChange={(value) => setAutoLockMinutes(Number(value))}
               >
-                <SelectTrigger aria-label="Auto-lock timeout">
+                <SelectTrigger
+                  aria-label={t("settings.security.autoLockLabel")}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

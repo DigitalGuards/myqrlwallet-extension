@@ -22,6 +22,7 @@ import { checkWalletAddQrlChainParams } from "@/scripts/utils/restrictedMethodsM
 import { useStore } from "@/stores/store";
 import StorageUtil from "@/utilities/storageUtil";
 import { zodResolver } from "@hookform/resolvers/zod";
+import type { TFunction } from "i18next";
 import { Loader, Pencil, Plus, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -36,13 +37,14 @@ type AddEditChainFormType = {
   chainToEdit?: BlockchainDataType;
 };
 
-const FormSchema = z.object({
-  chainName: z.string().min(1, "Chain name is required"),
-  chainId: z.coerce.number().gt(0, "Chain ID should be positive"),
-  currencyName: z.string().min(1, "Currency name is required"),
-  currencySymbol: z.string().min(1, "Currency symbol is required"),
-  currencyDecimals: z.coerce.number().gt(0, "Decimals should be positive"),
-});
+const createFormSchema = (t: TFunction) =>
+  z.object({
+    chainName: z.string().min(1, t("validation.chainNameRequired")),
+    chainId: z.coerce.number().gt(0, t("validation.chainIdPositive")),
+    currencyName: z.string().min(1, t("validation.currencyNameRequired")),
+    currencySymbol: z.string().min(1, t("validation.currencySymbolRequired")),
+    currencyDecimals: z.coerce.number().gt(0, t("validation.decimalsPositive")),
+  });
 
 const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
   const { t } = useTranslation();
@@ -59,9 +61,13 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
   const [qrnsRegistryAddress, setQrnsRegistryAddress] = useState("");
   const [error, setError] = useState("");
 
+  const FormSchema = createFormSchema(t);
+
   const isChainEdit = !!chainToEdit;
-  const labelText = isChainEdit ? t('chain.editTitle') : t('chain.addTitle');
-  const buttonSubmittingText = isChainEdit ? t('chain.editingButton') : t('chain.addingButton');
+  const labelText = isChainEdit ? t("chain.editTitle") : t("chain.addTitle");
+  const buttonSubmittingText = isChainEdit
+    ? t("chain.editingButton")
+    : t("chain.addingButton");
   const isCustomChain = chainToEdit?.isCustomChain ?? true;
 
   const form = useForm<z.infer<typeof FormSchema>>({
@@ -151,7 +157,7 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
     const { chainFound, updatedChainList } = await addChain(blockchainData);
     if (chainFound) {
       setError(
-        t('chain.errorChainIdExists', { chainId: blockchainData.chainId }),
+        t("chain.errorChainIdExists", { chainId: blockchainData.chainId }),
       );
       return;
     }
@@ -201,18 +207,20 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
               name="chainName"
               render={({ field }) => (
                 <FormItem>
-                  <Label>{t('chain.chainName')}</Label>
+                  <Label>{t("chain.chainName")}</Label>
                   <FormControl>
                     <Input
                       {...field}
                       aria-label={field.name}
                       autoComplete="off"
                       disabled={isSubmitting}
-                      placeholder={t('chain.chainNamePlaceholder')}
+                      placeholder={t("chain.chainNamePlaceholder")}
                       type="text"
                     />
                   </FormControl>
-                  <FormDescription>{t('chain.chainNameDescription')}</FormDescription>
+                  <FormDescription>
+                    {t("chain.chainNameDescription")}
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -222,24 +230,26 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
               name="chainId"
               render={({ field }) => (
                 <FormItem>
-                  <Label>{t('chain.chainIdLabel')}</Label>
+                  <Label>{t("chain.chainIdLabel")}</Label>
                   <FormControl>
                     <Input
                       {...field}
                       aria-label={field.name}
                       autoComplete="off"
                       disabled={isSubmitting || isChainEdit}
-                      placeholder={t('chain.chainIdPlaceholder')}
+                      placeholder={t("chain.chainIdPlaceholder")}
                       type="number"
                     />
                   </FormControl>
-                  <FormDescription>{t('chain.chainIdDescription')}</FormDescription>
+                  <FormDescription>
+                    {t("chain.chainIdDescription")}
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
             <UrlSelections
-              title={t('chain.rpcUrls')}
+              title={t("chain.rpcUrls")}
               canBeEmpty={false}
               urls={rpcUrls}
               setUrls={setRpcUrls}
@@ -247,7 +257,7 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
               setDefaultUrl={setDefaultRpcUrl}
             />
             <UrlSelections
-              title={t('chain.blockExplorerUrls')}
+              title={t("chain.blockExplorerUrls")}
               canBeEmpty={true}
               urls={blockExplorerUrls}
               setUrls={setBlockExplorerUrls}
@@ -255,7 +265,7 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
               setDefaultUrl={setDefaultBlockExplorerUrl}
             />
             <UrlSelections
-              title={t('chain.iconUrls')}
+              title={t("chain.iconUrls")}
               canBeEmpty={true}
               urls={iconUrls}
               setUrls={setIconUrls}
@@ -263,7 +273,7 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
               setDefaultUrl={setDefaultIconUrl}
             />
             <div>
-              <Label>{t('chain.qrnsRegistryAddress')}</Label>
+              <Label>{t("chain.qrnsRegistryAddress")}</Label>
               <Input
                 id="qrnsRegistryAddress"
                 name="qrnsRegistryAddress"
@@ -274,11 +284,11 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
                 autoCapitalize="off"
                 spellCheck={false}
                 disabled={isSubmitting}
-                placeholder={t('chain.qrnsRegistryAddressPlaceholder')}
+                placeholder={t("chain.qrnsRegistryAddressPlaceholder")}
                 type="text"
               />
-              <p className="text-[0.8rem] text-muted-foreground mt-1">
-                {t('chain.qrnsRegistryAddressDescription')}
+              <p className="mt-1 text-[0.8rem] text-muted-foreground">
+                {t("chain.qrnsRegistryAddressDescription")}
               </p>
             </div>
             <FormField
@@ -286,18 +296,20 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
               name="currencyName"
               render={({ field }) => (
                 <FormItem>
-                  <Label>{t('chain.currencyName')}</Label>
+                  <Label>{t("chain.currencyName")}</Label>
                   <FormControl>
                     <Input
                       {...field}
                       aria-label={field.name}
                       autoComplete="off"
                       disabled={isSubmitting || !isCustomChain}
-                      placeholder={t('chain.currencyNamePlaceholder')}
+                      placeholder={t("chain.currencyNamePlaceholder")}
                       type="text"
                     />
                   </FormControl>
-                  <FormDescription>{t('chain.currencyNameDescription')}</FormDescription>
+                  <FormDescription>
+                    {t("chain.currencyNameDescription")}
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -308,18 +320,20 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
                 name="currencySymbol"
                 render={({ field }) => (
                   <FormItem>
-                    <Label>{t('chain.currencySymbol')}</Label>
+                    <Label>{t("chain.currencySymbol")}</Label>
                     <FormControl>
                       <Input
                         {...field}
                         aria-label={field.name}
                         autoComplete="off"
                         disabled={isSubmitting || !isCustomChain}
-                        placeholder={t('chain.currencySymbolPlaceholder')}
+                        placeholder={t("chain.currencySymbolPlaceholder")}
                         type="text"
                       />
                     </FormControl>
-                    <FormDescription>{t('chain.currencySymbolDescription')}</FormDescription>
+                    <FormDescription>
+                      {t("chain.currencySymbolDescription")}
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -329,18 +343,20 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
                 name="currencyDecimals"
                 render={({ field }) => (
                   <FormItem>
-                    <Label>{t('chain.currencyDecimals')}</Label>
+                    <Label>{t("chain.currencyDecimals")}</Label>
                     <FormControl>
                       <Input
                         {...field}
                         aria-label={field.name}
                         autoComplete="off"
                         disabled={isSubmitting || !isCustomChain}
-                        placeholder={t('chain.currencyDecimalsPlaceholder')}
+                        placeholder={t("chain.currencyDecimalsPlaceholder")}
                         type="number"
                       />
                     </FormControl>
-                    <FormDescription>{t('chain.currencyDecimalsDescription')}</FormDescription>
+                    <FormDescription>
+                      {t("chain.currencyDecimalsDescription")}
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -360,7 +376,7 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
               }}
             >
               <X className="mr-2 h-4 w-4" />
-              {t('chain.cancelButton')}
+              {t("chain.cancelButton")}
             </Button>
             <Button
               disabled={isSubmitting || !isValid}

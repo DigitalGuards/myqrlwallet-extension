@@ -108,9 +108,13 @@ const AccountCreateImport = observer(() => {
               <CardContent>
                 <ActiveAccountDisplay />
               </CardContent>
-              <CardFooter className="gap-2">
+              {/* Wraps at narrow widths: the three labels have a
+                  combined min-content wider than a side panel dragged to
+                  its 320px minimum, and the shell is overflow-hidden, so an
+                  unwrapped row put Send and Receive out of reach. */}
+              <CardFooter className="flex-wrap gap-2">
                 <Link
-                  className="flex-1"
+                  className="min-w-[8rem] flex-1"
                   to={ROUTES.TOKEN_TRANSFER}
                   state={{ shouldStartFresh: true }}
                 >
@@ -119,13 +123,16 @@ const AccountCreateImport = observer(() => {
                     {t("home.send")}
                   </Button>
                 </Link>
-                <Link className="flex-1" to={ROUTES.TRANSACTION_HISTORY}>
+                <Link
+                  className="min-w-[8rem] flex-1"
+                  to={ROUTES.TRANSACTION_HISTORY}
+                >
                   <Button className="w-full" type="button" variant="outline">
                     <History className="mr-2 h-4 w-4" />
                     {t("home.history")}
                   </Button>
                 </Link>
-                <Link className="flex-1" to={ROUTES.RECEIVE}>
+                <Link className="min-w-[8rem] flex-1" to={ROUTES.RECEIVE}>
                   <Button className="w-full" type="button" variant="secondary">
                     <QrCode className="mr-2 h-4 w-4" />
                     {t("home.receive")}

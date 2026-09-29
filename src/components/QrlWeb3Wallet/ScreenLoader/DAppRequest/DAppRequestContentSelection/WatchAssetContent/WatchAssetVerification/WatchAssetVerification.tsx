@@ -3,8 +3,10 @@ import { useStore } from "@/stores/store";
 import { Loader, ShieldAlert } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 const WatchAssetVerification = observer(() => {
+  const { t } = useTranslation();
   const { dAppRequestStore, qrlStore } = useStore();
   const { getZrc20TokenDetails } = qrlStore;
   const { dAppRequestData } = dAppRequestStore;
@@ -20,15 +22,23 @@ const WatchAssetVerification = observer(() => {
     (async () => {
       const tokenDetails = await getZrc20TokenDetails(contractAddress);
       if (tokenDetails.error) {
-        setVerificationResult(`Failed to fetch details for ${contractAddress}`);
+        setVerificationResult(
+          t("dapp.watchAsset.fetchFailed", { address: contractAddress }),
+        );
       } else {
         if (tokenDetails?.token?.symbol !== contractSymbol) {
           setVerificationResult(
-            `The token symbol did not match. Expected '${tokenDetails?.token?.symbol}', but received '${contractSymbol}'`,
+            t("dapp.watchAsset.symbolMismatch", {
+              expected: tokenDetails?.token?.symbol,
+              received: contractSymbol,
+            }),
           );
         } else if (tokenDetails?.token?.decimals !== contractDecimals) {
           setVerificationResult(
-            `The token decimals did not match. Expected '${tokenDetails?.token?.decimals}', but received '${contractDecimals}'`,
+            t("dapp.watchAsset.decimalsMismatch", {
+              expected: String(tokenDetails?.token?.decimals),
+              received: String(contractDecimals),
+            }),
           );
         }
       }
@@ -40,7 +50,7 @@ const WatchAssetVerification = observer(() => {
     return (
       <Card className="flex gap-4 p-4">
         <Loader className="h-4 w-4 shrink-0 animate-spin" />
-        <div>Verifying token details...</div>
+        <div>{t("dapp.watchAsset.verifying")}</div>
       </Card>
     );
   }
@@ -55,9 +65,7 @@ const WatchAssetVerification = observer(() => {
   ) : (
     <Card className="flex gap-2 p-4">
       <ShieldAlert className="h-5 w-5 shrink-0 pt-1" />
-      <div>
-        Ensure you understand what you are doing before adding the token.
-      </div>
+      <div>{t("dapp.watchAsset.understand")}</div>
     </Card>
   );
 });

@@ -18,6 +18,7 @@ import { Input } from "@/components/UI/Input";
 import type { DiscoveredToken } from "@/services/assetDiscovery";
 import { useStore } from "@/stores/store";
 import { zodResolver } from "@hookform/resolvers/zod";
+import type { TFunction } from "i18next";
 import { Loader, RefreshCw } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useState } from "react";
@@ -29,9 +30,10 @@ import DiscoveredTokens from "./DiscoveredTokens/DiscoveredTokens";
 import TokenImportSuccess from "./TokenImportSuccess/TokenImportSuccess";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
 
-const FormSchema = z.object({
-  contractAddress: z.string().min(1, "Contract address is required"),
-});
+const createFormSchema = (t: TFunction) =>
+  z.object({
+    contractAddress: z.string().min(1, t("validation.contractAddressRequired")),
+  });
 
 const ImportToken = observer(() => {
   const { t } = useTranslation();
@@ -47,6 +49,8 @@ const ImportToken = observer(() => {
   // on purpose: setError flips isValid false and would leave the fetch
   // button disabled until the user edits the (already correct) address.
   const [discoveredError, setDiscoveredError] = useState("");
+
+  const FormSchema = createFormSchema(t);
 
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
