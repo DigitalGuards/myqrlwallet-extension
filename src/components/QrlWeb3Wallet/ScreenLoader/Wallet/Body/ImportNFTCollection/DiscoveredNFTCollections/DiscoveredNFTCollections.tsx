@@ -7,6 +7,7 @@ import { ROUTES } from "@/router/router";
 import {
   DiscoveredNFTCollection,
   discoverNftCollections,
+  MAX_DISCOVERED_COLLECTIONS,
 } from "@/services/assetDiscovery";
 import { useStore } from "@/stores/store";
 import StorageUtil from "@/utilities/storageUtil";
@@ -34,6 +35,9 @@ const DiscoveredNFTCollections = observer(() => {
   >([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [isAdding, setIsAdding] = useState(false);
+  // The explorer response is capped, so a heavily airdropped account sees
+  // only part of what it holds. Saying so beats a list that silently ends.
+  const [wasTruncated, setWasTruncated] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +52,7 @@ const DiscoveredNFTCollections = observer(() => {
       const existing = new Set(
         stored.map((collection) => collection.address.toLowerCase()),
       );
+      setWasTruncated(discovered.length >= MAX_DISCOVERED_COLLECTIONS);
       setPendingCollections(
         discovered.filter(
           (collection) => !existing.has(collection.address.toLowerCase()),
@@ -107,6 +112,11 @@ const DiscoveredNFTCollections = observer(() => {
         <p className="text-sm text-muted-foreground">
           {t("discovery.pickerHint")}
         </p>
+        {wasTruncated && (
+          <p className="text-xs text-muted-foreground">
+            {t("discovery.truncated", { limit: MAX_DISCOVERED_COLLECTIONS })}
+          </p>
+        )}
         <ul className="flex max-h-60 flex-col gap-2 overflow-y-auto">
           {pendingCollections.map((collection) => {
             const key = collection.address.toLowerCase();
@@ -126,7 +136,9 @@ const DiscoveredNFTCollections = observer(() => {
                   htmlFor={`discovered-collection-${key}`}
                   className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5"
                 >
-                  <span className="text-sm font-medium">
+                  {/* A name with no spaces (a spam collection's calling
+                      card) otherwise runs past the 360px panel edge. */}
+                  <span className="break-words text-sm font-medium">
                     {collection.name || t("discovery.unknownCollection")}{" "}
                     {collection.symbol && (
                       <span className="text-muted-foreground">

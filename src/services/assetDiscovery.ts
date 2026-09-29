@@ -30,6 +30,15 @@ export type DiscoveredNFTCollection = {
   tokenCount: number;
 };
 
+/**
+ * Upper bounds on what one explorer response may contribute to a picker.
+ * The lists are rendered in a 360px panel and every collection row costs
+ * further RPC work, so a spam-flooded (or hostile) index must not be able
+ * to grow either without limit. The caps sit far above any real holding.
+ */
+export const MAX_DISCOVERED_TOKENS = 50;
+export const MAX_DISCOVERED_COLLECTIONS = 50;
+
 // One row of the zondscan /api/address/:addr/tokens response, restricted
 // to the fields the extension consumes.
 type ExplorerToken = {
@@ -106,21 +115,23 @@ export async function discoverTokens(
     const data = (await response.json()) as ExplorerTokenResponse;
     if (!data || !Array.isArray(data.tokens)) return [];
 
-    return data.tokens.flatMap((token) => {
-      const contractAddress = token.contractAddress
-        ? toQAddress(token.contractAddress)
-        : null;
-      if (!contractAddress) return [];
-      return [
-        {
-          address: contractAddress,
-          name: token.name || "Unknown Token",
-          symbol: token.symbol || "UNK",
-          // Nullish coalescing preserves 0 as a valid decimals value.
-          decimals: token.decimals ?? 18,
-        },
-      ];
-    });
+    return data.tokens
+      .flatMap((token) => {
+        const contractAddress = token.contractAddress
+          ? toQAddress(token.contractAddress)
+          : null;
+        if (!contractAddress) return [];
+        return [
+          {
+            address: contractAddress,
+            name: token.name || "Unknown Token",
+            symbol: token.symbol || "UNK",
+            // Nullish coalescing preserves 0 as a valid decimals value.
+            decimals: token.decimals ?? 18,
+          },
+        ];
+      })
+      .slice(0, MAX_DISCOVERED_TOKENS);
   } catch {
     return [];
   }
@@ -173,6 +184,7 @@ export async function discoverNftCollections(
     if (seenTokens.has(tokenKey)) continue;
     seenTokens.add(tokenKey);
     const existing = collections.get(key);
+    if (!existing && collections.size >= MAX_DISCOVERED_COLLECTIONS) continue;
     if (existing) {
       existing.tokenCount += 1;
       if (!existing.name && nft.collectionName) {

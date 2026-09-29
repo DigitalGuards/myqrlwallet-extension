@@ -11,6 +11,7 @@ const FINGERPRINT = "Qfedcba98...3210fedc...76543210";
 
 vi.mock("@/services/assetDiscovery", () => ({
   discoverNftCollections: vi.fn(),
+  MAX_DISCOVERED_COLLECTIONS: 50,
 }));
 
 vi.mock("@/utilities/storageUtil", () => ({

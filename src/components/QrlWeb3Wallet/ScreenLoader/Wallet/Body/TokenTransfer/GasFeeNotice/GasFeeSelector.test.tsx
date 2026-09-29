@@ -343,6 +343,40 @@ describe("GasFeeSelector", () => {
     });
   });
 
+  it("clears a failed estimate once there is nothing left to price", async () => {
+    const onEstimateError = vi.fn();
+    const getNativeTokenGas = vi.fn(async () => {
+      throw new Error("execution reverted");
+    });
+    const store = mockedStore({ qrlStore: { getNativeTokenGas } });
+    const view = renderComponent(store, { onEstimateError });
+
+    await waitFor(() => {
+      expect(onEstimateError).toHaveBeenCalledWith(
+        expect.stringMatching(/gas fee could not be estimated/i),
+      );
+    });
+
+    // Clearing the amount removes the component entirely, so the verdict
+    // it left behind could no longer be seen or cleared, and the send
+    // button stayed disabled with no message explaining why.
+    view.rerender(
+      <StoreProvider value={store}>
+        <MemoryRouter>
+          <GasFeeSelector
+            {...defaultProps}
+            onEstimateError={onEstimateError}
+            value=""
+          />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    await waitFor(() => {
+      expect(onEstimateError).toHaveBeenLastCalledWith("");
+    });
+  });
+
   it("reports a worst-case fee for advanced values on every change", async () => {
     const onGasFeeCalculated = vi.fn();
     const getNativeTokenGas = vi.fn(

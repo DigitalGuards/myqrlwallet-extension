@@ -35,7 +35,8 @@ const ActiveChain = observer(() => {
   const { t } = useTranslation();
   const { qrlStore } = useStore();
   const { qrlConnection } = qrlStore;
-  const { isLoading, isConnected, blockchain } = qrlConnection;
+  const { isLoading, isConnected, areBalancesStale, blockchain } =
+    qrlConnection;
   const { chainId, chainName, defaultRpcUrl, defaultIconUrl } = blockchain;
 
   return (
@@ -58,6 +59,16 @@ const ActiveChain = observer(() => {
               {t("chain.chainId", { chainId: parseInt(chainId, 16) })}
             </span>
             <span className="text-xm opacity-80">{defaultRpcUrl}</span>
+            {!isLoading && !isConnected && (
+              <span className="text-xm text-destructive">
+                {t("chain.nodeUnreachable")}
+              </span>
+            )}
+            {areBalancesStale && (
+              <span className="text-xm text-destructive">
+                {t("chain.balancesStale")}
+              </span>
+            )}
           </div>
         </div>
         <div>

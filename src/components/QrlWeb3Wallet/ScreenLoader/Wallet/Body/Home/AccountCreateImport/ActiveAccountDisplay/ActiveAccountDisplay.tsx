@@ -4,7 +4,14 @@ import { parseBalanceValue } from "@/functions/parseBalanceValue";
 import { useStore } from "@/stores/store";
 import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import { useCopy } from "@/hooks/useCopy";
-import { Check, Copy, TrendingDown, TrendingUp, X } from "lucide-react";
+import {
+  Check,
+  Copy,
+  TrendingDown,
+  TrendingUp,
+  WifiOff,
+  X,
+} from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 
@@ -15,8 +22,9 @@ import { useTranslation } from "react-i18next";
  */
 const ActiveAccountDisplay = observer(() => {
   const { qrlStore, priceStore, settingsStore } = useStore();
-  const { activeAccount, getAccountBalance } = qrlStore;
+  const { activeAccount, getAccountBalance, qrlConnection } = qrlStore;
   const { accountAddress } = activeAccount;
+  const { areBalancesStale } = qrlConnection;
   const { showBalanceAndPrice, currency } = settingsStore;
 
   const { t } = useTranslation();
@@ -49,6 +57,12 @@ const ActiveAccountDisplay = observer(() => {
           </div>
         )}
       </div>
+      {areBalancesStale && (
+        <div className="flex items-center gap-1 text-xs text-destructive">
+          <WifiOff className="h-3 w-3 shrink-0" />
+          <span>{t("chain.balancesStale")}</span>
+        </div>
+      )}
       {fiatDisplay && (
         <div className="flex items-center gap-2 font-numeric text-sm text-muted-foreground">
           <span>{fiatDisplay}</span>

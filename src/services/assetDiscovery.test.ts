@@ -4,6 +4,8 @@ import {
   discoverNftCollections,
   discoverOwnedNftTokens,
   discoverTokens,
+  MAX_DISCOVERED_COLLECTIONS,
+  MAX_DISCOVERED_TOKENS,
 } from "./assetDiscovery";
 
 const TESTNET_CHAIN_ID = "0x301825";
@@ -257,5 +259,82 @@ describe("discoverOwnedNftTokens", () => {
       toChecksumAddress(`Q${"d".repeat(128)}`),
     );
     expect(tokens).toHaveLength(50);
+  });
+});
+
+describe("discovery caps", () => {
+  // A hostile or spam-flooded index must not be able to grow either
+  // picker without limit: the rows render in a 360px panel and each
+  // collection costs further chain reads.
+  const hexAddress = (index: number) =>
+    `Q${index.toString(16).padStart(128, "0")}`;
+
+  it("caps discovered tokens", async () => {
+    mockFetchJson({
+      address: HOLDER,
+      count: MAX_DISCOVERED_TOKENS + 25,
+      tokens: Array.from(
+        { length: MAX_DISCOVERED_TOKENS + 25 },
+        (_unused, index) => ({
+          contractAddress: hexAddress(index + 1),
+          name: `Spam ${index}`,
+          symbol: "SPAM",
+          decimals: 18,
+        }),
+      ),
+    });
+
+    const tokens = await discoverTokens(HOLDER, TESTNET_CHAIN_ID);
+
+    expect(tokens).toHaveLength(MAX_DISCOVERED_TOKENS);
+  });
+
+  it("caps discovered NFT collections", async () => {
+    mockFetchJson({
+      address: HOLDER,
+      count: MAX_DISCOVERED_COLLECTIONS + 25,
+      nfts: Array.from(
+        { length: MAX_DISCOVERED_COLLECTIONS + 25 },
+        (_unused, index) => ({
+          contractAddress: hexAddress(index + 1),
+          tokenID: "1",
+          tokenStandard: "ERC-721",
+          collectionName: `Spam ${index}`,
+          collectionSymbol: "SPAM",
+        }),
+      ),
+    });
+
+    const collections = await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID);
+
+    expect(collections).toHaveLength(MAX_DISCOVERED_COLLECTIONS);
+  });
+
+  it("still counts further tokens of a collection already inside the cap", async () => {
+    mockFetchJson({
+      address: HOLDER,
+      count: 3,
+      nfts: [
+        {
+          contractAddress: hexAddress(1),
+          tokenID: "1",
+          tokenStandard: "ERC-721",
+          collectionName: "Kept",
+          collectionSymbol: "KEP",
+        },
+        {
+          contractAddress: hexAddress(1),
+          tokenID: "2",
+          tokenStandard: "ERC-721",
+          collectionName: "Kept",
+          collectionSymbol: "KEP",
+        },
+      ],
+    });
+
+    const collections = await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID);
+
+    expect(collections).toHaveLength(1);
+    expect(collections[0].tokenCount).toBe(2);
   });
 });

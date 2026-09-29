@@ -52,14 +52,17 @@ const ZRC20Tokens = observer(
 
     return (
       <>
-        {tokenContractsList.slice(0, displayLimit).map(({ address, image }) => (
-          <ZRC20Token
-            key={address}
-            contractAddress={address}
-            tokenImage={image}
-            triggerReRender={triggerReRender}
-          />
-        ))}
+        {tokenContractsList
+          .slice(0, displayLimit)
+          .map(({ address, image, symbol }) => (
+            <ZRC20Token
+              key={address}
+              contractAddress={address}
+              tokenImage={image}
+              storedSymbol={symbol}
+              triggerReRender={triggerReRender}
+            />
+          ))}
       </>
     );
   },

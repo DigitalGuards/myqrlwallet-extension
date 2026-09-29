@@ -97,7 +97,7 @@ const mockedStoreValues: StoreType = {
       collection: undefined,
       error: "",
     }),
-    getOwnedNftTokens: async () => [],
+    getOwnedNftTokens: async () => ({ tokens: [], failed: false }),
     getErc1155TokenBalance: async () => undefined,
     getNftTokenUri: async () => "",
     signNftTransfer: async () => ({
@@ -313,6 +313,9 @@ const mockedStoreValues: StoreType = {
     stopAutoRefresh: () => {},
     getChange24h: () => 0,
   } as any,
+  // The real store wires its polling reactions in the constructor and keeps
+  // the disposer; nothing is wired here, so tearing down is a no-op.
+  disposeDataLifecycle: () => {},
 };
 
 export const mockedStore = (

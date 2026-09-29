@@ -47,7 +47,9 @@ describe("NFTGallery", () => {
   it("should render collection name as title", async () => {
     renderComponent({
       qrlStore: {
-        getOwnedNftTokens: vi.fn().mockResolvedValue([]),
+        getOwnedNftTokens: vi
+          .fn()
+          .mockResolvedValue({ tokens: [], failed: false }),
       },
     });
 
@@ -57,7 +59,9 @@ describe("NFTGallery", () => {
   it("should show empty state when no tokens owned", async () => {
     renderComponent({
       qrlStore: {
-        getOwnedNftTokens: vi.fn().mockResolvedValue([]),
+        getOwnedNftTokens: vi
+          .fn()
+          .mockResolvedValue({ tokens: [], failed: false }),
       },
     });
 
@@ -71,13 +75,10 @@ describe("NFTGallery", () => {
   it("should render gallery items for owned tokens", async () => {
     renderComponent({
       qrlStore: {
-        getOwnedNftTokens: vi
-          .fn()
-          .mockResolvedValue([
-            { tokenId: "1" },
-            { tokenId: "2" },
-            { tokenId: "3" },
-          ]),
+        getOwnedNftTokens: vi.fn().mockResolvedValue({
+          tokens: [{ tokenId: "1" }, { tokenId: "2" }, { tokenId: "3" }],
+          failed: false,
+        }),
       },
     });
 
@@ -89,9 +90,10 @@ describe("NFTGallery", () => {
   });
 
   it("should pass the route standard to the store and balances to items", async () => {
-    const getOwnedNftTokens = vi
-      .fn()
-      .mockResolvedValue([{ tokenId: "42", balance: "3" }]);
+    const getOwnedNftTokens = vi.fn().mockResolvedValue({
+      tokens: [{ tokenId: "42", balance: "3" }],
+      failed: false,
+    });
     renderComponent(
       { qrlStore: { getOwnedNftTokens } },
       { ...state, standard: "ZRC1155" },
@@ -109,7 +111,9 @@ describe("NFTGallery", () => {
   it("should have a back button", async () => {
     renderComponent({
       qrlStore: {
-        getOwnedNftTokens: vi.fn().mockResolvedValue([]),
+        getOwnedNftTokens: vi
+          .fn()
+          .mockResolvedValue({ tokens: [], failed: false }),
       },
     });
 

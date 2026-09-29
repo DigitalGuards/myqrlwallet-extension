@@ -16,6 +16,10 @@ export const ON_CHAIN_PAGE_SIZE = 10;
 export type OnChainHistoryPage = {
   entries: TransactionHistoryEntry[];
   totalCount: number;
+  /** True when the explorer could not be read: unreachable, or answering
+   *  with an error status. A chain with no configured explorer is not a
+   *  failure, it simply has no on-chain history to add. */
+  failed: boolean;
 };
 
 // One row of the zondscan /api/address/aggregate/:addr response,
@@ -56,7 +60,11 @@ type ExplorerAggregateResponse = {
   internal_transactions_count?: number;
 };
 
-const emptyPage = (): OnChainHistoryPage => ({ entries: [], totalCount: 0 });
+const emptyPage = (failed = false): OnChainHistoryPage => ({
+  entries: [],
+  totalCount: 0,
+  failed,
+});
 
 const toEntry = (
   row: ExplorerAggregateTx,
@@ -146,7 +154,7 @@ export async function fetchOnChainHistory(
     const response = await fetch(
       `${apiBase}/api/address/aggregate/${address}?page=${page}&limit=${ON_CHAIN_PAGE_SIZE}`,
     );
-    if (!response.ok) return emptyPage();
+    if (!response.ok) return emptyPage(true);
 
     const data = (await response.json()) as ExplorerAggregateResponse;
     const rows = Array.isArray(data?.transactions_by_address)
@@ -174,8 +182,12 @@ export async function fetchOnChainHistory(
       countOr(data?.transactions_count, txEntries.length),
       countOr(data?.internal_transactions_count, internalEntries.length),
     );
-    return { entries: [...txEntries, ...internalEntries], totalCount };
+    return {
+      entries: [...txEntries, ...internalEntries],
+      totalCount,
+      failed: false,
+    };
   } catch {
-    return emptyPage();
+    return emptyPage(true);
   }
 }

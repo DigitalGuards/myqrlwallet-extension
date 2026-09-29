@@ -23,6 +23,33 @@ import {
 
 type ReceiptStatus = string | number | bigint;
 
+/**
+ * True once a transaction is known to have been included in a block,
+ * whether it succeeded or reverted. Both outcomes consume the nonce, so
+ * both supersede anything else still pending on that nonce. Requiring
+ * "confirmed" alone left an original pending forever behind a replacement
+ * that was mined and reverted.
+ */
+const reachedABlock = (entry: TransactionHistoryEntry): boolean => {
+  if (entry.receiptStatusVerified !== true) return false;
+  if (entry.pendingStatus === "confirmed") return true;
+  return entry.pendingStatus === "failed" && !!entry.blockNumber;
+};
+
+/** A Cancel replacement is a zero-value send from the account to itself. */
+const isCancellation = (
+  entry: TransactionHistoryEntry,
+  accountAddress: string,
+): boolean => {
+  const account = accountAddress.toLowerCase();
+  return (
+    entry.from.toLowerCase() === account &&
+    entry.to.toLowerCase() === account &&
+    !entry.tokenContractAddress &&
+    Number(entry.amount) === 0
+  );
+};
+
 type QrlInstance = {
   getTransactionReceipt: (txHash: string) => Promise<
     | {
@@ -42,11 +69,19 @@ class TransactionHistoryStore {
   onChainPage = 0;
   isLoading = false;
   isLoadingOnChain = false;
+  /** True when the explorer could not be reached for the current account,
+   *  so the screen can say the list is local-only. An empty list would
+   *  otherwise read as "this account has no history". */
+  onChainFailed = false;
   filter: TokenFilter = "all";
   private pollingInterval: ReturnType<typeof setInterval> | null = null;
   /** Bumped per loadOnChainHistory call so a slow response for a
    *  previously-active account cannot land on the current one. */
   private onChainRequestId = 0;
+  /** Same guard for the local-history read. */
+  private localRequestId = 0;
+  /** The account whose local entries are currently in `transactions`. */
+  private loadedAccountAddress = "";
 
   constructor() {
     makeAutoObservable(this, {
@@ -56,6 +91,7 @@ class TransactionHistoryStore {
       onChainPage: observable,
       isLoading: observable,
       isLoadingOnChain: observable,
+      onChainFailed: observable,
       filter: observable,
       mergedTransactions: computed,
       filteredTransactions: computed,
@@ -70,6 +106,7 @@ class TransactionHistoryStore {
       clearHistory: action.bound,
       startPolling: action.bound,
       stopPolling: action.bound,
+      reconcileReplacedTransactions: action.bound,
     });
   }
 
@@ -139,10 +176,34 @@ class TransactionHistoryStore {
     return this.transactions.filter(needsReceipt);
   }
 
-  async loadHistory(accountAddress: string, qrlInstance?: QrlInstance) {
-    this.isLoading = true;
+  /**
+   * Reads the locally stored entries for an account.
+   *
+   * `background` keeps isLoading untouched. The receipt poller re-reads
+   * storage after every update, and toggling isLoading there replaced the
+   * whole list with a spinner every ten seconds while a transaction was
+   * pending. Only a read the user is waiting on reports loading.
+   */
+  async loadHistory(
+    accountAddress: string,
+    qrlInstance?: QrlInstance,
+    options?: { background?: boolean },
+  ) {
+    const requestId = ++this.localRequestId;
+    const background = options?.background === true;
+    const isAccountChange =
+      accountAddress.toLowerCase() !== this.loadedAccountAddress.toLowerCase();
+    // Switching accounts clears first. Holding the previous account's rows
+    // while the new read is in flight rendered account A's transactions
+    // under account B, and a slow read for A could land after B's and stay.
+    if (isAccountChange) {
+      this.transactions = [];
+      this.loadedAccountAddress = accountAddress;
+    }
+    if (!background) this.isLoading = true;
     try {
       const history = await StorageUtil.getTransactionHistory(accountAddress);
+      if (requestId !== this.localRequestId) return;
       runInAction(() => {
         this.transactions = history;
       });
@@ -153,7 +214,9 @@ class TransactionHistoryStore {
       console.error("Failed to load transaction history:", error);
     } finally {
       runInAction(() => {
-        this.isLoading = false;
+        if (!background && requestId === this.localRequestId) {
+          this.isLoading = false;
+        }
       });
     }
   }
@@ -163,9 +226,10 @@ class TransactionHistoryStore {
     this.onChainTransactions = [];
     this.onChainTotal = 0;
     this.onChainPage = 0;
+    this.onChainFailed = false;
     this.isLoadingOnChain = true;
     try {
-      const { entries, totalCount } = await fetchOnChainHistory(
+      const { entries, totalCount, failed } = await fetchOnChainHistory(
         accountAddress,
         chainId,
         1,
@@ -175,6 +239,7 @@ class TransactionHistoryStore {
         this.onChainTransactions = entries;
         this.onChainTotal = totalCount;
         this.onChainPage = 1;
+        this.onChainFailed = failed;
       });
     } finally {
       runInAction(() => {
@@ -191,13 +256,15 @@ class TransactionHistoryStore {
     const nextPage = this.onChainPage + 1;
     this.isLoadingOnChain = true;
     try {
-      const { entries, totalCount } = await fetchOnChainHistory(
+      const { entries, totalCount, failed } = await fetchOnChainHistory(
         accountAddress,
         chainId,
         nextPage,
       );
       runInAction(() => {
         if (requestId !== this.onChainRequestId) return;
+        this.onChainFailed = failed;
+        if (failed) return;
         // Dedup by id, not hash: an internal entry shares its hash with
         // the outer transaction but is its own row (id carries the call
         // tree position).
@@ -227,7 +294,7 @@ class TransactionHistoryStore {
 
   async addTransaction(accountAddress: string, entry: TransactionHistoryEntry) {
     await StorageUtil.setTransactionHistoryEntry(accountAddress, entry);
-    await this.loadHistory(accountAddress);
+    await this.loadHistory(accountAddress, undefined, { background: true });
     if (
       entry.pendingStatus === "confirmed" ||
       entry.pendingStatus === "failed"
@@ -256,7 +323,7 @@ class TransactionHistoryStore {
       transactionHash,
       updates,
     );
-    await this.loadHistory(accountAddress);
+    await this.loadHistory(accountAddress, undefined, { background: true });
   }
 
   setFilter(filter: TokenFilter) {
@@ -330,7 +397,46 @@ class TransactionHistoryStore {
           console.error(`Polling error for ${tx.transactionHash}:`, error);
         }
       }
+
+      await this.reconcileReplacedTransactions(accountAddress);
     }, 10000);
+  }
+
+  /**
+   * Settles originals whose replacement already landed.
+   *
+   * Speed Up and Cancel mark the original from the broadcast callback. If
+   * the surface is destroyed between signing and that callback (closing the
+   * popup does exactly that), nothing marks it, and the original sits
+   * pending forever while its nonce has already been spent. Another
+   * transaction from the same account that reached a block with the same
+   * nonce is proof the original can never be mined, so it is settled here.
+   */
+  async reconcileReplacedTransactions(accountAddress: string) {
+    const stillPending = this.transactions.filter(needsReceipt);
+    for (const tx of stillPending) {
+      if (tx.nonce === undefined) continue;
+      const replacement = this.transactions.find(
+        (other) =>
+          other.nonce === tx.nonce &&
+          !other.isInternal &&
+          reachedABlock(other) &&
+          other.transactionHash.toLowerCase() !==
+            tx.transactionHash.toLowerCase(),
+      );
+      if (!replacement) continue;
+      // A cancel is a zero-value self-send, which the UI reports under its
+      // own status. An action already recorded on the original wins: the
+      // flow that started the replacement knows what it sent.
+      const replacedByAction =
+        tx.replacedByAction ??
+        (isCancellation(replacement, accountAddress) ? "cancel" : "speed-up");
+      await this.updateTransaction(accountAddress, tx.transactionHash, {
+        pendingStatus: replacedByAction === "cancel" ? "cancelled" : "replaced",
+        replacementTransactionHash: replacement.transactionHash,
+        replacedByAction,
+      });
+    }
   }
 
   stopPolling() {

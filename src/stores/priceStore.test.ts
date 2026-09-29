@@ -126,6 +126,89 @@ describe("PriceStore", () => {
     expect(store.change24h).toEqual({ usd: 3.0 });
   });
 
+  it("loads the cache without refreshing when called with no argument", async () => {
+    const cached = {
+      prices: { usd: 1.2 },
+      change24h: { usd: 3.0 },
+      timestamp: Date.now(),
+    };
+    mockGetPriceCache.mockResolvedValue(cached);
+
+    const store = new PriceStore();
+    await store.initialize();
+
+    expect(store.prices).toEqual({ usd: 1.2 });
+    // Refreshing is decided separately, after the stored setting loads.
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(store.isRefreshing).toBe(false);
+  });
+
+  it("keeps a fresher fetch when the cache read lands after it", async () => {
+    let releaseCache: (value: unknown) => void = () => {};
+    mockGetPriceCache.mockReturnValueOnce(
+      new Promise((resolve) => {
+        releaseCache = resolve;
+      }),
+    );
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        "quantum-resistant-ledger": { usd: 9.99, usd_24h_change: 1 },
+      }),
+    });
+
+    const store = new PriceStore();
+    const initializing = store.initialize();
+    // Storage is slower than a warm network call here, which is exactly
+    // the order that used to put an hours-old cached price back on screen.
+    await store.fetchPrices();
+    expect(store.getPrice("usd")).toBe(9.99);
+
+    releaseCache({
+      prices: { usd: 1.11 },
+      change24h: { usd: 0 },
+      timestamp: Date.now() - 600_000,
+    });
+    await initializing;
+
+    expect(store.getPrice("usd")).toBe(9.99);
+  });
+
+  // ── setRefreshEnabled ──
+
+  it("arms and disarms the refresh interval", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        "quantum-resistant-ledger": { usd: 1.3, usd_24h_change: 4.0 },
+      }),
+    });
+    const store = new PriceStore();
+
+    store.setRefreshEnabled(true);
+    expect(store.isRefreshing).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    store.setRefreshEnabled(false);
+    expect(store.isRefreshing).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not restart the interval when already armed", () => {
+    const store = new PriceStore();
+    store.setRefreshEnabled(true);
+    const first = store.isRefreshing;
+    store.setRefreshEnabled(true);
+
+    expect(first).toBe(true);
+    expect(store.isRefreshing).toBe(true);
+    store.setRefreshEnabled(false);
+  });
+
   // ── fetchPrices ──
 
   it("should fetch prices from CoinGecko and update state", async () => {

@@ -192,26 +192,29 @@ describe("fetchOnChainHistory", () => {
     );
 
     const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
-    expect(page).toEqual({ entries: [], totalCount: 0 });
+    expect(page).toEqual({ entries: [], totalCount: 0, failed: false });
   });
 
   it("returns an empty page for chains without an explorer", async () => {
     const page = await fetchOnChainHistory(ADDRESS, "0x1", 1);
-    expect(page).toEqual({ entries: [], totalCount: 0 });
+    // No explorer configured is not an explorer failure.
+    expect(page).toEqual({ entries: [], totalCount: 0, failed: false });
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("returns an empty page on HTTP errors and network failures", async () => {
+  it("flags an explorer HTTP error and a network failure as failed", async () => {
     mockFetch.mockResolvedValueOnce({ ok: false, status: 403 });
     expect(await fetchOnChainHistory(ADDRESS, CHAIN, 1)).toEqual({
       entries: [],
       totalCount: 0,
+      failed: true,
     });
 
     mockFetch.mockRejectedValueOnce(new Error("offline"));
     expect(await fetchOnChainHistory(ADDRESS, CHAIN, 1)).toEqual({
       entries: [],
       totalCount: 0,
+      failed: true,
     });
   });
 });

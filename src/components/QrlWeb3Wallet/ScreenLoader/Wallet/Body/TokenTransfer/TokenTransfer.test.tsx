@@ -726,6 +726,149 @@ describe("TokenTransfer", () => {
     });
   });
 
+  describe("token ceilings from a cold open", () => {
+    // 24 decimals, one unit above a whole token. BigNumber's global
+    // DECIMAL_PLACES is 18 with ROUND_DOWN, so dividing by 10^24 dropped
+    // that trailing unit and Max left dust behind.
+    const WIDE_DECIMALS_DETAILS = {
+      isZrc20Token: true,
+      tokenContractAddress: CONTRACT_D,
+      tokenDecimals: 24,
+      tokenImage: "token.png",
+      tokenBalance: "1.0 WIDE",
+      tokenBalanceBaseUnits: "1000000000000000000000001",
+      tokenName: "Wide Token",
+      tokenSymbol: "WIDE",
+    };
+
+    it("spends a >18-decimal balance to the last unit on Max", async () => {
+      renderComponentWithState(
+        { tokenDetails: WIDE_DECIMALS_DETAILS },
+        mockedStore({
+          qrlStore: {
+            getAccountBalance: () => "10.0 Quanta",
+            getZrc20TokenGas: async () => "0.001",
+          },
+        }),
+      );
+
+      await screen.findByRole("button", { name: "Send WIDE" });
+      await act(async () => {
+        await userEvent.click(screen.getByRole("button", { name: "Max" }));
+      });
+
+      expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue(
+        "1.000000000000000000000001",
+      );
+    });
+
+    it("refuses a send against a restored ceiling the chain no longer backs", async () => {
+      const sign = vi.fn().mockResolvedValue(successSignResult);
+      // Storage still holds a whole token from an earlier session; the
+      // chain says half of it is left. A stale ceiling let the send pass
+      // this guard and revert on chain, burning the fee.
+      const getZrc20TokenDetails = vi.fn().mockResolvedValue({
+        token: {
+          balance: 0.5,
+          balanceBaseUnits: "50000000",
+          decimals: BigInt(8),
+          name: "Mini Token",
+          symbol: "MQW",
+          totalSupply: 1000,
+          image: "",
+        },
+        error: "",
+      });
+
+      renderComponentWithState(
+        {
+          tokenDetails: {
+            isZrc20Token: true,
+            tokenContractAddress: CONTRACT_D,
+            tokenDecimals: 8,
+            tokenImage: "token.png",
+            tokenBalance: "1.0 MQW",
+            tokenBalanceBaseUnits: "100000000",
+            tokenName: "Mini Token",
+            tokenSymbol: "MQW",
+          },
+        },
+        mockedStore({
+          qrlStore: {
+            signZrc20Token: sign,
+            getZrc20TokenDetails,
+            getAccountBalance: () => "10.0 Quanta",
+            getZrc20TokenGas: async () => "0.001",
+          },
+        }),
+      );
+
+      await screen.findByRole("button", { name: "Send MQW" });
+      await waitFor(() =>
+        expect(getZrc20TokenDetails).toHaveBeenCalledWith(CONTRACT_D),
+      );
+
+      await waitFor(
+        async () => {
+          await userEvent.type(
+            screen.getByRole("textbox", { name: "receiverAddress" }),
+            ACCOUNT_B,
+          );
+          await userEvent.type(
+            screen.getByRole("textbox", { name: "amount" }),
+            "0.8",
+          );
+        },
+        { timeout: 5000 },
+      );
+
+      expect(
+        await screen.findByText("Insufficient MQW balance"),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Send MQW" })).toBeDisabled();
+      expect(sign).not.toHaveBeenCalled();
+    });
+  });
+
+  it("warns on the send form while the balances are stale, without blocking Send", async () => {
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          getAccountBalance: () => "10.0 Quanta",
+          qrlConnection: {
+            // The node answers net_listening while qrl_getBalance keeps
+            // failing, so the chain reads as connected and the amounts on
+            // screen are old.
+            isConnected: true,
+            isLoading: false,
+            areBalancesStale: true,
+            blockchain: { chainId: "0x1" },
+          },
+        },
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        "The node is not answering, so this balance may be out of date.",
+      ),
+    ).toBeInTheDocument();
+
+    await fillAndSubmitForm("Send Quanta", "1");
+  });
+
+  it("shows no stale warning while the balances are current", async () => {
+    renderComponent(
+      mockedStore({ qrlStore: { getAccountBalance: () => "10.0 Quanta" } }),
+    );
+
+    expect(
+      screen.queryByText(
+        "The node is not answering, so this balance may be out of date.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   it("re-applies Max when a dearer gas tier raises the reserve", async () => {
     const getNativeTokenGas = vi.fn(async (overrides?: { tier?: string }) =>
       overrides?.tier === "aggressive" ? "3" : "1",

@@ -1,10 +1,5 @@
 import { Button } from "@/components/UI/Button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/UI/Card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/UI/tabs";
 import { useStore } from "@/stores/store";
 import type {
@@ -55,6 +50,7 @@ const TransactionHistory = observer(() => {
     isLoading,
     isLoadingOnChain,
     hasMoreOnChain,
+    onChainFailed,
     filter,
   } = transactionHistoryStore;
 
@@ -65,7 +61,12 @@ const TransactionHistory = observer(() => {
 
   useEffect(() => {
     if (accountAddress) {
-      transactionHistoryStore.loadHistory(accountAddress, qrlStore.qrlInstance as Parameters<typeof transactionHistoryStore.loadHistory>[1]);
+      transactionHistoryStore.loadHistory(
+        accountAddress,
+        qrlStore.qrlInstance as Parameters<
+          typeof transactionHistoryStore.loadHistory
+        >[1],
+      );
       transactionHistoryStore.loadOnChainHistory(
         accountAddress,
         blockchain.chainId,
@@ -88,7 +89,7 @@ const TransactionHistory = observer(() => {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <History className="h-5 w-5" />
-              {t('txHistory.title')}
+              {t("txHistory.title")}
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -100,19 +101,25 @@ const TransactionHistory = observer(() => {
             >
               <TabsList className="w-full">
                 <TabsTrigger value="all" className="flex-1">
-                  {t('txHistory.filterAll')}
+                  {t("txHistory.filterAll")}
                 </TabsTrigger>
                 <TabsTrigger value="native" className="flex-1">
-                  {t('txHistory.filterNative')}
+                  {t("txHistory.filterNative")}
                 </TabsTrigger>
                 <TabsTrigger value="zrc20" className="flex-1">
-                  {t('txHistory.filterZrc20')}
+                  {t("txHistory.filterZrc20")}
                 </TabsTrigger>
                 <TabsTrigger value="nft" className="flex-1">
-                  {t('txHistory.filterNft')}
+                  {t("txHistory.filterNft")}
                 </TabsTrigger>
               </TabsList>
             </Tabs>
+
+            {!showInitialSpinner && onChainFailed && (
+              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                {t("txHistory.explorerUnreachable")}
+              </p>
+            )}
 
             {showInitialSpinner && (
               <div className="flex items-center justify-center py-8">
@@ -123,7 +130,7 @@ const TransactionHistory = observer(() => {
             {!showInitialSpinner && filteredTransactions.length === 0 && (
               <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
                 <History className="h-12 w-12" />
-                <p className="text-sm">{t('txHistory.empty')}</p>
+                <p className="text-sm">{t("txHistory.empty")}</p>
               </div>
             )}
 
@@ -135,10 +142,7 @@ const TransactionHistory = observer(() => {
                       {dateLabel}
                     </p>
                     {transactions.map((tx) => (
-                      <TransactionHistoryItem
-                        key={tx.id}
-                        transaction={tx}
-                      />
+                      <TransactionHistoryItem key={tx.id} transaction={tx} />
                     ))}
                   </div>
                 ))}
@@ -161,7 +165,7 @@ const TransactionHistory = observer(() => {
                 {isLoadingOnChain && (
                   <Loader className="mr-2 h-4 w-4 animate-spin" />
                 )}
-                {t('txHistory.loadMore')}
+                {t("txHistory.loadMore")}
               </Button>
             )}
           </CardContent>

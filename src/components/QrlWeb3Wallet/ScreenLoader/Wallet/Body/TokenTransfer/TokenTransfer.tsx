@@ -21,6 +21,7 @@ import { NATIVE_TOKEN } from "@/constants/nativeToken";
 import { SIGNING_NONCE_BLOCK_TAG } from "@/constants/transactionNonce";
 import { isWalletLockedError } from "@/functions/describeExtensionError";
 import { formatFiatCompact } from "@/functions/formatFiat";
+import { getOptimalTokenBalance } from "@/functions/getOptimalTokenBalance";
 import { parseBalanceValue } from "@/functions/parseBalanceValue";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
@@ -42,6 +43,7 @@ import { z } from "zod";
 import type { GasFeeOverrides } from "@/types/gasFee";
 import BackButton from "../../../Shared/BackButton/BackButton";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
+import StaleBalanceNotice from "../../../Shared/StaleBalanceNotice/StaleBalanceNotice";
 import AccountAddressSection from "./AccountAddressSection/AccountAddressSection";
 import { GasFeeSelector } from "./GasFeeNotice/GasFeeSelector";
 import RecipientPicker from "./RecipientPicker/RecipientPicker";
@@ -135,6 +137,7 @@ const TokenTransfer = observer(() => {
     getGasFeeData,
     getNativeTokenGas,
     getAccountBalance,
+    getZrc20TokenDetails,
   } = qrlStore;
   const { accountAddress } = activeAccount;
 
@@ -489,6 +492,35 @@ const TokenTransfer = observer(() => {
     })();
   }, []);
 
+  // A cold open restores the token balance straight from storage, where it
+  // can be hours old. A ceiling that is too high passes the guard below and
+  // then reverts on chain, burning the whole fee for nothing, so the live
+  // balance is re-read here and overwrites both the display string and the
+  // base-unit ceiling every guard and Max work from.
+  useEffect(() => {
+    if (!isZrc20Token || !tokenContractAddress || !accountAddress) return;
+    let cancelled = false;
+    (async () => {
+      const details = await getZrc20TokenDetails(tokenContractAddress);
+      if (cancelled || details.error || !details.token) return;
+      setTokenBalance(
+        getOptimalTokenBalance(
+          details.token.balance.toString(),
+          details.token.symbol,
+        ),
+      );
+      setTokenBalanceBaseUnits(details.token.balanceBaseUnits);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isZrc20Token,
+    tokenContractAddress,
+    accountAddress,
+    getZrc20TokenDetails,
+  ]);
+
   useEffect(() => {
     const formWatchSubscription = watch(async (value) => {
       await StorageUtil.setTransactionValues({
@@ -613,11 +645,13 @@ const TokenTransfer = observer(() => {
   const maxSendable = useMemo(() => {
     if (isZrc20Token) {
       // Exact, so Max spends the whole balance. The rounded display
-      // value used to leave dust behind.
+      // value used to leave dust behind. shift moves the decimal point by
+      // exact multiplication, which no rounding setting can truncate;
+      // division obeys the global DECIMAL_PLACES of 18 with ROUND_DOWN, so
+      // a token with more than 18 decimals lost its tail and Max left dust
+      // behind again.
       if (tokenBalanceBaseUnits) {
-        return new BigNumber(tokenBalanceBaseUnits).dividedBy(
-          new BigNumber(10).pow(tokenDecimals),
-        );
+        return new BigNumber(tokenBalanceBaseUnits).shift(-tokenDecimals);
       }
       return parseBalanceValue(tokenBalance);
     }
@@ -783,6 +817,7 @@ const TokenTransfer = observer(() => {
               <div className="flex flex-col gap-1">
                 <Label className="text-lg">{t("transfer.activeAccount")}</Label>
                 <AccountAddressSection tokenBalance={tokenBalance} />
+                <StaleBalanceNotice />
               </div>
               <div className="flex flex-col gap-2">
                 <Label className="text-lg">
