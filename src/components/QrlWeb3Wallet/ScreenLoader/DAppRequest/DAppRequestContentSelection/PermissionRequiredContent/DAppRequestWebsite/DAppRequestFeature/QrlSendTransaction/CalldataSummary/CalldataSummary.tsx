@@ -1,11 +1,17 @@
 import { Button } from "@/components/UI/Button";
 import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
 import {
+  CALLDATA_ACTIONS,
   decodeTransactionCalldata,
   formatTokenBaseUnits,
   type CalldataAction,
   type DecodedCalldata,
 } from "@/functions/decodeTransactionCalldata";
+import {
+  encodeFunctionSignature,
+  encodeParameters,
+} from "@theqrl/web3-qrl-abi";
+import { BlockTags, type TransactionCall } from "@theqrl/web3-types";
 import { useStore } from "@/stores/store";
 import type { TokenContractType } from "@/scripts/middlewares/middlewareTypes";
 import type { NFTCollectionType } from "@/types/nft";
@@ -28,6 +34,31 @@ type CalldataSummaryProps = {
   contractAddress: string;
   /** The `from` of the request, which owns the imported token lists. */
   fromAddress: string;
+};
+
+/**
+ * The ZRC-721 interface id, and the read-only calls used to ask an unknown
+ * contract what it is. Both are hints: a node that will not answer, or a
+ * contract that does not implement them, simply leaves the surface saying
+ * it does not know. Nothing waits on them and nothing is blocked by them.
+ */
+const ZRC721_INTERFACE_ID = "0x80ac58cd";
+const SUPPORTS_INTERFACE_CALLDATA = `${encodeFunctionSignature(
+  "supportsInterface(bytes4)",
+)}${encodeParameters(["bytes4"], [ZRC721_INTERFACE_ID]).slice(2)}`;
+const TOTAL_SUPPLY_CALLDATA = encodeFunctionSignature("totalSupply()");
+/** A QRL 2.0 ABI word is 64 bytes, so one return value is 128 hex digits. */
+const RETURN_WORD_PATTERN = /^0x[0-9a-fA-F]{128}$/;
+
+const readReturnedWord = (result: unknown): bigint | undefined => {
+  if (typeof result !== "string" || !RETURN_WORD_PATTERN.test(result)) {
+    return undefined;
+  }
+  try {
+    return BigInt(result);
+  } catch {
+    return undefined;
+  }
 };
 
 const ACTION_LABEL_KEYS: Partial<Record<CalldataAction, string>> = {
@@ -65,6 +96,10 @@ const CalldataSummary = observer(
       NFTCollectionType | undefined
     >();
     const [isRawVisible, setIsRawVisible] = useState(false);
+    const [probedNftStandard, setProbedNftStandard] = useState<
+      boolean | undefined
+    >();
+    const [totalSupply, setTotalSupply] = useState<bigint | undefined>();
 
     const decoded: DecodedCalldata = useMemo(
       () => decodeTransactionCalldata(data),
@@ -112,6 +147,50 @@ const CalldataSummary = observer(
         isCurrent = false;
       };
     }, [contractAddress, fromAddress, qrlStore.activeAccount?.accountAddress]);
+
+    // Asks the contract itself what it is and how much of it exists, for
+    // the two questions the wallet's own lists cannot always answer: is
+    // this ambiguous `approve` an NFT approval, and is this allowance
+    // larger than the whole supply. Both reads are advisory, run without
+    // blocking anything, and are simply absent when the node or the
+    // contract does not answer.
+    const contractSelector =
+      decoded.status === "decoded" ? decoded.selector : undefined;
+    useEffect(() => {
+      let isCurrent = true;
+      const instance = qrlStore.qrlInstance;
+      const probeContract = async () => {
+        if (!instance || !contractAddress || !contractSelector) return;
+        const callContract = async (callData: string) => {
+          try {
+            return await instance.call(
+              {
+                to: contractAddress,
+                data: callData,
+              } as unknown as TransactionCall,
+              BlockTags.LATEST,
+            );
+          } catch {
+            return undefined;
+          }
+        };
+        const [interfaceResult, supplyResult] = await Promise.all([
+          callContract(SUPPORTS_INTERFACE_CALLDATA),
+          callContract(TOTAL_SUPPLY_CALLDATA),
+        ]);
+        if (!isCurrent) return;
+        const interfaceWord = readReturnedWord(interfaceResult);
+        setProbedNftStandard(
+          interfaceWord === undefined ? undefined : interfaceWord === 1n,
+        );
+        const supplyWord = readReturnedWord(supplyResult);
+        setTotalSupply(supplyWord === 0n ? undefined : supplyWord);
+      };
+      void probeContract();
+      return () => {
+        isCurrent = false;
+      };
+    }, [contractAddress, contractSelector, qrlStore.qrlInstance]);
 
     if (decoded.status === "empty") return null;
 
@@ -189,31 +268,72 @@ const CalldataSummary = observer(
       );
     }
 
-    // `transferFrom` is declared by both the fungible and the NFT standard,
-    // so its third argument is an amount or a token ID depending on the
-    // contract. Only an imported token or collection settles it; with
-    // neither, the surface says so instead of guessing.
+    // `approve` and `transferFrom` are declared by both the fungible and
+    // the NFT standard, so their trailing argument is an amount for one and
+    // a token ID for the other. The wallet's own lists settle it first; the
+    // contract probe is only consulted when they cannot, and when nothing
+    // settles it the surface says so instead of guessing. Announcing a
+    // fungible allowance for an NFT approval is exactly how an attacker
+    // gets an `approve(attacker, 1)` on a valuable collection to read as
+    // dust (security review finding M-1).
+    const isAmbiguousStandard = decoded.standard === "ZRC20_OR_ZRC721";
+    const isKnownToken = token !== undefined;
+    const isKnownCollection =
+      collection !== undefined || (!isKnownToken && probedNftStandard === true);
+    const isUnresolvedStandard =
+      isAmbiguousStandard && !isKnownToken && !isKnownCollection;
     const treatAmountAsTokenId =
       decoded.standard === "ZRC721" ||
-      (decoded.standard === "ZRC20_OR_ZRC721" && !token && !!collection);
-    const amountLabelKey =
-      decoded.standard === "ZRC20_OR_ZRC721" && !token && !collection
-        ? "dapp.calldata.amountOrTokenId"
-        : "dapp.calldata.amount";
+      (isAmbiguousStandard && !isKnownToken && isKnownCollection);
+    const amountLabelKey = isUnresolvedStandard
+      ? "dapp.calldata.amountOrTokenId"
+      : "dapp.calldata.amount";
 
-    const showsUnlimitedWarning = decoded.isUnlimitedAmount === true;
+    // An allowance above the token's own supply cannot be an amount anyone
+    // meant, whatever the number looks like written out. The fixed
+    // threshold in the decoder is the floor for when `totalSupply()` is
+    // unreadable (security review finding M-2). A token ID is never an
+    // allowance, so a resolved NFT approval carries no such warning: QNS
+    // name IDs are hashes and are routinely enormous.
+    const isAllowanceAction =
+      decoded.action === CALLDATA_ACTIONS.APPROVE ||
+      decoded.action === CALLDATA_ACTIONS.INCREASE_ALLOWANCE;
+    const exceedsTotalSupply =
+      totalSupply !== undefined &&
+      decoded.amount !== undefined &&
+      decoded.amount > totalSupply;
+    const showsUnlimitedWarning =
+      isAllowanceAction &&
+      !treatAmountAsTokenId &&
+      (decoded.isUnlimitedAmount === true || exceedsTotalSupply);
     const showsApprovalForAllWarning =
-      decoded.action === "setApprovalForAll" && decoded.approved === true;
+      decoded.action === CALLDATA_ACTIONS.SET_APPROVAL_FOR_ALL &&
+      decoded.approved === true;
+
+    const actionLabelKey = (() => {
+      if (decoded.action === CALLDATA_ACTIONS.SET_APPROVAL_FOR_ALL) {
+        return decoded.approved === true
+          ? "dapp.calldata.actionSetApprovalForAll"
+          : "dapp.calldata.actionSetApprovalForAllRevoke";
+      }
+      if (decoded.action === CALLDATA_ACTIONS.APPROVE) {
+        if (isKnownToken) return "dapp.calldata.actionApprove";
+        if (isKnownCollection) return "dapp.calldata.actionApproveNft";
+        return "dapp.calldata.actionApproveAmbiguous";
+      }
+      return ACTION_LABEL_KEYS[decoded.action] ?? "dapp.calldata.actionUnknown";
+    })();
+
+    const ambiguousCautionKey = isUnresolvedStandard
+      ? decoded.action === CALLDATA_ACTIONS.APPROVE
+        ? "dapp.calldata.approveAmbiguousCaution"
+        : "dapp.calldata.transferFromAmbiguousCaution"
+      : undefined;
 
     return (
       <div className="flex flex-col gap-2 rounded-md border border-foreground/15 p-2">
         <DetailRow label={t("dapp.calldata.action")}>
-          {t(
-            decoded.action === "setApprovalForAll" && decoded.approved !== true
-              ? "dapp.calldata.actionSetApprovalForAllRevoke"
-              : (ACTION_LABEL_KEYS[decoded.action] ??
-                  "dapp.calldata.actionUnknown"),
-          )}
+          {t(actionLabelKey)}
         </DetailRow>
         {(token || collection) && (
           <DetailRow label={t("dapp.calldata.token")}>
@@ -222,13 +342,22 @@ const CalldataSummary = observer(
               : `${collection?.name ?? ""} (${collection?.symbol ?? ""})`}
           </DetailRow>
         )}
+        {ambiguousCautionKey && (
+          <div className="text-xs">{t(ambiguousCautionKey)}</div>
+        )}
         {showsUnlimitedWarning && (
           <div
             role="alert"
             className="flex items-start gap-2 rounded border border-red-500/60 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300"
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{t("dapp.calldata.unlimitedWarning")}</span>
+            <span>
+              {t(
+                isUnresolvedStandard
+                  ? "dapp.calldata.unlimitedWarningAmbiguous"
+                  : "dapp.calldata.unlimitedWarning",
+              )}
+            </span>
           </div>
         )}
         {showsApprovalForAllWarning && (
@@ -256,7 +385,7 @@ const CalldataSummary = observer(
           </DetailRow>
         )}
         {decoded.amount !== undefined &&
-          (decoded.isUnlimitedAmount ? (
+          (showsUnlimitedWarning ? (
             <DetailRow label={t(amountLabelKey)}>
               <span>{t("dapp.calldata.unlimited")}</span>
               <div className="font-numeric text-xs font-normal">

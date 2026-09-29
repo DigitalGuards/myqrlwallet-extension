@@ -23,7 +23,7 @@ import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { Copy } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SEND_TRANSACTION_TYPES } from "../QrlSendTransaction";
 import { utils, qrl } from "@theqrl/web3";
 import {
@@ -175,14 +175,55 @@ const QrlSendTransactionForContent = observer(
 
     // The fee the request could actually cost, rather than only the gas
     // limit it asks for (security review finding M2). `maxFeePerGas` is read
-    // exactly the way the signing paths below read it, so the maximum shown
-    // here is the maximum that gets signed. The wallet's own estimate is
-    // advisory: it is never written back into the request, so the dApp's
-    // gas limit is still the one sent.
+    // exactly the way the signing paths below read it, and
+    // pinDisplayedMaxFeePerGas keeps the signed ceiling equal to the one
+    // that was on screen. The wallet's own estimate is advisory: it is
+    // never written back into the request, so the dApp's gas limit is still
+    // the one sent.
     const [feeBasis, setFeeBasis] = useState<{
       maxFeePerGas?: bigint;
       estimatedGas?: bigint;
     }>({});
+    // The approval callback is registered once per request, so it would
+    // otherwise close over the fee basis as it stood when that effect ran.
+    // Signing reads the ref; rendering reads the state.
+    const feeBasisRef = useRef<{
+      maxFeePerGas?: bigint;
+      estimatedGas?: bigint;
+    }>({});
+
+    const applyFeeBasis = (next: {
+      maxFeePerGas?: bigint;
+      estimatedGas?: bigint;
+    }) => {
+      feeBasisRef.current = next;
+      setFeeBasis(next);
+    };
+
+    /**
+     * Holds the signature to the maximum fee the user was shown. The fee
+     * market moves while an approval sits open, and re-reading it at
+     * signing time (as this used to) could sign a higher ceiling than the
+     * screen ever displayed (security review finding L-3). A fresh fee at
+     * or below the displayed one is harmless, because the displayed number
+     * is a ceiling and the block still charges base plus tip; a higher one
+     * stops the signature, updates the screen and asks for a fresh
+     * approval.
+     */
+    const pinDisplayedMaxFeePerGas = (freshMaxFeePerGas: bigint): bigint => {
+      const displayed = feeBasisRef.current.maxFeePerGas;
+      if (displayed === undefined) return freshMaxFeePerGas;
+      if (freshMaxFeePerGas > displayed) {
+        applyFeeBasis({
+          ...feeBasisRef.current,
+          maxFeePerGas: freshMaxFeePerGas,
+        });
+        throw new Error(
+          "The network fee rose while this request was open. The maximum fee has been updated. Review it and approve again.",
+        );
+      }
+      return displayed;
+    };
 
     useEffect(() => {
       let isCurrent = true;
@@ -217,7 +258,7 @@ const QrlSendTransactionForContent = observer(
           estimatedGas = undefined;
         }
         if (!isCurrent) return;
-        setFeeBasis({ maxFeePerGas, estimatedGas });
+        applyFeeBasis({ maxFeePerGas, estimatedGas });
       };
       void loadFeeBasis();
       return () => {
@@ -528,11 +569,18 @@ const QrlSendTransactionForContent = observer(
         pendingTransactionObject = transactionObject;
         if (type === "0x2") {
           const { maxFeePerGas, maxPriorityFeePerGas } = await getGasFeeData();
+          const signedMaxFeePerGas = pinDisplayedMaxFeePerGas(maxFeePerGas);
           transactionObject.type = "0x2";
-          transactionObject.maxPriorityFeePerGas = maxPriorityFeePerGas;
-          transactionObject.maxFeePerGas = `0x${maxFeePerGas.toString(16)}`;
+          // The tip can never exceed the ceiling the user approved.
+          transactionObject.maxPriorityFeePerGas =
+            maxPriorityFeePerGas > signedMaxFeePerGas
+              ? signedMaxFeePerGas
+              : maxPriorityFeePerGas;
+          transactionObject.maxFeePerGas = `0x${signedMaxFeePerGas.toString(16)}`;
         } else {
-          transactionObject.gasPrice = gasPrice;
+          transactionObject.gasPrice = pinDisplayedMaxFeePerGas(
+            BigInt(gasPrice ?? 0),
+          );
         }
 
         let rawTransactionToSend: string | undefined;
@@ -702,11 +750,18 @@ const QrlSendTransactionForContent = observer(
 
         if (type === "0x2") {
           const { maxFeePerGas, maxPriorityFeePerGas } = await getGasFeeData();
+          const signedMaxFeePerGas = pinDisplayedMaxFeePerGas(maxFeePerGas);
           transactionObject.type = "0x2";
-          transactionObject.maxPriorityFeePerGas = maxPriorityFeePerGas;
-          transactionObject.maxFeePerGas = `0x${maxFeePerGas.toString(16)}`;
+          // The tip can never exceed the ceiling the user approved.
+          transactionObject.maxPriorityFeePerGas =
+            maxPriorityFeePerGas > signedMaxFeePerGas
+              ? signedMaxFeePerGas
+              : maxPriorityFeePerGas;
+          transactionObject.maxFeePerGas = `0x${signedMaxFeePerGas.toString(16)}`;
         } else {
-          transactionObject.gasPrice = gasPrice;
+          transactionObject.gasPrice = pinDisplayedMaxFeePerGas(
+            BigInt(gasPrice ?? 0),
+          );
         }
 
         let rawTransactionToSend: string | undefined;
@@ -885,7 +940,10 @@ const QrlSendTransactionForContent = observer(
                 </div>
               </div>
             )}
-            {data && (
+            {/* Only a call to an existing contract has a summary to give.
+                Deployment bytecode has no `to` to resolve a token against
+                and no selector layout, so it stays in the Data tab. */}
+            {data && accountToAddress && (
               <CalldataSummary
                 data={data}
                 contractAddress={accountToAddress}

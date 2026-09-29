@@ -305,21 +305,39 @@ test("puts a decoded token approval in words on the approval screen", async () =
     await expect(yes).toBeEnabled();
     await yes.click();
 
+    // Rejecting several requests back to back arms the per-origin approval
+    // cooldown (approvalSlot.ts: two refusals of grace, then five seconds),
+    // which is exactly the behaviour that keeps a page from reopening the
+    // wallet in a loop. This spec walks through more refusals than that, so
+    // it waits the cooldown out and asks again.
+    const APPROVAL_COOLDOWN_WAIT_MS = 5_500;
     const openApproval = async (data: string, to: string) => {
-      await beginRequest(dAppPage, "qrl_sendTransaction", [
-        {
-          from: CHECKSUM_ACCOUNT,
-          to,
-          chainId: "0x301825",
-          value: "0x0",
-          gas: "0x7a120",
-          type: "0x2",
-          data,
-        },
-      ]);
-      await expect(
-        extensionPage.getByRole("button", { name: "Yes" }),
-      ).toBeEnabled();
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await beginRequest(dAppPage, "qrl_sendTransaction", [
+          {
+            from: CHECKSUM_ACCOUNT,
+            to,
+            chainId: "0x301825",
+            value: "0x0",
+            gas: "0x7a120",
+            type: "0x2",
+            data,
+          },
+        ]);
+        const opened = await extensionPage
+          .getByRole("button", { name: "Yes" })
+          .waitFor({ state: "visible", timeout: 6_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (opened) {
+          await expect(
+            extensionPage.getByRole("button", { name: "Yes" }),
+          ).toBeEnabled();
+          return;
+        }
+        await extensionPage.waitForTimeout(APPROVAL_COOLDOWN_WAIT_MS);
+      }
+      throw new Error("The approval surface never opened");
     };
 
     const rejectApproval = async () => {
@@ -353,7 +371,7 @@ test("puts a decoded token approval in words on the approval screen", async () =
     await expect(extensionPage.getByText("MQW", { exact: true })).toBeVisible();
     await expect(
       extensionPage.getByText(
-        "This grants unlimited spending of this token. The spender can move your whole balance at any time, now and in the future.",
+        "This allows spending more than the token's entire supply. It is effectively unlimited: the spender can move your whole balance at any time, now and in the future.",
       ),
     ).toBeVisible();
     await expect(
@@ -391,6 +409,22 @@ test("puts a decoded token approval in words on the approval screen", async () =
     ).toBeVisible();
     await expect(extensionPage.getByText("0xa22cb465")).toBeVisible();
     await capture("set-approval-for-all-360.png");
+    await rejectApproval();
+
+    // The same selector against a collection the wallet knows is an NFT
+    // approval, and hands over that one item (security review finding M-1).
+    await openApproval(
+      call("approve(address,uint256)", ["address", "uint256"], [SPENDER, "1"]),
+      COLLECTION_CONTRACT,
+    );
+    await expect(extensionPage.getByText("Approve one NFT")).toBeVisible();
+    await expect(
+      extensionPage.getByText("Token ID", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      extensionPage.getByText("Quanta Relics (RELIC)"),
+    ).toBeVisible();
+    await capture("approve-single-nft-360.png");
     await rejectApproval();
 
     // A selector the wallet does not know says so instead of inventing a

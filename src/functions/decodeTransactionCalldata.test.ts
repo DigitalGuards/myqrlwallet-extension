@@ -6,8 +6,8 @@ import {
 import { toChecksumAddress } from "@theqrl/wallet.js";
 import {
   CALLDATA_ACTIONS,
+  EFFECTIVELY_UNLIMITED_THRESHOLD,
   MAX_UINT256,
-  UNLIMITED_ALLOWANCE_THRESHOLD,
   decodeTransactionCalldata,
   formatTokenBaseUnits,
   isUnlimitedAllowance,
@@ -51,7 +51,8 @@ describe("decodeTransactionCalldata", () => {
     expect(decoded).toMatchObject({
       status: "decoded",
       action: CALLDATA_ACTIONS.APPROVE,
-      standard: "ZRC20",
+      // Shared with ZRC-721, where the second argument is a token ID.
+      standard: "ZRC20_OR_ZRC721",
       selector: "0x095ea7b3",
       spender: toChecksumAddress(SPENDER),
       amount: 25n,
@@ -217,7 +218,11 @@ describe("decodeTransactionCalldata", () => {
 
   it.each([
     ["max uint256", MAX_UINT256],
-    ["2^255 exactly", UNLIMITED_ALLOWANCE_THRESHOLD],
+    // The values that slipped past a 2^255 test and rendered as a plain
+    // 60-digit number with no warning at all.
+    ["2^254", 1n << 254n],
+    ["10^40", 10n ** 40n],
+    ["one above 2^128", EFFECTIVELY_UNLIMITED_THRESHOLD + 1n],
   ])("flags an effectively unlimited approve (%s)", (_label, amount) => {
     const decoded = decodeTransactionCalldata(
       call(
@@ -230,8 +235,21 @@ describe("decodeTransactionCalldata", () => {
     expect(decoded).toMatchObject({ amount, isUnlimitedAmount: true });
   });
 
-  it("does not flag an allowance one unit below the threshold", () => {
-    expect(isUnlimitedAllowance(UNLIMITED_ALLOWANCE_THRESHOLD - 1n)).toBe(
+  it("flags an effectively unlimited increaseAllowance too", () => {
+    expect(
+      decodeTransactionCalldata(
+        call(
+          "increaseAllowance(address,uint256)",
+          ["address", "uint256"],
+          [SPENDER, (1n << 254n).toString()],
+        ),
+      ),
+    ).toMatchObject({ isUnlimitedAmount: true });
+  });
+
+  it("does not flag an allowance at or below the threshold", () => {
+    expect(isUnlimitedAllowance(EFFECTIVELY_UNLIMITED_THRESHOLD)).toBe(false);
+    expect(isUnlimitedAllowance(EFFECTIVELY_UNLIMITED_THRESHOLD - 1n)).toBe(
       false,
     );
     expect(
@@ -239,7 +257,7 @@ describe("decodeTransactionCalldata", () => {
         call(
           "approve(address,uint256)",
           ["address", "uint256"],
-          [SPENDER, (UNLIMITED_ALLOWANCE_THRESHOLD - 1n).toString()],
+          [SPENDER, EFFECTIVELY_UNLIMITED_THRESHOLD.toString()],
         ),
       ),
     ).toMatchObject({ isUnlimitedAmount: false });
@@ -293,17 +311,50 @@ describe("decodeTransactionCalldata", () => {
     });
   });
 
-  it("still decodes a known call that carries trailing bytes", () => {
+  it("degrades to raw when a known call carries trailing bytes", () => {
     const padded = `${call(
       "approve(address,uint256)",
       ["address", "uint256"],
       [SPENDER, "5"],
     )}ffff`;
 
-    expect(decodeTransactionCalldata(padded)).toMatchObject({
-      status: "decoded",
-      action: CALLDATA_ACTIONS.APPROVE,
-      amount: 5n,
+    expect(decodeTransactionCalldata(padded)).toEqual({
+      status: "unknown",
+      selector: "0x095ea7b3",
+    });
+  });
+
+  it("degrades to raw when a uint word overflows its declared width", () => {
+    // The ABI coder masks a uint256 to 256 bits, so a 64-byte word holding
+    // 2^300 decodes as 0 and an approve for an absurd amount would read as
+    // a revoke. The round trip catches it.
+    const spenderWord = "ab".repeat(64);
+    const overflowWord = (1n << 300n).toString(16).padStart(128, "0");
+
+    expect(
+      decodeTransactionCalldata(`0x095ea7b3${spenderWord}${overflowWord}`),
+    ).toEqual({ status: "unknown", selector: "0x095ea7b3" });
+  });
+
+  it("degrades to raw for a bool word that is neither zero nor one", () => {
+    const operatorWord = "ab".repeat(64);
+    const nonCanonicalBool = "02".padStart(128, "0");
+
+    expect(
+      decodeTransactionCalldata(`0xa22cb465${operatorWord}${nonCanonicalBool}`),
+    ).toEqual({ status: "unknown", selector: "0xa22cb465" });
+  });
+
+  it("degrades to raw when a batch transfer pairs up unevenly", () => {
+    const mismatched = call(
+      "safeBatchTransferFrom(address,address,uint256[],uint256[],bytes)",
+      ["address", "address", "uint256[]", "uint256[]", "bytes"],
+      [SOURCE, RECIPIENT, ["1", "2", "3"], ["10", "20"], "0x"],
+    );
+
+    expect(decodeTransactionCalldata(mismatched)).toEqual({
+      status: "unknown",
+      selector: "0x2eb2c2d6",
     });
   });
 });

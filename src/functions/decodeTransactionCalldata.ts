@@ -1,6 +1,7 @@
 import {
   decodeParameters,
   encodeFunctionSignature,
+  encodeParameters,
 } from "@theqrl/web3-qrl-abi";
 import { toCanonicalQrlAddress } from "@/utilities/addressUtil";
 
@@ -24,8 +25,17 @@ import { toCanonicalQrlAddress } from "@/utilities/addressUtil";
  * the rest of the extension signs with.
  */
 
-/** A uint256 allowance at or above 2^255 can never be spent down in practice. */
-export const UNLIMITED_ALLOWANCE_THRESHOLD = 1n << 255n;
+/**
+ * An allowance above 2^128 is past any plausible token supply (a token with
+ * 18 decimals would need more than 10^20 whole units to reach it), so it is
+ * effectively unlimited whatever the contract holds. The threshold sits
+ * here rather than at 2^255 because an attacker picking 2^254, or any long
+ * decimal literal, would otherwise clear a 2^255 test and show a harmless
+ * looking 60-digit number. Where the surface can read the token's own
+ * `totalSupply()` it compares against that as well, and this rule is the
+ * floor when that read is unavailable.
+ */
+export const EFFECTIVELY_UNLIMITED_THRESHOLD = 1n << 128n;
 
 export const MAX_UINT256 = (1n << 256n) - 1n;
 
@@ -46,12 +56,13 @@ export type CalldataAction =
   (typeof CALLDATA_ACTIONS)[keyof typeof CALLDATA_ACTIONS];
 
 /**
- * Which token family the signature belongs to. `ZRC20_OR_ZRC721` covers
- * `transferFrom(address,address,uint256)`, which both standards declare: the
- * last argument is an amount for a fungible token and a token ID for an NFT,
- * and only the contract at `to` settles which. The surface resolves it from
- * the wallet's own token and collection lists and says "amount or token ID"
- * when it knows neither.
+ * Which token family the signature belongs to. `ZRC20_OR_ZRC721` covers the
+ * signatures both standards declare, `approve(address,uint256)` and
+ * `transferFrom(address,address,uint256)`: the trailing argument is an
+ * amount for a fungible token and a token ID for an NFT, and only the
+ * contract at `to` settles which. The surface resolves it from the wallet's
+ * own token and collection lists and says "amount or token ID" when it
+ * knows neither.
  */
 export type TokenStandardHint =
   | "ZRC20"
@@ -129,7 +140,7 @@ const asBoolean = (value: unknown): boolean => {
 };
 
 export const isUnlimitedAllowance = (amount: bigint): boolean =>
-  amount >= UNLIMITED_ALLOWANCE_THRESHOLD;
+  amount > EFFECTIVELY_UNLIMITED_THRESHOLD;
 
 const allowanceFields = (values: unknown[]): DecodedCalldataFields => {
   const amount = asBigInt(values[1]);
@@ -142,9 +153,13 @@ const allowanceFields = (values: unknown[]): DecodedCalldataFields => {
 
 const SPECS: CalldataSpec[] = [
   {
+    // Shared with ZRC-721, where the second argument is a token ID and the
+    // call hands over that one item. Tagged ambiguous so the surface asks
+    // the wallet's own lists which contract this is instead of announcing a
+    // fungible allowance for an NFT approval.
     signature: "approve(address,uint256)",
     action: CALLDATA_ACTIONS.APPROVE,
-    standard: "ZRC20",
+    standard: "ZRC20_OR_ZRC721",
     types: ["address", "uint256"],
     build: allowanceFields,
   },
@@ -237,12 +252,22 @@ const SPECS: CalldataSpec[] = [
     action: CALLDATA_ACTIONS.SAFE_BATCH_TRANSFER_FROM,
     standard: "ZRC1155",
     types: ["address", "address", "uint256[]", "uint256[]", "bytes"],
-    build: (values) => ({
-      source: asAddress(values[0]),
-      recipient: asAddress(values[1]),
-      tokenIds: asBigIntList(values[2]),
-      tokenAmounts: asBigIntList(values[3]),
-    }),
+    build: (values) => {
+      const tokenIds = asBigIntList(values[2]);
+      const tokenAmounts = asBigIntList(values[3]);
+      if (tokenIds.length !== tokenAmounts.length) {
+        // The standard pairs the two arrays by index, and the contract
+        // reverts on a mismatch. Rendering the lists side by side would
+        // imply a pairing the calldata does not have.
+        throw new Error("Token IDs and quantities do not pair up");
+      }
+      return {
+        source: asAddress(values[0]),
+        recipient: asAddress(values[1]),
+        tokenIds,
+        tokenAmounts,
+      };
+    },
   },
 ];
 
@@ -290,11 +315,22 @@ export const decodeTransactionCalldata = (data: unknown): DecodedCalldata => {
   if (!spec) return { status: "unknown", selector };
 
   try {
-    const decoded = decodeParameters(
-      [...spec.types],
-      `0x${trimmed.slice(SELECTOR_HEX_LENGTH)}`,
-    );
+    const argumentBytes = `0x${trimmed.slice(SELECTOR_HEX_LENGTH)}`;
+    const decoded = decodeParameters([...spec.types], argumentBytes);
     const values = spec.types.map((_type, index) => decoded[index]);
+    // The ABI coder masks a uint to its declared width, so a 64-byte word
+    // holding 2^300 decodes as 0 and an `approve` for an absurd amount
+    // would read as a revoke. Re-encoding the decoded values and demanding
+    // the exact original bytes back rejects that, along with any other
+    // non-canonical encoding (a bool word that is not 0 or 1, a dynamic
+    // offset pointing somewhere unexpected, trailing bytes). Anything that
+    // fails it is shown as raw calldata instead.
+    if (
+      encodeParameters([...spec.types], values).toLowerCase() !==
+      argumentBytes.toLowerCase()
+    ) {
+      return { status: "unknown", selector };
+    }
     return {
       status: "decoded",
       selector,

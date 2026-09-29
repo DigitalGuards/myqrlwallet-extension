@@ -1716,3 +1716,202 @@ describe("QrlSendTransactionForContent recipient disclosure", () => {
     expect(screen.queryByRole("tab", { name: "Data" })).not.toBeInTheDocument();
   });
 });
+
+describe("QrlSendTransactionForContent fee pinning", () => {
+  afterEach(cleanup);
+
+  const ONE_GWEI = BigInt(1_000_000_000);
+
+  const setupPinning = ({
+    displayedFeePerGas,
+    signingFeePerGas,
+    requestParams,
+  }: {
+    displayedFeePerGas: bigint;
+    signingFeePerGas: bigint;
+    requestParams: Record<string, unknown>;
+  }) => {
+    let approve: (() => Promise<void>) | undefined;
+    const addToResponseData = vi.fn();
+    const signTransaction = vi.fn().mockResolvedValue({
+      rawTransaction: "0xsignedraw",
+      transactionHash: "0xsignedrawhash",
+    });
+    const sendRawTransaction = vi.fn().mockResolvedValue("0xbroadcasthash");
+    let feeReads = 0;
+    const storeValues = mockedStore({
+      qrlStore: {
+        qrlConnection: { isConnected: true },
+        qrlInstance: {
+          getGasPrice: async () => ONE_GWEI,
+          estimateGas: async () => BigInt(21_000),
+          getTransactionCount: async () => 0,
+          accounts: {
+            seedToAccount: () => ({ address: SENDER_ADDRESS }),
+            signTransaction,
+          },
+          call: vi.fn().mockResolvedValue("0x"),
+          requestManager: { send: sendRawTransaction },
+        } as any,
+        getGasFeeData: async () => {
+          feeReads += 1;
+          return {
+            baseFeePerGas: BigInt(0),
+            maxFeePerGas:
+              feeReads === 1 ? displayedFeePerGas : signingFeePerGas,
+            maxPriorityFeePerGas: BigInt(0),
+          };
+        },
+      },
+      dAppRequestStore: {
+        dAppRequestData: { params: [requestParams] },
+        setOnPermissionCallBack: (callback: any) => {
+          approve = () => callback(true, addToResponseData);
+        },
+        addToResponseData,
+      },
+      lockStore: { getMnemonicPhrases: async () => "test mnemonic phrases" },
+      ledgerStore: { isLedgerAccount: () => false } as any,
+    });
+    return {
+      storeValues,
+      approve: async () => {
+        if (!approve) throw new Error("The approval callback was never set");
+        await approve();
+      },
+      addToResponseData,
+      signTransaction,
+      sendRawTransaction,
+    };
+  };
+
+  // 42,000, so the maximum fee never coincides with the 21,000 estimate.
+  const transferRequest = {
+    chainId: "0x301825",
+    from: SENDER_ADDRESS,
+    to: RECIPIENT_ADDRESS,
+    value: "0x30",
+    gas: "0xa410",
+    type: "0x2",
+  };
+
+  const interactionRequest = {
+    chainId: "0x301825",
+    from: SENDER_ADDRESS,
+    to: CONTRACT_ADDRESS,
+    data: "0x608060405234",
+    value: "0x0",
+    gas: "0xa410",
+    type: "0x2",
+  };
+
+  const renderPinning = (
+    storeValues: ReturnType<typeof mockedStore>,
+    transactionType: keyof typeof SEND_TRANSACTION_TYPES,
+  ) =>
+    render(
+      <StoreProvider value={storeValues}>
+        <MemoryRouter>
+          <TooltipProvider>
+            <QrlSendTransactionForContent transactionType={transactionType} />
+          </TooltipProvider>
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+  it("signs the maximum fee that was displayed when the market eased", async () => {
+    const pinning = setupPinning({
+      displayedFeePerGas: BigInt(2) * ONE_GWEI,
+      signingFeePerGas: ONE_GWEI,
+      requestParams: transferRequest,
+    });
+    renderPinning(pinning.storeValues, SEND_TRANSACTION_TYPES.QRL_TRANSFER);
+
+    // 42,000 x 2 gwei, the ceiling the screen showed.
+    expect(await screen.findByText("0.000084 Quanta")).toBeInTheDocument();
+    await act(async () => pinning.approve());
+
+    expect(pinning.signTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxFeePerGas: `0x${(BigInt(2) * ONE_GWEI).toString(16)}`,
+      }),
+      "0xhexseed",
+    );
+    expect(pinning.sendRawTransaction).toHaveBeenCalled();
+  });
+
+  it("stops the signature and asks again when the fee rose while open", async () => {
+    const pinning = setupPinning({
+      displayedFeePerGas: ONE_GWEI,
+      signingFeePerGas: BigInt(3) * ONE_GWEI,
+      requestParams: interactionRequest,
+    });
+    renderPinning(
+      pinning.storeValues,
+      SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION,
+    );
+
+    expect(await screen.findByText("0.000042 Quanta")).toBeInTheDocument();
+    await act(async () => pinning.approve());
+
+    expect(pinning.signTransaction).not.toHaveBeenCalled();
+    expect(pinning.sendRawTransaction).not.toHaveBeenCalled();
+    expect(pinning.addToResponseData).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        message: expect.stringContaining("The network fee rose"),
+      }),
+    });
+    // The screen now shows the fee it would take, for a fresh decision.
+    expect(await screen.findByText("0.000126 Quanta")).toBeInTheDocument();
+  });
+});
+
+describe("QrlSendTransactionForContent deployment bytecode", () => {
+  afterEach(cleanup);
+
+  it("does not read deployment bytecode as a token call", async () => {
+    // Constructor bytecode can start with any four bytes, including ones
+    // that happen to match a token selector. A deployment has no `to` to
+    // resolve a token against, so it gets no summary at all.
+    const approveCalldata = `0x095ea7b3${"ab".repeat(64)}${"5".padStart(128, "0")}`;
+    render(
+      <StoreProvider
+        value={mockedStore({
+          dAppRequestStore: {
+            dAppRequestData: {
+              params: [
+                {
+                  chainId: "0x301825",
+                  from: SENDER_ADDRESS,
+                  data: approveCalldata,
+                  gas: "0x1cbb3",
+                  type: "0x2",
+                  value: "0x0",
+                },
+              ],
+            },
+          },
+        })}
+      >
+        <MemoryRouter>
+          <TooltipProvider>
+            <QrlSendTransactionForContent
+              transactionType={SEND_TRANSACTION_TYPES.CONTRACT_DEPLOYMENT}
+            />
+          </TooltipProvider>
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    expect(
+      screen.getByText("None. This creates a new contract."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Action")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Approve token spending"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Approve an amount or one NFT"),
+    ).not.toBeInTheDocument();
+  });
+});
