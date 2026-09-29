@@ -36,6 +36,14 @@ import { ZRC_20_ITEMS_DISPLAY_LIMIT } from "@/constants/zrc20Token";
 import { NFT_ITEMS_DISPLAY_LIMIT } from "@/constants/nftToken";
 import { cn } from "@/utilities/stylingUtil";
 
+// Send / History / Receive share one row down to a 320px side panel, so
+// they carry tighter metrics than a full-width button and grow back to the
+// default ones once there is room. min-w-0 is what lets a flex child shrink
+// below its content, which is what keeps the row unwrapped.
+const HOME_ACTION_CLASS =
+  "w-full min-w-0 gap-1 px-1 text-xs min-[460px]:gap-2 min-[460px]:px-3 min-[460px]:text-sm";
+const HOME_ACTION_ICON_CLASS = "h-4 w-4 shrink-0";
+
 const AccountCreateImport = observer(() => {
   const { t } = useTranslation();
   const { qrlStore } = useStore();
@@ -108,34 +116,46 @@ const AccountCreateImport = observer(() => {
               <CardContent>
                 <ActiveAccountDisplay />
               </CardContent>
-              {/* Wraps at narrow widths: the three labels have a
-                  combined min-content wider than a side panel dragged to
-                  its 320px minimum, and the shell is overflow-hidden, so an
-                  unwrapped row put Send and Receive out of reach. */}
-              <CardFooter className="flex-wrap gap-2">
+              {/* One row at every supported width. A previous fix gave
+                  each action an 8rem floor to stop it clipping at the
+                  320px side-panel minimum, but three 8rem buttons plus
+                  their gaps need about 400px, so Receive dropped to its
+                  own row at ordinary panel widths. The row shrinks its
+                  gaps, padding and type instead: each action is an equal
+                  share of the row with no width floor, and the label
+                  truncates only if a translation still overruns. */}
+              <CardFooter className="flex-nowrap gap-1.5 px-4 min-[460px]:gap-2 min-[460px]:px-6">
                 <Link
-                  className="min-w-[8rem] flex-1"
+                  className="min-w-0 flex-1"
                   to={ROUTES.TOKEN_TRANSFER}
                   state={{ shouldStartFresh: true }}
                 >
-                  <Button className="w-full" type="button">
-                    <Send className="mr-2 h-4 w-4" />
-                    {t("home.send")}
+                  <Button className={HOME_ACTION_CLASS} type="button">
+                    <Send className={HOME_ACTION_ICON_CLASS} />
+                    <span className="truncate">{t("home.send")}</span>
                   </Button>
                 </Link>
                 <Link
-                  className="min-w-[8rem] flex-1"
+                  className="min-w-0 flex-1"
                   to={ROUTES.TRANSACTION_HISTORY}
                 >
-                  <Button className="w-full" type="button" variant="outline">
-                    <History className="mr-2 h-4 w-4" />
-                    {t("home.history")}
+                  <Button
+                    className={HOME_ACTION_CLASS}
+                    type="button"
+                    variant="outline"
+                  >
+                    <History className={HOME_ACTION_ICON_CLASS} />
+                    <span className="truncate">{t("home.history")}</span>
                   </Button>
                 </Link>
-                <Link className="min-w-[8rem] flex-1" to={ROUTES.RECEIVE}>
-                  <Button className="w-full" type="button" variant="secondary">
-                    <QrCode className="mr-2 h-4 w-4" />
-                    {t("home.receive")}
+                <Link className="min-w-0 flex-1" to={ROUTES.RECEIVE}>
+                  <Button
+                    className={HOME_ACTION_CLASS}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <QrCode className={HOME_ACTION_ICON_CLASS} />
+                    <span className="truncate">{t("home.receive")}</span>
                   </Button>
                 </Link>
               </CardFooter>

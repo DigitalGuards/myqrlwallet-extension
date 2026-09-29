@@ -17,6 +17,30 @@ vi.mock("@/utilities/storageUtil", () => ({
 const mockFetch = vi.fn();
 (globalThis as any).fetch = mockFetch;
 
+const COINGECKO_HOST = "api.coingecko.com";
+
+/** Answers the CoinGecko call and lets every other URL fail. */
+const mockCoinGecko = (qrlData: Record<string, number>) => {
+  mockFetch.mockImplementation(async (url: string) =>
+    String(url).includes(COINGECKO_HOST)
+      ? {
+          ok: true,
+          json: async () => ({ "quantum-resistant-ledger": qrlData }),
+        }
+      : { ok: false, status: 404 },
+  );
+};
+
+/** Refuses the CoinGecko call the way its CDN does, and answers the
+ *  explorer fallback. */
+const mockCoinGeckoBlocked = (overview: unknown) => {
+  mockFetch.mockImplementation(async (url: string) =>
+    String(url).includes(COINGECKO_HOST)
+      ? { ok: false, status: 403 }
+      : { ok: true, json: async () => overview },
+  );
+};
+
 describe("PriceStore", () => {
   let PriceStore: typeof import("@/stores/priceStore").default;
 
@@ -177,28 +201,53 @@ describe("PriceStore", () => {
   // ── setRefreshEnabled ──
 
   it("arms and disarms the refresh interval", async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        "quantum-resistant-ledger": { usd: 1.3, usd_24h_change: 4.0 },
-      }),
-    });
+    mockCoinGecko({ usd: 1.3, usd_24h_change: 4.0 });
     const store = new PriceStore();
 
     store.setRefreshEnabled(true);
     expect(store.isRefreshing).toBe(true);
 
-    await vi.advanceTimersByTimeAsync(60_000);
+    // Arming refreshes at once, then once per interval.
+    await vi.advanceTimersByTimeAsync(0);
     expect(mockFetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
 
     store.setRefreshEnabled(false);
     expect(store.isRefreshing).toBe(false);
 
     await vi.advanceTimersByTimeAsync(180_000);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
-  it("does not restart the interval when already armed", () => {
+  it("refreshes as soon as the poll is armed with nothing on screen", async () => {
+    mockCoinGecko({ usd: 1.3, usd_24h_change: 4.0 });
+    const store = new PriceStore();
+
+    store.setRefreshEnabled(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The regression: the poll used to arm an interval and nothing else,
+    // so the fiat line stayed blank for a minute, and the action popup
+    // rarely lives that long.
+    expect(store.getPrice("usd")).toBe(1.3);
+    store.setRefreshEnabled(false);
+  });
+
+  it("waits for the tick when the prices on hand are still fresh", async () => {
+    mockCoinGecko({ usd: 1.3 });
+    const store = new PriceStore();
+    store.lastUpdated = Date.now();
+
+    store.setRefreshEnabled(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    store.setRefreshEnabled(false);
+  });
+
+  it("does not restart the interval when already armed", async () => {
+    mockCoinGecko({ usd: 1.3 });
     const store = new PriceStore();
     store.setRefreshEnabled(true);
     const first = store.isRefreshing;
@@ -207,6 +256,7 @@ describe("PriceStore", () => {
     expect(first).toBe(true);
     expect(store.isRefreshing).toBe(true);
     store.setRefreshEnabled(false);
+    await vi.advanceTimersByTimeAsync(0);
   });
 
   // ── fetchPrices ──
@@ -327,5 +377,84 @@ describe("PriceStore", () => {
     const store = new PriceStore();
     // Should not throw
     store.stopAutoRefresh();
+  });
+
+  // ── fallback quote source ──
+
+  it("falls back to the explorer when CoinGecko refuses the request", async () => {
+    // CoinGecko's keyless endpoint answers 403 for whole networks, which
+    // used to leave the Home card with no fiat line at all.
+    mockCoinGeckoBlocked({ currentPrice: 0.67, priceChange24h: -0.47 });
+
+    const store = new PriceStore();
+    await store.fetchPrices();
+
+    expect(store.getPrice("USD")).toBe(0.67);
+    expect(store.getChange24h("USD")).toBe(-0.47);
+    expect(store.hasError).toBe(false);
+    expect(mockSetPriceCache).toHaveBeenCalledWith(
+      expect.objectContaining({ prices: { usd: 0.67 } }),
+    );
+  });
+
+  it("keeps the currencies the fallback does not carry", async () => {
+    mockCoinGecko({ usd: 1.5, eur: 1.3, eur_24h_change: 2.1 });
+    const store = new PriceStore();
+    await store.fetchPrices();
+
+    mockCoinGeckoBlocked({ currentPrice: 2, priceChange24h: 1 });
+    store.lastUpdated = 0;
+    await store.fetchPrices();
+
+    expect(store.getPrice("usd")).toBe(2);
+    // The explorer quotes USD only; blanking EUR here would empty the
+    // fiat line for everyone not on dollars.
+    expect(store.getPrice("eur")).toBe(1.3);
+  });
+
+  it("reports an error only when both sources fail", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockFetch.mockResolvedValue({ ok: false, status: 503 });
+
+    const store = new PriceStore();
+    await store.fetchPrices();
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(store.hasError).toBe(true);
+    consoleSpy.mockRestore();
+  });
+
+  it("ignores an explorer answer with no usable price", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockCoinGeckoBlocked({ currentPrice: 0 });
+
+    const store = new PriceStore();
+    await store.fetchPrices();
+
+    expect(store.getPrice("usd")).toBe(0);
+    expect(store.hasError).toBe(true);
+    consoleSpy.mockRestore();
+  });
+
+  it("does not start a second request while one is in flight", async () => {
+    let release: (value: unknown) => void = () => {};
+    mockFetch.mockImplementation(
+      async () =>
+        await new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const store = new PriceStore();
+    const first = store.fetchPrices();
+    void store.fetchPrices();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    release({
+      ok: true,
+      json: async () => ({ "quantum-resistant-ledger": { usd: 4 } }),
+    });
+    await first;
+    expect(store.getPrice("usd")).toBe(4);
   });
 });

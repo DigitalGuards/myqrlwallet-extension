@@ -314,6 +314,7 @@ const mockedStoreValues: StoreType = {
     isCacheStale: false,
     initialize: async () => {},
     fetchPrices: async () => {},
+    setRefreshEnabled: () => {},
     startAutoRefresh: () => {},
     stopAutoRefresh: () => {},
     getChange24h: () => 0,

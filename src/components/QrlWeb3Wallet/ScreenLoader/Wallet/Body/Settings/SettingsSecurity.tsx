@@ -154,12 +154,9 @@ const SettingsSecurity = observer(() => {
   const handleTogglePrice = (checked: boolean | "indeterminate") => {
     const enabled = checked === true;
     setShowBalanceAndPrice(enabled);
-    if (enabled) {
-      priceStore.fetchPrices();
-      priceStore.startAutoRefresh();
-    } else {
-      priceStore.stopAutoRefresh();
-    }
+    // One chokepoint: the store decides whether turning this back on needs
+    // a refresh right now or can wait for the next tick.
+    priceStore.setRefreshEnabled(enabled);
   };
 
   return (

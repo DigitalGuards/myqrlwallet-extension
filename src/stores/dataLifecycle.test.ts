@@ -125,7 +125,7 @@ describe("data lifecycle wiring", () => {
     expect(priceStore.fetchPrices).not.toHaveBeenCalled();
   });
 
-  it("refreshes prices once settings confirm the setting is on", async () => {
+  it("arms the price poll once settings confirm the setting is on", async () => {
     const { wire, priceStore } = makeStores({
       isLocked: false,
       showBalanceAndPrice: true,
@@ -134,7 +134,9 @@ describe("data lifecycle wiring", () => {
     await wire();
 
     expect(priceStore.setRefreshEnabled).toHaveBeenCalledWith(true);
-    expect(priceStore.fetchPrices).toHaveBeenCalledTimes(1);
+    // Whether arming also refreshes right now is the store's call, so the
+    // toggle in Settings and this wiring cannot answer it differently.
+    expect(priceStore.fetchPrices).not.toHaveBeenCalled();
   });
 
   it("stops the price poll while the wallet is locked and restarts it on unlock", async () => {

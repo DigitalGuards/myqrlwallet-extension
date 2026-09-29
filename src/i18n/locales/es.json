@@ -537,7 +537,7 @@
   "settings.security.60minutes": "60 minutos",
   "settings.security.never": "Nunca",
   "settings.security.showBalanceLabel": "Mostrar saldo y precio del token",
-  "settings.security.showBalanceDescription": "Usamos la API de CoinGecko para mostrar precios de tokens. Cuando está desactivado, no se realizan llamadas a APIs externas y no se muestran valores en moneda fiduciaria.",
+  "settings.security.showBalanceDescription": "Usamos la API de CoinGecko para mostrar precios de tokens, y recurrimos al explorador ZondScan cuando CoinGecko rechaza la solicitud. Cuando está desactivado, no se realizan llamadas a APIs externas y no se muestran valores en moneda fiduciaria.",
   "settings.security.coingeckoLink": "API de CoinGecko",
   "settings.security.changePassword": "Cambiar contraseña",
   "settings.security.currentPassword": "Contraseña actual",

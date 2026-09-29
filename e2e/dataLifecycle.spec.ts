@@ -1,4 +1,10 @@
-import { expect, test, chromium } from "@playwright/test";
+import {
+  expect,
+  test,
+  chromium,
+  type BrowserContext,
+  type Worker,
+} from "@playwright/test";
 import { createServer, type IncomingMessage } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -42,7 +48,9 @@ const rpcResult = (method: string): unknown => {
     case "net_listening":
       return true;
     case "qrl_getBalance":
-      return "0x0";
+      // 1,000 Quanta, so the fiat estimate on the Home card is a real
+      // number rather than a zero that any price would produce.
+      return "0x3635c9adc5dea00000";
     case "qrl_blockNumber":
       return "0x1";
     case "web3_clientVersion":
@@ -106,6 +114,207 @@ const startFixtureNode = async () => {
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 };
+
+const LAUNCH_ARGS = [
+  `--disable-extensions-except=${EXTENSION_PATH}`,
+  `--load-extension=${EXTENSION_PATH}`,
+  // Every host but the fixture node is unresolvable, so anything the
+  // wallet reaches for has to be answered by an explicit route below.
+  "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
+];
+
+const seedWalletStorage = async (
+  serviceWorker: Worker,
+  rpcUrl: string,
+): Promise<void> => {
+  await serviceWorker.evaluate(
+    async ({ rpcUrl: url, prefix }) => {
+      await chrome.storage.local.set({
+        [`${prefix}:SETTINGS`]: {
+          phishingDetectionEnabled: false,
+          autoLockMinutes: 30,
+        },
+        [`${prefix}:BLOCKCHAINS`]: {
+          ACTIVE_BLOCKCHAIN: "0x301825",
+          ALL_BLOCKCHAINS: [
+            {
+              chainId: "0x301825",
+              chainName: "QRL E2E Testnet",
+              rpcUrls: [url],
+              blockExplorerUrls: ["https://example.invalid"],
+              nativeCurrency: {
+                name: "Quanta",
+                symbol: "Quanta",
+                decimals: 18,
+              },
+              iconUrls: [],
+              defaultRpcUrl: url,
+              defaultBlockExplorerUrl: "https://example.invalid",
+              defaultIconUrl: "",
+              isTestnet: true,
+              defaultWsRpcUrl: url,
+              isCustomChain: true,
+            },
+          ],
+        },
+      });
+    },
+    { rpcUrl, prefix: STORAGE_PREFIX },
+  );
+};
+
+const completeOnboarding = async (
+  context: BrowserContext,
+  extensionId: string,
+): Promise<void> => {
+  const onboarding = await context.newPage();
+  await onboarding.goto(
+    `chrome-extension://${extensionId}/index.html?tab=true`,
+  );
+  await onboarding.getByRole("button", { name: "Continue" }).click();
+  await onboarding
+    .getByLabel("password", { exact: true })
+    .fill("e2e-password-only");
+  await onboarding.getByLabel("reEnteredPassword").fill("e2e-password-only");
+  await onboarding.getByRole("button", { name: "Continue" }).click();
+  await onboarding
+    .getByRole("button", { name: "Import an existing account" })
+    .click();
+  await onboarding.getByRole("tab", { name: "Hex seed" }).click();
+  await onboarding
+    .getByRole("textbox", { name: "hexSeed" })
+    .fill(TEST_ONLY_HEX_SEED);
+  await onboarding.getByRole("button", { name: "Import account" }).click();
+  await onboarding.getByRole("button", { name: "Continue" }).click();
+  await expect(
+    onboarding.getByRole("heading", { name: "That's All" }),
+  ).toBeVisible();
+  const onboardingClosed = onboarding.waitForEvent("close");
+  await onboarding
+    .getByRole("button", { name: "Done" })
+    .click({ noWaitAfter: true })
+    .catch((error: unknown) => {
+      if (!onboarding.isClosed()) throw error;
+    });
+  await onboardingClosed;
+};
+
+const COINGECKO_QUOTES = JSON.stringify({
+  "quantum-resistant-ledger": {
+    usd: 0.5,
+    usd_24h_change: 3.41,
+    eur: 0.45,
+    eur_24h_change: 3.2,
+  },
+});
+
+const EXPLORER_OVERVIEW = JSON.stringify({
+  currentPrice: 0.25,
+  priceChange24h: -1.5,
+});
+
+/**
+ * The fiat estimate under the balance is the one thing on the Home card
+ * that depends on a third party, and CoinGecko's keyless endpoint refuses
+ * whole networks outright. Both halves are checked here: the quote painting
+ * at all, and the explorer standing in when CoinGecko says no.
+ */
+test("the Home card shows a fiat estimate, with the explorer standing in for a blocked CoinGecko", async () => {
+  const node = await startFixtureNode();
+  const profile = await mkdtemp(path.join(tmpdir(), "myqrlwallet-fiat-"));
+  const context = await chromium.launchPersistentContext(profile, {
+    channel: "chromium",
+    headless: true,
+    args: LAUNCH_ARGS,
+  });
+
+  let coinGeckoBlocked = false;
+  let explorerCalls = 0;
+  await context.route("https://api.coingecko.com/**", async (route) => {
+    if (coinGeckoBlocked) {
+      // Exactly what CoinGecko's CDN answers for a blocked network.
+      await route.fulfill({
+        status: 403,
+        contentType: "text/html",
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: "<html><body>Request blocked.</body></html>",
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "Access-Control-Allow-Origin": "*" },
+      body: COINGECKO_QUOTES,
+    });
+  });
+  await context.route("https://zondscan.com/api/overview", async (route) => {
+    explorerCalls += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "Access-Control-Allow-Origin": "*" },
+      body: EXPLORER_OVERVIEW,
+    });
+  });
+
+  try {
+    const serviceWorker =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent("serviceworker"));
+    const extensionId = new URL(serviceWorker.url()).host;
+    await seedWalletStorage(serviceWorker, `${node.origin}/rpc`);
+    await completeOnboarding(context, extensionId);
+
+    // 1,000 Quanta at 0.50 USD.
+    const wallet = await context.newPage();
+    await wallet.setViewportSize({ width: 360, height: 760 });
+    await wallet.goto(
+      `chrome-extension://${extensionId}/index.html?sidepanel=true`,
+    );
+    await expect(
+      wallet.getByRole("heading", { name: "Active account" }),
+    ).toBeVisible();
+    await expect(wallet.getByText("\u2248 $500.00")).toBeVisible();
+    await expect(wallet.getByText("3.41%")).toBeVisible();
+    expect(explorerCalls).toBe(0);
+
+    // The three actions stay on one row at the narrowest supported panel.
+    await wallet.setViewportSize({ width: 320, height: 760 });
+    const actionTops = await wallet
+      .locator("a", { hasText: /^(Send|History|Receive)$/ })
+      .evaluateAll((links) =>
+        links.map((link) => Math.round(link.getBoundingClientRect().top)),
+      );
+    expect(actionTops).toHaveLength(3);
+    expect(new Set(actionTops).size).toBe(1);
+    await wallet.close();
+
+    // CoinGecko now refuses every request, and a fresh surface has no
+    // cached quote to fall back on. The explorer carries the same market
+    // data, so the fiat line survives.
+    coinGeckoBlocked = true;
+    await serviceWorker.evaluate(async (prefix) => {
+      await chrome.storage.local.remove(`${prefix}:PRICE_CACHE`);
+    }, STORAGE_PREFIX);
+
+    const blocked = await context.newPage();
+    await blocked.setViewportSize({ width: 360, height: 760 });
+    await blocked.goto(
+      `chrome-extension://${extensionId}/index.html?sidepanel=true`,
+    );
+    await expect(
+      blocked.getByRole("heading", { name: "Active account" }),
+    ).toBeVisible();
+    // 1,000 Quanta at the explorer's 0.25 USD.
+    await expect(blocked.getByText("\u2248 $250.00")).toBeVisible();
+    expect(explorerCalls).toBeGreaterThan(0);
+  } finally {
+    await context.close();
+    await node.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+});
 
 test("balance polling follows lock state and a dead node marks balances stale", async () => {
   const node = await startFixtureNode();
