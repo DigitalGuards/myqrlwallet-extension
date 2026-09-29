@@ -31,6 +31,22 @@ describe("ActiveAccount", () => {
     await userEvent.click(trigger);
   };
 
+  it("exposes the account menu trigger as a named button", () => {
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          activeAccount: {
+            accountAddress: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+          },
+        },
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "More" })).toBe(
+      screen.getByTestId("account-menu"),
+    );
+  });
+
   it("should render the active account component", async () => {
     renderComponent(
       mockedStore({

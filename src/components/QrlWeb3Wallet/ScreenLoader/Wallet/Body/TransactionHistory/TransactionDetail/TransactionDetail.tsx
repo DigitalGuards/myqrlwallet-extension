@@ -7,6 +7,7 @@ import { formatFiatCompact } from "@/functions/formatFiat";
 import { formatTransactionAmount } from "@/functions/formatTransactionAmount";
 import { getOptimalGasFee } from "@/functions/getOptimalGasFee";
 import { transactionFailureUpdate } from "@/functions/transactionOutcome";
+import { useCopy } from "@/hooks/useCopy";
 import { useStore } from "@/stores/store";
 import type {
   PendingStatus,
@@ -34,12 +35,10 @@ import CircuitBackground from "../../../../Shared/CircuitBackground/CircuitBackg
 import ReplacementConfirmationDialog from "./ReplacementConfirmationDialog";
 
 const CopyableField = ({ label, value }: { label: string; value: string }) => {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopy({ resetAfterMs: 1000 });
 
   const onCopy = () => {
-    navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1000);
+    void copy(value);
   };
 
   return (

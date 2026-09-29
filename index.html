@@ -1,9 +1,9 @@
 <!doctype html>
 <html
-    lang="en"
-    dir="ltr"
-    style="height: 100% !important; overflow: hidden !important"
-  >
+  lang="en"
+  dir="ltr"
+  style="height: 100% !important; overflow: hidden !important"
+>
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -15,7 +15,7 @@
     style="
       margin-right: 0px !important;
       height: 100% !important;
-      min-width: 22.5rem !important;
+      min-width: 20rem !important;
       overflow: hidden !important;
       display: grid !important;
       grid-template-columns: minmax(0, 1fr) !important;
@@ -24,6 +24,12 @@
     "
   >
     <!--
+      min-width is 20rem because the Chrome side panel can be dragged
+      narrower than the 22.5rem the shell used to demand. Both html and body
+      are overflow-hidden, so any shell wider than the panel put its right
+      edge (the header menu, the Receive button) out of reach, with no
+      scrollbar to get at it. Measured at a 320px viewport.
+
       The explicit single column is load-bearing. A default implicit grid
       column is sized from its content, so the shell grew to its widest
       descendant (about 443px) and a narrower side panel clipped the right

@@ -58,7 +58,7 @@ describe("PersonalSign", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Message")).toBeInTheDocument();
     expect(screen.getByText(expectedMessage)).toBeInTheDocument();
-    const copyButton = screen.getByRole("button", { name: "Copy message" });
+    const copyButton = screen.getByRole("button", { name: "Copy Message" });
     expect(copyButton).toBeInTheDocument();
     expect(copyButton).toBeEnabled();
   });
@@ -126,7 +126,7 @@ describe("PersonalSign", () => {
       },
       writable: true,
     });
-    const copyButton = screen.getByRole("button", { name: "Copy message" });
+    const copyButton = screen.getByRole("button", { name: "Copy Message" });
     await userEvent.click(copyButton);
     expect(clipboardMock).toHaveBeenCalledTimes(1);
     expect(clipboardMock).toHaveBeenCalledWith(

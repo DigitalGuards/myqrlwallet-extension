@@ -82,6 +82,38 @@ describe("NFTCollectionItem", () => {
     expect(await screen.findByText("Gallery route")).toBeInTheDocument();
   });
 
+  it("pluralises the owned-NFT count", async () => {
+    renderComponent();
+
+    expect(await screen.findByText("3 NFTs")).toBeInTheDocument();
+  });
+
+  it("uses the singular owned-NFT form for a single NFT", async () => {
+    render(
+      <StoreProvider
+        value={mockedStore({
+          qrlStore: {
+            getNftCollectionDetails: (async () => ({
+              collection: {
+                name: "Test Collection",
+                symbol: "TST",
+                standard: "ZRC721",
+                balance: 1,
+              },
+              error: "",
+            })) as any,
+          },
+        })}
+      >
+        <MemoryRouter>
+          <NFTCollectionItem contractAddress={contractAddress} />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    expect(await screen.findByText("1 NFT")).toBeInTheDocument();
+  });
+
   it("uses the shared fingerprint for a nameless collection row", async () => {
     render(
       <StoreProvider

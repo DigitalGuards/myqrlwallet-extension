@@ -129,6 +129,93 @@ describe("ImportAccount", () => {
     });
   });
 
+  describe("re-importing an account the wallet already holds", () => {
+    const seededAccount = {
+      address: "Q2090E9F38771876FB6Fc51a6b464121d3cC093A1",
+      seed: "",
+      sign: (_data: string | Record<string, unknown>) => ({
+        messageHash: "",
+        signature: "",
+      }),
+      signTransaction: async (_tx: Transaction) => ({
+        messageHash: "",
+        rawTransaction: "",
+        signature: "",
+        transactionHash: "",
+      }),
+      encrypt: async () => {
+        throw new Error("Not implemented");
+      },
+    };
+
+    const renderWithExistingAccount = (storedAddress: string) => {
+      const encryptAccount = vi.fn(async () => {});
+      const setActiveAccount = vi.fn(async () => {});
+      renderComponent(
+        mockedStore({
+          qrlStore: {
+            setActiveAccount,
+            qrlAccounts: {
+              isLoading: false,
+              accounts: [
+                { accountAddress: storedAddress, accountBalance: "0 Quanta" },
+              ],
+            },
+            qrlInstance: {
+              accounts: {
+                seedToAccount: (_seed: string | Uint8Array) => seededAccount,
+              },
+            },
+          },
+          lockStore: { encryptAccount },
+        }),
+      );
+      return { encryptAccount, setActiveAccount };
+    };
+
+    const submitMnemonic = async () => {
+      await userEvent.type(
+        screen.getByRole("textbox", { name: "mnemonicPhrases" }),
+        "knight paddy india glow play chew lame mature sock ill deadly olive blink marble breach hey mile mature tacit mean polo crawl khaya stud number speed viking windy jump subtle mildew sewage",
+      );
+      await userEvent.click(
+        screen.getByRole("button", { name: "Import account" }),
+      );
+    };
+
+    it("reports the duplicate and leaves the wallet untouched", async () => {
+      const { encryptAccount, setActiveAccount } = renderWithExistingAccount(
+        seededAccount.address,
+      );
+      await submitMnemonic();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("This account is already in your wallet"),
+        ).toBeInTheDocument();
+      });
+      expect(encryptAccount).not.toHaveBeenCalled();
+      expect(setActiveAccount).not.toHaveBeenCalled();
+      expect(
+        screen.queryByText("Mocked Account Import Success"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("matches a stored address that differs only in hex casing", async () => {
+      const { encryptAccount } = renderWithExistingAccount(
+        seededAccount.address.toLowerCase(),
+      );
+      await submitMnemonic();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("This account is already in your wallet"),
+        ).toBeInTheDocument();
+      });
+      expect(encryptAccount).not.toHaveBeenCalled();
+    });
+  });
+
   describe("when the unlock session has no password left", () => {
     // Reproduces the second-import bug: after a service-worker restart the
     // decrypted keys self-heal from session storage, so the wallet reads as

@@ -40,7 +40,7 @@ const ActiveChain = observer(() => {
 
   return (
     <div className="flex flex-col gap-2">
-      <Label className="text-lg">{t('chain.activeChain')}</Label>
+      <Label className="text-lg">{t("chain.activeChain")}</Label>
       <Card className="flex justify-between gap-4 p-4">
         <div className="flex gap-4">
           <div className="flex h-min items-center gap-2 pt-1">
@@ -55,7 +55,7 @@ const ActiveChain = observer(() => {
           <div className="flex flex-col break-all">
             <span className="font-bold">{chainName}</span>
             <span className="text-xm opacity-80">
-              {t('chain.chainId', { chainId: parseInt(chainId, 16) })}
+              {t("chain.chainId", { chainId: parseInt(chainId, 16) })}
             </span>
             <span className="text-xm opacity-80">{defaultRpcUrl}</span>
           </div>
@@ -66,20 +66,20 @@ const ActiveChain = observer(() => {
               <Link
                 to={ROUTES.ADD_EDIT_CHAIN}
                 state={{ hasState: true, chainId }}
-                aria-label="Edit chain"
+                aria-label={t("chain.editChain")}
               >
                 <Button
                   className="size-7 hover:bg-accent hover:text-secondary"
                   variant="outline"
                   size="icon"
-                  aria-label="Edit chain"
+                  aria-label={t("chain.editChain")}
                 >
                   <Pencil size="16" />
                 </Button>
               </Link>
             </TooltipTrigger>
             <TooltipContent side="left">
-              <Label>{t('chain.editChain')}</Label>
+              <Label>{t("chain.editChain")}</Label>
             </TooltipContent>
           </Tooltip>
         </div>

@@ -15,23 +15,24 @@ import {
   toCanonicalQrlAddress,
 } from "@/utilities/addressUtil";
 import { zodResolver } from "@hookform/resolvers/zod";
+import type { TFunction } from "i18next";
 import { Save, X } from "lucide-react";
 import { useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-const createContactFormSchema = (existingAddresses: string[]) =>
+const createContactFormSchema = (t: TFunction, existingAddresses: string[]) =>
   z
     .object({
       name: z
         .string()
-        .min(1, "Name is required")
-        .max(50, "Name must be 50 characters or less"),
-      address: z.string().min(1, "Address is required"),
+        .min(1, t("validation.nameRequired"))
+        .max(50, t("validation.nameTooLong")),
+      address: z.string().min(1, t("validation.addressRequired")),
     })
     .refine((fields) => isQrlAddress(fields.address), {
-      message: "Address is invalid",
+      message: t("validation.addressInvalid"),
       path: ["address"],
     })
     .refine(
@@ -40,7 +41,7 @@ const createContactFormSchema = (existingAddresses: string[]) =>
           areAddressesEquivalent(address, fields.address),
         ),
       {
-        message: "Contact with this address already exists",
+        message: t("validation.contactExists"),
         path: ["address"],
       },
     );
@@ -71,8 +72,8 @@ const ContactForm = ({
   );
 
   const schema = useMemo(
-    () => createContactFormSchema(addressesToCheck),
-    [addressesToCheck],
+    () => createContactFormSchema(t, addressesToCheck),
+    [t, addressesToCheck],
   );
 
   const form = useForm<z.infer<typeof schema>>({
@@ -107,7 +108,7 @@ const ContactForm = ({
                 <Input
                   {...field}
                   autoComplete="off"
-                  placeholder="Contact name"
+                  placeholder={t("contacts.namePlaceholder")}
                 />
               </FormControl>
               <FormMessage />
@@ -124,7 +125,7 @@ const ContactForm = ({
                 <Input
                   {...field}
                   autoComplete="off"
-                  placeholder="Q address"
+                  placeholder={t("contacts.addressPlaceholder")}
                   disabled={!!initialContact}
                 />
               </FormControl>
