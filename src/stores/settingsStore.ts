@@ -42,6 +42,8 @@ class SettingsStore {
   notificationsEnabled = true;
   phishingDetectionEnabled = true;
 
+  #settingsLoaded: Promise<void>;
+
   constructor() {
     makeAutoObservable(this, {
       isDarkMode: observable,
@@ -87,7 +89,18 @@ class SettingsStore {
     const isTab = urlParams.has("tab");
     this.isPopupWindow = !this.isSidePanel && !isTab;
 
-    this.#loadSettings();
+    this.#settingsLoaded = this.#loadSettings();
+  }
+
+  /**
+   * Resolves once the stored settings have been applied.
+   *
+   * Every field above starts at a default, so anything that acts on a
+   * setting at construction time acts on the default, before the user's
+   * choice is known. Callers await this first.
+   */
+  whenSettingsLoaded(): Promise<void> {
+    return this.#settingsLoaded;
   }
 
   async #loadSettings() {

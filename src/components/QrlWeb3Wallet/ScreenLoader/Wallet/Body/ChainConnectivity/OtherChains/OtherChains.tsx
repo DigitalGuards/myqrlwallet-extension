@@ -22,7 +22,10 @@ const OtherChains = observer(() => {
       const blockchains = await StorageUtil.getAllBlockChains();
       setOtherChains(blockchains.filter((chain) => chain.chainId !== chainId));
     })();
-  }, [reRender]);
+    // chainId belongs here: the list is "every chain except the active one",
+    // so switching chains has to re-filter it. Without it the newly active
+    // chain stayed listed under Other chains and the one just left vanished.
+  }, [reRender, chainId]);
 
   const triggerReRender = () => {
     setReRender(reRender + 1);
@@ -30,7 +33,7 @@ const OtherChains = observer(() => {
 
   return (
     <div className="flex flex-col gap-2">
-      <Label className="text-lg">{t('chain.otherChains')}</Label>
+      <Label className="text-lg">{t("chain.otherChains")}</Label>
       {otherChains.map((blockchain) => {
         return (
           <OtherChainItem

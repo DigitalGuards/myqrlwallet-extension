@@ -93,7 +93,9 @@ const DiscoveredTokens = observer(({ onReview }: DiscoveredTokensProps) => {
                   onClick={() => void review(token)}
                 >
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="text-sm font-medium">
+                    {/* A token name with no spaces (a spam token's calling
+                        card) otherwise runs past the 360px panel edge. */}
+                    <span className="break-words text-sm font-medium">
                       {token.name}{" "}
                       <span className="text-muted-foreground">
                         ({token.symbol})

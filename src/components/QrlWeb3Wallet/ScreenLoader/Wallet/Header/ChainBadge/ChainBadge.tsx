@@ -84,7 +84,11 @@ const ChainBadge = observer(
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <Label>{t('nav.blockchainSelection')}</Label>
+            <Label>
+              {isConnected
+                ? t("nav.blockchainSelection")
+                : t("chain.nodeUnreachable")}
+            </Label>
           </TooltipContent>
         </Tooltip>
       </Link>

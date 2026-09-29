@@ -184,4 +184,29 @@ describe("TransactionHistory", () => {
 
     expect(screen.getByTestId("backButtonTestId")).toBeInTheDocument();
   });
+  it("says the explorer is unreachable when it could not be read", () => {
+    renderComponent(
+      mockedStore({
+        transactionHistoryStore: {
+          onChainFailed: true,
+        } as any,
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        "Could not reach the explorer; showing local history only",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows no explorer warning when the explorer answered", () => {
+    renderComponent();
+
+    expect(
+      screen.queryByText(
+        "Could not reach the explorer; showing local history only",
+      ),
+    ).not.toBeInTheDocument();
+  });
 });

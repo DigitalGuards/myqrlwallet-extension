@@ -174,7 +174,14 @@ export const GasFeeSelector = observer(
     }, [preferredTier]);
 
     useEffect(() => {
-      if (!hasValuesForGasCalculation) return;
+      if (!hasValuesForGasCalculation) {
+        // Nothing to price means nothing to fail on. A verdict left over
+        // from the previous recipient or amount kept Send disabled with no
+        // visible reason, because this component renders nothing at all in
+        // this state and cannot show the message it is blocking on.
+        reportEstimateFailure(false);
+        return;
+      }
 
       let cancelled = false;
       setIsLoadingCosts(true);
@@ -220,7 +227,14 @@ export const GasFeeSelector = observer(
       return () => {
         cancelled = true;
       };
-    }, [from, to, value, hasValuesForGasCalculation, calculateGas]);
+    }, [
+      from,
+      to,
+      value,
+      hasValuesForGasCalculation,
+      calculateGas,
+      reportEstimateFailure,
+    ]);
 
     // Advanced mode prices its own worst case (gas limit x max fee) on every
     // change, so the send form keeps a real fee to guard the balance with

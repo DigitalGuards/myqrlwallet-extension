@@ -6,7 +6,6 @@ import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/A
 import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
 import { Usb } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 type AccountIdType = {
@@ -25,15 +24,15 @@ const AccountId = observer(
       priceStore,
       settingsStore,
     } = useStore();
-    const { getAccountBalance, qrlAccounts } = qrlStore;
-    const { accounts } = qrlAccounts;
-    const [accountBalance, setAccountBalance] = useState("");
+    const { getAccountBalance } = qrlStore;
     const isLedgerAccount = ledgerStore.isLedgerAccount(account);
     const label = accountLabelsStore.getLabel(account);
 
-    useEffect(() => {
-      setAccountBalance(getAccountBalance(account));
-    }, [accounts]);
+    // Read in render. The old effect mirrored the balance into state and
+    // left `account` out of its dependencies, so switching accounts in a
+    // reused element kept showing the previous account's balance until the
+    // next balance refresh happened to land.
+    const accountBalance = getAccountBalance(account);
 
     const { amount: balanceAmount, unit: balanceUnit } =
       splitFormattedBalance(accountBalance);

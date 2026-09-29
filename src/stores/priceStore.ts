@@ -33,6 +33,7 @@ class PriceStore {
       isCacheStale: computed,
       startAutoRefresh: action.bound,
       stopAutoRefresh: action.bound,
+      setRefreshEnabled: action.bound,
       fetchPrices: action.bound,
     });
   }
@@ -41,11 +42,23 @@ class PriceStore {
     return (currency: string) => this.prices[currency.toLowerCase()] ?? 0;
   }
 
+  /** True while the auto-refresh interval is armed. */
+  get isRefreshing(): boolean {
+    return this.refreshInterval !== null;
+  }
+
   get isCacheStale(): boolean {
     return Date.now() - this.lastUpdated > CACHE_MAX_AGE_MS;
   }
 
-  async initialize(showBalanceAndPrice: boolean) {
+  /**
+   * Loads the cached prices so the first paint has numbers.
+   *
+   * Refreshing is a separate decision (setRefreshEnabled): it depends on
+   * the stored "show balance and price" setting, which loads
+   * asynchronously, and on the wallet being unlocked.
+   */
+  async initialize(showBalanceAndPrice = false) {
     // Load cached prices first for instant display
     const cached = await StorageUtil.getPriceCache();
     if (cached) {
@@ -57,9 +70,22 @@ class PriceStore {
     }
 
     if (showBalanceAndPrice) {
+      this.setRefreshEnabled(true);
       await this.fetchPrices();
-      this.startAutoRefresh();
     }
+  }
+
+  /**
+   * Starts or stops the price poll. Disabled means no network call at all:
+   * the setting is off, or the wallet is locked and nobody is looking.
+   */
+  setRefreshEnabled(enabled: boolean) {
+    if (!enabled) {
+      this.stopAutoRefresh();
+      return;
+    }
+    if (this.refreshInterval) return;
+    this.startAutoRefresh();
   }
 
   async fetchPrices() {

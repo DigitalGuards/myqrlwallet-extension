@@ -126,7 +126,9 @@ const DiscoveredNFTCollections = observer(() => {
                   htmlFor={`discovered-collection-${key}`}
                   className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5"
                 >
-                  <span className="text-sm font-medium">
+                  {/* A name with no spaces (a spam collection's calling
+                      card) otherwise runs past the 360px panel edge. */}
+                  <span className="break-words text-sm font-medium">
                     {collection.name || t("discovery.unknownCollection")}{" "}
                     {collection.symbol && (
                       <span className="text-muted-foreground">

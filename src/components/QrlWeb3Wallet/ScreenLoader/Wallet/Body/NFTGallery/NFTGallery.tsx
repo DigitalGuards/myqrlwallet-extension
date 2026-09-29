@@ -1,3 +1,4 @@
+import { Button } from "@/components/UI/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { useStore } from "@/stores/store";
 import type { OwnedNftToken } from "@/types/nft";
@@ -24,21 +25,26 @@ const NFTGallery = observer(() => {
 
   const [tokens, setTokens] = useState<OwnedNftToken[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setIsLoading(true);
       const owned = await getOwnedNftTokens(contractAddress, standard);
-      if (!cancelled) {
-        setTokens(owned);
-        setIsLoading(false);
-      }
+      if (cancelled) return;
+      // An unreadable chain is not an empty collection. Reporting the
+      // failure keeps "you own nothing here" from standing in for "the
+      // node did not answer".
+      setLoadFailed(owned.failed);
+      setTokens(owned.tokens);
+      setIsLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [contractAddress, standard, accountAddress, blockchain]);
+  }, [contractAddress, standard, accountAddress, blockchain, reloadKey]);
 
   return (
     <>
@@ -60,6 +66,19 @@ const NFTGallery = observer(() => {
                     <div className="h-full w-full bg-accent" />
                   </Card>
                 ))}
+              </div>
+            ) : loadFailed ? (
+              <div className="flex flex-col items-center gap-4 py-8 text-center text-muted-foreground">
+                <Image className="h-12 w-12" />
+                <p className="text-sm">{t("nft.galleryLoadFailed")}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setReloadKey((key) => key + 1)}
+                >
+                  {t("common.retry")}
+                </Button>
               </div>
             ) : tokens.length === 0 ? (
               <div className="flex flex-col items-center gap-4 py-8 text-center text-muted-foreground">

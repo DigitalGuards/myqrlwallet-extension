@@ -31,7 +31,7 @@ vi.mock("@/utilities/storageUtil", () => ({
 const { mockFetchOnChainHistory } = vi.hoisted(() => ({
   mockFetchOnChainHistory: vi
     .fn()
-    .mockResolvedValue({ entries: [], totalCount: 0 }),
+    .mockResolvedValue({ entries: [], totalCount: 0, failed: false }),
 }));
 
 vi.mock("@/services/onChainHistory", () => ({
@@ -822,6 +822,198 @@ describe("TransactionHistoryStore", () => {
       expect(store.onChainTransactions.map((tx) => tx.transactionHash)).toEqual(
         ["0xnew"],
       );
+    });
+  });
+  describe("local history account isolation", () => {
+    it("clears the previous account's entries before the new read lands", async () => {
+      const store = new TransactionHistoryStore();
+      mockGetTransactionHistory.mockResolvedValueOnce([
+        makeSampleEntry({ id: "0xa", transactionHash: "0xa" }),
+      ]);
+      await store.loadHistory("Qaccounta");
+      expect(store.transactions.map((tx) => tx.id)).toEqual(["0xa"]);
+
+      let resolveSecond: (value: any) => void = () => {};
+      mockGetTransactionHistory.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveSecond = resolve;
+        }),
+      );
+      const second = store.loadHistory("Qaccountb");
+      // Account A's rows must not sit under account B while B loads.
+      expect(store.transactions).toEqual([]);
+
+      resolveSecond([makeSampleEntry({ id: "0xb", transactionHash: "0xb" })]);
+      await second;
+      expect(store.transactions.map((tx) => tx.id)).toEqual(["0xb"]);
+    });
+
+    it("ignores a slow read for a previously active account", async () => {
+      const store = new TransactionHistoryStore();
+      let resolveFirst: (value: any) => void = () => {};
+      mockGetTransactionHistory.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+      );
+      const first = store.loadHistory("Qaccounta");
+
+      mockGetTransactionHistory.mockResolvedValueOnce([
+        makeSampleEntry({ id: "0xb", transactionHash: "0xb" }),
+      ]);
+      await store.loadHistory("Qaccountb");
+
+      resolveFirst([makeSampleEntry({ id: "0xa", transactionHash: "0xa" })]);
+      await first;
+
+      expect(store.transactions.map((tx) => tx.id)).toEqual(["0xb"]);
+      expect(store.isLoading).toBe(false);
+    });
+  });
+
+  describe("explorer failures", () => {
+    const ADDRESS = "Q20B714091cF2a62DADda2847803e3f1B9D2D3779";
+    const CHAIN = "0x539";
+
+    it("flags an unreachable explorer", async () => {
+      mockFetchOnChainHistory.mockResolvedValueOnce({
+        entries: [],
+        totalCount: 0,
+        failed: true,
+      });
+      const store = new TransactionHistoryStore();
+      await store.loadOnChainHistory(ADDRESS, CHAIN);
+
+      expect(store.onChainFailed).toBe(true);
+      expect(store.onChainTransactions).toEqual([]);
+    });
+
+    it("clears the flag once the explorer answers again", async () => {
+      mockFetchOnChainHistory.mockResolvedValueOnce({
+        entries: [],
+        totalCount: 0,
+        failed: true,
+      });
+      const store = new TransactionHistoryStore();
+      await store.loadOnChainHistory(ADDRESS, CHAIN);
+      expect(store.onChainFailed).toBe(true);
+
+      mockFetchOnChainHistory.mockResolvedValueOnce({
+        entries: [makeSampleEntry({ id: "0xok", transactionHash: "0xok" })],
+        totalCount: 1,
+        failed: false,
+      });
+      await store.loadOnChainHistory(ADDRESS, CHAIN);
+      expect(store.onChainFailed).toBe(false);
+      expect(store.onChainTransactions).toHaveLength(1);
+    });
+
+    it("keeps the loaded page when a Load More call fails", async () => {
+      mockFetchOnChainHistory.mockResolvedValueOnce({
+        entries: [makeSampleEntry({ id: "0xone", transactionHash: "0xone" })],
+        totalCount: 5,
+        failed: false,
+      });
+      const store = new TransactionHistoryStore();
+      await store.loadOnChainHistory(ADDRESS, CHAIN);
+
+      mockFetchOnChainHistory.mockResolvedValueOnce({
+        entries: [],
+        totalCount: 0,
+        failed: true,
+      });
+      await store.loadMoreOnChain(ADDRESS, CHAIN);
+
+      expect(store.onChainFailed).toBe(true);
+      expect(store.onChainTransactions).toHaveLength(1);
+      expect(store.onChainPage).toBe(1);
+    });
+  });
+
+  describe("replacement reconciliation", () => {
+    const ACCOUNT = "Q20B714091cF2a62DADda2847803e3f1B9D2D3779";
+
+    it("settles an original whose same-nonce replacement already confirmed", async () => {
+      const store = new TransactionHistoryStore();
+      store.transactions = [
+        makeSampleEntry({
+          id: "0xoriginal",
+          transactionHash: "0xoriginal",
+          pendingStatus: "pending",
+          nonce: 7,
+        }),
+        makeSampleEntry({
+          id: "0xreplacement",
+          transactionHash: "0xreplacement",
+          pendingStatus: "confirmed",
+          receiptStatusVerified: true,
+          nonce: 7,
+        }),
+      ];
+
+      await store.reconcileReplacedTransactions(ACCOUNT);
+
+      expect(mockUpdateTransactionHistoryEntry).toHaveBeenCalledWith(
+        ACCOUNT,
+        "0xoriginal",
+        {
+          pendingStatus: "replaced",
+          replacementTransactionHash: "0xreplacement",
+          replacedByAction: "speed-up",
+        },
+      );
+    });
+
+    it("leaves a pending transaction alone while nothing with its nonce has confirmed", async () => {
+      const store = new TransactionHistoryStore();
+      store.transactions = [
+        makeSampleEntry({
+          id: "0xoriginal",
+          transactionHash: "0xoriginal",
+          pendingStatus: "pending",
+          nonce: 7,
+        }),
+        makeSampleEntry({
+          id: "0xreplacement",
+          transactionHash: "0xreplacement",
+          pendingStatus: "pending",
+          nonce: 7,
+        }),
+        makeSampleEntry({
+          id: "0xother",
+          transactionHash: "0xother",
+          pendingStatus: "confirmed",
+          receiptStatusVerified: true,
+          nonce: 8,
+        }),
+      ];
+
+      await store.reconcileReplacedTransactions(ACCOUNT);
+
+      expect(mockUpdateTransactionHistoryEntry).not.toHaveBeenCalled();
+    });
+
+    it("does not settle a transaction against an unverified confirmation", async () => {
+      const store = new TransactionHistoryStore();
+      store.transactions = [
+        makeSampleEntry({
+          id: "0xoriginal",
+          transactionHash: "0xoriginal",
+          pendingStatus: "pending",
+          nonce: 7,
+        }),
+        makeSampleEntry({
+          id: "0xreplacement",
+          transactionHash: "0xreplacement",
+          pendingStatus: "confirmed",
+          receiptStatusVerified: false,
+          nonce: 7,
+        }),
+      ];
+
+      await store.reconcileReplacedTransactions(ACCOUNT);
+
+      expect(mockUpdateTransactionHistoryEntry).not.toHaveBeenCalled();
     });
   });
 });
