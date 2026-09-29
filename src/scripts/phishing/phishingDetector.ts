@@ -5,6 +5,9 @@ import browser from "webextension-polyfill";
 // cache are both unavailable, so the wallet always has a baseline blocklist
 // to consult before the dApp approval popup renders.
 import bundledPhishingConfig from "./defaultPhishingConfig.json";
+// Locally maintained QRL-ecosystem config, applied alongside whichever
+// MetaMask config is in use.
+import { QRL_PHISHING_CONFIG } from "./qrlPhishingConfig";
 
 const PHISHING_CONFIG_URL =
   "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/master/src/config.json";
@@ -105,6 +108,13 @@ async function setCachedConfig(config: PhishingConfig): Promise<void> {
   }
 }
 
+// Builds the detector from two configs: whichever MetaMask blocklist the
+// caller managed to obtain (remote, cache, or the bundled snapshot) and our
+// locally maintained QRL one. MetaMask's fuzzylist covers ethereum-ecosystem
+// brands only, so without the second config a QRL-targeted lookalike domain
+// is never flagged. PhishingDetector consults every config's allowlist before
+// any blocklist or fuzzylist, so the order of the two entries changes nothing
+// for allowlisted domains.
 function createDetector(config: PhishingConfig) {
   return new PhishingDetector([
     {
@@ -115,6 +125,7 @@ function createDetector(config: PhishingConfig) {
       name: "MetaMask",
       version: 1,
     },
+    QRL_PHISHING_CONFIG,
   ]);
 }
 

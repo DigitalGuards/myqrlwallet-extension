@@ -1310,3 +1310,54 @@ describe("storageUtil module boundary", () => {
     expect(match?.[1]).toBe(CAVEAT_TYPES.RESTRICT_RETURNED_ACCOUNTS);
   });
 });
+
+describe("clearDAppsRequestDataForRequestId", () => {
+  let StorageUtil: typeof import("@/utilities/storageUtil").default;
+
+  beforeEach(async () => {
+    for (const key of Object.keys(sessionStore)) delete sessionStore[key];
+    vi.resetModules();
+    StorageUtil = (await import("@/utilities/storageUtil")).default;
+  });
+
+  it("clears the slot when it still holds the given request", async () => {
+    await StorageUtil.setDAppsRequestData({
+      method: "qrl_sendTransaction",
+      requestId: "request-a",
+    } as never);
+
+    await StorageUtil.clearDAppsRequestDataForRequestId("request-a");
+
+    expect(await StorageUtil.getDAppsRequestData()).toBeUndefined();
+  });
+
+  it("leaves a newer request that took the slot in the meantime", async () => {
+    await StorageUtil.setDAppsRequestData({
+      method: "qrl_signMessage",
+      requestId: "request-b",
+    } as never);
+
+    await StorageUtil.clearDAppsRequestDataForRequestId("request-a");
+
+    expect(await StorageUtil.getDAppsRequestData()).toMatchObject({
+      requestId: "request-b",
+    });
+  });
+
+  it("clears unconditionally when no request id is given", async () => {
+    await StorageUtil.setDAppsRequestData({
+      method: "qrl_signMessage",
+      requestId: "request-b",
+    } as never);
+
+    await StorageUtil.clearDAppsRequestDataForRequestId(undefined);
+
+    expect(await StorageUtil.getDAppsRequestData()).toBeUndefined();
+  });
+
+  it("is safe on an empty slot", async () => {
+    await expect(
+      StorageUtil.clearDAppsRequestDataForRequestId("request-a"),
+    ).resolves.toBeUndefined();
+  });
+});

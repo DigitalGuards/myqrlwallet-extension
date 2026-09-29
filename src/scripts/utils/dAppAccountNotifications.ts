@@ -22,6 +22,26 @@ type DAppsStorage = {
 
 const streamsByOrigin = new Map<string, Set<NotificationStream>>();
 
+/**
+ * Whether the wallet is locked, mirrored here from LockManager.
+ *
+ * The value is cached here because this module answers a storage-change
+ * listener and every emission has to happen in that same turn. A
+ * notification stream carries ordered events, so deferring the write behind
+ * an await would put it after whatever the listener does next, and the
+ * in-page provider drops an account list that matches the one it already
+ * holds.
+ * LockManager pushes the value from the one place that can change it, so
+ * the flag cannot drift. It starts locked, which is the state a freshly
+ * started service worker is in.
+ */
+let walletLocked = true;
+
+/** Called by LockManager whenever the in-memory key state changes. */
+export const setWalletLockedForDAppNotifications = (isLocked: boolean) => {
+  walletLocked = isLocked;
+};
+
 const normalizeOrigin = (url: string): string | undefined => {
   try {
     const origin = new URL(url).origin;
@@ -77,6 +97,10 @@ export const registerDAppAccountNotificationStream = (
   };
 };
 
+// MetaMask parity (F8): a locked wallet hides the account list on every
+// surface. qrl_accounts and the initial provider state already answer empty
+// while locked, so the push notification must match them. An origin whose
+// account list did not change still emits nothing.
 export const notifyDAppAccountsChanged = (change?: StorageChange): void => {
   if (!change) return;
 
@@ -94,7 +118,7 @@ export const notifyDAppAccountsChanged = (change?: StorageChange): void => {
     const notification = {
       jsonrpc: "2.0",
       method: "qrlWallet_accountsChanged",
-      params: nextAccounts,
+      params: walletLocked ? [] : nextAccounts,
     };
     for (const stream of streams) {
       try {

@@ -92,7 +92,7 @@ class LockStore {
 
   constructor() {
     makeAutoObservable(this, {
-      getWalletPassword: action.bound,
+      ensureWalletPassword: action.bound,
       getMnemonicPhrases: action.bound,
       encryptAccount: action.bound,
       changePassword: action.bound,
@@ -348,23 +348,30 @@ class LockStore {
     });
   }
 
-  async getWalletPassword(): Promise<string> {
-    let password: string | undefined;
+  /**
+   * Fail-closed availability probe used before any write that needs the
+   * unlock session's wallet password. Asks the service worker whether it
+   * still holds one and throws when it does not, so the calling surface
+   * can re-arm the session before it writes anything.
+   *
+   * The answer is a boolean; the password stays in the worker, which is
+   * the only process that needs it. A send that fails outright counts as
+   * "unavailable" too: a fresh service-worker restart looks the same as an
+   * explicit lock from here, and both mean re-unlocking is required.
+   */
+  async ensureWalletPassword(): Promise<void> {
+    let hasPassword = false;
     try {
-      // The SW rejects (not returns "") when it is locked or has no
-      // password to give - a fresh service-worker restart looks the same
-      // as an explicit lock from here: both mean re-unlocking is required.
-      password = (await browser.runtime.sendMessage({
-        name: LOCK_MANAGER_MESSAGES.GET_WALLET_PASSWORD,
-      })) as string | undefined;
+      const response = (await browser.runtime.sendMessage({
+        name: LOCK_MANAGER_MESSAGES.HAS_WALLET_PASSWORD,
+      })) as { hasPassword?: boolean } | undefined;
+      hasPassword = response?.hasPassword === true;
     } catch {
-      password = undefined;
+      hasPassword = false;
     }
-    if (!password) {
-      // Never let the caller encrypt with "": force a re-unlock instead.
+    if (!hasPassword) {
       throw new Error("WALLET_PASSWORD_UNAVAILABLE");
     }
-    return password;
   }
 
   async getMnemonicPhrases(accountAddress: string) {
@@ -377,15 +384,24 @@ class LockStore {
     return key?.mnemonicPhrases ?? "";
   }
 
-  async encryptAccount(account: Web3BaseWalletAccount, password: string) {
+  /**
+   * Persist one new account's seed through the service worker's keystore
+   * route.
+   *
+   * `password` is for first-run onboarding alone, where the user has just
+   * typed a password the worker does not hold yet. Every other caller
+   * omits it and the worker encrypts with the password its unlock session
+   * already holds, which keeps that plaintext out of this page entirely.
+   */
+  async encryptAccount(account: Web3BaseWalletAccount, password?: string) {
     // Never persist a keystore under an empty password (the SW rejects it too;
     // this stops the round-trip early and keeps the guarantee visible here).
-    if (!password) {
+    if (password !== undefined && !password) {
       throw new Error("WALLET_PASSWORD_UNAVAILABLE");
     }
     const accountData: EncryptAccountType = {
       seed: account?.seed ?? "",
-      password,
+      ...(password === undefined ? {} : { password }),
     };
     await browser.runtime.sendMessage({
       name: LOCK_MANAGER_MESSAGES.ENCRYPT_ACCOUNT,

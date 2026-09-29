@@ -1056,3 +1056,111 @@ describe("LockStore – unlock still succeeds after a spurious port disconnect",
     expect(connectCallCount).toBeGreaterThan(connectCallsAfterInitialUnlock);
   });
 });
+
+describe("LockStore – the wallet password stays in the service worker", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearStore(localStore);
+    clearStore(sessionStore);
+  });
+
+  async function createLockStore() {
+    mockSendMessage.mockResolvedValueOnce({
+      isLocked: false,
+      hasPasswordSet: true,
+    });
+    const module = await import("./lockStore");
+    const store = new module.default();
+    await new Promise((r) => setTimeout(r, 300));
+    return store;
+  }
+
+  const lastMessageNamed = (name: string) =>
+    mockSendMessage.mock.calls
+      .map((call: any) => call[0])
+      .filter((message: any) => message?.name === name)
+      .pop();
+
+  describe("ensureWalletPassword", () => {
+    it("resolves when the worker reports a held password, having asked only for a boolean", async () => {
+      const store = await createLockStore();
+      mockSendMessage.mockResolvedValue({ hasPassword: true });
+
+      await expect(store.ensureWalletPassword()).resolves.toBeUndefined();
+
+      // The probe carries a name and nothing else.
+      expect(lastMessageNamed("HAS_WALLET_PASSWORD")).toEqual({
+        name: "HAS_WALLET_PASSWORD",
+      });
+    });
+
+    it("throws WALLET_PASSWORD_UNAVAILABLE when the worker holds no password", async () => {
+      const store = await createLockStore();
+      mockSendMessage.mockResolvedValue({ hasPassword: false });
+
+      await expect(store.ensureWalletPassword()).rejects.toThrow(
+        "WALLET_PASSWORD_UNAVAILABLE",
+      );
+    });
+
+    it("throws WALLET_PASSWORD_UNAVAILABLE when the service worker is unreachable", async () => {
+      // A restarted worker and an explicit lock look identical from here,
+      // and both mean the user has to unlock again before any write.
+      const store = await createLockStore();
+      mockSendMessage.mockRejectedValue(new Error("SW not reachable"));
+
+      await expect(store.ensureWalletPassword()).rejects.toThrow(
+        "WALLET_PASSWORD_UNAVAILABLE",
+      );
+    });
+
+    it("treats an answer it cannot read as unavailable", async () => {
+      const store = await createLockStore();
+      mockSendMessage.mockResolvedValue(undefined);
+
+      await expect(store.ensureWalletPassword()).rejects.toThrow(
+        "WALLET_PASSWORD_UNAVAILABLE",
+      );
+    });
+  });
+
+  describe("encryptAccount", () => {
+    const account = {
+      address: `Q${"a".repeat(128)}`,
+      seed: "0xseed",
+    } as any;
+
+    it("puts no password on the wire when the caller supplies none", async () => {
+      const store = await createLockStore();
+      mockSendMessage.mockResolvedValue({ success: true });
+
+      await store.encryptAccount(account);
+
+      const sent = lastMessageNamed("ENCRYPT_ACCOUNT");
+      expect(sent?.data).toEqual({ seed: "0xseed" });
+      expect(sent?.data).not.toHaveProperty("password");
+    });
+
+    it("forwards an explicit password, for first-run onboarding", async () => {
+      const store = await createLockStore();
+      mockSendMessage.mockResolvedValue({ success: true });
+
+      await store.encryptAccount(account, "typed-pw");
+
+      expect(lastMessageNamed("ENCRYPT_ACCOUNT")?.data).toEqual({
+        seed: "0xseed",
+        password: "typed-pw",
+      });
+    });
+
+    it("refuses an explicit empty password without reaching the worker", async () => {
+      const store = await createLockStore();
+      mockSendMessage.mockResolvedValue({ success: true });
+
+      await expect(store.encryptAccount(account, "")).rejects.toThrow(
+        "WALLET_PASSWORD_UNAVAILABLE",
+      );
+      expect(lastMessageNamed("ENCRYPT_ACCOUNT")).toBeUndefined();
+    });
+  });
+});

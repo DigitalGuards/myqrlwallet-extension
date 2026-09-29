@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import {
   notifyDAppAccountsChanged,
   registerDAppAccountNotificationStream,
+  setWalletLockedForDAppNotifications,
 } from "./dAppAccountNotifications";
 
 const dAppsStorage = (accountsByOrigin: Record<string, string[]>) => ({
@@ -15,6 +17,10 @@ const dAppsStorage = (accountsByOrigin: Record<string, string[]>) => ({
 
 describe("dApp account notifications", () => {
   const cleanups: Array<() => void> = [];
+
+  beforeEach(() => {
+    setWalletLockedForDAppNotifications(false);
+  });
 
   afterEach(() => {
     cleanups.splice(0).forEach((cleanup) => cleanup());
@@ -85,7 +91,7 @@ describe("dApp account notifications", () => {
     { origin: "not an origin", url: "https://fallback.example/frame" },
     { url: "about:blank" },
     { url: "file:///tmp/dapp.html" },
-  ])("rejects opaque or malformed sender identity %#", (sender) => {
+  ])("rejects opaque or malformed sender identity %#", async (sender) => {
     const stream = { write: vi.fn() };
     registerDAppAccountNotificationStream(sender, stream);
 
@@ -110,5 +116,82 @@ describe("dApp account notifications", () => {
     });
 
     expect(stream.write).not.toHaveBeenCalled();
+  });
+
+  it("emits the real account list while the wallet is unlocked (F8)", () => {
+    setWalletLockedForDAppNotifications(false);
+    const stream = register("https://dapp.example");
+
+    notifyDAppAccountsChanged({
+      oldValue: dAppsStorage({ "https://dapp.example": [] }),
+      newValue: dAppsStorage({ "https://dapp.example": ["QAccount"] }),
+    });
+
+    expect(stream.write).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      method: "qrlWallet_accountsChanged",
+      params: ["QAccount"],
+    });
+  });
+
+  it("emits an empty account list while the wallet is locked (F8)", () => {
+    setWalletLockedForDAppNotifications(true);
+    const stream = register("https://dapp.example");
+
+    notifyDAppAccountsChanged({
+      oldValue: dAppsStorage({ "https://dapp.example": [] }),
+      newValue: dAppsStorage({ "https://dapp.example": ["QAccount"] }),
+    });
+
+    expect(stream.write).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      method: "qrlWallet_accountsChanged",
+      params: [],
+    });
+  });
+
+  it("stays silent for an unchanged origin while locked (F8)", () => {
+    setWalletLockedForDAppNotifications(true);
+    const stream = register("https://dapp.example");
+    const accounts = ["QAccount"];
+
+    notifyDAppAccountsChanged({
+      oldValue: dAppsStorage({ "https://dapp.example": accounts }),
+      newValue: dAppsStorage({ "https://dapp.example": accounts }),
+    });
+
+    expect(stream.write).not.toHaveBeenCalled();
+  });
+});
+
+describe("dApp account notifications lock mirror", () => {
+  const cleanups: Array<() => void> = [];
+
+  afterEach(() => {
+    cleanups.splice(0).forEach((cleanup) => cleanup());
+    setWalletLockedForDAppNotifications(false);
+  });
+
+  it("starts out locked so a fresh worker never leaks accounts (F8)", async () => {
+    // A freshly evaluated module has no keys in memory. Re-import it to
+    // observe the state the service worker starts in.
+    vi.resetModules();
+    const fresh = await import("./dAppAccountNotifications");
+    const stream = { write: vi.fn() };
+    cleanups.push(
+      fresh.registerDAppAccountNotificationStream(
+        { origin: "https://dapp.example" },
+        stream,
+      ),
+    );
+
+    fresh.notifyDAppAccountsChanged({
+      oldValue: dAppsStorage({}),
+      newValue: dAppsStorage({ "https://dapp.example": ["QAccount"] }),
+    });
+
+    expect(stream.write).toHaveBeenCalledWith(
+      expect.objectContaining({ params: [] }),
+    );
   });
 });

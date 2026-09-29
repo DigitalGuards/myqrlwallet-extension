@@ -6,6 +6,7 @@ import { encryptKeystore } from "@/crypto/keystoreCrypto";
 import { getMnemonicFromHexSeed } from "@/functions/getMnemonicFromHexSeed";
 import { isQrlAddress } from "@/utilities/addressUtil";
 import { EXTENSION_MESSAGES } from "../constants/streamConstants";
+import { setWalletLockedForDAppNotifications } from "../utils/dAppAccountNotifications";
 import browser from "webextension-polyfill";
 
 type MessageType = {
@@ -17,9 +18,14 @@ type MessageType = {
   data?: any;
 };
 
+// ENCRYPT_ACCOUNT payload. `password` is optional and is only ever sent by
+// first-run onboarding, the one caller that has a password the worker does
+// not hold yet. Every in-wallet caller omits it, and the worker encrypts
+// with the password it already holds from the unlock session, so the
+// plaintext stays inside the worker.
 export type EncryptAccountType = {
   seed: Bytes;
-  password: string;
+  password?: string;
 };
 
 export type DecryptedKeyType = {
@@ -47,7 +53,10 @@ export const LOCK_MANAGER_MESSAGES = {
   // account's mnemonic per signature is never handed the rest of the
   // wallet's.
   GET_DECRYPTED_KEY_FOR_ADDRESS: "GET_DECRYPTED_KEY_FOR_ADDRESS",
-  GET_WALLET_PASSWORD: "GET_WALLET_PASSWORD",
+  // Availability probe only: answers whether an unlock session with a
+  // usable wallet password is live. The password itself never leaves this
+  // worker; ENCRYPT_ACCOUNT uses the held copy in place.
+  HAS_WALLET_PASSWORD: "HAS_WALLET_PASSWORD",
   SET_DECRYPTED_KEYS: "SET_DECRYPTED_KEYS",
   REMOVE_ACCOUNT_KEY: "LOCK_MANAGER_REMOVE_ACCOUNT_KEY",
   RESET_WALLET: "LOCK_MANAGER_RESET_WALLET",
@@ -62,7 +71,7 @@ export const LOCK_MANAGER_MESSAGES = {
 
 // Message names that represent a deliberate user action or a user-initiated
 // write, and therefore postpone the inactivity auto-lock. Everything else -
-// reads (GET_*, IS_LOCKED), automated background traffic (the keep-alive
+// reads (GET_*, HAS_*, IS_LOCKED), automated background traffic (the keep-alive
 // interval's session write, SEND_TX_NOTIFICATION), and unrelated messages
 // this listener merely overhears - must NOT postpone it, or the wallet
 // never locks while any surface is left open. See lockManagerListener()
@@ -374,13 +383,26 @@ class LockManager {
     );
   }
 
+  /**
+   * Encrypt and persist one new account's seed.
+   *
+   * The password is optional. First-run onboarding supplies the one the
+   * user just typed, at a point where this worker holds none yet.
+   * In-wallet create/import omit it, and the password the unlock session
+   * already put in this class's memory is used in place, so the plaintext
+   * stays here.
+   */
   static async encryptAccount(accountData: EncryptAccountType): Promise<void> {
     const { password: rawPassword, seed } = accountData;
-    const password = rawPassword.normalize("NFC");
+    const explicitPassword = rawPassword
+      ? rawPassword.normalize("NFC")
+      : undefined;
+    const password = explicitPassword ?? this.walletPassword;
     // Never persist a keystore under an empty password: the Argon2id KDF
     // accepts "" and the ciphertext is then trivially recomputable from the
-    // cleartext salt stored beside it. Defence in depth behind
-    // getWalletPassword's own guard.
+    // cleartext salt stored beside it. An absent payload password with no
+    // session password behind it lands here too, which is the locked-worker
+    // case the calling surface re-arms from.
     if (!password) {
       throw new Error("Refusing to encrypt an account without a password");
     }
@@ -423,16 +445,22 @@ class LockManager {
    */
   private static setDecryptedKeys(decryptedKeys: DecryptedKeyType[]): void {
     this.decryptedKeys = decryptedKeys;
+    // The dApp account-notification stream mirrors the lock state so it can
+    // answer synchronously from its storage listener. Both chokepoints push
+    // it, so the mirror cannot drift from decryptedKeys.
+    setWalletLockedForDAppNotifications(false);
     this.startKeepAliveInterval();
   }
 
-  static getWalletPassword(): string {
-    // Force the locked-state error if keys are gone.
-    this.getDecryptedKeys();
-    if (!this.walletPassword) {
-      throw new Error("MyQRLWallet password is unavailable");
-    }
-    return this.walletPassword;
+  /**
+   * Availability probe behind the HAS_WALLET_PASSWORD message: true only
+   * while the wallet is unlocked and a usable password is held. Reads the
+   * in-memory fields directly and never throws, so a caller asking "does
+   * the user have to unlock again first?" gets a plain answer and the
+   * password itself stays in this class.
+   */
+  static hasWalletPassword(): boolean {
+    return this.decryptedKeys !== undefined && Boolean(this.walletPassword);
   }
 
   static getDecryptedKeys(): DecryptedKeyType[] {
@@ -468,6 +496,7 @@ class LockManager {
    */
   private static clearDecryptedKeys(): void {
     this.decryptedKeys = undefined;
+    setWalletLockedForDAppNotifications(true);
     this.stopKeepAliveInterval();
   }
 
@@ -521,8 +550,10 @@ class LockManager {
       result = LockManager.getDecryptedKeyForAddress(
         typeof message?.data === "string" ? message.data : "",
       );
-    } else if (message.name === LOCK_MANAGER_MESSAGES.GET_WALLET_PASSWORD) {
-      result = LockManager.getWalletPassword();
+    } else if (message.name === LOCK_MANAGER_MESSAGES.HAS_WALLET_PASSWORD) {
+      // A boolean, and only a boolean. No message carries the wallet
+      // password out of this worker.
+      result = { hasPassword: LockManager.hasWalletPassword() };
     } else if (message.name === LOCK_MANAGER_MESSAGES.ENCRYPT_ACCOUNT) {
       result = await LockManager.encryptAccount(message?.data ?? {});
     } else if (message.name === LOCK_MANAGER_MESSAGES.USER_ACTIVITY) {
@@ -534,7 +565,7 @@ class LockManager {
     // approval/rejection response, the one activity signal carrying an
     // `action` field (see MessageType above) as its discriminator.
     // Everything else this global listener happens to overhear - reads
-    // (IS_LOCKED, GET_*), the keep-alive interval's own session write
+    // (IS_LOCKED, GET_*, HAS_*), the keep-alive interval's own session write
     // (which never goes through this listener at all), SEND_TX_NOTIFICATION,
     // and any other message - leaves the timer alone.
     const isUserActivity =

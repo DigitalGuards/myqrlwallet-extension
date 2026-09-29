@@ -31,6 +31,11 @@ const originFromTabUrl = (url?: string): string => {
 class DAppRequestStore {
   private currentTabFetchGeneration = 0;
   private dAppRequestReadGeneration = 0;
+  // The request the user clicked on, plus the data that approval produces.
+  // Both are captured at click time and survive a newer request taking the
+  // slot mid-approval; see onPermission and addToResponseData.
+  private inFlightRequestId?: string;
+  private inFlightResponseData?: Record<string, unknown>;
   currentTabData?: CurrentTabData;
   dAppRequestData?: DAppRequestType;
   responseData: Record<string, unknown> = {};
@@ -152,6 +157,19 @@ class DAppRequestStore {
 
   addToResponseData(data: Record<string, unknown>) {
     const serializableData = getSerializableObject(data);
+    // While an approval is running, everything it produces belongs to that
+    // approval's own bucket. The storage subscription above resets
+    // responseData the moment a new request takes the slot, so writing a
+    // signature or a transaction hash into the shared field could either
+    // be wiped mid-flight or be read back as the answer to the newer
+    // request.
+    if (this.inFlightRequestId !== undefined) {
+      this.inFlightResponseData = {
+        ...(this.inFlightResponseData ?? {}),
+        ...serializableData,
+      };
+      return;
+    }
     this.responseData = { ...this.responseData, ...serializableData };
   }
 
@@ -175,18 +193,44 @@ class DAppRequestStore {
   }
 
   async onPermission(hasApproved: boolean) {
+    // Everything that identifies the request is read once, at click time.
+    // The callback below can run for a long time (signing, then a broadcast
+    // that waits on the node), and the storage subscription swaps
+    // dAppRequestData out the instant another request takes the slot.
+    // Reading the id after the callback therefore used to address the
+    // answer to whichever request happened to be pending by then, which
+    // meant a dApp could receive the first request's transaction hash as
+    // the answer to its retry.
+    const requestId = this.dAppRequestData?.requestId;
+    const method = this.dAppRequestData?.method ?? "";
+    this.inFlightRequestId = requestId;
+    this.inFlightResponseData = { ...this.responseData };
     try {
       this.setApprovalProcessingStatus({
         isProcessing: true,
         hasApproved,
       });
+      // Tell the service worker the user has acted before the slow part
+      // starts, so its idle timeout stops counting down. Without this the
+      // timeout can answer the dApp 4001 while the broadcast is on the
+      // wire, and the retry that follows signs a second transaction.
+      if (requestId !== undefined) {
+        try {
+          await browser.runtime.sendMessage({
+            action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
+            requestId,
+          });
+        } catch {
+          // The worker will fall back to its own timeouts.
+        }
+      }
       await this.onPermissionCallBack(hasApproved);
       const response: DAppResponseType = {
-        method: this.dAppRequestData?.method ?? "",
+        method,
         action: EXTENSION_MESSAGES.DAPP_RESPONSE,
         hasApproved,
-        requestId: this.dAppRequestData?.requestId,
-        response: this.responseData,
+        requestId,
+        response: this.inFlightResponseData,
       };
       await browser.runtime.sendMessage(response);
     } catch (error) {
@@ -195,7 +239,11 @@ class DAppRequestStore {
         error,
       );
     } finally {
-      await StorageUtil.clearDAppsRequestData();
+      this.inFlightRequestId = undefined;
+      this.inFlightResponseData = undefined;
+      // Scoped to this request: clearing unconditionally would wipe a newer
+      // request that took the slot while this one was still running.
+      await StorageUtil.clearDAppsRequestDataForRequestId(requestId);
       this.setApprovalProcessingStatus({
         isProcessing: false,
         hasCompleted: true,

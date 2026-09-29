@@ -113,7 +113,7 @@ describe("CreateAccount", () => {
     renderComponent(
       storeWithCreate({
         lockStore: {
-          getWalletPassword: async () => {
+          ensureWalletPassword: async () => {
             throw new Error("WALLET_PASSWORD_UNAVAILABLE");
           },
         },
@@ -167,6 +167,11 @@ describe("CreateAccount", () => {
     });
 
     expect(encryptAccount).toHaveBeenCalledTimes(1);
+    // No password argument: the service worker encrypts with the one its
+    // unlock session already holds, so no plaintext crosses this boundary.
+    expect(encryptAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ address: ADDRESS }),
+    );
     expect(setActiveAccount).toHaveBeenCalledWith(ADDRESS);
     expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
       "Account created",
@@ -180,13 +185,13 @@ describe("CreateAccount", () => {
   });
 
   it("should stay on the backup with an error when persisting fails at confirm time", async () => {
-    const getWalletPassword = vi
+    const ensureWalletPassword = vi
       .fn()
-      .mockResolvedValueOnce("password")
+      .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("WALLET_PASSWORD_UNAVAILABLE"));
     const encryptAccount = vi.fn(async () => {});
     renderComponent(
-      storeWithCreate({ lockStore: { getWalletPassword, encryptAccount } }),
+      storeWithCreate({ lockStore: { ensureWalletPassword, encryptAccount } }),
     );
 
     await clickCreate();
@@ -209,15 +214,16 @@ describe("CreateAccount", () => {
 
   describe("session re-arm (F1)", () => {
     it("continues onto the seed backup after the inline password re-arms the session", async () => {
-      // First getWalletPassword call (pre-reveal check) fails; the second,
-      // made by the retry after a successful inline unlock, succeeds.
-      const getWalletPassword = vi
+      // First ensureWalletPassword call (pre-reveal check) fails; the
+      // second, made by the retry after a successful inline unlock,
+      // succeeds.
+      const ensureWalletPassword = vi
         .fn()
         .mockRejectedValueOnce(new Error("WALLET_PASSWORD_UNAVAILABLE"))
-        .mockResolvedValue("password");
+        .mockResolvedValue(undefined);
       const unlock = vi.fn(async () => "success" as const);
       renderComponent(
-        storeWithCreate({ lockStore: { getWalletPassword, unlock } }),
+        storeWithCreate({ lockStore: { ensureWalletPassword, unlock } }),
       );
 
       await clickCreate();
@@ -243,12 +249,12 @@ describe("CreateAccount", () => {
     });
 
     it("shows the normal wrong-password error inline when the re-arm password is wrong", async () => {
-      const getWalletPassword = vi
+      const ensureWalletPassword = vi
         .fn()
         .mockRejectedValue(new Error("WALLET_PASSWORD_UNAVAILABLE"));
       const unlock = vi.fn(async () => "wrong-password" as const);
       renderComponent(
-        storeWithCreate({ lockStore: { getWalletPassword, unlock } }),
+        storeWithCreate({ lockStore: { ensureWalletPassword, unlock } }),
       );
 
       await clickCreate();
@@ -266,17 +272,17 @@ describe("CreateAccount", () => {
     });
 
     it("retries encryptAccount in place after re-arming at the confirm-backup step", async () => {
-      const getWalletPassword = vi
+      const ensureWalletPassword = vi
         .fn()
-        .mockResolvedValueOnce("password")
+        .mockResolvedValueOnce(undefined)
         .mockRejectedValueOnce(new Error("WALLET_PASSWORD_UNAVAILABLE"))
-        .mockResolvedValue("password");
+        .mockResolvedValue(undefined);
       const encryptAccount = vi.fn(async () => {});
       const setActiveAccount = vi.fn(async () => {});
       const unlock = vi.fn(async () => "success" as const);
       renderComponent(
         storeWithCreate({
-          lockStore: { getWalletPassword, encryptAccount, unlock },
+          lockStore: { ensureWalletPassword, encryptAccount, unlock },
           qrlStore: {
             qrlInstance: { accounts: { create: createdAccount } },
             setActiveAccount,
@@ -307,15 +313,15 @@ describe("CreateAccount", () => {
     });
 
     it("keeps the backup screen and the generated account up on a 'failed' re-arm result (N8)", async () => {
-      const getWalletPassword = vi
+      const ensureWalletPassword = vi
         .fn()
-        .mockResolvedValueOnce("password")
+        .mockResolvedValueOnce(undefined)
         .mockRejectedValueOnce(new Error("WALLET_PASSWORD_UNAVAILABLE"));
       const encryptAccount = vi.fn(async () => {});
       const unlock = vi.fn(async () => "failed" as const);
       renderComponent(
         storeWithCreate({
-          lockStore: { getWalletPassword, encryptAccount, unlock },
+          lockStore: { ensureWalletPassword, encryptAccount, unlock },
         }),
       );
 
@@ -377,7 +383,7 @@ describe("CreateAccount", () => {
           ),
         ).toBeInTheDocument();
       });
-      // getWalletPassword() already succeeded (default mock), so this is
+      // ensureWalletPassword() already succeeded (default mock), so this is
       // not a password-availability problem: no re-arm prompt.
       expect(
         screen.queryByRole("button", { name: "Continue" }),

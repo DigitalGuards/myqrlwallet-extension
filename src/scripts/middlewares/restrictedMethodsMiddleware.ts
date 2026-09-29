@@ -14,6 +14,7 @@ import {
 } from "../constants/streamConstants";
 import LockManager from "../lockManager/lockManager";
 import { checkDomain } from "../phishing/phishingDetector";
+import { claimApprovalSlot, releaseApprovalSlot } from "../utils/approvalSlot";
 import { openApprovalSurface } from "../utils/approvalSurface";
 import { resolveTrustedSenderOrigin } from "../utils/dAppAccountNotifications";
 import {
@@ -234,6 +235,21 @@ const checkRequestCanProceed = async (req: JsonRpcRequest<JsonRpcRequest>) => {
   }
 };
 
+/**
+ * Idle timeout: the approval surface never connected its lifecycle port
+ * (openPopup() can fail silently) and the user never acted, so the approval
+ * slot has to come back on its own.
+ */
+export const POPUP_RESPONSE_TIMEOUT_MS = 90 * 1000;
+
+/**
+ * Backstop once the user has clicked. Signing with ML-DSA-87 and waiting on
+ * a node broadcast takes seconds, and this only has to be longer than the
+ * slowest honest click-to-answer path while still bounding a wedged
+ * approval surface so it cannot hold the approval slot indefinitely.
+ */
+export const APPROVAL_IN_PROGRESS_TIMEOUT_MS = 3 * 60 * 1000;
+
 // get the result of the user approval/rejection of the request
 const getRestrictedMethodResult = async (
   req: JsonRpcRequest<JsonRpcRequest>,
@@ -285,39 +301,79 @@ const getRestrictedMethodResult = async (
   // gesture; it stays UI-only context and is no part of any trust decision.
   await openApprovalSurface({ tabId: req.senderData?.tabId });
 
-  // Safety timeout: if the popup never connects its lifecycle port (e.g.
-  // openPopup() failed) and never posts a DAPP_RESPONSE, fall through here so
-  // isRequestPending eventually resets. Most popup-close paths now resolve
-  // via the lifecycle-port disconnect handler below.
-  const POPUP_RESPONSE_TIMEOUT_MS = 90 * 1000;
-
   return new Promise((resolve) => {
     let popupPort: browser.Runtime.Port | undefined;
+    // Set by the DAPP_REQUEST_IN_PROGRESS message the approval surface
+    // posts the instant the user clicks. From that point the wallet is
+    // signing and broadcasting for this request, so neither the idle
+    // timeout nor a torn-down surface may answer on the user's behalf.
+    let userHasActed = false;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
+
     const cleanup = () => {
       clearTimeout(timeoutHandle);
       browser.runtime.onMessage.removeListener(handleMessage);
       browser.runtime.onConnect.removeListener(handlePortConnect);
       popupPort?.onDisconnect.removeListener(handlePortDisconnect);
     };
+
+    const abandon = async (reason: string) => {
+      cleanup();
+      console.warn(`QrlWeb3Wallet: dApp request abandoned (${reason})`);
+      try {
+        // Scoped to this requestId: by the time a long-running approval
+        // gives up, the slot may already hold somebody else's request.
+        await StorageUtil.clearDAppsRequestDataForRequestId(requestId);
+      } catch {
+        // best-effort cleanup
+      }
+      resolve({
+        method: req.method,
+        action: EXTENSION_MESSAGES.DAPP_RESPONSE,
+        hasApproved: false,
+        requestId,
+      });
+    };
+
     function handleMessage(message: DAppResponseType) {
-      if (
-        message.action === EXTENSION_MESSAGES.DAPP_RESPONSE &&
-        message.requestId === requestId
-      ) {
+      // Every branch is keyed by requestId, so a message left over from an
+      // approval that already ended cannot answer the current one.
+      if (message.requestId !== requestId) return;
+      if (message.action === EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS) {
+        if (userHasActed) return;
+        userHasActed = true;
+        clearTimeout(timeoutHandle);
+        timeoutHandle = setTimeout(
+          () => void abandon("no response after the user acted"),
+          APPROVAL_IN_PROGRESS_TIMEOUT_MS,
+        );
+        return;
+      }
+      if (message.action === EXTENSION_MESSAGES.DAPP_RESPONSE) {
         cleanup();
         resolve(message);
       }
     }
+
     function handlePortConnect(port: browser.Runtime.Port) {
       if (port.name === DAPP_REQUEST_PORT_NAME) {
         popupPort = port;
         port.onDisconnect.addListener(handlePortDisconnect);
       }
     }
+
     async function handlePortDisconnect() {
+      // A surface that goes away before the user acted is a rejection: the
+      // user closed the popup. A surface that goes away after the click is
+      // the ordinary self-close once the response has been posted, and on
+      // the rare path where the click's work is still running, answering
+      // 4001 here would tell the dApp its transaction was rejected while
+      // the broadcast is on the wire. The in-progress backstop bounds that
+      // case instead.
+      if (userHasActed) return;
       cleanup();
       try {
-        await StorageUtil.clearDAppsRequestData();
+        await StorageUtil.clearDAppsRequestDataForRequestId(requestId);
       } catch {
         // best-effort cleanup
       }
@@ -325,32 +381,20 @@ const getRestrictedMethodResult = async (
         method: req.method,
         action: EXTENSION_MESSAGES.DAPP_RESPONSE,
         hasApproved: false,
+        requestId,
       });
     }
-    const timeoutHandle = setTimeout(async () => {
-      cleanup();
-      console.warn(
-        "QrlWeb3Wallet: dApp request timed out without user response",
-      );
-      try {
-        await StorageUtil.clearDAppsRequestData();
-      } catch {
-        // best-effort cleanup
-      }
-      resolve({
-        method: req.method,
-        action: EXTENSION_MESSAGES.DAPP_RESPONSE,
-        hasApproved: false,
-      });
-    }, POPUP_RESPONSE_TIMEOUT_MS);
+
+    timeoutHandle = setTimeout(
+      () => void abandon("no user response"),
+      POPUP_RESPONSE_TIMEOUT_MS,
+    );
     // Listen for the approval/rejection from the UI, plus the popup's
     // lifecycle port so we can resolve immediately when it disconnects.
     browser.runtime.onMessage.addListener(handleMessage);
     browser.runtime.onConnect.addListener(handlePortConnect);
   });
 };
-
-let isRequestPending = false;
 
 type RestrictedMethodValue =
   (typeof RESTRICTED_METHODS)[keyof typeof RESTRICTED_METHODS];
@@ -374,16 +418,38 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
       });
       return end();
     }
-    if (isRequestPending) {
+    // Claimed before the first await: the precheck and the silent-completion
+    // check below both suspend, and two requests that arrived in the same
+    // tick used to sail past a flag set only after them.
+    const slotClaim = claimApprovalSlot(requesterOrigin, req.senderData?.tabId);
+    if (!slotClaim.claimed) {
+      if (slotClaim.reason === "cooldown") {
+        // The origin just had an approval rejected or time out. Opening a
+        // surface here would let one page reopen the wallet in a loop.
+        res.error = rpcErrors.resourceUnavailable({
+          message:
+            "The wallet is still dismissing this site's previous request. Try again in a moment.",
+        });
+        return end();
+      }
       try {
-        await openApprovalSurface({ tabId: req.senderData?.tabId });
+        // Raise the surface for the tab that owns the pending request. The
+        // requesting tab's own id would put another site's approval prompt
+        // in this tab's side panel.
+        await openApprovalSurface({ tabId: slotClaim.pendingTabId });
       } finally {
         res.error = providerErrors.unsupportedMethod({
           message: "A request is already pending",
         });
       }
       return end();
-    } else {
+    }
+    // Only an approval the user actually saw and turned down (or left to
+    // time out) arms the per-origin cooldown. A precheck rejection or a
+    // silent completion never reached the user, so it must not throttle the
+    // origin's next request.
+    let approvalWasRefused = false;
+    try {
       // check if the request can proceed
       const precheckResult = await checkRequestCanProceed(req);
       const { canProceed, proceedError } = precheckResult;
@@ -416,14 +482,13 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
         hasApproved: false,
       };
       try {
-        isRequestPending = true;
         restrictedMethodResult = await getRestrictedMethodResult(
           req,
           authorizedChainId,
         );
       } finally {
-        isRequestPending = false;
         const hasApproved = restrictedMethodResult?.hasApproved;
+        approvalWasRefused = !hasApproved;
         if (hasApproved) {
           switch (restrictedMethodResult?.method) {
             case RESTRICTED_METHODS.WALLET_ADD_QRL_CHAIN:
@@ -527,6 +592,11 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
         }
       }
       return end();
+    } finally {
+      // An approval that ended without the user approving it is an outcome
+      // a hostile page can produce on demand, so that origin backs off
+      // before it may take the slot again.
+      releaseApprovalSlot({ startCooldown: approvalWasRefused });
     }
   } else {
     next();

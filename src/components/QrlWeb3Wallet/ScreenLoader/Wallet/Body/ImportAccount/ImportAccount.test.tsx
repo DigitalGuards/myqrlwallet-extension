@@ -220,7 +220,7 @@ describe("ImportAccount", () => {
     // Reproduces the second-import bug: after a service-worker restart the
     // decrypted keys self-heal from session storage, so the wallet reads as
     // unlocked and no lock screen is shown, while the memory-only wallet
-    // password is gone and getWalletPassword rejects.
+    // password is gone and ensureWalletPassword rejects.
     const seededAccount = {
       address: "Q2090E9F38771876FB6Fc51a6b464121d3cC093A1",
       seed: "",
@@ -244,7 +244,7 @@ describe("ImportAccount", () => {
         unlock?: (
           password: string,
         ) => Promise<"success" | "wrong-password" | "failed">;
-        getWalletPasswordAfterReArm?: () => Promise<string>;
+        ensureWalletPasswordAfterReArm?: () => Promise<void>;
       } = {},
     ) => {
       const setActiveAccount = vi.fn(async () => {});
@@ -255,16 +255,16 @@ describe("ImportAccount", () => {
         vi.fn(async () => {
           throw new Error("unlock not mocked for this test");
         });
-      let getWalletPasswordCalls = 0;
-      const getWalletPassword = vi.fn(async () => {
-        getWalletPasswordCalls += 1;
+      let ensureWalletPasswordCalls = 0;
+      const ensureWalletPassword = vi.fn(async () => {
+        ensureWalletPasswordCalls += 1;
         if (
-          getWalletPasswordCalls === 1 ||
-          !overrides.getWalletPasswordAfterReArm
+          ensureWalletPasswordCalls === 1 ||
+          !overrides.ensureWalletPasswordAfterReArm
         ) {
           throw new Error("WALLET_PASSWORD_UNAVAILABLE");
         }
-        return overrides.getWalletPasswordAfterReArm();
+        return overrides.ensureWalletPasswordAfterReArm();
       });
       renderComponent(
         mockedStore({
@@ -280,7 +280,7 @@ describe("ImportAccount", () => {
             encryptAccount,
             lock,
             unlock,
-            getWalletPassword,
+            ensureWalletPassword,
           },
         }),
       );
@@ -289,7 +289,7 @@ describe("ImportAccount", () => {
         encryptAccount,
         lock,
         unlock,
-        getWalletPassword,
+        ensureWalletPassword,
       };
     };
 
@@ -341,7 +341,7 @@ describe("ImportAccount", () => {
       const { setActiveAccount, encryptAccount, unlock } =
         renderWithExpiredSession({
           unlock: vi.fn(async () => "success" as const),
-          getWalletPasswordAfterReArm: async () => "the-password",
+          ensureWalletPasswordAfterReArm: async () => {},
         });
       await submitMnemonic();
       await screen.findByText(
@@ -352,10 +352,9 @@ describe("ImportAccount", () => {
       await userEvent.click(screen.getByRole("button", { name: "Continue" }));
 
       await waitFor(() => {
-        expect(encryptAccount).toHaveBeenCalledWith(
-          seededAccount,
-          "the-password",
-        );
+        // The account alone: the service worker encrypts with the
+        // password its unlock session already holds.
+        expect(encryptAccount).toHaveBeenCalledWith(seededAccount);
       });
       expect(unlock).toHaveBeenCalledWith("pw");
       expect(setActiveAccount).toHaveBeenCalledWith(seededAccount.address);
@@ -469,7 +468,7 @@ describe("ImportAccount", () => {
           ),
         ).toBeInTheDocument();
       });
-      // getWalletPassword() already succeeded (default mock), so this is
+      // ensureWalletPassword() already succeeded (default mock), so this is
       // not a password-availability problem: no re-arm prompt.
       expect(
         screen.queryByRole("button", { name: "Continue" }),

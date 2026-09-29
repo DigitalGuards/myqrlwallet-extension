@@ -11,6 +11,7 @@ import {
   checkAccountHasBeenAuthorized,
   checkAccountAndChainHaveBeenAuthorized,
   checkWalletAddQrlChainParams,
+  pickDefaultRpcUrl,
   normalizeChainId,
   revalidateAuthorizedDAppRequest,
 } from "./restrictedMethodsMiddlewareUtils";
@@ -410,4 +411,106 @@ describe("dApp chain authorization for PQ signing methods", () => {
       "versioned 64-byte address layout",
     );
   });
+});
+
+describe("wallet_addQRLChain rpcUrls validation (L5)", () => {
+  const chain = {
+    chainName: "Some chain",
+    chainId: "0x301825",
+    nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
+    blockExplorerUrls: [],
+    iconUrls: [],
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(StorageUtil, "getAllBlockChains").mockResolvedValue([]);
+  });
+
+  it("accepts a dApp list where every url is https on a public host", async () => {
+    const result = await checkWalletAddQrlChainParams({
+      ...chain,
+      rpcUrls: ["https://rpc.example", "https://rpc2.example"],
+    } as never);
+
+    expect(result.canProceed).toBe(true);
+  });
+
+  it.each([
+    ["http://localhost:8545", "loopback by name"],
+    ["http://127.0.0.1:8545", "loopback by address"],
+    ["https://192.168.1.10:8545", "private LAN"],
+    ["https://10.0.0.5:8545", "private range"],
+    ["https://172.16.0.5:8545", "private range"],
+    ["https://169.254.1.1:8545", "link local"],
+    ["https://node.local:8545", "mDNS host"],
+    ["http://rpc.example", "cleartext http"],
+  ])(
+    "rejects a dApp list smuggling %s (%s) past an https entry",
+    async (url) => {
+      const result = await checkWalletAddQrlChainParams({
+        ...chain,
+        rpcUrls: ["https://rpc.example", url],
+      } as never);
+
+      expect(result.canProceed).toBe(false);
+      expect(result.proceedError?.message).toContain("rpcUrls");
+    },
+  );
+
+  it("rejects a dApp list whose first entry is unacceptable", async () => {
+    // The entry the wallet would adopt as its default endpoint.
+    const result = await checkWalletAddQrlChainParams({
+      ...chain,
+      rpcUrls: ["http://127.0.0.1:8545", "https://rpc.example"],
+    } as never);
+
+    expect(result.canProceed).toBe(false);
+  });
+
+  it("still lets the user add their own local node from the wallet form", async () => {
+    const result = await checkWalletAddQrlChainParams(
+      {
+        ...chain,
+        rpcUrls: ["http://127.0.0.1:8545"],
+        defaultRpcUrl: "http://127.0.0.1:8545",
+        defaultBlockExplorerUrl: "",
+        defaultIconUrl: "",
+        isTestnet: true,
+        defaultWsRpcUrl: "",
+        isCustomChain: true,
+      } as never,
+      true,
+    );
+
+    expect(result.canProceed).toBe(true);
+  });
+});
+
+describe("pickDefaultRpcUrl (L5)", () => {
+  it("takes the first entry the wallet is willing to use", () => {
+    expect(pickDefaultRpcUrl(["https://a.example", "https://b.example"])).toBe(
+      "https://a.example",
+    );
+  });
+
+  it("skips entries the wallet would refuse", () => {
+    expect(
+      pickDefaultRpcUrl(["http://127.0.0.1:8545", "https://b.example"]),
+    ).toBe("https://b.example");
+  });
+
+  it("takes a local node only when local hosts are allowed", () => {
+    expect(pickDefaultRpcUrl(["http://127.0.0.1:8545"])).toBe("");
+    expect(pickDefaultRpcUrl(["http://127.0.0.1:8545"], true)).toBe(
+      "http://127.0.0.1:8545",
+    );
+  });
+
+  it.each([undefined, null, "https://a.example", [], [42]])(
+    "answers with an empty string for %s",
+    (rpcUrls) => {
+      expect(pickDefaultRpcUrl(rpcUrls)).toBe("");
+    },
+  );
 });

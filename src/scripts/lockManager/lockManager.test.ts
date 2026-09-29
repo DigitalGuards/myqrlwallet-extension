@@ -342,7 +342,7 @@ describe("LockManager", () => {
       await LockManager.lock();
 
       expect(() => LockManager.getDecryptedKeys()).toThrow();
-      expect(() => LockManager.getWalletPassword()).toThrow();
+      expect(LockManager.hasWalletPassword()).toBe(false);
       expect(LockManager.isKeepAliveIntervalRunning()).toBe(false);
       expect(alarmsStore[LockManager.AUTO_LOCK_ALARM]).toBeUndefined();
     });
@@ -405,11 +405,66 @@ describe("LockManager", () => {
 
   // ── encryptAccount ───────────────────────────────────────────────
 
+  describe("hasWalletPassword", () => {
+    it("is false on a locked worker", () => {
+      expect(LockManager.hasWalletPassword()).toBe(false);
+    });
+
+    it("is true once an unlock session holds a password", async () => {
+      await unlock();
+
+      expect(LockManager.hasWalletPassword()).toBe(true);
+    });
+
+    it("never throws while locked, unlike the decrypted-key reads", () => {
+      expect(() => LockManager.hasWalletPassword()).not.toThrow();
+      // And it leaves the locked state exactly as it found it.
+      expect(() => LockManager.getDecryptedKeys()).toThrow(/locked/);
+    });
+  });
+
   describe("encryptAccount", () => {
-    it("refuses an empty password", async () => {
+    it("refuses an empty password with no session password behind it", async () => {
       await expect(
         LockManager.encryptAccount({ seed: "0xseed" as any, password: "" }),
       ).rejects.toThrow(/without a password/);
+    });
+
+    it("refuses a payload with no password at all on a locked worker", async () => {
+      await expect(
+        LockManager.encryptAccount({ seed: "0xseed" as any }),
+      ).rejects.toThrow(/without a password/);
+    });
+
+    it("encrypts with the password the worker already holds when the payload carries none", async () => {
+      seedWallet();
+      await unlock();
+
+      await expect(
+        LockManager.encryptAccount({ seed: "0xseed" as any }),
+      ).resolves.toBeUndefined();
+
+      const { encryptKeystore } = await import("@/crypto/keystoreCrypto");
+      expect(encryptKeystore).toHaveBeenCalledWith("0xseed", "test-pw");
+      // The new account's key joined the in-memory keyring.
+      expect(
+        LockManager.getDecryptedKeys().some(
+          (key) => key.address === `Q${"c".repeat(128)}`,
+        ),
+      ).toBe(true);
+    });
+
+    it("prefers an explicit payload password over the held one", async () => {
+      seedWallet();
+      await unlock();
+
+      await LockManager.encryptAccount({
+        seed: "0xseed" as any,
+        password: "typed-pw",
+      });
+
+      const { encryptKeystore } = await import("@/crypto/keystoreCrypto");
+      expect(encryptKeystore).toHaveBeenCalledWith("0xseed", "typed-pw");
     });
   });
 
@@ -613,6 +668,60 @@ describe("LockManager", () => {
       );
 
       expect(result).toEqual(KEY_B);
+    });
+
+    describe("HAS_WALLET_PASSWORD", () => {
+      it("answers { hasPassword: false } on a locked worker", async () => {
+        const result = await LockManager.lockManagerListener(
+          { name: LOCK_MANAGER_MESSAGES.HAS_WALLET_PASSWORD },
+          TRUSTED_SENDER,
+        );
+
+        expect(result).toEqual({ hasPassword: false });
+      });
+
+      it("answers { hasPassword: true } once unlocked, and nothing else", async () => {
+        await unlock(MOCK_KEYS, "super-secret-pw");
+
+        const result = await LockManager.lockManagerListener(
+          { name: LOCK_MANAGER_MESSAGES.HAS_WALLET_PASSWORD },
+          TRUSTED_SENDER,
+        );
+
+        expect(result).toEqual({ hasPassword: true });
+        // The password value is nowhere in the response: the boolean is
+        // the whole answer.
+        expect(JSON.stringify(result)).not.toContain("super-secret-pw");
+      });
+
+      it("does NOT reset the auto-lock timer: it is a read", async () => {
+        localStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 5 };
+        seedWallet();
+        await unlock();
+        mockAlarms.create.mockClear();
+
+        await LockManager.lockManagerListener(
+          { name: LOCK_MANAGER_MESSAGES.HAS_WALLET_PASSWORD },
+          TRUSTED_SENDER,
+        );
+
+        expect(mockAlarms.create).not.toHaveBeenCalled();
+      });
+    });
+
+    it("GET_WALLET_PASSWORD is not a message this listener answers any more", async () => {
+      // The plaintext-password read is gone: the surfaces that used it now
+      // probe HAS_WALLET_PASSWORD and let the worker encrypt with the
+      // password it already holds. An unknown message name falls through
+      // with no result and no secret anywhere in the response.
+      await unlock(MOCK_KEYS, "super-secret-pw");
+
+      const result = await LockManager.lockManagerListener(
+        { name: "GET_WALLET_PASSWORD" },
+        TRUSTED_SENDER,
+      );
+
+      expect(result).toBeUndefined();
     });
 
     it("GET_DECRYPTED_KEYS is not a message this listener answers (L3)", async () => {

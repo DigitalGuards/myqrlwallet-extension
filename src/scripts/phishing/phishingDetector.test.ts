@@ -171,3 +171,86 @@ describe("phishingDetector (H1)", () => {
     expect(result.detectorStatus).toBe("unavailable");
   });
 });
+
+/**
+ * L7b: MetaMask's eth-phishing-detect config protects ethereum-ecosystem
+ * brands, so a lookalike of a QRL domain used to sail through the detector.
+ * The locally maintained QRL config is passed alongside it, which means these
+ * assertions hold whichever source (remote, cache, bundled snapshot) supplied
+ * the MetaMask half. These tests run on the bundled-snapshot path: fetch is
+ * stubbed to reject and the cache is empty, so nothing touches the network.
+ */
+describe("phishingDetector QRL ecosystem coverage (L7b)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    // The H1 suite above vi.doMock()s the detector class with a constructor
+    // that always throws. vi.resetModules() clears the module registry and
+    // leaves that mock registered, so it has to be dropped explicitly.
+    vi.doUnmock("eth-phishing-detect/src/detector");
+    clearLocalStore();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("network unavailable")),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const loadReadyDetector = async () => {
+    const module = await import("./phishingDetector");
+    await module.initializePhishingDetector();
+    expect(module.getPhishingDetectorStatus()).toBe("ready");
+    return module;
+  };
+
+  it.each([
+    // Capital i standing in for a lowercase L, lowercased by URL parsing.
+    ["https://qrlwaIlet.com", "qrlwallet.com"],
+    ["https://qr1wallet.com", "qrlwallet.com"],
+    ["https://zondscan.co", "zondscan.com"],
+    ["https://quantaswap.i0", "quantaswap.io"],
+    ["https://myqr1wallet.com", "myqrlwallet.com"],
+    ["https://theqr1.org", "theqrl.org"],
+  ])("flags the lookalike %s as fuzzy phishing", async (url, expectedMatch) => {
+    const { checkDomain } = await loadReadyDetector();
+
+    const result = checkDomain(url);
+
+    expect(result.isDomainPhishing).toBe(true);
+    expect(result.matchType).toBe("fuzzy");
+    expect(result.matchedDomain).toBe(expectedMatch);
+  });
+
+  it.each([
+    "https://qrlwallet.com",
+    "https://dev.qrlwallet.com",
+    "https://myqrlwallet.com",
+    "https://theqrl.org",
+    "https://zondscan.com",
+    "https://explorer.zondscan.com",
+    "https://quantaswap.io",
+    "https://quantapool.com",
+    "https://quantapool.io",
+    "https://quantastark.com",
+  ])("passes the real QRL domain %s clean", async (url) => {
+    const { checkDomain } = await loadReadyDetector();
+
+    const result = checkDomain(url);
+
+    expect(result.isDomainPhishing).toBe(false);
+  });
+
+  it.each([
+    "https://example.com",
+    "https://en.wikipedia.org",
+    "https://github.com",
+  ])("leaves the unrelated domain %s alone", async (url) => {
+    const { checkDomain } = await loadReadyDetector();
+
+    const result = checkDomain(url);
+
+    expect(result.isDomainPhishing).toBe(false);
+  });
+});

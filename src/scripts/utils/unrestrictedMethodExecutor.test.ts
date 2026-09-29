@@ -73,6 +73,9 @@ const TOPIC = `0x${"ab".repeat(64)}`;
 
 describe("qrlWallet_getProviderState", () => {
   beforeEach(() => {
+    mockIsLocked
+      .mockReset()
+      .mockResolvedValue({ isLocked: false, hasPasswordSet: true });
     getChainId.mockReset().mockResolvedValue(1337n);
     getNetworkId.mockReset().mockResolvedValue(1337n);
     getConnectedAccounts
@@ -135,6 +138,102 @@ describe("qrlWallet_getProviderState", () => {
     expect(getConnectedAccounts).toHaveBeenCalledWith(
       "https://connected.example",
     );
+  });
+
+  it("reports the wallet as unlocked and returns the connected accounts", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: false, hasPasswordSet: true });
+
+    await expect(
+      executeUnrestrictedMethod(request("https://connected.example/swap")),
+    ).resolves.toMatchObject({
+      isUnlocked: true,
+      accounts: ["QConnected"],
+    });
+  });
+
+  it("reports the wallet as locked and hides the connected accounts", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+
+    await expect(
+      executeUnrestrictedMethod(request("https://connected.example/swap")),
+    ).resolves.toMatchObject({
+      isUnlocked: false,
+      accounts: [],
+    });
+  });
+});
+
+describe("wallet_getPermissions (F8)", () => {
+  const permissionsRequest = (origin: string) =>
+    ({
+      id: 1,
+      jsonrpc: "2.0",
+      method: UNRESTRICTED_METHODS.WALLET_GET_PERMISSIONS,
+      senderData: { url: origin },
+    }) as never;
+
+  const storedPermissions = [
+    {
+      parentCapability: "qrl_accounts",
+      caveats: [{ type: "restrictReturnedAccounts", value: ["QConnected"] }],
+    },
+  ];
+
+  beforeEach(() => {
+    mockIsLocked.mockReset();
+    getConnectedAccounts.mockReset();
+    getChainId.mockReset().mockResolvedValue(1337n);
+    getNetworkId.mockReset().mockResolvedValue(1337n);
+  });
+
+  it("returns an empty permission list while the wallet is locked", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+    getConnectedAccounts.mockResolvedValue({ permissions: storedPermissions });
+
+    await expect(
+      executeUnrestrictedMethod(
+        permissionsRequest("https://connected.example"),
+      ),
+    ).resolves.toEqual([]);
+    // The caveats carry the account addresses, so nothing is looked up.
+    expect(getConnectedAccounts).not.toHaveBeenCalled();
+  });
+
+  it("returns the stored permissions once unlocked", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: false, hasPasswordSet: true });
+    getConnectedAccounts.mockResolvedValue({ permissions: storedPermissions });
+
+    await expect(
+      executeUnrestrictedMethod(
+        permissionsRequest("https://connected.example"),
+      ),
+    ).resolves.toEqual(storedPermissions);
+  });
+});
+
+describe("websocket subscription methods are unsupported (L1)", () => {
+  beforeEach(() => {
+    mockIsLocked
+      .mockReset()
+      .mockResolvedValue({ isLocked: false, hasPasswordSet: true });
+    getChainId.mockReset().mockResolvedValue(1337n);
+    getNetworkId.mockReset().mockResolvedValue(1337n);
+  });
+
+  it.each([
+    [UNRESTRICTED_METHODS.QRL_SUBSCRIBE, ["logs", { topics: [TOPIC] }]],
+    [UNRESTRICTED_METHODS.QRL_UNSUBSCRIBE, ["0xsubscription"]],
+  ])("rejects %s without issuing any request", async (method, params) => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}"));
+
+    await expect(
+      executeUnrestrictedMethod(rpcRequest(method, params)),
+    ).rejects.toThrow("is not supported by this wallet");
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
 

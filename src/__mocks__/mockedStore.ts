@@ -193,14 +193,12 @@ const mockedStoreValues: StoreType = {
     },
     encryptAccount: async (
       _account: Web3BaseWalletAccount,
-      _password: string,
+      _password?: string,
     ) => {},
     initialize: () => {},
     lock: async () => {},
     initializeStorageListener: () => {},
-    getWalletPassword: async () => {
-      return "test-password";
-    },
+    ensureWalletPassword: async () => {},
     getMnemonicPhrases: async (accountAddress: string) => {
       return accountAddress;
     },
