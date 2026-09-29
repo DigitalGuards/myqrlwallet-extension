@@ -18,6 +18,7 @@ const DISCOVERED = {
 
 vi.mock("@/services/assetDiscovery", () => ({
   discoverTokens: vi.fn(),
+  MAX_DISCOVERED_TOKENS: 50,
 }));
 
 vi.mock("@/utilities/storageUtil", () => ({
@@ -85,5 +86,30 @@ describe("DiscoveredTokens", () => {
     );
     expect(screen.queryByText(CONTRACT_ADDRESS)).not.toBeInTheDocument();
     expect(container).toBeEmptyDOMElement();
+  });
+  it("says the list is capped when the explorer filled it", async () => {
+    // A capped response means the account holds more than the picker can
+    // show; a list that simply ends looks complete.
+    vi.mocked(discoverTokens).mockResolvedValue(
+      Array.from({ length: 50 }, (_unused, index) => ({
+        ...DISCOVERED,
+        address: `Q${index.toString(16).padStart(128, "0")}`,
+        name: `Token ${index}`,
+      })),
+    );
+    renderComponent();
+
+    expect(
+      await screen.findByText("Showing the first 50 found."),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about a cap for a short list", async () => {
+    renderComponent();
+
+    expect(await screen.findByText("Test Token")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Showing the first 50 found."),
+    ).not.toBeInTheDocument();
   });
 });

@@ -11,6 +11,7 @@ const DISCOVERED_ADDRESS = `Q${"0123456789abcdef".repeat(8)}`;
 
 vi.mock("@/services/assetDiscovery", () => ({
   discoverTokens: vi.fn(),
+  MAX_DISCOVERED_TOKENS: 50,
 }));
 
 vi.mock("@/utilities/storageUtil", () => ({

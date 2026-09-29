@@ -133,7 +133,9 @@ describe("SettingsStore", () => {
     });
 
     it("should not throw if sendMessage fails", async () => {
-      (mockSendMessage as Mock<() => Promise<any>>).mockRejectedValueOnce(new Error("SW not ready"));
+      (mockSendMessage as Mock<() => Promise<any>>).mockRejectedValueOnce(
+        new Error("SW not ready"),
+      );
 
       await expect(store.setAutoLockMinutes(5)).resolves.not.toThrow();
       expect(store.autoLockMinutes).toBe(5);
@@ -199,6 +201,24 @@ describe("SettingsStore", () => {
       expect(newStore.autoLockMinutes).toBe(15);
       expect(newStore.currency).toBe("USD");
       expect(newStore.language).toBe("en");
+    });
+  });
+  describe("a failed settings read", () => {
+    it("resolves whenSettingsLoaded with the defaults", async () => {
+      const get = browser.storage.local.get as Mock;
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      get.mockRejectedValue(new Error("storage unavailable"));
+
+      const failing = new SettingsStore();
+      // A rejection here would reject everything chained off it, and the
+      // price refresh (wired through this promise) would never be armed.
+      await expect(failing.whenSettingsLoaded()).resolves.toBeUndefined();
+      expect(failing.showBalanceAndPrice).toBe(true);
+      expect(failing.currency).toBe("USD");
+      expect(consoleError).toHaveBeenCalled();
+      consoleError.mockRestore();
     });
   });
 });

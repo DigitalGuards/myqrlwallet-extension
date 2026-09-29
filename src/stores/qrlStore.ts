@@ -76,6 +76,11 @@ export const BALANCE_POLL_INTERVAL_MS = 30000;
  *  probes regardless, so recovery is noticed within one interval. */
 export const CONNECTION_REPROBE_TICKS = 4;
 
+/** Ceiling on the backoff applied while the node is down. A wallet left open
+ *  against a dead node settles at one probe every five minutes, which still
+ *  notices recovery quickly without hammering an endpoint that is failing. */
+export const MAX_POLL_BACKOFF_MS = 300000;
+
 class QrlStore {
   qrlInstance?: Web3QRLInterface;
   qrlConnection = {
@@ -99,6 +104,9 @@ class QrlStore {
   private initializationEpoch = 0;
   private ticksSinceConnectionProbe = 0;
   private isPollingAllowed = true;
+  private consecutivePollFailures = 0;
+  /** Timestamp before which poll ticks are skipped, set by the backoff. */
+  private nextPollAllowedAt = 0;
 
   constructor() {
     makeAutoObservable(this, {
@@ -193,10 +201,15 @@ class QrlStore {
     this.stopBalancePolling();
     if (!this.isPollingAllowed) return;
     this.ticksSinceConnectionProbe = 0;
+    this.consecutivePollFailures = 0;
+    this.nextPollAllowedAt = 0;
     this.balancePollInterval = setInterval(() => {
       // A hidden side panel keeps its document alive; skip the tick
       // instead of polling for pixels nobody sees.
       if (typeof document !== "undefined" && document.hidden) return;
+      // Backoff while the node is down: an unreachable endpoint gets
+      // exponentially fewer calls, up to MAX_POLL_BACKOFF_MS apart.
+      if (Date.now() < this.nextPollAllowedAt) return;
       void this.pollBalancesAndConnection();
     }, BALANCE_POLL_INTERVAL_MS);
   }
@@ -210,6 +223,9 @@ class QrlStore {
    * looking current. A failed refresh probes immediately, a known-down node
    * probes every tick so recovery shows up fast, and an otherwise healthy
    * session probes every CONNECTION_REPROBE_TICKS ticks.
+   *
+   * A tick that finds the node down also pushes the next one further out,
+   * doubling each time up to MAX_POLL_BACKOFF_MS. Recovery resets it.
    */
   async pollBalancesAndConnection() {
     const refreshed = await this.refreshBalancesQuietly();
@@ -218,9 +234,27 @@ class QrlStore {
       !refreshed ||
       !this.qrlConnection.isConnected ||
       this.ticksSinceConnectionProbe >= CONNECTION_REPROBE_TICKS;
-    if (!shouldProbe) return;
-    this.ticksSinceConnectionProbe = 0;
-    await this.fetchQrlConnection({ quiet: true });
+    if (shouldProbe) {
+      this.ticksSinceConnectionProbe = 0;
+      await this.fetchQrlConnection({ quiet: true });
+    }
+    this.applyPollBackoff(refreshed && this.qrlConnection.isConnected);
+  }
+
+  /** Spaces out ticks while the node is failing and restores the plain
+   *  cadence the moment it answers again. */
+  private applyPollBackoff(healthy: boolean) {
+    if (healthy) {
+      this.consecutivePollFailures = 0;
+      this.nextPollAllowedAt = 0;
+      return;
+    }
+    this.consecutivePollFailures += 1;
+    const delay = Math.min(
+      BALANCE_POLL_INTERVAL_MS * 2 ** this.consecutivePollFailures,
+      MAX_POLL_BACKOFF_MS,
+    );
+    this.nextPollAllowedAt = Date.now() + delay;
   }
 
   stopBalancePolling() {

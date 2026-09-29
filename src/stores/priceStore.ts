@@ -61,13 +61,15 @@ class PriceStore {
   async initialize(showBalanceAndPrice = false) {
     // Load cached prices first for instant display
     const cached = await StorageUtil.getPriceCache();
-    if (cached) {
-      runInAction(() => {
-        this.prices = cached.prices;
-        this.change24h = cached.change24h;
-        this.lastUpdated = cached.timestamp;
-      });
-    }
+    runInAction(() => {
+      // Storage is slower than a warm network call, so a live fetch armed
+      // alongside this can land first. Only older data is replaced, which
+      // keeps the cache read from putting stale prices back on screen.
+      if (!cached || cached.timestamp <= this.lastUpdated) return;
+      this.prices = cached.prices;
+      this.change24h = cached.change24h;
+      this.lastUpdated = cached.timestamp;
+    });
 
     if (showBalanceAndPrice) {
       this.setRefreshEnabled(true);

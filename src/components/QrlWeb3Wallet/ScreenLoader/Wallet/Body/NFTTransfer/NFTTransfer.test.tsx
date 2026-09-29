@@ -360,4 +360,27 @@ describe("NFTTransfer", () => {
     ).toBeInTheDocument();
     expect(mockReadLockState).toHaveBeenCalled();
   });
+  it("warns while the balances are stale", async () => {
+    renderComponent(
+      defaultState,
+      mockedStore({
+        qrlStore: {
+          qrlConnection: {
+            isConnected: true,
+            isLoading: false,
+            areBalancesStale: true,
+            blockchain: { chainId: "0x1" },
+          },
+        },
+      }),
+    );
+
+    // The gas for an NFT transfer is spent from a native balance that is
+    // just as stale as the rest.
+    expect(
+      await screen.findByText(
+        "The node is not answering, so this balance may be out of date.",
+      ),
+    ).toBeInTheDocument();
+  });
 });

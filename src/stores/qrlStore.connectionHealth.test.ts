@@ -48,6 +48,7 @@ vi.mock("@/configuration/releaseProfile", async () => {
 import QrlStore, {
   BALANCE_POLL_INTERVAL_MS,
   CONNECTION_REPROBE_TICKS,
+  MAX_POLL_BACKOFF_MS,
 } from "./qrlStore";
 
 const ACCOUNT = "Q79b662ce3d663643df4454a8ba3f532c0de6887f";
@@ -111,12 +112,71 @@ describe("QrlStore connection health", () => {
 
     mockGetBalance.mockResolvedValue(BigInt(7e18));
     mockIsListening.mockResolvedValue(true);
-    await vi.advanceTimersByTimeAsync(BALANCE_POLL_INTERVAL_MS);
+    // One failure pushes the next tick out by the first backoff step.
+    await vi.advanceTimersByTimeAsync(BALANCE_POLL_INTERVAL_MS * 2);
     await flush();
 
     expect(store.qrlConnection.isConnected).toBe(true);
     expect(store.qrlConnection.areBalancesStale).toBe(false);
     expect(store.qrlAccounts.accounts[0]?.accountBalance).toContain("7");
+    store.stopBalancePolling();
+  });
+
+  it("backs off while the node is down and resumes the plain cadence on recovery", async () => {
+    const store = await connectedStore();
+    mockGetBalance.mockRejectedValue(new Error("rpc down"));
+    mockIsListening.mockResolvedValue(false);
+
+    // First failure: the next tick is pushed out one backoff step, so the
+    // very next interval is skipped.
+    await vi.advanceTimersByTimeAsync(BALANCE_POLL_INTERVAL_MS);
+    await flush();
+    const afterFirstFailure = mockGetBalance.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(BALANCE_POLL_INTERVAL_MS);
+    await flush();
+    expect(mockGetBalance.mock.calls.length).toBe(afterFirstFailure);
+
+    await vi.advanceTimersByTimeAsync(BALANCE_POLL_INTERVAL_MS);
+    await flush();
+    const afterSecondFailure = mockGetBalance.mock.calls.length;
+    expect(afterSecondFailure).toBeGreaterThan(afterFirstFailure);
+
+    // The second failure doubles it again, so two more intervals still
+    // buy no call.
+    await vi.advanceTimersByTimeAsync(BALANCE_POLL_INTERVAL_MS * 2);
+    await flush();
+    expect(mockGetBalance.mock.calls.length).toBe(afterSecondFailure);
+
+    // Recovery resets the spacing: the next interval polls again.
+    mockGetBalance.mockResolvedValue(BigInt(3e18));
+    mockIsListening.mockResolvedValue(true);
+    await vi.advanceTimersByTimeAsync(BALANCE_POLL_INTERVAL_MS * 4);
+    await flush();
+    expect(store.qrlConnection.isConnected).toBe(true);
+    const afterRecovery = mockGetBalance.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(BALANCE_POLL_INTERVAL_MS);
+    await flush();
+    expect(mockGetBalance.mock.calls.length).toBeGreaterThan(afterRecovery);
+    store.stopBalancePolling();
+  });
+
+  it("caps the backoff so a long outage still gets probed", async () => {
+    const store = await connectedStore();
+    mockGetBalance.mockRejectedValue(new Error("rpc down"));
+    mockIsListening.mockResolvedValue(false);
+
+    // Well past the point where doubling would exceed the cap.
+    for (let i = 0; i < 12; i++) {
+      await vi.advanceTimersByTimeAsync(MAX_POLL_BACKOFF_MS);
+      await flush();
+    }
+    const beforeCappedWait = mockGetBalance.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(MAX_POLL_BACKOFF_MS);
+    await flush();
+
+    expect(mockGetBalance.mock.calls.length).toBeGreaterThan(beforeCappedWait);
     store.stopBalancePolling();
   });
 

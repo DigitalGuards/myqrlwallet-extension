@@ -143,6 +143,37 @@ describe("PriceStore", () => {
     expect(store.isRefreshing).toBe(false);
   });
 
+  it("keeps a fresher fetch when the cache read lands after it", async () => {
+    let releaseCache: (value: unknown) => void = () => {};
+    mockGetPriceCache.mockReturnValueOnce(
+      new Promise((resolve) => {
+        releaseCache = resolve;
+      }),
+    );
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        "quantum-resistant-ledger": { usd: 9.99, usd_24h_change: 1 },
+      }),
+    });
+
+    const store = new PriceStore();
+    const initializing = store.initialize();
+    // Storage is slower than a warm network call here, which is exactly
+    // the order that used to put an hours-old cached price back on screen.
+    await store.fetchPrices();
+    expect(store.getPrice("usd")).toBe(9.99);
+
+    releaseCache({
+      prices: { usd: 1.11 },
+      change24h: { usd: 0 },
+      timestamp: Date.now() - 600_000,
+    });
+    await initializing;
+
+    expect(store.getPrice("usd")).toBe(9.99);
+  });
+
   // ── setRefreshEnabled ──
 
   it("arms and disarms the refresh interval", async () => {

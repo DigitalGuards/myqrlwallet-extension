@@ -830,6 +830,45 @@ describe("TokenTransfer", () => {
     });
   });
 
+  it("warns on the send form while the balances are stale, without blocking Send", async () => {
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          getAccountBalance: () => "10.0 Quanta",
+          qrlConnection: {
+            // The node answers net_listening while qrl_getBalance keeps
+            // failing, so the chain reads as connected and the amounts on
+            // screen are old.
+            isConnected: true,
+            isLoading: false,
+            areBalancesStale: true,
+            blockchain: { chainId: "0x1" },
+          },
+        },
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        "The node is not answering, so this balance may be out of date.",
+      ),
+    ).toBeInTheDocument();
+
+    await fillAndSubmitForm("Send Quanta", "1");
+  });
+
+  it("shows no stale warning while the balances are current", async () => {
+    renderComponent(
+      mockedStore({ qrlStore: { getAccountBalance: () => "10.0 Quanta" } }),
+    );
+
+    expect(
+      screen.queryByText(
+        "The node is not answering, so this balance may be out of date.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   it("re-applies Max when a dearer gas tier raises the reserve", async () => {
     const getNativeTokenGas = vi.fn(async (overrides?: { tier?: string }) =>
       overrides?.tier === "aggressive" ? "3" : "1",

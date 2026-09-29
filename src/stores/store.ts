@@ -37,8 +37,13 @@ class Store {
     // Cached prices paint immediately; whether to keep refreshing them is
     // decided by wireDataLifecycle, once the stored settings are in.
     void this.priceStore.initialize();
-    wireDataLifecycle(this);
+    this.disposeDataLifecycle = wireDataLifecycle(this);
   }
+
+  /** Tears down the lifecycle reactions. Held so a test (or a future
+   *  multi-store surface) can dispose them; the singleton below lives as
+   *  long as its document. */
+  disposeDataLifecycle: () => void;
 }
 
 /**
@@ -53,33 +58,57 @@ class Store {
  */
 export function wireDataLifecycle(store: Store) {
   const { lockStore, priceStore, qrlStore, settingsStore } = store;
+  const disposers: Array<() => void> = [];
+  let disposed = false;
 
-  reaction(
-    () => lockStore.isLocked,
-    (isLocked) => {
-      qrlStore.setPollingAllowed(!isLocked);
-      // Unlocking lands on a screen that shows balances, so refresh once
-      // straight away, without waiting out a whole interval. Before the
-      // provider exists, initialization does that itself.
-      if (!isLocked && qrlStore.qrlInstance) {
-        void qrlStore.pollBalancesAndConnection();
-      }
-    },
-    { fireImmediately: true },
-  );
-
-  return settingsStore.whenSettingsLoaded().then(() => {
+  disposers.push(
     reaction(
-      () => settingsStore.showBalanceAndPrice && !lockStore.isLocked,
-      (shouldRefresh) => {
-        priceStore.setRefreshEnabled(shouldRefresh);
-        if (shouldRefresh && priceStore.isCacheStale) {
-          void priceStore.fetchPrices();
+      () => lockStore.isLocked,
+      (isLocked) => {
+        qrlStore.setPollingAllowed(!isLocked);
+        // Unlocking lands on a screen that shows balances, so refresh once
+        // straight away, without waiting out a whole interval. Before the
+        // provider exists, initialization does that itself.
+        if (!isLocked && qrlStore.qrlInstance) {
+          void qrlStore.pollBalancesAndConnection();
         }
       },
       { fireImmediately: true },
-    );
-  });
+    ),
+  );
+
+  // The price reaction waits on storage, so it is armed asynchronously. A
+  // failed settings load must not take the wiring down with it: the load
+  // resolves with defaults and this still runs.
+  const priceWiring = settingsStore
+    .whenSettingsLoaded()
+    .then(() => {
+      if (disposed) return;
+      disposers.push(
+        reaction(
+          () => settingsStore.showBalanceAndPrice && !lockStore.isLocked,
+          (shouldRefresh) => {
+            priceStore.setRefreshEnabled(shouldRefresh);
+            if (shouldRefresh && priceStore.isCacheStale) {
+              void priceStore.fetchPrices();
+            }
+          },
+          { fireImmediately: true },
+        ),
+      );
+    })
+    .catch((error: unknown) => {
+      console.error("Failed to wire the price refresh:", error);
+    });
+
+  const dispose = () => {
+    disposed = true;
+    while (disposers.length > 0) disposers.pop()?.();
+  };
+  // The promise is exposed for tests that need to await the asynchronous
+  // half; production code only ever needs the disposer.
+  dispose.priceWiring = priceWiring;
+  return dispose;
 }
 
 export type StoreType = InstanceType<typeof Store>;

@@ -43,6 +43,7 @@ import { z } from "zod";
 import type { GasFeeOverrides } from "@/types/gasFee";
 import BackButton from "../../../Shared/BackButton/BackButton";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
+import StaleBalanceNotice from "../../../Shared/StaleBalanceNotice/StaleBalanceNotice";
 import AccountAddressSection from "./AccountAddressSection/AccountAddressSection";
 import { GasFeeSelector } from "./GasFeeNotice/GasFeeSelector";
 import RecipientPicker from "./RecipientPicker/RecipientPicker";
@@ -816,6 +817,7 @@ const TokenTransfer = observer(() => {
               <div className="flex flex-col gap-1">
                 <Label className="text-lg">{t("transfer.activeAccount")}</Label>
                 <AccountAddressSection tokenBalance={tokenBalance} />
+                <StaleBalanceNotice />
               </div>
               <div className="flex flex-col gap-2">
                 <Label className="text-lg">

@@ -43,7 +43,13 @@ const makeStores = (options?: {
   };
   return {
     stores,
-    wire: () => wireDataLifecycle(stores as unknown as LifecycleStores),
+    // Every wiring is registered for teardown: leaked reactions would keep
+    // reacting to the next case's stores.
+    wire: () => {
+      const dispose = wireDataLifecycle(stores as unknown as LifecycleStores);
+      activeDisposers.push(dispose);
+      return dispose.priceWiring.then(() => dispose);
+    },
     lockStore,
     settingsStore,
     qrlStore,
@@ -51,12 +57,15 @@ const makeStores = (options?: {
   };
 };
 
+const activeDisposers: Array<() => void> = [];
+
 describe("data lifecycle wiring", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
 
   afterEach(() => {
+    while (activeDisposers.length > 0) activeDisposers.pop()?.();
     vi.useRealTimers();
   });
 
@@ -163,5 +172,54 @@ describe("data lifecycle wiring", () => {
       settingsStore.showBalanceAndPrice = true;
     });
     expect(priceStore.setRefreshEnabled).toHaveBeenLastCalledWith(true);
+  });
+  it("arms the price reaction even when the settings read failed", async () => {
+    // A failed load resolves with the defaults, so the wiring below still
+    // has to run: without it the price refresh is dead for the session.
+    const { wire, priceStore } = makeStores({
+      isLocked: false,
+      showBalanceAndPrice: true,
+      settingsLoad: Promise.resolve(),
+      isCacheStale: true,
+    });
+    await wire();
+
+    expect(priceStore.setRefreshEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it("handles a rejected settings promise without an unhandled rejection", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const { wire, qrlStore, priceStore } = makeStores({
+      isLocked: false,
+      settingsLoad: Promise.reject(new Error("storage unavailable")),
+    });
+
+    // The rejection is caught and logged; the lock half of the wiring is
+    // unaffected and the promise settles, so nothing escapes.
+    await expect(wire()).resolves.toBeTypeOf("function");
+    expect(consoleError).toHaveBeenCalled();
+    expect(qrlStore.setPollingAllowed).toHaveBeenCalledWith(true);
+    expect(priceStore.setRefreshEnabled).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("stops reacting once disposed", async () => {
+    const { wire, lockStore, qrlStore, priceStore } = makeStores({
+      isLocked: true,
+      showBalanceAndPrice: true,
+    });
+    const dispose = await wire();
+    dispose();
+    qrlStore.setPollingAllowed.mockClear();
+    priceStore.setRefreshEnabled.mockClear();
+
+    runInAction(() => {
+      lockStore.isLocked = false;
+    });
+
+    expect(qrlStore.setPollingAllowed).not.toHaveBeenCalled();
+    expect(priceStore.setRefreshEnabled).not.toHaveBeenCalled();
   });
 });

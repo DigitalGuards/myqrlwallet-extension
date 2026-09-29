@@ -37,6 +37,7 @@ import type { TFunction } from "i18next";
 import { z } from "zod";
 import BackButton from "../../../Shared/BackButton/BackButton";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
+import StaleBalanceNotice from "../../../Shared/StaleBalanceNotice/StaleBalanceNotice";
 import CopyableAddress from "../../../Shared/CopyableAddress/CopyableAddress";
 import RecipientPicker from "../TokenTransfer/RecipientPicker/RecipientPicker";
 
@@ -374,6 +375,7 @@ const NFTTransfer = observer(() => {
               <CardTitle>{t("nft.sendNft")}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-6">
+              <StaleBalanceNotice />
               <div className="flex items-center gap-4">
                 <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md bg-muted">
                   {nftImageUrl && !imageError ? (

@@ -23,6 +23,33 @@ import {
 
 type ReceiptStatus = string | number | bigint;
 
+/**
+ * True once a transaction is known to have been included in a block,
+ * whether it succeeded or reverted. Both outcomes consume the nonce, so
+ * both supersede anything else still pending on that nonce. Requiring
+ * "confirmed" alone left an original pending forever behind a replacement
+ * that was mined and reverted.
+ */
+const reachedABlock = (entry: TransactionHistoryEntry): boolean => {
+  if (entry.receiptStatusVerified !== true) return false;
+  if (entry.pendingStatus === "confirmed") return true;
+  return entry.pendingStatus === "failed" && !!entry.blockNumber;
+};
+
+/** A Cancel replacement is a zero-value send from the account to itself. */
+const isCancellation = (
+  entry: TransactionHistoryEntry,
+  accountAddress: string,
+): boolean => {
+  const account = accountAddress.toLowerCase();
+  return (
+    entry.from.toLowerCase() === account &&
+    entry.to.toLowerCase() === account &&
+    !entry.tokenContractAddress &&
+    Number(entry.amount) === 0
+  );
+};
+
 type QrlInstance = {
   getTransactionReceipt: (txHash: string) => Promise<
     | {
@@ -149,8 +176,21 @@ class TransactionHistoryStore {
     return this.transactions.filter(needsReceipt);
   }
 
-  async loadHistory(accountAddress: string, qrlInstance?: QrlInstance) {
+  /**
+   * Reads the locally stored entries for an account.
+   *
+   * `background` keeps isLoading untouched. The receipt poller re-reads
+   * storage after every update, and toggling isLoading there replaced the
+   * whole list with a spinner every ten seconds while a transaction was
+   * pending. Only a read the user is waiting on reports loading.
+   */
+  async loadHistory(
+    accountAddress: string,
+    qrlInstance?: QrlInstance,
+    options?: { background?: boolean },
+  ) {
     const requestId = ++this.localRequestId;
+    const background = options?.background === true;
     const isAccountChange =
       accountAddress.toLowerCase() !== this.loadedAccountAddress.toLowerCase();
     // Switching accounts clears first. Holding the previous account's rows
@@ -160,7 +200,7 @@ class TransactionHistoryStore {
       this.transactions = [];
       this.loadedAccountAddress = accountAddress;
     }
-    this.isLoading = true;
+    if (!background) this.isLoading = true;
     try {
       const history = await StorageUtil.getTransactionHistory(accountAddress);
       if (requestId !== this.localRequestId) return;
@@ -174,7 +214,7 @@ class TransactionHistoryStore {
       console.error("Failed to load transaction history:", error);
     } finally {
       runInAction(() => {
-        if (requestId === this.localRequestId) {
+        if (!background && requestId === this.localRequestId) {
           this.isLoading = false;
         }
       });
@@ -254,7 +294,7 @@ class TransactionHistoryStore {
 
   async addTransaction(accountAddress: string, entry: TransactionHistoryEntry) {
     await StorageUtil.setTransactionHistoryEntry(accountAddress, entry);
-    await this.loadHistory(accountAddress);
+    await this.loadHistory(accountAddress, undefined, { background: true });
     if (
       entry.pendingStatus === "confirmed" ||
       entry.pendingStatus === "failed"
@@ -283,7 +323,7 @@ class TransactionHistoryStore {
       transactionHash,
       updates,
     );
-    await this.loadHistory(accountAddress);
+    await this.loadHistory(accountAddress, undefined, { background: true });
   }
 
   setFilter(filter: TokenFilter) {
@@ -365,12 +405,12 @@ class TransactionHistoryStore {
   /**
    * Settles originals whose replacement already landed.
    *
-   * Speed Up marks the original "replaced" from the broadcast callback. If
+   * Speed Up and Cancel mark the original from the broadcast callback. If
    * the surface is destroyed between signing and that callback (closing the
    * popup does exactly that), nothing marks it, and the original sits
-   * pending forever while its nonce has already been spent. A confirmed
-   * transaction from the same account carrying the same nonce is proof the
-   * original can never be mined, so it is settled here instead.
+   * pending forever while its nonce has already been spent. Another
+   * transaction from the same account that reached a block with the same
+   * nonce is proof the original can never be mined, so it is settled here.
    */
   async reconcileReplacedTransactions(accountAddress: string) {
     const stillPending = this.transactions.filter(needsReceipt);
@@ -379,17 +419,22 @@ class TransactionHistoryStore {
       const replacement = this.transactions.find(
         (other) =>
           other.nonce === tx.nonce &&
-          other.receiptStatusVerified === true &&
-          other.pendingStatus === "confirmed" &&
           !other.isInternal &&
+          reachedABlock(other) &&
           other.transactionHash.toLowerCase() !==
             tx.transactionHash.toLowerCase(),
       );
       if (!replacement) continue;
+      // A cancel is a zero-value self-send, which the UI reports under its
+      // own status. An action already recorded on the original wins: the
+      // flow that started the replacement knows what it sent.
+      const replacedByAction =
+        tx.replacedByAction ??
+        (isCancellation(replacement, accountAddress) ? "cancel" : "speed-up");
       await this.updateTransaction(accountAddress, tx.transactionHash, {
-        pendingStatus: "replaced",
+        pendingStatus: replacedByAction === "cancel" ? "cancelled" : "replaced",
         replacementTransactionHash: replacement.transactionHash,
-        replacedByAction: "speed-up",
+        replacedByAction,
       });
     }
   }

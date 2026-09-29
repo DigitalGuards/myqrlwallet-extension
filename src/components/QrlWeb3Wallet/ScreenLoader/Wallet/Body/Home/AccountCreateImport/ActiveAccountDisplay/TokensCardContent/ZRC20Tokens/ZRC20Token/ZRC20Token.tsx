@@ -48,6 +48,12 @@ const ZRC20Token = observer(
     useEffect(() => {
       const requestId = ++requestIdRef.current;
       setHasError(false);
+      // The held details belong to the account and chain that were active
+      // when they were read. Keeping them across a switch showed the
+      // previous account's holding as this account's balance, and a failed
+      // read for the new account left that wrong number on screen with no
+      // error and no retry.
+      setToken(undefined);
       (async () => {
         const tokenDetails = await getZrc20TokenDetails(contractAddress);
         if (requestId !== requestIdRef.current) return;
@@ -56,6 +62,7 @@ const ZRC20Token = observer(
           // Nothing was set on the error path before, so the row stayed a
           // loading skeleton for the rest of the session.
           setHasError(true);
+          setToken(undefined);
           return;
         }
         setToken(tokenDetails.token);
@@ -73,7 +80,7 @@ const ZRC20Token = observer(
       setRetryCount((count) => count + 1);
     };
 
-    if (hasError && !token) {
+    if (hasError) {
       const displayName =
         storedSymbol || formatQrlAddressFingerprint(contractAddress);
       return (

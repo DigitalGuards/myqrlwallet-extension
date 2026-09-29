@@ -178,4 +178,52 @@ describe("ZRC20Token", () => {
       "3.0 POW",
     );
   });
+  it("drops the previous account's balance when the new account fails to read", async () => {
+    const getZrc20TokenDetails = vi
+      .fn()
+      .mockResolvedValueOnce(successfulDetails(65))
+      .mockResolvedValueOnce({ token: undefined, error: "rpc down" });
+
+    const accountA = `Q${"a".repeat(128)}`;
+    const accountB = `Q${"b".repeat(128)}`;
+    const storeFor = (accountAddress: string) =>
+      mockedStore({
+        qrlStore: {
+          activeAccount: { accountAddress },
+          getZrc20TokenDetails,
+        },
+      });
+
+    const view = renderComponent(storeFor(accountA), "POW");
+    await waitFor(() => {
+      expect(screen.getByText(/Mocked Token List Item/)).toHaveTextContent(
+        "65.0 POW",
+      );
+    });
+
+    view.rerender(
+      <StoreProvider value={storeFor(accountB)}>
+        <MemoryRouter>
+          <TooltipProvider>
+            <ZRC20Token
+              contractAddress={CONTRACT}
+              tokenImage=""
+              storedSymbol="POW"
+            />
+          </TooltipProvider>
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    // Account A's holding must not stand in as account B's balance, and
+    // the failure has to be visible with a way to retry.
+    await waitFor(() => {
+      expect(screen.getByText("Token details unavailable")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText(/Mocked Token List Item/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/65\.0/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
 });

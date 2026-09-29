@@ -313,6 +313,9 @@ const mockedStoreValues: StoreType = {
     stopAutoRefresh: () => {},
     getChange24h: () => 0,
   } as any,
+  // The real store wires its polling reactions in the constructor and keeps
+  // the disposer; nothing is wired here, so tearing down is a no-op.
+  disposeDataLifecycle: () => {},
 };
 
 export const mockedStore = (
