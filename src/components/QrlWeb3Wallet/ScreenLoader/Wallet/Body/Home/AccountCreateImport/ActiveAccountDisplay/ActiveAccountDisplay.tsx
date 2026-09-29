@@ -37,12 +37,17 @@ const ActiveAccountDisplay = observer(() => {
   const { amount: balanceAmount, unit: balanceUnit } =
     splitFormattedBalance(accountBalance);
   const numericBalance = parseBalanceValue(accountBalance).toNumber();
-  const price = priceStore.getPrice(currency);
+  // Quoted in the user's currency where there is a usable quote for it,
+  // in dollars otherwise, so the number and its symbol always agree.
+  const {
+    price,
+    currency: quoteCurrency,
+    change24h,
+  } = priceStore.quoteFor(currency);
   const fiatDisplay =
     showBalanceAndPrice && price > 0
-      ? formatFiatCompact(numericBalance, price, currency)
+      ? formatFiatCompact(numericBalance, price, quoteCurrency)
       : "";
-  const change24h = priceStore.getChange24h(currency);
   const showChange = showBalanceAndPrice && price > 0 && change24h !== 0;
 
   return (

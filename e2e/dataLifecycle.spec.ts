@@ -292,10 +292,17 @@ test("the Home card shows a fiat estimate, with the explorer standing in for a b
 
     // CoinGecko now refuses every request, and a fresh surface has no
     // cached quote to fall back on. The explorer carries the same market
-    // data, so the fiat line survives.
+    // data, so the fiat line survives. The currency is switched to euros
+    // first, which the explorer does not quote: the estimate has to fall
+    // back to dollars, symbol included, and the estimate stays on screen.
     coinGeckoBlocked = true;
     await serviceWorker.evaluate(async (prefix) => {
       await chrome.storage.local.remove(`${prefix}:PRICE_CACHE`);
+      const key = `${prefix}:SETTINGS`;
+      const stored = await chrome.storage.local.get(key);
+      await chrome.storage.local.set({
+        [key]: { ...stored[key], currency: "EUR" },
+      });
     }, STORAGE_PREFIX);
 
     const blocked = await context.newPage();

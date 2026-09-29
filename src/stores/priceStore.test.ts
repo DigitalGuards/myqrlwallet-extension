@@ -112,19 +112,35 @@ describe("PriceStore", () => {
       timestamp: Date.now() - 1000,
     };
     mockGetPriceCache.mockResolvedValue(cached);
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        "quantum-resistant-ledger": { usd: 1.3, usd_24h_change: 4.0 },
-      }),
-    });
+    mockCoinGecko({ usd: 1.3, usd_24h_change: 4.0 });
 
     const store = new PriceStore();
     await store.initialize(true);
 
-    // Should have loaded cache first, then fetched
     expect(mockGetPriceCache).toHaveBeenCalled();
-    expect(mockFetch).toHaveBeenCalled();
+    expect(store.getPrice("usd")).toBe(1.2);
+    expect(store.isRefreshing).toBe(true);
+    // The cached quote is a second old, so there is nothing to refresh yet.
+    // initialize goes through setRefreshEnabled like every other caller.
+    expect(mockFetch).not.toHaveBeenCalled();
+    store.setRefreshEnabled(false);
+  });
+
+  it("refreshes on initialize when the cached prices are stale", async () => {
+    mockGetPriceCache.mockResolvedValue({
+      prices: { usd: 1.2 },
+      change24h: { usd: 3.1 },
+      timestamp: Date.now() - 20 * 60_000,
+    });
+    mockCoinGecko({ usd: 1.3, usd_24h_change: 4.0 });
+
+    const store = new PriceStore();
+    await store.initialize(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(store.getPrice("usd")).toBe(1.3);
+    store.setRefreshEnabled(false);
   });
 
   it("should not fetch prices when showBalanceAndPrice is false", async () => {
@@ -136,10 +152,11 @@ describe("PriceStore", () => {
   });
 
   it("should still load cache even when showBalanceAndPrice is false", async () => {
+    const cachedAt = Date.now();
     const cached = {
       prices: { usd: 1.2 },
       change24h: { usd: 3.0 },
-      timestamp: Date.now(),
+      timestamp: cachedAt,
     };
     mockGetPriceCache.mockResolvedValue(cached);
 
@@ -148,6 +165,25 @@ describe("PriceStore", () => {
 
     expect(store.prices).toEqual({ usd: 1.2 });
     expect(store.change24h).toEqual({ usd: 3.0 });
+    // A cache from an older build carries one timestamp; every quote in it
+    // is dated to that so the per-currency window still has something to
+    // measure against.
+    expect(store.updatedAt).toEqual({ usd: cachedAt });
+  });
+
+  it("keeps the per-currency stamps a newer cache carries", async () => {
+    const now = Date.now();
+    mockGetPriceCache.mockResolvedValue({
+      prices: { usd: 1.2, eur: 1.1 },
+      change24h: {},
+      updatedAt: { usd: now, eur: now - 5 * 60_000 },
+      timestamp: now,
+    });
+
+    const store = new PriceStore();
+    await store.initialize(false);
+
+    expect(store.updatedAt).toEqual({ usd: now, eur: now - 5 * 60_000 });
   });
 
   it("loads the cache without refreshing when called with no argument", async () => {
@@ -397,19 +433,107 @@ describe("PriceStore", () => {
     );
   });
 
-  it("keeps the currencies the fallback does not carry", async () => {
+  it("keeps a currency the fallback does not carry while its own quote is fresh", async () => {
     mockCoinGecko({ usd: 1.5, eur: 1.3, eur_24h_change: 2.1 });
     const store = new PriceStore();
     await store.fetchPrices();
 
     mockCoinGeckoBlocked({ currentPrice: 2, priceChange24h: 1 });
-    store.lastUpdated = 0;
     await store.fetchPrices();
 
     expect(store.getPrice("usd")).toBe(2);
-    // The explorer quotes USD only; blanking EUR here would empty the
-    // fiat line for everyone not on dollars.
+    // The explorer quotes USD only; blanking a euro quote from a minute
+    // ago would empty the fiat line for everyone off dollars.
     expect(store.getPrice("eur")).toBe(1.3);
+    expect(store.getChange24h("eur")).toBe(2.1);
+  });
+
+  it("drops a carried-over currency once its own quote ages out", async () => {
+    mockCoinGecko({ usd: 1.5, eur: 1.3, eur_24h_change: 2.1 });
+    const store = new PriceStore();
+    await store.fetchPrices();
+
+    // CoinGecko stays blocked past the cache window. Carrying the euro
+    // quote further and restamping it as current would present a quote
+    // hours or days old as the live price.
+    mockCoinGeckoBlocked({ currentPrice: 2, priceChange24h: 1 });
+    vi.setSystemTime(Date.now() + 11 * 60_000);
+    await store.fetchPrices();
+
+    expect(store.getPrice("usd")).toBe(2);
+    expect(store.getPrice("eur")).toBe(0);
+    expect(store.change24h.eur).toBeUndefined();
+  });
+
+  it("quotes a currency with nothing of its own in dollars", async () => {
+    mockCoinGecko({ usd: 1.5, eur: 1.3, eur_24h_change: 2.1 });
+    const store = new PriceStore();
+    await store.fetchPrices();
+
+    expect(store.quoteFor("EUR")).toEqual({
+      price: 1.3,
+      currency: "EUR",
+      change24h: 2.1,
+    });
+
+    mockCoinGeckoBlocked({ currentPrice: 2, priceChange24h: 1 });
+    vi.setSystemTime(Date.now() + 11 * 60_000);
+    await store.fetchPrices();
+
+    // The fallback carries dollars alone, so a euro user sees the dollar
+    // estimate with the dollar symbol, so the fiat line stays on screen.
+    expect(store.quoteFor("EUR")).toEqual({
+      price: 2,
+      currency: "USD",
+      change24h: 1,
+    });
+  });
+
+  it("restores the user's currency as soon as CoinGecko answers again", async () => {
+    mockCoinGeckoBlocked({ currentPrice: 2, priceChange24h: 1 });
+    const store = new PriceStore();
+    await store.fetchPrices();
+    expect(store.quoteFor("EUR").currency).toBe("USD");
+
+    mockCoinGecko({ usd: 1.5, eur: 1.4, eur_24h_change: 2.2 });
+    await store.fetchPrices();
+
+    expect(store.quoteFor("EUR")).toEqual({
+      price: 1.4,
+      currency: "EUR",
+      change24h: 2.2,
+    });
+  });
+
+  it("reports no quote at all when nothing has ever been fetched", () => {
+    const store = new PriceStore();
+    expect(store.quoteFor("EUR")).toEqual({
+      price: 0,
+      currency: "EUR",
+      change24h: 0,
+    });
+  });
+
+  it("treats an explorer 24h change of exactly 0 as missing", async () => {
+    // The explorer reports 0 when it has no 24h baseline, which means the
+    // trend data is simply absent.
+    mockCoinGeckoBlocked({ currentPrice: 2, priceChange24h: 0 });
+    const store = new PriceStore();
+    await store.fetchPrices();
+
+    expect(store.getPrice("usd")).toBe(2);
+    expect(store.change24h.usd).toBeUndefined();
+  });
+
+  it("gives both requests a timeout so a hung socket cannot wedge the poll", async () => {
+    mockCoinGeckoBlocked({ currentPrice: 2, priceChange24h: 1 });
+    const store = new PriceStore();
+    await store.fetchPrices();
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    for (const [, init] of mockFetch.mock.calls) {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+    }
   });
 
   it("reports an error only when both sources fail", async () => {

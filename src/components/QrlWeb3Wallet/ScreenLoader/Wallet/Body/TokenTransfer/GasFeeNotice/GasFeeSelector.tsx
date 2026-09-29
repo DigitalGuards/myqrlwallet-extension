@@ -73,7 +73,8 @@ export const GasFeeSelector = observer(
       [t],
     );
     const { defaultGasTier, showBalanceAndPrice, currency } = settingsStore;
-    const qrlPrice = priceStore.getPrice(currency);
+    const { price: qrlPrice, currency: quoteCurrency } =
+      priceStore.quoteFor(currency);
     const { getNativeTokenGas, getZrc20TokenGas } = qrlStore;
 
     // The stored "advanced" preference has no preset values behind it, so it
@@ -381,7 +382,7 @@ export const GasFeeSelector = observer(
                         <span>{getOptimalGasFee(cost)}</span>
                         {showBalanceAndPrice && qrlPrice > 0 && (
                           <span className="text-[10px]">
-                            {formatFiatCompact(cost, qrlPrice, currency)}
+                            {formatFiatCompact(cost, qrlPrice, quoteCurrency)}
                           </span>
                         )}
                       </>
@@ -432,7 +433,11 @@ export const GasFeeSelector = observer(
                     <span>{getOptimalGasFee(advancedCost)}</span>
                     {showBalanceAndPrice && qrlPrice > 0 && (
                       <span className="text-[10px]">
-                        {formatFiatCompact(advancedCost, qrlPrice, currency)}
+                        {formatFiatCompact(
+                          advancedCost,
+                          qrlPrice,
+                          quoteCurrency,
+                        )}
                       </span>
                     )}
                   </div>

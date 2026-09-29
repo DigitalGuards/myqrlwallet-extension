@@ -128,6 +128,12 @@ export type WalletSettings = {
 export type PriceCache = {
   prices: Record<string, number>;
   change24h: Record<string, number>;
+  /**
+   * When each individual currency was last quoted. Optional: a cache
+   * written by an older build carries only `timestamp`, and every quote in
+   * it is dated to that instead.
+   */
+  updatedAt?: Record<string, number>;
   timestamp: number;
 };
 

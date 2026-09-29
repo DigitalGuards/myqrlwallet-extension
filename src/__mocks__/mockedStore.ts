@@ -311,6 +311,8 @@ const mockedStoreValues: StoreType = {
     isLoading: false,
     hasError: false,
     getPrice: () => 0,
+    quoteFor: (currency: string) => ({ price: 0, currency, change24h: 0 }),
+    updatedAt: {},
     isCacheStale: false,
     initialize: async () => {},
     fetchPrices: async () => {},

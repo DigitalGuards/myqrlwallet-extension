@@ -126,6 +126,9 @@ const TokenTransfer = observer(() => {
     priceStore,
     settingsStore,
   } = useStore();
+  // Quoted in the user's currency where there is a usable quote for it, in
+  // dollars otherwise, so the number and its symbol always agree.
+  const amountQuote = priceStore.quoteFor(settingsStore.currency);
   const { getMnemonicPhrases } = lockStore;
   const {
     activeAccount,
@@ -957,13 +960,13 @@ const TokenTransfer = observer(() => {
                           {t("transfer.amountDescription")}
                           {!isZrc20Token &&
                             settingsStore.showBalanceAndPrice &&
-                            priceStore.getPrice(settingsStore.currency) > 0 &&
+                            amountQuote.price > 0 &&
                             amountForDisplay(field.value || "0").gt(0) && (
                               <span className="ml-1 font-numeric text-muted-foreground">
                                 {formatFiatCompact(
                                   field.value,
-                                  priceStore.getPrice(settingsStore.currency),
-                                  settingsStore.currency,
+                                  amountQuote.price,
+                                  amountQuote.currency,
                                 )}
                               </span>
                             )}
