@@ -2,7 +2,29 @@ vi.mock("@/configuration/releaseProfile", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/configuration/releaseProfile")>()),
   assertV3Network: vi.fn().mockResolvedValue(undefined),
 }));
-import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// The real LockManager pulls in the @theqrl/web3 crypto graph; the
+// authorization prechecks only need its isLocked() answer (L6). Held in a
+// plain object so the per-describe vi.restoreAllMocks() cannot strip the
+// implementation out from under it.
+const { lockState } = vi.hoisted(() => ({
+  lockState: { isLocked: false, hasPasswordSet: true, readFails: false },
+}));
+vi.mock("../lockManager/lockManager", () => ({
+  __esModule: true,
+  default: {
+    isLocked: async () => {
+      if (lockState.readFails) {
+        throw new Error("The lock state is unreadable.");
+      }
+      return {
+        isLocked: lockState.isLocked,
+        hasPasswordSet: lockState.hasPasswordSet,
+      };
+    },
+  },
+}));
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toChecksumAddress } from "@theqrl/wallet.js";
 import { assertV3Network } from "@/configuration/releaseProfile";
 import StorageUtil from "@/utilities/storageUtil";
@@ -10,7 +32,9 @@ import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import {
   checkAccountHasBeenAuthorized,
   checkAccountAndChainHaveBeenAuthorized,
+  checkUrlOriginHasBeenConnected,
   checkWalletAddQrlChainParams,
+  pickDefaultRpcUrl,
   normalizeChainId,
   revalidateAuthorizedDAppRequest,
 } from "./restrictedMethodsMiddlewareUtils";
@@ -409,5 +433,543 @@ describe("dApp chain authorization for PQ signing methods", () => {
     expect(result.proceedError?.message).toContain(
       "versioned 64-byte address layout",
     );
+  });
+});
+
+describe("wallet_addQRLChain rpcUrls validation (L5)", () => {
+  const chain = {
+    chainName: "Some chain",
+    chainId: "0x301825",
+    nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
+    blockExplorerUrls: [],
+    iconUrls: [],
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(StorageUtil, "getAllBlockChains").mockResolvedValue([]);
+  });
+
+  it("accepts a dApp list where every url is https on a public host", async () => {
+    const result = await checkWalletAddQrlChainParams({
+      ...chain,
+      rpcUrls: ["https://rpc.example", "https://rpc2.example"],
+    } as never);
+
+    expect(result.canProceed).toBe(true);
+  });
+
+  it.each([
+    ["http://localhost:8545", "loopback by name"],
+    ["http://127.0.0.1:8545", "loopback by address"],
+    ["https://192.168.1.10:8545", "private LAN"],
+    ["https://10.0.0.5:8545", "private range"],
+    ["https://172.16.0.5:8545", "private range"],
+    ["https://169.254.1.1:8545", "link local"],
+    ["https://node.local:8545", "mDNS host"],
+    ["http://rpc.example", "cleartext http"],
+  ])(
+    "rejects a dApp list smuggling %s (%s) past an https entry",
+    async (url) => {
+      const result = await checkWalletAddQrlChainParams({
+        ...chain,
+        rpcUrls: ["https://rpc.example", url],
+      } as never);
+
+      expect(result.canProceed).toBe(false);
+      expect(result.proceedError?.message).toContain("rpcUrls");
+    },
+  );
+
+  it.each([
+    ["https://localhost./", "trailing-dot loopback name"],
+    ["https://printer.local./", "trailing-dot mDNS host"],
+    ["https://node.internal./", "trailing-dot internal suffix"],
+    ["https://[::ffff:127.0.0.1]:8545/", "IPv4-mapped loopback"],
+    ["https://[::ffff:192.168.1.10]:8545/", "IPv4-mapped private LAN"],
+    ["https://[64:ff9b::7f00:1]:8545/", "NAT64-embedded loopback"],
+    ["https://[64:ff9b:1::7f00:1]:8545/", "NAT64 /48 prefix"],
+    ["https://100.64.0.1:8545/", "carrier-grade NAT"],
+    ["https://100.127.255.254:8545/", "carrier-grade NAT upper bound"],
+    ["https://[fc00::1]:8545/", "IPv6 unique local, low end"],
+    ["https://[fdff:1234::1]:8545/", "IPv6 unique local, high end"],
+    ["https://[fe80::1]:8545/", "IPv6 link local, low end"],
+    ["https://[febf::1]:8545/", "IPv6 link local, high end"],
+  ])("rejects a dApp list reaching a private host via %s (%s)", async (url) => {
+    const result = await checkWalletAddQrlChainParams({
+      ...chain,
+      rpcUrls: ["https://rpc.example", url],
+    } as never);
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("rpcUrls");
+  });
+
+  it.each([
+    "https://rpc.example",
+    "https://rpc.example./",
+    "https://[2001:db8::ffff:1]:8545/",
+    "https://[::ffff:8.8.8.8]:8545/",
+    "https://101.64.0.1:8545/",
+  ])("still accepts the public https endpoint %s", async (url) => {
+    const result = await checkWalletAddQrlChainParams({
+      ...chain,
+      rpcUrls: [url],
+    } as never);
+
+    expect(result.canProceed).toBe(true);
+  });
+
+  it("rejects a dApp list whose first entry is unacceptable", async () => {
+    // The entry the wallet would adopt as its default endpoint.
+    const result = await checkWalletAddQrlChainParams({
+      ...chain,
+      rpcUrls: ["http://127.0.0.1:8545", "https://rpc.example"],
+    } as never);
+
+    expect(result.canProceed).toBe(false);
+  });
+
+  it("still lets the user add their own local node from the wallet form", async () => {
+    const result = await checkWalletAddQrlChainParams(
+      {
+        ...chain,
+        rpcUrls: ["http://127.0.0.1:8545"],
+        defaultRpcUrl: "http://127.0.0.1:8545",
+        defaultBlockExplorerUrl: "",
+        defaultIconUrl: "",
+        isTestnet: true,
+        defaultWsRpcUrl: "",
+        isCustomChain: true,
+      } as never,
+      true,
+    );
+
+    expect(result.canProceed).toBe(true);
+  });
+
+  it.each([
+    "http://localhost./",
+    "http://[::ffff:127.0.0.1]:8545/",
+    "http://100.64.0.1:8545/",
+    "http://[fe80::1]:8545/",
+  ])("still lets the wallet form add the local node %s", async (url) => {
+    const result = await checkWalletAddQrlChainParams(
+      {
+        ...chain,
+        rpcUrls: [url],
+        defaultRpcUrl: url,
+        defaultBlockExplorerUrl: "",
+        defaultIconUrl: "",
+        isTestnet: true,
+        defaultWsRpcUrl: "",
+        isCustomChain: true,
+      } as never,
+      true,
+    );
+
+    expect(result.canProceed).toBe(true);
+  });
+});
+
+describe("pickDefaultRpcUrl (L5)", () => {
+  it("takes the first entry the wallet is willing to use", () => {
+    expect(pickDefaultRpcUrl(["https://a.example", "https://b.example"])).toBe(
+      "https://a.example",
+    );
+  });
+
+  it("skips entries the wallet would refuse", () => {
+    expect(
+      pickDefaultRpcUrl(["http://127.0.0.1:8545", "https://b.example"]),
+    ).toBe("https://b.example");
+  });
+
+  it("takes a local node only when local hosts are allowed", () => {
+    expect(pickDefaultRpcUrl(["http://127.0.0.1:8545"])).toBe("");
+    expect(pickDefaultRpcUrl(["http://127.0.0.1:8545"], true)).toBe(
+      "http://127.0.0.1:8545",
+    );
+  });
+
+  it.each([undefined, null, "https://a.example", [], [42]])(
+    "answers with an empty string for %s",
+    (rpcUrls) => {
+      expect(pickDefaultRpcUrl(rpcUrls)).toBe("");
+    },
+  );
+});
+
+// L6/L-1: while the wallet is locked, qrl_accounts, the provider state and
+// wallet_getPermissions all report nothing, so the authorization prechecks
+// must not answer differently for an authorized and an unauthorized address
+// either. Every locked precheck refuses with one shared error, so the page
+// learns nothing and cannot raise the unlock screen on demand.
+// revalidateAuthorizedDAppRequest enforces the grant strictly after unlock.
+describe("locked-wallet authorization oracle (L6/L-1)", () => {
+  const UNAUTHORIZED_ACCOUNT = `Q${"b".repeat(128)}`;
+  const LOCKED_REFUSAL_MESSAGE =
+    "The wallet is locked. Unlock it and try again.";
+  const UNAUTHORIZED_CODE = 4100;
+
+  const capabilitiesRequest = (from: string) =>
+    request(RESTRICTED_METHODS.WALLET_GET_CAPABILITIES, [from, ["0x301825"]]);
+  const sendTransactionRequest = (from: string) =>
+    request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [{ from }]);
+
+  const expectLockedRefusal = (result: {
+    canProceed: boolean;
+    proceedError?: { code?: number; message?: string };
+  }) => {
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.code).toBe(UNAUTHORIZED_CODE);
+    expect(result.proceedError?.message).toBe(LOCKED_REFUSAL_MESSAGE);
+    expect(result).not.toHaveProperty("authorizedChainId");
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    lockState.isLocked = false;
+    lockState.readFails = false;
+    vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
+      urlOrigin: ORIGIN,
+      accounts: [ACCOUNT],
+      blockchains: [{ chainId: "0x301825" } as never],
+      permissions: [],
+    });
+    vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue({
+      chainId: "0x301825",
+    } as never);
+  });
+
+  afterEach(() => {
+    lockState.isLocked = false;
+    lockState.readFails = false;
+  });
+
+  it("refuses wallet_getCapabilities identically for both accounts while locked", async () => {
+    lockState.isLocked = true;
+
+    const authorized = await checkAccountHasBeenAuthorized(
+      capabilitiesRequest(ACCOUNT),
+    );
+    const unauthorized = await checkAccountHasBeenAuthorized(
+      capabilitiesRequest(UNAUTHORIZED_ACCOUNT),
+    );
+
+    expectLockedRefusal(authorized);
+    expectLockedRefusal(unauthorized);
+    expect(unauthorized.proceedError?.message).toBe(
+      authorized.proceedError?.message,
+    );
+  });
+
+  it("refuses qrl_sendTransaction identically for both accounts while locked", async () => {
+    lockState.isLocked = true;
+
+    const authorized = await checkAccountAndChainHaveBeenAuthorized(
+      sendTransactionRequest(ACCOUNT),
+    );
+    const unauthorized = await checkAccountAndChainHaveBeenAuthorized(
+      sendTransactionRequest(UNAUTHORIZED_ACCOUNT),
+    );
+
+    expectLockedRefusal(authorized);
+    expectLockedRefusal(unauthorized);
+    expect(unauthorized.proceedError?.message).toBe(
+      authorized.proceedError?.message,
+    );
+  });
+
+  it("gives an origin with no grant at all the same locked refusal", async () => {
+    lockState.isLocked = true;
+    vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+      urlOrigin: ORIGIN,
+      accounts: [],
+      blockchains: [],
+      permissions: [],
+    });
+
+    expectLockedRefusal(
+      await checkAccountHasBeenAuthorized(
+        capabilitiesRequest(UNAUTHORIZED_ACCOUNT),
+      ),
+    );
+    expectLockedRefusal(
+      await checkAccountAndChainHaveBeenAuthorized(
+        sendTransactionRequest(UNAUTHORIZED_ACCOUNT),
+      ),
+    );
+  });
+
+  it("keeps every locked refusal free of address, chain and connection detail", async () => {
+    lockState.isLocked = true;
+    vi.mocked(StorageUtil.getActiveBlockChain).mockResolvedValue({
+      chainId: "0x1",
+    } as never);
+
+    const results = [
+      await checkAccountHasBeenAuthorized(
+        capabilitiesRequest(UNAUTHORIZED_ACCOUNT),
+      ),
+      await checkAccountAndChainHaveBeenAuthorized(
+        sendTransactionRequest(UNAUTHORIZED_ACCOUNT),
+      ),
+      await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [
+          { from: ACCOUNT, to: WRONG_CHECKSUM_ACCOUNT, chainId: "0x539" },
+        ]),
+      ),
+      await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.QRL_SIGN_MESSAGE, [ACCOUNT, "0xdeadbeef"]),
+      ),
+      await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.PERSONAL_SIGN, ["0x1234", ACCOUNT]),
+      ),
+    ];
+
+    results.forEach((result) => {
+      expectLockedRefusal(result);
+      const message = result.proceedError?.message ?? "";
+      expect(message).not.toContain(ACCOUNT);
+      expect(message).not.toContain(UNAUTHORIZED_ACCOUNT);
+      expect(message).not.toContain("0x301825");
+      expect(message).not.toContain("0x539");
+      expect(message).not.toContain("chain");
+      expect(message).not.toContain("authorized");
+      expect(message).not.toContain("connected");
+    });
+  });
+
+  // wallet_addQRLChain, wallet_getCapabilities and wallet_switchQRLChain all
+  // run the same connection gate before their own parameter checks, so one
+  // gated call stands for each of the three.
+  const CONNECTION_GATED_METHODS = [
+    RESTRICTED_METHODS.WALLET_ADD_QRL_CHAIN,
+    RESTRICTED_METHODS.WALLET_GET_CAPABILITIES,
+    RESTRICTED_METHODS.WALLET_SWITCH_QRL_CHAIN,
+  ];
+  const UNCONNECTED_ORIGIN = "https://stranger-dapp.example";
+
+  it.each(CONNECTION_GATED_METHODS)(
+    "refuses the %s connection gate identically for a connected and an unconnected origin while locked",
+    async () => {
+      lockState.isLocked = true;
+
+      const connected = await checkUrlOriginHasBeenConnected(
+        `${ORIGIN}/request`,
+        true,
+      );
+      vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+        urlOrigin: UNCONNECTED_ORIGIN,
+        accounts: [],
+        blockchains: [],
+        permissions: [],
+      });
+      const unconnected = await checkUrlOriginHasBeenConnected(
+        `${UNCONNECTED_ORIGIN}/request`,
+        true,
+      );
+
+      expectLockedRefusal(connected);
+      expectLockedRefusal(unconnected);
+      expect(unconnected.proceedError?.message).toBe(
+        connected.proceedError?.message,
+      );
+      [connected, unconnected].forEach((result) => {
+        const message = result.proceedError?.message ?? "";
+        expect(message).not.toContain("connected");
+        expect(message).not.toContain(ORIGIN);
+        expect(message).not.toContain(UNCONNECTED_ORIGIN);
+      });
+    },
+  );
+
+  it.each(CONNECTION_GATED_METHODS)(
+    "keeps the unlocked %s connection distinction",
+    async () => {
+      const connected = await checkUrlOriginHasBeenConnected(
+        `${ORIGIN}/request`,
+        true,
+      );
+      vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+        urlOrigin: UNCONNECTED_ORIGIN,
+        accounts: [],
+        blockchains: [],
+        permissions: [],
+      });
+      const unconnected = await checkUrlOriginHasBeenConnected(
+        `${UNCONNECTED_ORIGIN}/request`,
+        true,
+      );
+
+      expect(connected.canProceed).toBe(true);
+      expect(unconnected.canProceed).toBe(false);
+      expect(unconnected.proceedError?.message).toBe(
+        "The dApp is not connected to MyQRLWallet.",
+      );
+    },
+  );
+
+  it("refuses the connection gate while the lock state cannot be read", async () => {
+    lockState.readFails = true;
+
+    expectLockedRefusal(
+      await checkUrlOriginHasBeenConnected(`${ORIGIN}/request`, true),
+    );
+  });
+
+  // qrl_accounts shares this gate and answers a locked wallet with an empty
+  // array (F8), so the default has to leave it exactly as it was.
+  it("leaves the ungated connection check untouched while locked", async () => {
+    lockState.isLocked = true;
+
+    const connected = await checkUrlOriginHasBeenConnected(`${ORIGIN}/request`);
+    expect(connected.canProceed).toBe(true);
+
+    vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+      urlOrigin: UNCONNECTED_ORIGIN,
+      accounts: [],
+      blockchains: [],
+      permissions: [],
+    });
+    const unconnected = await checkUrlOriginHasBeenConnected(
+      `${UNCONNECTED_ORIGIN}/request`,
+    );
+    expect(unconnected.canProceed).toBe(false);
+    expect(unconnected.proceedError?.message).toBe(
+      "The dApp is not connected to MyQRLWallet.",
+    );
+  });
+
+  it("refuses while the lock state cannot be read", async () => {
+    lockState.readFails = true;
+
+    expectLockedRefusal(
+      await checkAccountHasBeenAuthorized(capabilitiesRequest(ACCOUNT)),
+    );
+    expectLockedRefusal(
+      await checkAccountAndChainHaveBeenAuthorized(
+        sendTransactionRequest(ACCOUNT),
+      ),
+    );
+  });
+
+  it("keeps the unlocked wallet_getCapabilities distinction", async () => {
+    const authorized = await checkAccountHasBeenAuthorized(
+      capabilitiesRequest(ACCOUNT),
+    );
+    const unauthorized = await checkAccountHasBeenAuthorized(
+      capabilitiesRequest(UNAUTHORIZED_ACCOUNT),
+    );
+
+    expect(authorized.canProceed).toBe(true);
+    expect(unauthorized.canProceed).toBe(false);
+    expect(unauthorized.proceedError?.message).toContain(
+      "has not been authorized",
+    );
+  });
+
+  it("keeps the unlocked qrl_sendTransaction distinction", async () => {
+    const authorized = await checkAccountAndChainHaveBeenAuthorized(
+      sendTransactionRequest(ACCOUNT),
+    );
+    const unauthorized = await checkAccountAndChainHaveBeenAuthorized(
+      sendTransactionRequest(UNAUTHORIZED_ACCOUNT),
+    );
+
+    expect(authorized).toMatchObject({
+      canProceed: true,
+      authorizedChainId: "0x301825",
+    });
+    expect(unauthorized.canProceed).toBe(false);
+    expect(unauthorized.proceedError?.message).toContain(
+      "has not been authorized",
+    );
+  });
+
+  it("keeps the unlocked chain-grant refusal for an origin with no grant", async () => {
+    vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+      urlOrigin: ORIGIN,
+      accounts: [ACCOUNT],
+      blockchains: [],
+      permissions: [],
+    });
+
+    const result = await checkAccountAndChainHaveBeenAuthorized(
+      sendTransactionRequest(ACCOUNT),
+    );
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("not authorized to use");
+  });
+
+  it("revalidation still refuses an unauthorized account while locked", async () => {
+    lockState.isLocked = true;
+
+    const result = await revalidateAuthorizedDAppRequest({
+      method: RESTRICTED_METHODS.QRL_SEND_TRANSACTION,
+      params: [{ from: UNAUTHORIZED_ACCOUNT }],
+      requestId: "request-id",
+      authorizedChainId: "0x301825",
+      requestData: { senderData: { url: `${ORIGIN}/request` } },
+    });
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("has not been authorized");
+  });
+
+  it("revalidation still refuses an ungranted chain while locked", async () => {
+    lockState.isLocked = true;
+    vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+      urlOrigin: ORIGIN,
+      accounts: [ACCOUNT],
+      blockchains: [],
+      permissions: [],
+    });
+
+    const result = await revalidateAuthorizedDAppRequest({
+      method: RESTRICTED_METHODS.QRL_SIGN_MESSAGE,
+      params: [ACCOUNT, "0xdeadbeef"],
+      requestId: "request-id",
+      authorizedChainId: "0x301825",
+      requestData: { senderData: { url: `${ORIGIN}/request` } },
+    });
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("not authorized to use");
+  });
+
+  it("revalidation after unlock refuses an unauthorized account", async () => {
+    const result = await revalidateAuthorizedDAppRequest({
+      method: RESTRICTED_METHODS.QRL_SEND_TRANSACTION,
+      params: [{ from: UNAUTHORIZED_ACCOUNT }],
+      requestId: "request-id",
+      authorizedChainId: "0x301825",
+      requestData: { senderData: { url: `${ORIGIN}/request` } },
+    });
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("has not been authorized");
+  });
+
+  it("revalidation after unlock refuses an ungranted chain", async () => {
+    vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+      urlOrigin: ORIGIN,
+      accounts: [ACCOUNT],
+      blockchains: [],
+      permissions: [],
+    });
+
+    const result = await revalidateAuthorizedDAppRequest({
+      method: RESTRICTED_METHODS.QRL_SIGN_MESSAGE,
+      params: [ACCOUNT, "0xdeadbeef"],
+      requestId: "request-id",
+      authorizedChainId: "0x301825",
+      requestData: { senderData: { url: `${ORIGIN}/request` } },
+    });
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("not authorized to use");
   });
 });

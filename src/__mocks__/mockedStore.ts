@@ -162,7 +162,10 @@ const mockedStoreValues: StoreType = {
     hasDAppRequest: true,
     responseData: {},
     canProceed: false,
-    onPermissionCallBack: async (_hasApproved: boolean) => {},
+    onPermissionCallBack: async (
+      _hasApproved: boolean,
+      _record: (data: Record<string, unknown>) => void,
+    ) => {},
     approvalProcessingStatus: {
       hasApproved: false,
       isProcessing: false,
@@ -172,7 +175,10 @@ const mockedStoreValues: StoreType = {
     addToResponseData: (_data: any) => {},
     setCanProceed: (_decision: boolean) => {},
     setOnPermissionCallBack: (
-      _callBack: (hasApproved: boolean) => Promise<void>,
+      _callBack: (
+        hasApproved: boolean,
+        record: (data: Record<string, unknown>) => void,
+      ) => Promise<void>,
     ) => {},
     setApprovalProcessingStatus: async (_status: {
       isProcessing?: boolean;
@@ -180,6 +186,7 @@ const mockedStoreValues: StoreType = {
       hasCompleted?: boolean;
     }) => {},
     onPermission: async (_hasApproved: boolean) => {},
+    reportPendingTransactionHash: async (_transactionHash: string) => {},
     fetchCurrentTabData: async () => {},
     disconnectFromCurrentTab: async () => {},
   } as unknown as DAppRequestStore,
@@ -193,14 +200,12 @@ const mockedStoreValues: StoreType = {
     },
     encryptAccount: async (
       _account: Web3BaseWalletAccount,
-      _password: string,
+      _password?: string,
     ) => {},
     initialize: () => {},
     lock: async () => {},
     initializeStorageListener: () => {},
-    getWalletPassword: async () => {
-      return "test-password";
-    },
+    ensureWalletPassword: async () => {},
     getMnemonicPhrases: async (accountAddress: string) => {
       return accountAddress;
     },

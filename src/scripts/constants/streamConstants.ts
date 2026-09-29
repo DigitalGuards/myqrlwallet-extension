@@ -9,6 +9,17 @@ export const EXTENSION_MESSAGES = {
   CONNECTION_READY: "QRL_WALLET_CONNECTION_READY",
   READY: "QRL_WALLET_EXTENSION_READY",
   DAPP_RESPONSE: "QRL_WALLET_DAPP_RESPONSE",
+  // Posted by the approval surface the moment the user clicks Approve or
+  // Reject, carrying the same requestId the eventual DAPP_RESPONSE will
+  // carry. It tells the middleware that the wallet is now doing real work
+  // for this request, so the idle approval timeout has to stand down: a
+  // timeout that fires while a signature and broadcast are in flight
+  // answers the dApp 4001 for a transaction that is about to land.
+  DAPP_REQUEST_IN_PROGRESS: "QRL_WALLET_DAPP_REQUEST_IN_PROGRESS",
+  // The hash of the transaction an approval is about to broadcast, posted
+  // before the broadcast leaves. It lets the worker name the transaction in
+  // an answer it has to give without the surface, and watch for it landing.
+  DAPP_REQUEST_PENDING_TRANSACTION: "QRL_WALLET_DAPP_REQUEST_PENDING_TX",
   // Side-panel gesture roundtrip. The service worker asks the requesting tab
   // for its user activation, and the frame that holds it answers; see
   // scripts/utils/sidePanelSurface.ts.

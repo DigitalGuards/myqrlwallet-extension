@@ -64,7 +64,7 @@ const ImportAccount = observer(() => {
   // button belongs on it.
   const [duplicateNotice, setDuplicateNotice] = useState("");
   const { lockStore, qrlStore, accountLabelsStore } = useStore();
-  const { encryptAccount, getWalletPassword } = lockStore;
+  const { encryptAccount, ensureWalletPassword } = lockStore;
   const { setActiveAccount, qrlAccounts } = qrlStore;
 
   // Shared finalize step for every import path (mnemonic, hex seed, wallet
@@ -91,8 +91,8 @@ const ImportAccount = observer(() => {
     }
     setDuplicateNotice("");
     pendingAccountRef.current = importedAccount;
-    // Fail closed before any write. getWalletPassword() throws whenever the
-    // service worker is locked - including a stale popup-side isLocked
+    // Fail closed before any write. ensureWalletPassword() throws whenever
+    // the service worker is locked - including a stale popup-side isLocked
     // observable racing an actual SW restart (see SessionPasswordPrompt's
     // doc comment). Writing the account pointer first left that address in
     // the accounts list with no keystore, so the import both reported
@@ -100,9 +100,8 @@ const ImportAccount = observer(() => {
     // SessionPasswordPrompt below re-arms the session and this same
     // function runs again with the same account, so the import completes
     // in place.
-    let password: string;
     try {
-      password = await getWalletPassword();
+      await ensureWalletPassword();
     } catch {
       setNeedsReArm(true);
       setNeedsRetry(false);
@@ -111,9 +110,11 @@ const ImportAccount = observer(() => {
     }
     setAccount(importedAccount);
     try {
-      await encryptAccount(importedAccount, password);
+      // No password on the wire: the service worker encrypts with the one
+      // its unlock session already holds.
+      await encryptAccount(importedAccount);
     } catch (error) {
-      // getWalletPassword() already confirmed a usable password moments
+      // ensureWalletPassword() already confirmed a usable password moments
       // ago (N11): a failure here has some other cause, so this shows the
       // real error behind a plain Retry button (R1). A re-arm prompt here
       // would only re-confirm the same already-usable password.

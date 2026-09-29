@@ -31,26 +31,10 @@ import LockManager from "../lockManager/lockManager";
 // Exported for dAppTransactionWatcher.ts, which needs the same
 // service-worker-only, CORS-exempt RPC access to poll receipts.
 export const getQrlProperties = async () => {
-  const { defaultRpcUrl, defaultWsRpcUrl } =
-    await StorageUtil.getActiveBlockChain();
+  const { defaultRpcUrl } = await StorageUtil.getActiveBlockChain();
   const qrlHttpProvider = new Web3.providers.HttpProvider(defaultRpcUrl);
   const { provider, qrl } = new Web3({ provider: qrlHttpProvider });
-  return { provider, qrl, defaultWsRpcUrl };
-};
-
-// Plain fetch instead of axios: XMLHttpRequest does not exist in MV3
-// service workers, so axios' default browser adapter is unusable here.
-const postJson = async (
-  url: string,
-  body: unknown,
-): Promise<Record<string, unknown> | null> => {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) return null;
-  return (await response.json()) as Record<string, unknown>;
+  return { provider, qrl };
 };
 
 export const executeUnrestrictedMethod = async (
@@ -76,7 +60,7 @@ export const executeUnrestrictedMethod = async (
       genesisHash: V3_GENESIS_HASH,
     };
   }
-  const { provider, qrl, defaultWsRpcUrl } = await getQrlProperties();
+  const { provider, qrl } = await getQrlProperties();
   const method = req.method;
   if (method === UNRESTRICTED_METHODS.QRL_GET_BLOCK_BY_NUMBER) {
     // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
@@ -103,11 +87,18 @@ export const executeUnrestrictedMethod = async (
     // initial-state response.
     const connectedAccountsData =
       await StorageUtil.getDAppsConnectedAccountsData(urlOrigin);
+    // MetaMask parity (F8): the initial provider state must agree with
+    // qrl_accounts. It previously reported isUnlocked: false unconditionally
+    // while still handing back the stored account list, so a page had no way
+    // to tell a locked wallet from an unlocked one. Every write path
+    // re-checks the lock state on its own, so a page holding a stale account
+    // list cannot act on it; this is a disclosure fix.
+    const { isLocked } = await LockManager.isLocked();
     return {
       chainId: `0x${chainId.toString(16)}`,
       networkVersion,
-      isUnlocked: false,
-      accounts: connectedAccountsData?.accounts ?? [],
+      isUnlocked: !isLocked,
+      accounts: isLocked ? [] : (connectedAccountsData?.accounts ?? []),
     } as Parameters<BaseProvider["_initializeState"]>[0];
   } else if (method === UNRESTRICTED_METHODS.QRL_SYNCING) {
     const isSyncing = await qrl.isSyncing();
@@ -120,12 +111,14 @@ export const executeUnrestrictedMethod = async (
     );
     return isSuccess;
   } else if (method === UNRESTRICTED_METHODS.QRL_UNSUBSCRIBE) {
-    const params = req?.params;
-    const data = await postJson(`${defaultWsRpcUrl}/qrl_unsubscribe`, {
-      params,
-    });
-    const unsubscribed = data?.unsubscribed as boolean;
-    return unsubscribed;
+    // The wallet has no websocket transport, so there is no subscription to
+    // cancel. The former implementation POSTed the page's params at a
+    // configurable base URL that defaulted to loopback, which let any site
+    // drive the service worker into talking to a local service. The
+    // middleware turns this throw into EIP-1193 4200.
+    throw new Error(
+      "qrl_unsubscribe is not supported by this wallet. Use the qrl_newFilter family for event polling.",
+    );
   } else if (method === UNRESTRICTED_METHODS.NET_VERSION) {
     const networkId = await qrl.net.getId();
     return "0x".concat(networkId.toString(16));
@@ -143,6 +136,11 @@ export const executeUnrestrictedMethod = async (
       );
     return connectedAccountsData?.accounts ?? [];
   } else if (method === UNRESTRICTED_METHODS.WALLET_GET_PERMISSIONS) {
+    // The permission caveats carry the connected account addresses, so a
+    // locked wallet answers with an empty permission list for the same
+    // reason qrl_accounts answers with an empty array.
+    const { isLocked } = await LockManager.isLocked();
+    if (isLocked) return [];
     const dAppsConnectedAccountsData =
       await StorageUtil.getDAppsConnectedAccountsData(
         new URL(req?.senderData?.url ?? "").origin,
@@ -209,16 +207,14 @@ export const executeUnrestrictedMethod = async (
       ?.transactionHash;
     return transactionHash;
   } else if (method === UNRESTRICTED_METHODS.QRL_SUBSCRIBE) {
-    const params = req.params;
-    const subscriptionParams =
-      Array.isArray(params) && params[0] === "logs"
-        ? [params[0], prepareQip55LogFilter(params[1] ?? {})]
-        : params;
-    const data = await postJson(`${defaultWsRpcUrl}/qrl_subscribe`, {
-      params: subscriptionParams,
-    });
-    const subscriptionId = data?.subscriptionId as string;
-    return subscriptionId;
+    // Websocket subscriptions were never wired to a real JSON-RPC transport:
+    // the old code POSTed the page's params at a configurable base URL that
+    // defaulted to loopback and expected a bespoke {subscriptionId} reply.
+    // That gave any site a way to make the service worker POST chosen JSON
+    // at a local service. The middleware turns this throw into EIP-1193 4200.
+    throw new Error(
+      "qrl_subscribe is not supported by this wallet. Use the qrl_newFilter family for event polling.",
+    );
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_BY_HASH) {
     const [txHashForTransactionByHash] = req.params;
     const transactionDetails = await qrl.getTransaction(

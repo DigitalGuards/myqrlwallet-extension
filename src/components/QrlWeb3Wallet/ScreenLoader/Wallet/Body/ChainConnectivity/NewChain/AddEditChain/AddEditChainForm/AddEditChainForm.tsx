@@ -146,7 +146,9 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
       defaultBlockExplorerUrl,
       defaultIconUrl,
       isTestnet: false,
-      defaultWsRpcUrl: "http://127.0.0.1:8545",
+      // Retained for the stored chain record shape. The wallet issues no
+      // request to this URL, so a custom chain gets no websocket default.
+      defaultWsRpcUrl: "",
       isCustomChain: true,
       qrnsRegistryAddress: qrnsRegistryAddress || undefined,
     };

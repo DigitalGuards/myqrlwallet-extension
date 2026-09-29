@@ -16,6 +16,10 @@ const REPO_ROOT = path.resolve(
 const EXTENSION_PATH = path.join(REPO_ROOT, "Extension");
 
 // Public deterministic fixture from canonical.json. Never fund this account.
+// The hex seed below derives exactly this address, so the onboarding import
+// this spec runs ends up holding the account the seeded grant names.
+const TEST_ONLY_HEX_SEED =
+  "0x0100000580a227e1b6d5a89df7723a71e9c03535e9447ec6d160b68c0ba845c68a05c59226cce711eb3db312c022ccf9577be7";
 const CHECKSUM_ACCOUNT =
   "Q6aFB7dFC849bC16E439033DfEE7B296484619Db8fc7e3b7c20a1b1688B128259338aFfd79b7cdda8F28509607bc26eB67a4799Ae457Ec82b57A6a57dea04C194";
 const PROFILE_PREFIX =
@@ -264,9 +268,10 @@ test("provider survives a back/forward-cache round trip", async () => {
     const serviceWorker =
       context.serviceWorkers()[0] ??
       (await context.waitForEvent("serviceworker"));
+    const extensionId = new URL(serviceWorker.url()).host;
     // Seeding the connected-dApp record directly keeps this spec off the
-    // onboarding and approval flows that quantaSwapLifecycle.spec.ts covers;
-    // all this one needs is an origin the provider reports as connected.
+    // approval flow that quantaSwapLifecycle.spec.ts covers; all this one
+    // needs is an origin the provider reports as connected.
     await serviceWorker.evaluate(
       async ({ rpcUrl, origin, account, prefix }) => {
         await chrome.storage.local.set({
@@ -317,6 +322,36 @@ test("provider survives a back/forward-cache round trip", async () => {
         prefix: PROFILE_PREFIX,
       },
     );
+
+    // The grant is seeded, but a locked wallet reports no accounts to the
+    // page, exactly as qrl_accounts does. Onboarding the seeded account
+    // unlocks the wallet, which is what puts the address in front of the
+    // dApp and makes the revocation later in this test a real change.
+    const extensionPage = await context.newPage();
+    await extensionPage.goto(
+      `chrome-extension://${extensionId}/index.html?tab=true`,
+    );
+    await extensionPage.getByRole("button", { name: "Continue" }).click();
+    await extensionPage
+      .getByLabel("password", { exact: true })
+      .fill("e2e-password-only");
+    await extensionPage
+      .getByLabel("reEnteredPassword")
+      .fill("e2e-password-only");
+    await extensionPage.getByRole("button", { name: "Continue" }).click();
+    await extensionPage
+      .getByRole("button", { name: "Import an existing account" })
+      .click();
+    await extensionPage.getByRole("tab", { name: "Hex seed" }).click();
+    await extensionPage
+      .getByRole("textbox", { name: "hexSeed" })
+      .fill(TEST_ONLY_HEX_SEED);
+    await extensionPage.getByRole("button", { name: "Import account" }).click();
+    await extensionPage.getByRole("button", { name: "Continue" }).click();
+    await expect(
+      extensionPage.getByRole("heading", { name: "That's All" }),
+    ).toBeVisible();
+    await extensionPage.close();
 
     const dAppPage = await context.newPage();
     await dAppPage.goto(`${fixture.origin}/dapp`);

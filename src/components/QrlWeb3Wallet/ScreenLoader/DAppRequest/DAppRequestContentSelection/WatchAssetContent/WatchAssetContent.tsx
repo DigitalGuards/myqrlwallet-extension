@@ -1,6 +1,7 @@
 import { Button } from "@/components/UI/Button";
 import { Card, CardContent, CardFooter } from "@/components/UI/Card";
 import { useStore } from "@/stores/store";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { Check, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -19,7 +20,6 @@ const WatchAssetContent = observer(() => {
     approvalProcessingStatus,
     setOnPermissionCallBack,
     dAppRequestData,
-    addToResponseData,
   } = dAppRequestStore;
   const { isProcessing } = approvalProcessingStatus;
 
@@ -27,7 +27,10 @@ const WatchAssetContent = observer(() => {
   const tokenContract = paramsObject?.options;
 
   const addBlockchain = async () => {
-    const onPermissionCallBack = async (hasApproved: boolean) => {
+    const onPermissionCallBack = async (
+      hasApproved: boolean,
+      record: ResponseRecorder,
+    ) => {
       if (hasApproved) {
         await StorageUtil.setTokenContractsList(accountAddress, {
           address: tokenContract?.address ?? "",
@@ -35,7 +38,7 @@ const WatchAssetContent = observer(() => {
           decimals: parseInt(tokenContract?.decimals ?? 0),
           image: tokenContract?.image ?? "",
         });
-        addToResponseData({ result: true });
+        record({ result: true });
       }
     };
     setOnPermissionCallBack(onPermissionCallBack);
@@ -48,12 +51,12 @@ const WatchAssetContent = observer(() => {
         <ChainBadge isDisabled={true} />
       </div>
       <div className="p-6">
-        <div>{t('dapp.watchAsset.description')}</div>
+        <div>{t("dapp.watchAsset.description")}</div>
       </div>
       <CardContent className="space-y-6">
         <WatchAssetInfo />
         <WatchAssetVerification />
-        <div className="font-bold">{t('dapp.watchAsset.question')}</div>
+        <div className="font-bold">{t("dapp.watchAsset.question")}</div>
       </CardContent>
       <CardFooter className="grid grid-cols-2 gap-4">
         <Button
@@ -65,7 +68,7 @@ const WatchAssetContent = observer(() => {
           onClick={() => onPermission(false)}
         >
           <X className="mr-2 h-4 w-4" />
-          {t('dapp.no')}
+          {t("dapp.no")}
         </Button>
         <Button
           className="w-full"
@@ -75,7 +78,7 @@ const WatchAssetContent = observer(() => {
           onClick={() => addBlockchain()}
         >
           <Check className="mr-2 h-4 w-4" />
-          {t('dapp.yes')}
+          {t("dapp.yes")}
         </Button>
       </CardFooter>
     </Card>

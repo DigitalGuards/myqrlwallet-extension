@@ -16,6 +16,7 @@ import {
 } from "@/functions/describeExtensionError";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { Copy } from "lucide-react";
@@ -128,8 +129,8 @@ const QrlSendTransactionForContent = observer(
     const {
       dAppRequestData,
       setOnPermissionCallBack,
+      reportPendingTransactionHash,
       setCanProceed,
-      addToResponseData,
     } = dAppRequestStore;
 
     const params = dAppRequestData?.params[0];
@@ -141,18 +142,21 @@ const QrlSendTransactionForContent = observer(
 
     useEffect(() => {
       if (isConnected) {
-        const onPermissionCallBack = async (hasApproved: boolean) => {
+        const onPermissionCallBack = async (
+          hasApproved: boolean,
+          record: ResponseRecorder,
+        ) => {
           if (hasApproved) {
             const authorization =
               await revalidateAuthorizedDAppRequest(dAppRequestData);
             if (!authorization.canProceed) {
-              addToResponseData({ error: authorization.proceedError });
+              record({ error: authorization.proceedError });
               return;
             }
             if (transactionType === SEND_TRANSACTION_TYPES.QRL_TRANSFER) {
-              await sendZndTransfer();
+              await sendZndTransfer(record);
             } else {
-              await deployContractOrInteract();
+              await deployContractOrInteract(record);
             }
           }
         };
@@ -417,7 +421,7 @@ const QrlSendTransactionForContent = observer(
       });
     };
 
-    const deployContractOrInteract = async () => {
+    const deployContractOrInteract = async (record: ResponseRecorder) => {
       const request = dAppRequestData?.params?.[0];
       // Hoisted above the try so the catch block can still record a pending
       // entry for a TransactionMayStillBeProcessingError (the broadcast
@@ -521,12 +525,16 @@ const QrlSendTransactionForContent = observer(
         }
 
         if (rawTransactionToSend && precomputedHash) {
+          // The worker learns the hash before the broadcast leaves, so an
+          // approval that loses its surface mid-flight can still name the
+          // transaction in its answer and watch for it on chain.
+          await reportPendingTransactionHash(precomputedHash);
           const transactionHash = await broadcastTransaction(
             rawTransactionToSend,
             transactionObject,
             precomputedHash,
           );
-          addToResponseData({ transactionHash });
+          record({ transactionHash });
           await recordPendingTransactionForRequest(
             transactionObject,
             transactionHash,
@@ -545,11 +553,11 @@ const QrlSendTransactionForContent = observer(
           // dApp response.
           setIsWalletLocked(true);
           void readLockState();
-          addToResponseData({ error: walletLockedProviderError() });
+          record({ error: walletLockedProviderError() });
           return;
         }
         if (error instanceof TransactionMayStillBeProcessingError) {
-          addToResponseData({ error });
+          record({ error });
           if (pendingTransactionObject) {
             await recordPendingTransactionForRequest(
               pendingTransactionObject,
@@ -559,7 +567,7 @@ const QrlSendTransactionForContent = observer(
           }
           return;
         }
-        addToResponseData({ error });
+        record({ error });
         console.error(
           transactionType === SEND_TRANSACTION_TYPES.CONTRACT_DEPLOYMENT
             ? "Contract deployment failed:"
@@ -569,7 +577,7 @@ const QrlSendTransactionForContent = observer(
       }
     };
 
-    const sendZndTransfer = async () => {
+    const sendZndTransfer = async (record: ResponseRecorder) => {
       const request = dAppRequestData?.params?.[0];
       // Hoisted above the try for the same reason as in
       // deployContractOrInteract: the catch block needs it for a
@@ -679,12 +687,16 @@ const QrlSendTransactionForContent = observer(
         }
 
         if (rawTransactionToSend && precomputedHash) {
+          // The worker learns the hash before the broadcast leaves, so an
+          // approval that loses its surface mid-flight can still name the
+          // transaction in its answer and watch for it on chain.
+          await reportPendingTransactionHash(precomputedHash);
           const transactionHash = await broadcastTransaction(
             rawTransactionToSend,
             transactionObject,
             precomputedHash,
           );
-          addToResponseData({ transactionHash });
+          record({ transactionHash });
           await recordPendingTransactionForRequest(
             transactionObject,
             transactionHash,
@@ -703,11 +715,11 @@ const QrlSendTransactionForContent = observer(
           // dApp response.
           setIsWalletLocked(true);
           void readLockState();
-          addToResponseData({ error: walletLockedProviderError() });
+          record({ error: walletLockedProviderError() });
           return;
         }
         if (error instanceof TransactionMayStillBeProcessingError) {
-          addToResponseData({ error });
+          record({ error });
           if (pendingTransactionObject) {
             await recordPendingTransactionForRequest(
               pendingTransactionObject,
@@ -717,7 +729,7 @@ const QrlSendTransactionForContent = observer(
           }
           return;
         }
-        addToResponseData({ error });
+        record({ error });
         console.error("QRL Transfer failed:", error);
       }
     };

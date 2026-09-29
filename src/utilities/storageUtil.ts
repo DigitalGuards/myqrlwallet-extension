@@ -624,6 +624,26 @@ class StorageUtil {
       | undefined;
   }
 
+  /**
+   * Clear the pending dApp request only while the slot still holds the
+   * given request. Anything that resolves an approval asynchronously (the
+   * approval surface after its callback, the middleware's timeouts) can
+   * finish after a newer request has taken the slot, and an unconditional
+   * clear there wipes the request the user is currently looking at.
+   *
+   * An undefined requestId falls back to the unconditional clear so callers
+   * from before requestIds existed keep working.
+   */
+  static async clearDAppsRequestDataForRequestId(requestId?: string) {
+    if (requestId === undefined) {
+      await this.clearDAppsRequestData();
+      return;
+    }
+    const storedDAppsRequestData = await this.getDAppsRequestData();
+    if (storedDAppsRequestData?.requestId !== requestId) return;
+    await this.clearDAppsRequestData();
+  }
+
   static async clearDAppsRequestData() {
     const storedDAppsRequestData =
       (await walletSessionStorage.get(DAPPS_IDENTIFIER))?.[DAPPS_IDENTIFIER] ??

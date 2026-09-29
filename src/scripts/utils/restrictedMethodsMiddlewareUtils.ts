@@ -20,6 +20,52 @@ import {
   Permission,
 } from "../middlewares/middlewareTypes";
 import { registerDAppTransactionWatch } from "./dAppTransactionWatcher";
+import LockManager from "../lockManager/lockManager";
+
+/**
+ * The single answer every authorization precheck gives while the wallet is
+ * locked. It carries no address, no chain and no connection state, so it
+ * reads the same for an authorized address, an unauthorized one and an
+ * origin with no grant at all.
+ */
+const LOCKED_WALLET_REFUSAL_MESSAGE =
+  "The wallet is locked. Unlock it and try again.";
+
+const buildLockedWalletRefusal = () => ({
+  canProceed: false,
+  proceedError: providerErrors.unauthorized({
+    message: LOCKED_WALLET_REFUSAL_MESSAGE,
+  }),
+});
+
+/**
+ * A locked wallet has to answer an authorization precheck identically for an
+ * authorized and an unauthorized origin or address. `qrl_accounts`, the
+ * provider state and `wallet_getPermissions` all report nothing while
+ * locked, so a precheck that refused an unauthorized address outright and
+ * opened a prompt for an authorized one handed the page an oracle for its
+ * own grants through a method it cannot complete anyway (L6).
+ *
+ * The equality is kept by refusing every locked precheck with one shared
+ * error (L-1). No approval surface opens, so a page cannot raise the unlock
+ * screen on demand either. A legitimate dApp re-sends the request once the
+ * user has unlocked the wallet by hand.
+ *
+ * @param enforceWhileLocked true for post-approval revalidation, which runs
+ * after the user unlocked and decides whether a signature happens, so it
+ * answers strictly on the stored grants whatever the lock state says.
+ */
+const shouldRefuseWhileLocked = async (
+  enforceWhileLocked: boolean,
+): Promise<boolean> => {
+  if (enforceWhileLocked) return false;
+  try {
+    return (await LockManager.isLocked()).isLocked;
+  } catch {
+    // An unreadable lock state fails closed: refuse.
+    return true;
+  }
+};
 
 const getFromAddress = (req: JsonRpcRequest<JsonRpcRequest>) => {
   switch (req.method) {
@@ -40,7 +86,13 @@ const getFromAddress = (req: JsonRpcRequest<JsonRpcRequest>) => {
 
 export const checkAccountHasBeenAuthorized = async (
   req: JsonRpcRequest<JsonRpcRequest>,
+  enforceWhileLocked = false,
 ) => {
+  // First, and before anything derived from the request is read, so the
+  // locked answer is the same for every origin and every address (L6/L-1).
+  if (await shouldRefuseWhileLocked(enforceWhileLocked)) {
+    return buildLockedWalletRefusal();
+  }
   const fromAddress = getFromAddress(req);
   const urlOrigin = new URL(req?.senderData?.url ?? "").origin;
   const connectedAccounts =
@@ -100,8 +152,15 @@ const getTypedDataChainId = (req: JsonRpcRequest<JsonRpcRequest>) => {
 export const checkAccountAndChainHaveBeenAuthorized = async (
   req: JsonRpcRequest<JsonRpcRequest>,
   expectedChainId?: string,
+  enforceWhileLocked = false,
 ) => {
-  const accountResult = await checkAccountHasBeenAuthorized(req);
+  // The account check leads, and it carries the locked-wallet refusal, so a
+  // locked wallet returns that one shared error here before any part of the
+  // request is inspected (L6/L-1).
+  const accountResult = await checkAccountHasBeenAuthorized(
+    req,
+    enforceWhileLocked,
+  );
   if (!accountResult.canProceed) return accountResult;
 
   if (req.method === RESTRICTED_METHODS.QRL_SEND_TRANSACTION) {
@@ -201,6 +260,9 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
     };
   }
 
+  // A locked wallet never reaches this point: the account check above
+  // returns the shared locked refusal for every origin, so the per-origin
+  // chain grant is only ever read on an unlocked wallet (L6/L-1).
   const isAuthorized = (connectedData?.blockchains ?? []).some(
     (chain) => normalizeChainId(chain.chainId) === effectiveChainId,
   );
@@ -245,6 +307,11 @@ export const revalidateAuthorizedDAppRequest = async (
     };
   }
 
+  // enforceWhileLocked: the precheck answers every origin with one shared
+  // refusal while the wallet is locked, so a page cannot probe its grants
+  // (L6/L-1). This runs after the user unlocked and decides whether a
+  // signature happens, so it skips that gate and answers strictly on the
+  // stored grants whatever the lock state reads.
   const authorization = await checkAccountAndChainHaveBeenAuthorized(
     {
       id: request.requestId,
@@ -254,6 +321,7 @@ export const revalidateAuthorizedDAppRequest = async (
       senderData: request.requestData.senderData,
     } as JsonRpcRequest<JsonRpcRequest>,
     request.authorizedChainId,
+    true,
   );
   if (!authorization.canProceed) return authorization;
   try {
@@ -286,10 +354,84 @@ export const revalidateAuthorizedDAppRequest = async (
       senderData: request.requestData.senderData,
     } as JsonRpcRequest<JsonRpcRequest>,
     request.authorizedChainId,
+    true,
   );
 };
 
-const isAcceptableUrl = (urlString: string) => {
+/** IPv4 addresses that resolve inside the user's own machine or network. */
+const isPrivateIpv4Address = (address: string): boolean => {
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(address);
+  if (!ipv4) return false;
+  const [first, second] = ipv4.slice(1).map(Number);
+  if (first === 127 || first === 0 || first === 10) return true;
+  if (first === 169 && second === 254) return true;
+  if (first === 192 && second === 168) return true;
+  if (first === 172 && second >= 16 && second <= 31) return true;
+  // Carrier-grade NAT (100.64.0.0/10, RFC 6598): shared address space on
+  // the provider side of the user's router, reachable from the machine the
+  // wallet runs on and never a public RPC endpoint.
+  if (first === 100 && second >= 64 && second <= 127) return true;
+  return false;
+};
+
+/**
+ * The IPv4 address embedded in an IPv4-mapped IPv6 literal, in dotted form.
+ * The URL parser rewrites `[::ffff:127.0.0.1]` to `[::ffff:7f00:1]`, so the
+ * hex-group spelling has to be recognised alongside the dotted one. The
+ * leading run of zero hextets covers the fully written
+ * `0:0:0:0:0:ffff:127.0.0.1`, and the optional zero hextet after `ffff:`
+ * covers the IPv4-translated `::ffff:0:0/96` form.
+ */
+const getIpv4MappedAddress = (host: string): string | undefined => {
+  const mapped = /^(?:0{1,4}:){0,5}:{0,2}ffff:(?:0{1,4}:)?(.+)$/.exec(host);
+  if (!mapped) return undefined;
+  const tail = mapped[1];
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(tail)) return tail;
+  const hexPair = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(tail);
+  if (!hexPair) return undefined;
+  const high = parseInt(hexPair[1], 16);
+  const low = parseInt(hexPair[2], 16);
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
+};
+
+/**
+ * Hosts that resolve inside the user's own machine or LAN. A dApp-supplied
+ * RPC URL pointing at one of these turns the wallet into a proxy the page
+ * can aim at services it cannot reach itself, so only a chain the user adds
+ * in the wallet's own form may use them.
+ */
+const isPrivateOrLoopbackHost = (hostname: string): boolean => {
+  // A trailing dot makes the name absolute, so `localhost.` and
+  // `printer.local.` resolve exactly like their dotless spellings while
+  // slipping past every equality and suffix test below (L5).
+  const host = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.+$/, "");
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (host.endsWith(".local") || host.endsWith(".internal")) return true;
+  if (host === "::1" || host === "::" || host === "0.0.0.0") return true;
+  // IPv6 unique-local (fc00::/7, so a first hextet of fc00 through fdff)
+  // and link-local (fe80::/10, so fe80 through febf).
+  if (/^f[cd][0-9a-f]{2}:/.test(host)) return true;
+  if (/^fe[89ab][0-9a-f]:/.test(host)) return true;
+  // The NAT64 well-known prefix (64:ff9b::/96 and 64:ff9b:1::/48, RFC 6052
+  // and RFC 8215) carries an embedded IPv4 destination, so a host inside it
+  // reaches whatever that IPv4 address reaches.
+  if (/^64:ff9b:/.test(host)) return true;
+  // An IPv4-mapped literal reaches the embedded IPv4 address, so it has to
+  // answer to the IPv4 rules.
+  const mappedIpv4 = getIpv4MappedAddress(host);
+  if (mappedIpv4 !== undefined) return isPrivateIpv4Address(mappedIpv4);
+  return isPrivateIpv4Address(host);
+};
+
+/**
+ * @param allowPrivateHosts true only for the wallet's own add-chain form,
+ * where the user typed the URL themselves and running a local node is a
+ * legitimate thing to want.
+ */
+const isAcceptableUrl = (urlString: string, allowPrivateHosts = false) => {
   try {
     const url = new URL(urlString);
 
@@ -302,14 +444,38 @@ const isAcceptableUrl = (urlString: string) => {
       return false;
     }
 
-    return (
-      url.hostname === "localhost" ||
-      url.hostname === "127.0.0.1" ||
-      url.protocol === "https:"
-    );
+    if (isPrivateOrLoopbackHost(url.hostname)) {
+      return (
+        allowPrivateHosts &&
+        (url.protocol === "http:" || url.protocol === "https:")
+      );
+    }
+
+    return url.protocol === "https:";
   } catch {
     return false;
   }
+};
+
+/**
+ * The URL the wallet will actually talk to for a newly added chain. EIP-3085
+ * treats rpcUrls as a preference-ordered list, so this walks it in order and
+ * takes the first entry the wallet is willing to use. Taking rpcUrls[0]
+ * blindly let a page pass validation on a later, acceptable entry while the
+ * wallet adopted an unacceptable first one.
+ */
+export const pickDefaultRpcUrl = (
+  rpcUrls: unknown,
+  allowPrivateHosts = false,
+): string => {
+  if (!Array.isArray(rpcUrls)) return "";
+  return (
+    rpcUrls.find(
+      (rpcUrl): rpcUrl is string =>
+        typeof rpcUrl === "string" &&
+        isAcceptableUrl(rpcUrl, allowPrivateHosts),
+    ) ?? ""
+  );
 };
 
 export const checkWalletAddQrlChainParams = async (
@@ -394,16 +560,20 @@ export const checkWalletAddQrlChainParams = async (
   }
 
   const rpcUrls = chainData?.rpcUrls;
+  // Every entry has to be acceptable, because the wallet keeps the whole
+  // list and can fall back to any of them. Accepting the list as soon as one
+  // entry passed let a page smuggle a loopback or plain-http endpoint in
+  // beside a presentable https one.
   if (
     !rpcUrls ||
     !Array.isArray(rpcUrls) ||
     rpcUrls.length === 0 ||
-    !rpcUrls.find((rpcUrl) => isAcceptableUrl(rpcUrl))
+    !rpcUrls.every((rpcUrl) => isAcceptableUrl(rpcUrl, hasInternalKeys))
   ) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
-        message: `Expected an array with at least one valid string HTTPS url 'rpcUrls', Received: ${rpcUrls}`,
+        message: `Expected an array of HTTPS urls on a public host for 'rpcUrls'. Received: ${rpcUrls}`,
       }),
     };
   }
@@ -482,7 +652,27 @@ export const checkWalletAddQrlChainParams = async (
   };
 };
 
-export const checkUrlOriginHasBeenConnected = async (url: string) => {
+/**
+ * The connection gate `wallet_addQRLChain`, `wallet_getCapabilities` and
+ * `wallet_switchQRLChain` run before their own parameter checks, and its
+ * refusal names the connection state. With `refuseWhileLocked` those three
+ * answer a locked wallet with the shared locked refusal (L6/L-1): none of
+ * them can do useful work while locked, and a page must learn nothing about
+ * its grants from any of them.
+ *
+ * `qrl_accounts` uses this same gate and must keep its own locked answer,
+ * the empty array EIP-1193 clients expect (F8, unrestrictedMethodExecutor),
+ * so the flag is off by default and that caller is left alone.
+ *
+ * @param refuseWhileLocked true for the restricted-method connection gate.
+ */
+export const checkUrlOriginHasBeenConnected = async (
+  url: string,
+  refuseWhileLocked = false,
+) => {
+  if (refuseWhileLocked && (await shouldRefuseWhileLocked(false))) {
+    return buildLockedWalletRefusal();
+  }
   const urlOrigin = new URL(url).origin;
   const connectedAccounts =
     (await StorageUtil.getDAppsConnectedAccountsData(urlOrigin))?.accounts ??

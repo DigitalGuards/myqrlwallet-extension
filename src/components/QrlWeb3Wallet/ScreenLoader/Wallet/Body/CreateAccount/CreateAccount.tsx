@@ -29,7 +29,7 @@ const SeedBackup = withSuspense(
 const CreateAccount = observer(() => {
   const { t } = useTranslation();
   const { lockStore, qrlStore, accountLabelsStore } = useStore();
-  const { encryptAccount, getWalletPassword } = lockStore;
+  const { encryptAccount, ensureWalletPassword } = lockStore;
   const { setActiveAccount } = qrlStore;
 
   const [account, setAccount] = useState<Web3BaseWalletAccount>();
@@ -52,14 +52,14 @@ const CreateAccount = observer(() => {
     scrollShellToTop();
     if (!created) return;
     pendingCreatedAccountRef.current = created;
-    // Fail closed before showing anything: with no cached password (SW
-    // restarted) the account could never be stored, so do not walk the
-    // user through a backup that ends in an error. F1: the inline
-    // SessionPasswordPrompt re-arms the session and this function runs
-    // again with the same generated account, which keeps it in play for
-    // the backup step that follows.
+    // Fail closed before showing anything: with no session password left
+    // in the service worker (it restarted) the account could never be
+    // stored, so do not walk the user through a backup that ends in an
+    // error. F1: the inline SessionPasswordPrompt re-arms the session and
+    // this function runs again with the same generated account, which
+    // keeps it in play for the backup step that follows.
     try {
-      await getWalletPassword();
+      await ensureWalletPassword();
     } catch {
       setNeedsReArmOnStart(true);
       setStartError(t("account.sessionPasswordExpired"));
@@ -79,9 +79,8 @@ const CreateAccount = observer(() => {
 
   const onBackupConfirmed = async () => {
     if (!account) return;
-    let password: string;
     try {
-      password = await getWalletPassword();
+      await ensureWalletPassword();
     } catch {
       setNeedsReArmOnPersist(true);
       setNeedsRetryOnPersist(false);
@@ -89,9 +88,11 @@ const CreateAccount = observer(() => {
       return;
     }
     try {
-      await encryptAccount(account, password);
+      // No password on the wire: the service worker encrypts with the one
+      // its unlock session already holds.
+      await encryptAccount(account);
     } catch (error) {
-      // getWalletPassword() already confirmed a usable password moments
+      // ensureWalletPassword() already confirmed a usable password moments
       // ago (N11): a failure here has some other cause, so this shows the
       // real error behind a plain Retry button (R1). A re-arm prompt here
       // would only re-confirm the same already-usable password.

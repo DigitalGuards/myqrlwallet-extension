@@ -1,4 +1,5 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
@@ -71,7 +72,7 @@ describe("PersonalSign", () => {
     const signerAddress = toChecksumAddress(`Q${"a".repeat(128)}`);
     const sign = vi.fn(() => ({ signature: "0xsig" }));
     let capturedPermissionCallback:
-      | ((hasApproved: boolean) => Promise<void>)
+      | ((hasApproved: boolean, record: ResponseRecorder) => Promise<void>)
       | null = null;
 
     renderComponent(
@@ -89,7 +90,10 @@ describe("PersonalSign", () => {
             params: [unprefixedHex, signerAddress],
           },
           setOnPermissionCallBack: (
-            callback: (hasApproved: boolean) => Promise<void>,
+            callback: (
+              hasApproved: boolean,
+              record: ResponseRecorder,
+            ) => Promise<void>,
           ) => {
             capturedPermissionCallback = callback;
           },
@@ -102,7 +106,7 @@ describe("PersonalSign", () => {
 
     expect(capturedPermissionCallback).not.toBeNull();
     await act(async () => {
-      await capturedPermissionCallback!(true);
+      await capturedPermissionCallback!(true, () => undefined);
     });
 
     // The displayed text and the signed payload are the same string.
@@ -136,10 +140,12 @@ describe("PersonalSign", () => {
 
   it("shows a translated message, re-polls lock state, and sends a stable 4100 error to the dApp when signing hits a locked wallet (L1)", async () => {
     let capturedPermissionCallback:
-      | ((hasApproved: boolean) => Promise<void>)
+      | ((hasApproved: boolean, record: ResponseRecorder) => Promise<void>)
       | null = null;
     const mockReadLockState = vi.fn().mockResolvedValue(undefined);
-    const addToResponseData = vi.fn();
+    // The approval's own recorder: results go to the run that produced
+    // them, never to whatever request the screen shows by then.
+    const record = vi.fn();
 
     renderComponent(
       mockedStore({
@@ -150,7 +156,6 @@ describe("PersonalSign", () => {
           setOnPermissionCallBack: (cb: any) => {
             capturedPermissionCallback = cb;
           },
-          addToResponseData,
         },
         lockStore: {
           getMnemonicPhrases: vi
@@ -162,13 +167,13 @@ describe("PersonalSign", () => {
     );
 
     expect(capturedPermissionCallback).not.toBeNull();
-    await act(async () => capturedPermissionCallback!(true));
+    await act(async () => capturedPermissionCallback!(true, record));
 
     expect(
       screen.getByText("The wallet is locked. Unlock it to continue."),
     ).toBeInTheDocument();
     expect(mockReadLockState).toHaveBeenCalled();
-    expect(addToResponseData).toHaveBeenCalledWith({
+    expect(record).toHaveBeenCalledWith({
       error: expect.objectContaining({
         code: 4100,
         message: "The wallet is locked",

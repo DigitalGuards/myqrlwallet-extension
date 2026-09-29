@@ -1,6 +1,7 @@
 import { Button } from "@/components/UI/Button";
 import { Card, CardContent, CardFooter } from "@/components/UI/Card";
 import { useStore } from "@/stores/store";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { Check, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -16,7 +17,6 @@ const SwitchQrlChainContent = observer(() => {
     onPermission,
     approvalProcessingStatus,
     setOnPermissionCallBack,
-    addToResponseData,
   } = dAppRequestStore;
   const { isProcessing } = approvalProcessingStatus;
 
@@ -24,14 +24,17 @@ const SwitchQrlChainContent = observer(() => {
   const chainId = paramObject?.chainId;
 
   const switchChain = async () => {
-    const onPermissionCallBack = async (hasApproved: boolean) => {
+    const onPermissionCallBack = async (
+      hasApproved: boolean,
+      record: ResponseRecorder,
+    ) => {
       if (hasApproved) {
         await includeChainForUrlOrigin({
           urlOrigin: dAppRequestData?.requestData?.senderData?.url ?? "",
           chainId,
         });
         await selectBlockchain(chainId);
-        addToResponseData({ result: true });
+        record({ result: true });
       }
     };
     setOnPermissionCallBack(onPermissionCallBack);
@@ -41,12 +44,14 @@ const SwitchQrlChainContent = observer(() => {
   return (
     <Card className="surface-ember w-full animate-appear-in">
       <div className="p-6">
-        <div className="mb-1 text-xs font-bold">{t('dapp.switchChain.title')}</div>
-        <div>{t('dapp.switchChain.description')}</div>
+        <div className="mb-1 text-xs font-bold">
+          {t("dapp.switchChain.title")}
+        </div>
+        <div>{t("dapp.switchChain.description")}</div>
       </div>
       <CardContent className="space-y-6">
         <SwitchQrlChainInfo />
-        <div className="font-bold">{t('dapp.switchChain.question')}</div>
+        <div className="font-bold">{t("dapp.switchChain.question")}</div>
       </CardContent>
       <CardFooter className="grid grid-cols-2 gap-4">
         <Button
@@ -58,7 +63,7 @@ const SwitchQrlChainContent = observer(() => {
           onClick={() => onPermission(false)}
         >
           <X className="mr-2 h-4 w-4" />
-          {t('dapp.no')}
+          {t("dapp.no")}
         </Button>
         <Button
           className="w-full"
@@ -68,7 +73,7 @@ const SwitchQrlChainContent = observer(() => {
           onClick={() => switchChain()}
         >
           <Check className="mr-2 h-4 w-4" />
-          {t('dapp.yes')}
+          {t("dapp.yes")}
         </Button>
       </CardFooter>
     </Card>
