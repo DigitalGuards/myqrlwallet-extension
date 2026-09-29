@@ -40,10 +40,12 @@ const AccountId = observer(
       ? `${balanceAmount} ${balanceUnit}`
       : balanceAmount;
     const numericBalance = parseBalanceValue(accountBalance).toNumber();
-    const price = priceStore.getPrice(settingsStore.currency);
+    const { price, currency: quoteCurrency } = priceStore.quoteFor(
+      settingsStore.currency,
+    );
     const fiatDisplay =
       settingsStore.showBalanceAndPrice && price > 0
-        ? formatFiatCompact(numericBalance, price, settingsStore.currency)
+        ? formatFiatCompact(numericBalance, price, quoteCurrency)
         : "";
 
     return (

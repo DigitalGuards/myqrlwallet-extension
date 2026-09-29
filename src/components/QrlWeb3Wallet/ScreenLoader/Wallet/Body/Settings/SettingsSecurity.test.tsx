@@ -85,12 +85,11 @@ describe("SettingsSecurity", () => {
 
   it("should call setShowBalanceAndPrice when toggling checkbox", async () => {
     const setShowBalanceAndPrice = vi.fn(() => Promise.resolve());
-    const fetchPrices = vi.fn(() => Promise.resolve());
-    const startAutoRefresh = vi.fn();
+    const setRefreshEnabled = vi.fn();
     renderComponent(
       mockedStore({
         settingsStore: { showBalanceAndPrice: true, setShowBalanceAndPrice },
-        priceStore: { fetchPrices, startAutoRefresh },
+        priceStore: { setRefreshEnabled },
       }),
     );
 
@@ -104,12 +103,11 @@ describe("SettingsSecurity", () => {
 
   it("should start auto-refresh when enabling balance display", async () => {
     const setShowBalanceAndPrice = vi.fn(() => Promise.resolve());
-    const fetchPrices = vi.fn(() => Promise.resolve());
-    const startAutoRefresh = vi.fn();
+    const setRefreshEnabled = vi.fn();
     renderComponent(
       mockedStore({
         settingsStore: { showBalanceAndPrice: false, setShowBalanceAndPrice },
-        priceStore: { fetchPrices, startAutoRefresh },
+        priceStore: { setRefreshEnabled },
       }),
     );
 
@@ -119,17 +117,16 @@ describe("SettingsSecurity", () => {
     );
 
     expect(setShowBalanceAndPrice).toHaveBeenCalledWith(true);
-    expect(fetchPrices).toHaveBeenCalled();
-    expect(startAutoRefresh).toHaveBeenCalled();
+    expect(setRefreshEnabled).toHaveBeenCalledWith(true);
   });
 
   it("should stop auto-refresh when disabling balance display", async () => {
     const setShowBalanceAndPrice = vi.fn(() => Promise.resolve());
-    const stopAutoRefresh = vi.fn();
+    const setRefreshEnabled = vi.fn();
     renderComponent(
       mockedStore({
         settingsStore: { showBalanceAndPrice: true, setShowBalanceAndPrice },
-        priceStore: { stopAutoRefresh },
+        priceStore: { setRefreshEnabled },
       }),
     );
 
@@ -138,7 +135,7 @@ describe("SettingsSecurity", () => {
     );
 
     expect(setShowBalanceAndPrice).toHaveBeenCalledWith(false);
-    expect(stopAutoRefresh).toHaveBeenCalled();
+    expect(setRefreshEnabled).toHaveBeenCalledWith(false);
   });
 
   describe("Change Password", () => {

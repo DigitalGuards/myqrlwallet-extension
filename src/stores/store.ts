@@ -88,10 +88,10 @@ export function wireDataLifecycle(store: Store) {
         reaction(
           () => settingsStore.showBalanceAndPrice && !lockStore.isLocked,
           (shouldRefresh) => {
+            // setRefreshEnabled owns the "refresh now or wait for the
+            // tick" decision, so this wiring and the settings toggle
+            // cannot arrive at different answers.
             priceStore.setRefreshEnabled(shouldRefresh);
-            if (shouldRefresh && priceStore.isCacheStale) {
-              void priceStore.fetchPrices();
-            }
           },
           { fireImmediately: true },
         ),

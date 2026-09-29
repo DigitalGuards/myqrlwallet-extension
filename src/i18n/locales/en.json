@@ -537,7 +537,7 @@
   "settings.security.60minutes": "60 minutes",
   "settings.security.never": "Never",
   "settings.security.showBalanceLabel": "Show balance and token price",
-  "settings.security.showBalanceDescription": "We use CoinGecko API to display token prices. When disabled, no external API calls are made and no fiat values are shown.",
+  "settings.security.showBalanceDescription": "We use CoinGecko API to display token prices, and fall back to the ZondScan explorer when CoinGecko refuses the request. When disabled, no external API calls are made and no fiat values are shown.",
   "settings.security.coingeckoLink": "CoinGecko API",
   "settings.security.changePassword": "Change Password",
   "settings.security.currentPassword": "Current password",

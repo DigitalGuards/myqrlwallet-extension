@@ -100,10 +100,11 @@ export const GasFeeNotice = observer(
     }, [from, to, value, overrides]);
 
     const { showBalanceAndPrice, currency } = settingsStore;
-    const qrlPrice = priceStore.getPrice(currency);
+    const { price: qrlPrice, currency: quoteCurrency } =
+      priceStore.quoteFor(currency);
     const fiatGas =
       showBalanceAndPrice && qrlPrice > 0 && gasFee.rawAmount
-        ? formatFiatCompact(gasFee.rawAmount, qrlPrice, currency)
+        ? formatFiatCompact(gasFee.rawAmount, qrlPrice, quoteCurrency)
         : "";
 
     return (
@@ -112,13 +113,13 @@ export const GasFeeNotice = observer(
           {gasFee.isLoading ? (
             <div className="flex gap-2">
               <Loader className="h-4 w-4 animate-spin" />
-              {t('gasFee.estimating')}
+              {t("gasFee.estimating")}
             </div>
           ) : gasFee.error ? (
             <div>{gasFee.error}</div>
           ) : (
             <div className="w-full overflow-hidden font-numeric">
-              {t('gasFee.estimated', { amount: gasFee?.estimatedGas })}
+              {t("gasFee.estimated", { amount: gasFee?.estimatedGas })}
               {fiatGas && (
                 <span className="ml-1 text-muted-foreground">{fiatGas}</span>
               )}

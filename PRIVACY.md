@@ -46,7 +46,10 @@ you.
 - **Prices:** while the wallet is unlocked and balance and price display is
   switched on, the extension asks CoinGecko (`api.coingecko.com`) for the current
   QRL market price about once a minute. No wallet data is sent; the request
-  reveals your IP address to CoinGecko. You can switch this off in the settings.
+  reveals your IP address to CoinGecko. When CoinGecko refuses or fails the
+  request, the extension asks the ZondScan block explorer (zondscan.com,
+  operated by DigitalGuards) for the same price instead, again without sending
+  any wallet data. You can switch this off in the settings.
 - **NFT content:** NFT metadata and images stored on IPFS are loaded through the
   qrlwallet.com gateway, with the public ipfs.io gateway as a fallback. NFT images
   that their creators host on an ordinary web address are loaded from that

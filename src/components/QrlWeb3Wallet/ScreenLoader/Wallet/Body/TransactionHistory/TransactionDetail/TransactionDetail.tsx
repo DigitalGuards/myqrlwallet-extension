@@ -406,19 +406,20 @@ const TransactionDetail = observer(() => {
   const exactAmount = formatTransactionAmount(amount)?.exact ?? String(amount);
 
   const { showBalanceAndPrice, currency } = settingsStore;
-  const qrlPrice = priceStore.getPrice(currency);
+  const { price: qrlPrice, currency: quoteCurrency } =
+    priceStore.quoteFor(currency);
   const showFiat =
     showBalanceAndPrice && qrlPrice > 0 && !transaction.isZrc20Token;
   const fiatAmount = showFiat
-    ? formatFiatCompact(amount, qrlPrice, currency)
+    ? formatFiatCompact(amount, qrlPrice, quoteCurrency)
     : "";
   const fiatGasFee =
     showFiat && totalGasFeeQrl !== undefined
-      ? formatFiatCompact(totalGasFeeQrl, qrlPrice, currency)
+      ? formatFiatCompact(totalGasFeeQrl, qrlPrice, quoteCurrency)
       : "";
   const fiatTotalCost =
     showFiat && totalCost !== undefined
-      ? formatFiatCompact(totalCost, qrlPrice, currency)
+      ? formatFiatCompact(totalCost, qrlPrice, quoteCurrency)
       : "";
 
   const formattedDate = new Date(timestamp).toLocaleString(undefined, {
