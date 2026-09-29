@@ -115,12 +115,22 @@ describe("restricted method approval slot and timers", () => {
   };
 
   /** Drive the approval surface's click handshake and return the answer. */
-  const actOnPending = async (requestId?: string) => {
+  const actOnPending = async (requestId?: string, hasApproved = true) => {
     const answers = post({
       action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
       requestId: requestId ?? pendingRequestId(),
+      hasApproved,
     });
     return answers.length === 0 ? undefined : await answers[0];
+  };
+
+  /** What the surface posts just before it broadcasts. */
+  const reportPendingHash = (requestId: string, transactionHash: string) => {
+    post({
+      action: EXTENSION_MESSAGES.DAPP_REQUEST_PENDING_TRANSACTION,
+      requestId,
+      transactionHash,
+    } as never);
   };
 
   /** Wait until the middleware has written a request other than `previous`. */
@@ -783,5 +793,90 @@ describe("restricted method approval slot and timers", () => {
     expect(otherRes.error).toBeUndefined();
     answerPending(false);
     await other;
+  });
+
+  it("grants the in-progress acknowledgement once per request (L-2)", async () => {
+    const res = {} as ResponseShape;
+    const pending = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      res as never,
+      vi.fn(),
+      vi.fn(),
+    );
+    const requestId = await awaitPendingRequest();
+
+    expect(await actOnPending(requestId)).toEqual({ accepted: true });
+    // A second surface showing the same request must not sign it again.
+    expect(await actOnPending(requestId)).toEqual({ accepted: false });
+    expect(await actOnPending(requestId)).toEqual({ accepted: false });
+
+    answerPending(false);
+    await pending;
+  });
+
+  it("reports a rejection when the surface dies after a Reject click (L-2)", async () => {
+    const res = {} as ResponseShape;
+    const pending = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      res as never,
+      vi.fn(),
+      vi.fn(),
+    );
+    const requestId = await awaitPendingRequest();
+    const port = connectApprovalPort();
+
+    await actOnPending(requestId, false);
+    await port.disconnect();
+    await vi.advanceTimersByTimeAsync(APPROVAL_DISCONNECT_GRACE_MS + 1);
+    await pending;
+
+    // A rejection that lost its surface is still a rejection.
+    expect(res.error?.code).toBe(4001);
+  });
+
+  it("names the transaction it may have broadcast (L-4)", async () => {
+    const res = {} as ResponseShape;
+    const pending = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      res as never,
+      vi.fn(),
+      vi.fn(),
+    );
+    const requestId = await awaitPendingRequest();
+    const port = connectApprovalPort();
+
+    await actOnPending(requestId);
+    // The surface posts the hash it is about to broadcast, then dies.
+    reportPendingHash(requestId, "0xdeadbeef");
+    await port.disconnect();
+    await vi.advanceTimersByTimeAsync(APPROVAL_DISCONNECT_GRACE_MS + 1);
+    await pending;
+
+    expect(res.error?.code).toBe(-32603);
+    expect(res.error?.message).toContain("may have been broadcast");
+    expect(
+      (res.error as { data?: { transactionHash?: string } })?.data,
+    ).toEqual({ transactionHash: "0xdeadbeef" });
+  });
+
+  it("says the outcome is unknown when no hash was reported (L-4)", async () => {
+    const res = {} as ResponseShape;
+    const pending = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      res as never,
+      vi.fn(),
+      vi.fn(),
+    );
+    const requestId = await awaitPendingRequest();
+    const port = connectApprovalPort();
+
+    await actOnPending(requestId);
+    await port.disconnect();
+    await vi.advanceTimersByTimeAsync(APPROVAL_DISCONNECT_GRACE_MS + 1);
+    await pending;
+
+    expect(res.error?.code).toBe(-32603);
+    expect(res.error?.message).toContain("outcome is unknown");
+    expect((res.error as { data?: unknown })?.data).toBeUndefined();
   });
 });

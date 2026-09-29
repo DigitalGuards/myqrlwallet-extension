@@ -20,8 +20,22 @@ const PROTECTED = [
   "quantapool.io",
   "quantastark.com",
   "quantaswap.io",
+  "shorscan.com",
   "theqrl.org",
   "zondscan.com",
+];
+
+/**
+ * What the detector allowlists: the protected domains plus the real sites that
+ * share a protected label or sit close to one. findHomographMatch() checks
+ * this before it reports anything.
+ */
+const ALLOWLISTED = [
+  ...PROTECTED,
+  "qrl.foundation",
+  "quantascan.com",
+  "quantascan.io",
+  "theqrl.com",
 ];
 
 /** Punycodes a Unicode hostname the way a browser does. */
@@ -88,6 +102,30 @@ describe("findHomographMatch", () => {
     );
   });
 
+  it.each([
+    // Cyrillic o inside zondscan, registered under .io. The suffix swap used
+    // to hide the substitution, because the comparison ran over the whole
+    // domain and .io is not .com.
+    ["zоndscan.io", "zondscan.com"],
+    // Cyrillic a inside quantaswap, registered under .com.
+    ["quаntaswap.com", "quantaswap.io"],
+  ])(
+    "matches %s, where a confusable and a suffix swap are combined",
+    (unicodeHost, expected) => {
+      const hostname = asBrowserHostname(unicodeHost);
+
+      expect(
+        findHomographMatch(hostname, PROTECTED, ALLOWLISTED)?.matchedDomain,
+      ).toBe(expected);
+    },
+  );
+
+  it("matches a protected label under any public suffix", () => {
+    expect(
+      findHomographMatch("zondscan.io", PROTECTED, ALLOWLISTED)?.matchedDomain,
+    ).toBe("zondscan.com");
+  });
+
   it("never reports a protected domain as a lookalike of itself", () => {
     for (const domain of PROTECTED) {
       expect(findHomographMatch(domain, PROTECTED)).toBeNull();
@@ -95,14 +133,22 @@ describe("findHomographMatch", () => {
     }
   });
 
+  it.each(["theqrl.com", "quantascan.io", "quantapool.io"])(
+    "never reports the allowlisted %s as a lookalike",
+    (hostname) => {
+      expect(findHomographMatch(hostname, PROTECTED, ALLOWLISTED)).toBeNull();
+      expect(
+        findHomographMatch(`www.${hostname}`, PROTECTED, ALLOWLISTED),
+      ).toBeNull();
+    },
+  );
+
   it.each([
-    "quantascan.io",
-    "theqrl.com",
-    "zondscan.io",
+    "quantascan.net",
     "quantastack.com",
     "example.com",
     "en.wikipedia.org",
   ])("returns null for the unrelated domain %s", (hostname) => {
-    expect(findHomographMatch(hostname, PROTECTED)).toBeNull();
+    expect(findHomographMatch(hostname, PROTECTED, ALLOWLISTED)).toBeNull();
   });
 });

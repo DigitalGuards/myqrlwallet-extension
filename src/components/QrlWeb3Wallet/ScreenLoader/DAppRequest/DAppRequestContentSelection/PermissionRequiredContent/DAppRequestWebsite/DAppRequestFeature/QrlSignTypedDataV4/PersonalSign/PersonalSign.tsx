@@ -13,6 +13,7 @@ import {
 import { decodePersonalSignMessage } from "@/functions/decodePersonalSignMessage";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { sanitizeForDisplay } from "@/utilities/stringUtil";
 import { MLDSA87, ExtendedSeed } from "@theqrl/wallet.js";
@@ -30,12 +31,8 @@ const PersonalSign = observer(() => {
   const { getMnemonicPhrases, readLockState } = lockStore;
   const { qrlInstance, qrlConnection } = qrlStore;
   const { isConnected } = qrlConnection;
-  const {
-    dAppRequestData,
-    setOnPermissionCallBack,
-    setCanProceed,
-    addToResponseData,
-  } = dAppRequestStore;
+  const { dAppRequestData, setOnPermissionCallBack, setCanProceed } =
+    dAppRequestStore;
   const [isWalletLocked, setIsWalletLocked] = useState(false);
 
   const params = dAppRequestData?.params;
@@ -48,18 +45,21 @@ const PersonalSign = observer(() => {
 
   useEffect(() => {
     if (isConnected) {
-      const onPermissionCallBack = async (hasApproved: boolean) => {
+      const onPermissionCallBack = async (
+        hasApproved: boolean,
+        record: ResponseRecorder,
+      ) => {
         if (hasApproved) {
           const authorization =
             await revalidateAuthorizedDAppRequest(dAppRequestData);
           if (!authorization.canProceed) {
-            addToResponseData({ error: authorization.proceedError });
+            record({ error: authorization.proceedError });
             return;
           }
           // Must await: onPermission reads responseData the moment this
           // resolves, so a bare call would send the dApp an empty result
           // before signing finishes.
-          await personalSign();
+          await personalSign(record);
         }
       };
       setOnPermissionCallBack(onPermissionCallBack);
@@ -70,7 +70,7 @@ const PersonalSign = observer(() => {
     navigator.clipboard.writeText(challenge);
   };
 
-  const personalSign = async () => {
+  const personalSign = async (record: ResponseRecorder) => {
     try {
       const mnemonicPhrases = await getMnemonicPhrases(fromAddress ?? "");
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
@@ -90,7 +90,7 @@ const PersonalSign = observer(() => {
       const publicKey = bytesToHex(acc.getPK());
 
       if (signature && publicKey) {
-        addToResponseData({
+        record({
           signature,
           publicKey,
         });
@@ -106,10 +106,10 @@ const PersonalSign = observer(() => {
         // EIP-1193 error; the raw guard text never reaches the dApp response.
         setIsWalletLocked(true);
         void readLockState();
-        addToResponseData({ error: walletLockedProviderError() });
+        record({ error: walletLockedProviderError() });
         return;
       }
-      addToResponseData({ error });
+      record({ error });
     }
   };
 

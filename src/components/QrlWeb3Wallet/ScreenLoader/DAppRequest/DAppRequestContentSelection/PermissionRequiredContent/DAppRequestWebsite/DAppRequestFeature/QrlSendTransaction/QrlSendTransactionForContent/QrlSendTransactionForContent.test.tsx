@@ -118,6 +118,10 @@ describe("QrlSendTransactionForContent", () => {
 
   const createStoreWithCallback = (overrides: Record<string, any> = {}) => {
     capturedPermissionCallback = null;
+    const responseRecorder =
+      overrides.dAppRequestStore?.addToResponseData ||
+      overrides.addToResponseData ||
+      vi.fn();
     return mockedStore({
       qrlStore: {
         qrlConnection: { isConnected: true },
@@ -150,9 +154,13 @@ describe("QrlSendTransactionForContent", () => {
           params: [overrides.requestParams || zndTransferRequest],
         },
         setOnPermissionCallBack: (cb: any) => {
-          capturedPermissionCallback = cb;
+          // The store hands every permission callback a recorder bound to
+          // the request that was on screen when the user clicked. The
+          // suite keeps asserting on the same mock it supplies here.
+          capturedPermissionCallback = (hasApproved: boolean) =>
+            cb(hasApproved, responseRecorder);
         },
-        addToResponseData: overrides.addToResponseData || vi.fn(),
+        addToResponseData: responseRecorder,
         ...overrides.dAppRequestStore,
       },
       lockStore: {

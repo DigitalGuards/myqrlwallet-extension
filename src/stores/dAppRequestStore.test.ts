@@ -44,7 +44,7 @@ describe("DAppRequestStore permission refresh", () => {
       { [profileStorageKey("DAPPS")]: { oldValue: {}, newValue: {} } },
       "session",
     );
-    await store.onPermissionCallBack(true);
+    await store.onPermissionCallBack(true, () => undefined);
 
     expect(store.canProceed).toBe(false);
     expect(store.responseData).toEqual({});
@@ -297,9 +297,9 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
 
   it("keeps the approval's own result out of the newer request (M1)", async () => {
     const store = buildStore("request-a");
-    store.setOnPermissionCallBack(async () => {
+    store.setOnPermissionCallBack(async (_hasApproved, record) => {
       swapInAnotherRequest(store);
-      store.addToResponseData({ transactionHash: "0xabc" });
+      record({ transactionHash: "0xabc" });
     });
 
     await store.onPermission(true);
@@ -309,19 +309,24 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
     expect(store.responseData).toEqual({});
   });
 
-  it("keeps two approvals in flight apart (L-8)", async () => {
+  it("keeps two approvals in flight apart (L-8, L-3)", async () => {
     const store = buildStore("request-a");
     let releaseFirst: (() => void) | undefined;
-    store.setOnPermissionCallBack(async () => {
-      store.addToResponseData({ transactionHash: "0xfirst" });
+    let recordFirst: ((data: Record<string, unknown>) => void) | undefined;
+    store.setOnPermissionCallBack(async (_hasApproved, record) => {
+      recordFirst = record;
       await new Promise<void>((resolve) => {
         releaseFirst = resolve;
       });
+      // Written after the second approval has come and gone, through the
+      // recorder bound to this run.
+      record({ transactionHash: "0xfirst" });
     });
     const first = store.onPermission(true);
     await vi.waitFor(() => {
       expect(releaseFirst).toBeTypeOf("function");
     });
+    expect(recordFirst).toBeTypeOf("function");
 
     // A second approval runs to completion while the first is still
     // waiting on its broadcast.
@@ -329,8 +334,8 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
       requestId: "request-b",
       method: "qrl_signMessage",
     };
-    store.setOnPermissionCallBack(async () => {
-      store.addToResponseData({ signature: "0xsecond" });
+    store.setOnPermissionCallBack(async (_hasApproved, record) => {
+      record({ signature: "0xsecond" });
     });
     await store.onPermission(true);
     releaseFirst?.();
@@ -347,6 +352,34 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
     ).toEqual({ transactionHash: "0xfirst" });
   });
 
+  it("reports the hash it is about to broadcast (L-4)", async () => {
+    const store = buildStore("request-a");
+    store.setOnPermissionCallBack(async () => {
+      await store.reportPendingTransactionHash("0xdeadbeef");
+    });
+
+    await store.onPermission(true);
+
+    expect(sentMessages()).toContainEqual({
+      action: EXTENSION_MESSAGES.DAPP_REQUEST_PENDING_TRANSACTION,
+      requestId: "request-a",
+      transactionHash: "0xdeadbeef",
+    });
+  });
+
+  it("tells the worker which way the user answered (L-2)", async () => {
+    const store = buildStore("request-a");
+    store.setOnPermissionCallBack(async () => undefined);
+
+    await store.onPermission(false);
+
+    expect(sentMessages()).toContainEqual({
+      action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
+      requestId: "request-a",
+      hasApproved: false,
+    });
+  });
+
   it("asks the service worker before it does any work (L-2)", async () => {
     const seenBeforeCallback: unknown[] = [];
     const store = buildStore("request-a");
@@ -360,6 +393,7 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
       {
         action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
         requestId: "request-a",
+        hasApproved: true,
       },
     ]);
   });

@@ -19,6 +19,7 @@ import {
 import { RESTRICTED_METHODS } from "@/scripts/constants/requestConstants";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import { useStore } from "@/stores/store";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { sanitizeForDisplay } from "@/utilities/stringUtil";
 import { useCopy } from "@/hooks/useCopy";
@@ -43,12 +44,8 @@ const QrlPqSign = observer(() => {
   const { getMnemonicPhrases, readLockState } = lockStore;
   const { qrlInstance, qrlConnection } = qrlStore;
   const { isConnected } = qrlConnection;
-  const {
-    dAppRequestData,
-    setOnPermissionCallBack,
-    setCanProceed,
-    addToResponseData,
-  } = dAppRequestStore;
+  const { dAppRequestData, setOnPermissionCallBack, setCanProceed } =
+    dAppRequestStore;
   const [isWalletLocked, setIsWalletLocked] = useState(false);
 
   const method = dAppRequestData?.method;
@@ -97,17 +94,19 @@ const QrlPqSign = observer(() => {
 
   useEffect(() => {
     if (isConnected) {
-      setOnPermissionCallBack(async (hasApproved: boolean) => {
-        if (hasApproved) {
-          const authorization =
-            await revalidateAuthorizedDAppRequest(dAppRequestData);
-          if (!authorization.canProceed) {
-            addToResponseData({ error: authorization.proceedError });
-            return;
+      setOnPermissionCallBack(
+        async (hasApproved: boolean, record: ResponseRecorder) => {
+          if (hasApproved) {
+            const authorization =
+              await revalidateAuthorizedDAppRequest(dAppRequestData);
+            if (!authorization.canProceed) {
+              record({ error: authorization.proceedError });
+              return;
+            }
+            await pqSign(record);
           }
-          await pqSign();
-        }
-      });
+        },
+      );
     }
   }, [isConnected, dAppRequestData]);
 
@@ -119,7 +118,7 @@ const QrlPqSign = observer(() => {
     void copy(challenge);
   };
 
-  const pqSign = async () => {
+  const pqSign = async (record: ResponseRecorder) => {
     try {
       const mnemonicPhrases = await getMnemonicPhrases(fromAddress);
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
@@ -131,7 +130,7 @@ const QrlPqSign = observer(() => {
       const result = isTypedData
         ? signTypedData(typedPayload as TypedDataPayload, seed)
         : signMessage(rawMessage, seed);
-      addToResponseData({ ...result });
+      record({ ...result });
     } catch (error) {
       if (isWalletLockedError(error)) {
         // getMnemonicPhrases() hit the SW's locked-wallet guard (L1, PR
@@ -141,10 +140,10 @@ const QrlPqSign = observer(() => {
         // EIP-1193 error; the raw guard text never reaches the dApp response.
         setIsWalletLocked(true);
         void readLockState();
-        addToResponseData({ error: walletLockedProviderError() });
+        record({ error: walletLockedProviderError() });
         return;
       }
-      addToResponseData({ error });
+      record({ error });
     }
   };
 

@@ -213,6 +213,7 @@ describe("phishingDetector QRL ecosystem coverage (L7b)", () => {
     ["https://quantaswap.i0", "quantaswap.io"],
     ["https://myqr1wallet.com", "myqrlwallet.com"],
     ["https://theqr1.org", "theqrl.org"],
+    ["https://sh0rscan.com", "shorscan.com"],
   ])("flags the lookalike %s as fuzzy phishing", async (url, expectedMatch) => {
     const { checkDomain } = await loadReadyDetector();
 
@@ -231,9 +232,11 @@ describe("phishingDetector QRL ecosystem coverage (L7b)", () => {
     "https://zondscan.com",
     "https://explorer.zondscan.com",
     "https://quantaswap.io",
+    "https://dev.quantaswap.io",
     "https://quantapool.com",
     "https://quantapool.io",
     "https://quantastark.com",
+    "https://shorscan.com",
   ])("passes the real QRL domain %s clean", async (url) => {
     const { checkDomain } = await loadReadyDetector();
 
@@ -263,12 +266,19 @@ describe("phishingDetector QRL ecosystem coverage (L7b)", () => {
  * zondscan.org, quantastack.com and quantastar.com. Three changes answer it,
  * and all of them are exercised here through the real detector:
  *
- * 1. Third-party ecosystem domains are allowlisted in qrlPhishingConfig.ts.
- * 2. The tolerance is 1, quantastark.com left the fuzzylist, and a fuzzy
- *    verdict that amounts to "same label, different public suffix" on an
- *    informational domain is dropped by checkDomain().
+ * 1. Every real site that shares a protected label is allowlisted by exact
+ *    name in qrlPhishingConfig.ts: the foundation's theqrl.com, the
+ *    third-party explorer quantascan, and our own sibling registrations.
+ * 2. The tolerance is 1 and quantastark.com left the fuzzylist, so ordinary
+ *    product names one edit away (quantastack, quantastar) are left alone.
  * 3. A homograph check decodes punycode and folds confusables, catching what
  *    a levenshtein distance over an xn-- string never could.
+ *
+ * A copy of a protected label under another public suffix stays phishing. The
+ * earlier tier that treated that as clean for the informational domains was
+ * rejected on review: registering our brand under a second suffix is the
+ * classic phishing setup, and the allowlist is where a legitimate variant
+ * belongs.
  */
 describe("phishingDetector lookalike precision (L-7)", () => {
   beforeEach(() => {
@@ -305,15 +315,13 @@ describe("phishingDetector lookalike precision (L-7)", () => {
 
   it.each([
     // Third-party QRL explorer. Two edits from quantaswap once the public
-    // suffix is stripped, so the old tolerance of 2 flagged it.
+    // suffix is stripped, so the old tolerance of 2 flagged it. Allowlisted
+    // by exact name, and its label differs from every protected one.
     "https://quantascan.io",
     "https://quantascan.com",
-    // The foundation's own domains: distance 0 from theqrl.org on the label.
+    // The foundation's other domain: distance 0 from theqrl.org on the label,
+    // so it is only clean because the allowlist names it.
     "https://theqrl.com",
-    "https://theqrl.net",
-    // Distance 0 from zondscan.com on the label.
-    "https://zondscan.io",
-    "https://zondscan.org",
     // One and two edits from quantastark, which has left the fuzzylist.
     "https://quantastack.com",
     "https://quantastar.com",
@@ -324,17 +332,33 @@ describe("phishingDetector lookalike precision (L-7)", () => {
   });
 
   it.each([
+    ["https://zondscan.io", "zondscan.com"],
+    ["https://zondscan.net", "zondscan.com"],
+    ["https://qrlwallet.io", "qrlwallet.com"],
+    ["https://theqrl.net", "theqrl.org"],
+    ["https://quantaswap.com", "quantaswap.io"],
+    ["https://quantapool.net", "quantapool.com"],
+    ["https://shorscan.io", "shorscan.com"],
+  ])(
+    "flags %s, a protected label under another public suffix",
+    async (url, expectedMatch) => {
+      const { checkDomain } = await loadReadyDetector();
+
+      const result = checkDomain(url);
+
+      expect(result.isDomainPhishing).toBe(true);
+      expect(result.matchedDomain).toBe(expectedMatch);
+    },
+  );
+
+  it.each([
     // Capital i standing in for a lowercase L, lowercased by URL parsing.
     ["https://qrlwaIlet.com", "qrlwallet.com"],
     ["https://qr1wallet.com", "qrlwallet.com"],
-    // A signing origin under another public suffix stays flagged.
     ["https://qrlwallet.net", "qrlwallet.com"],
-    ["https://quantaswap.com", "quantaswap.io"],
-    // A lookalike of the public suffix itself stays flagged, informational
-    // domain or not.
+    // A lookalike of the public suffix itself.
     ["https://quantaswap.i0", "quantaswap.io"],
     ["https://zondscan.co", "zondscan.com"],
-    // A different label stays flagged on an informational domain too.
     ["https://theqr1.org", "theqrl.org"],
     ["https://zondscam.com", "zondscan.com"],
   ])("still flags the lookalike %s", async (url, expectedMatch) => {
@@ -360,6 +384,31 @@ describe("phishingDetector lookalike precision (L-7)", () => {
       const hostname = asBrowserHostname(unicodeHost);
       // The detector only ever sees the ASCII form, where a levenshtein
       // distance against the protected domain is meaningless.
+      expect(hostname.startsWith("xn--")).toBe(true);
+
+      const result = checkDomain(`https://${hostname}`);
+
+      expect(result.isDomainPhishing).toBe(true);
+      expect(result.matchType).toBe("homograph");
+      expect(result.matchedDomain).toBe(expectedMatch);
+    },
+  );
+
+  it.each([
+    // Cyrillic o inside zondscan, registered under .io.
+    ["zоndscan.io", "zondscan.com"],
+    // Cyrillic a inside quantaswap, registered under .com.
+    ["quаntaswap.com", "quantaswap.io"],
+    // Cyrillic o inside shorscan, registered under .io.
+    ["shоrscan.io", "shorscan.com"],
+  ])(
+    "flags %s, a homograph that swapped the public suffix too",
+    async (unicodeHost, expectedMatch) => {
+      const { checkDomain } = await loadReadyDetector();
+      const hostname = asBrowserHostname(unicodeHost);
+      // Both halves of the disguise defeat the fuzzylist on their own: it
+      // measures its distance over this xn-- string, and over the public
+      // suffix it measures nothing at all.
       expect(hostname.startsWith("xn--")).toBe(true);
 
       const result = checkDomain(`https://${hostname}`);
@@ -398,15 +447,29 @@ describe("phishingDetector lookalike precision (L-7)", () => {
     expect(result.matchedDomain).toBe(expected);
   });
 
+  // Every name on the allowlist, plus a subdomain of each kind of entry.
+  // `matchPartsAgainstList()` in eth-phishing-detect matches a subdomain of an
+  // allowlist entry, so dev.qrlwallet.com and dev.quantaswap.io are covered by
+  // their registrable domain and carry no entry of their own.
   it.each([
+    "https://theqrl.org",
+    "https://theqrl.com",
+    "https://qrl.foundation",
+    "https://quantascan.io",
+    "https://quantascan.com",
+    "https://explorer.quantascan.io",
     "https://qrlwallet.com",
     "https://dev.qrlwallet.com",
+    "https://myqrlwallet.com",
+    "https://zondscan.com",
+    "https://explorer.zondscan.com",
+    "https://quantaswap.io",
+    "https://dev.quantaswap.io",
+    "https://quantapool.com",
+    "https://quantapool.io",
     "https://quantastark.com",
     "https://docs.quantastark.com",
-    "https://theqrl.org",
-    "https://quantascan.io",
-    "https://explorer.quantascan.io",
-    "https://qrl.foundation",
+    "https://shorscan.com",
   ])("passes the allowlisted domain %s clean", async (url) => {
     const { checkDomain } = await loadReadyDetector();
 

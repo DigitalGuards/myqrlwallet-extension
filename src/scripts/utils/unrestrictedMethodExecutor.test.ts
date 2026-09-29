@@ -332,3 +332,40 @@ describe("qrl_accounts (F8)", () => {
     ).resolves.toEqual([]);
   });
 });
+
+describe("qrl_accounts hides the grant state while locked (L-1)", () => {
+  // A locked wallet answers every origin the same way here. Answering a
+  // connected origin [] and an unconnected one "not connected" would tell
+  // the page whether it holds a grant.
+  it("answers an unconnected origin the same empty array as a connected one", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+
+    const { unrestrictedMethodsMiddleware } =
+      await import("@/scripts/middlewares/unrestrictedMethodsMiddleware");
+
+    const answer = async (url: string) => {
+      const res = {} as { result?: unknown; error?: { code?: number } };
+      await unrestrictedMethodsMiddleware(
+        {
+          id: 1,
+          jsonrpc: "2.0",
+          method: "qrl_accounts",
+          params: [],
+          senderData: { url },
+        } as never,
+        res as never,
+        vi.fn(),
+        vi.fn(),
+      );
+      return res;
+    };
+
+    const connected = await answer("https://dapp.example/app");
+    const unconnected = await answer("https://stranger.example/app");
+
+    expect(connected.result).toEqual([]);
+    expect(unconnected.result).toEqual([]);
+    expect(connected.error).toBeUndefined();
+    expect(unconnected.error).toBeUndefined();
+  });
+});

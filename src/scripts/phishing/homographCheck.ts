@@ -12,11 +12,21 @@
  * WHAT THIS DOES INSTEAD
  * Decode every punycode label back to Unicode, fold the well-known confusable
  * characters onto one ASCII skeleton, and require the skeleton of the
- * registrable domain to be *exactly* the skeleton of a protected domain.
- * Exact skeleton equality keeps false positives near zero, and unlike an edit
- * distance it does not care how many characters were substituted:
- * qrlwaIIet.com (two capital i's, two edits away) is caught just as reliably
- * as one substitution.
+ * registrable domain's own label to be *exactly* the skeleton of a protected
+ * domain's label. Exact skeleton equality keeps false positives near zero, and
+ * an edit distance is beside the point here: qrlwaIIet.com (two capital i's,
+ * two edits away) is caught just as reliably as one substitution.
+ *
+ * WHY THE LABEL AND NOT THE WHOLE DOMAIN
+ * Comparing the public suffix too let a homograph hide behind a suffix swap.
+ * A Cyrillic "о" inside zondscan under .io reaches the detector as
+ * xn--zndscan-h1a.io: the fuzzylist sees punycode and measures nothing useful,
+ * and a whole-domain skeleton comparison sees .io against .com and passes it.
+ * The label carries the brand, so the label is what is compared and any public
+ * suffix counts as a hit. The real sites that share a protected label
+ * (theqrl.com beside theqrl.org, our own quantapool.io beside quantapool.com)
+ * are named in the allowlist handed to findHomographMatch(), which is checked
+ * before anything is reported.
  *
  * THE CONFUSABLE TABLE IS A CURATED APPROXIMATION.
  * It is not the Unicode confusables data file. It covers the Cyrillic, Greek
@@ -175,6 +185,17 @@ export function foldConfusables(value: string): string {
   return skeleton;
 }
 
+/**
+ * The registrable domain's own label, the part that carries the brand:
+ * "zondscan" for zondscan.com and for app.zondscan.co.uk alike. A host with no
+ * registrable boundary (localhost) is returned as it is.
+ */
+export function registrableLabel(hostnameOrDomain: string): string {
+  const registrable = registrableDomain(hostnameOrDomain);
+  const boundary = registrable.indexOf(".");
+  return boundary <= 0 ? registrable : registrable.slice(0, boundary);
+}
+
 export type HomographMatch = {
   /** The protected domain this hostname is a lookalike of. */
   matchedDomain: string;
@@ -184,21 +205,28 @@ export type HomographMatch = {
 
 /**
  * Returns the protected domain a hostname impersonates through confusable
- * characters, or null. The comparison runs on the registrable domain, so
- * subdomains of a lookalike are caught too, and a hostname that decodes to a
- * protected domain exactly is never reported: that is the real site.
+ * characters, or null.
+ *
+ * The comparison runs on the registrable domain's label, so subdomains of a
+ * lookalike are caught (login.qrlwаllet.com) and so is a lookalike that also
+ * swapped the public suffix (zоndscan.io). A hostname whose registrable domain
+ * is on `allowlistedDomains` is never reported, which is what keeps a real
+ * site from being called a lookalike of itself or of a sibling registration of
+ * the same brand. The allowlist defaults to the protected domains, so a caller
+ * that has only one list still gets that guarantee for it.
  */
 export function findHomographMatch(
   hostname: string,
   protectedDomains: readonly string[],
+  allowlistedDomains: readonly string[] = protectedDomains,
 ): HomographMatch | null {
   const decoded = decodeHostname(hostname.toLowerCase());
   const candidate = registrableDomain(decoded);
-  if (protectedDomains.includes(candidate)) return null;
+  if (allowlistedDomains.includes(candidate)) return null;
 
-  const skeleton = foldConfusables(candidate);
+  const skeleton = foldConfusables(registrableLabel(candidate));
   for (const domain of protectedDomains) {
-    if (skeleton === foldConfusables(domain)) {
+    if (skeleton === foldConfusables(registrableLabel(domain))) {
       return { matchedDomain: domain, decodedDomain: candidate };
     }
   }

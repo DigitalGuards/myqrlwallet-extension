@@ -23,6 +23,22 @@ import { registerDAppTransactionWatch } from "./dAppTransactionWatcher";
 import LockManager from "../lockManager/lockManager";
 
 /**
+ * The single answer every authorization precheck gives while the wallet is
+ * locked. It carries no address, no chain and no connection state, so it
+ * reads the same for an authorized address, an unauthorized one and an
+ * origin with no grant at all.
+ */
+const LOCKED_WALLET_REFUSAL_MESSAGE =
+  "The wallet is locked. Unlock it and try again.";
+
+const buildLockedWalletRefusal = () => ({
+  canProceed: false,
+  proceedError: providerErrors.unauthorized({
+    message: LOCKED_WALLET_REFUSAL_MESSAGE,
+  }),
+});
+
+/**
  * A locked wallet has to answer an authorization precheck identically for an
  * authorized and an unauthorized origin or address. `qrl_accounts`, the
  * provider state and `wallet_getPermissions` all report nothing while
@@ -30,25 +46,24 @@ import LockManager from "../lockManager/lockManager";
  * opened a prompt for an authorized one handed the page an oracle for its
  * own grants through a method it cannot complete anyway (L6).
  *
- * Deferring here lets the request reach the approval surface, which shows
- * the unlock screen first, so the page learns only that a prompt opened.
- * Authorization is then enforced for real:
- * `revalidateAuthorizedDAppRequest` re-runs the full check with
- * `enforceWhileLocked` set before anything is signed or broadcast, and
- * every approval component calls it on the approve path.
+ * The equality is kept by refusing every locked precheck with one shared
+ * error (L-1). No approval surface opens, so a page cannot raise the unlock
+ * screen on demand either. A legitimate dApp re-sends the request once the
+ * user has unlocked the wallet by hand.
  *
- * @param enforceWhileLocked true for post-approval revalidation, where the
- * answer decides whether a signature happens.
+ * @param enforceWhileLocked true for post-approval revalidation, which runs
+ * after the user unlocked and decides whether a signature happens, so it
+ * answers strictly on the stored grants whatever the lock state says.
  */
-const shouldDeferAuthorizationToApproval = async (
+const shouldRefuseWhileLocked = async (
   enforceWhileLocked: boolean,
 ): Promise<boolean> => {
   if (enforceWhileLocked) return false;
   try {
     return (await LockManager.isLocked()).isLocked;
   } catch {
-    // An unreadable lock state fails closed: keep the strict answer.
-    return false;
+    // An unreadable lock state fails closed: refuse.
+    return true;
   }
 };
 
@@ -73,6 +88,11 @@ export const checkAccountHasBeenAuthorized = async (
   req: JsonRpcRequest<JsonRpcRequest>,
   enforceWhileLocked = false,
 ) => {
+  // First, and before anything derived from the request is read, so the
+  // locked answer is the same for every origin and every address (L6/L-1).
+  if (await shouldRefuseWhileLocked(enforceWhileLocked)) {
+    return buildLockedWalletRefusal();
+  }
   const fromAddress = getFromAddress(req);
   const urlOrigin = new URL(req?.senderData?.url ?? "").origin;
   const connectedAccounts =
@@ -82,9 +102,7 @@ export const checkAccountHasBeenAuthorized = async (
       areAddressesEquivalent(address, fromAddress),
     ) ?? false;
   return {
-    canProceed:
-      hasAddressConnected ||
-      (await shouldDeferAuthorizationToApproval(enforceWhileLocked)),
+    canProceed: hasAddressConnected,
     proceedError: providerErrors.unauthorized({
       message: `The requested account ${fromAddress} has not been authorized by the user.`,
     }),
@@ -136,6 +154,9 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
   expectedChainId?: string,
   enforceWhileLocked = false,
 ) => {
+  // The account check leads, and it carries the locked-wallet refusal, so a
+  // locked wallet returns that one shared error here before any part of the
+  // request is inspected (L6/L-1).
   const accountResult = await checkAccountHasBeenAuthorized(
     req,
     enforceWhileLocked,
@@ -239,12 +260,12 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
     };
   }
 
-  // The chain grant is per origin, so refusing it while locked would leak
-  // the same thing the account check above stopped leaking (L6).
-  const isAuthorized =
-    (connectedData?.blockchains ?? []).some(
-      (chain) => normalizeChainId(chain.chainId) === effectiveChainId,
-    ) || (await shouldDeferAuthorizationToApproval(enforceWhileLocked));
+  // A locked wallet never reaches this point: the account check above
+  // returns the shared locked refusal for every origin, so the per-origin
+  // chain grant is only ever read on an unlocked wallet (L6/L-1).
+  const isAuthorized = (connectedData?.blockchains ?? []).some(
+    (chain) => normalizeChainId(chain.chainId) === effectiveChainId,
+  );
   if (!isAuthorized) {
     return {
       canProceed: false,
@@ -286,10 +307,11 @@ export const revalidateAuthorizedDAppRequest = async (
     };
   }
 
-  // enforceWhileLocked: the precheck defers an unauthorized answer while
-  // the wallet is locked so a page cannot probe its grants (L6). This is
-  // the check that decides whether a signature happens, so it answers
-  // strictly whatever the lock state is.
+  // enforceWhileLocked: the precheck answers every origin with one shared
+  // refusal while the wallet is locked, so a page cannot probe its grants
+  // (L6/L-1). This runs after the user unlocked and decides whether a
+  // signature happens, so it skips that gate and answers strictly on the
+  // stored grants whatever the lock state reads.
   const authorization = await checkAccountAndChainHaveBeenAuthorized(
     {
       id: request.requestId,
@@ -630,7 +652,27 @@ export const checkWalletAddQrlChainParams = async (
   };
 };
 
-export const checkUrlOriginHasBeenConnected = async (url: string) => {
+/**
+ * The connection gate `wallet_addQRLChain`, `wallet_getCapabilities` and
+ * `wallet_switchQRLChain` run before their own parameter checks, and its
+ * refusal names the connection state. With `refuseWhileLocked` those three
+ * answer a locked wallet with the shared locked refusal (L6/L-1): none of
+ * them can do useful work while locked, and a page must learn nothing about
+ * its grants from any of them.
+ *
+ * `qrl_accounts` uses this same gate and must keep its own locked answer,
+ * the empty array EIP-1193 clients expect (F8, unrestrictedMethodExecutor),
+ * so the flag is off by default and that caller is left alone.
+ *
+ * @param refuseWhileLocked true for the restricted-method connection gate.
+ */
+export const checkUrlOriginHasBeenConnected = async (
+  url: string,
+  refuseWhileLocked = false,
+) => {
+  if (refuseWhileLocked && (await shouldRefuseWhileLocked(false))) {
+    return buildLockedWalletRefusal();
+  }
   const urlOrigin = new URL(url).origin;
   const connectedAccounts =
     (await StorageUtil.getDAppsConnectedAccountsData(urlOrigin))?.accounts ??

@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import AddQrlChainContent from "./AddQrlChainContent";
 import StorageUtil from "@/utilities/storageUtil";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/AddQrlChainContent/AddQrlChainInfo/AddQrlChainInfo",
@@ -91,14 +92,23 @@ describe("AddQrlChainContent", () => {
     const clearRequest = vi
       .spyOn(StorageUtil, "clearDAppsRequestData")
       .mockResolvedValue(undefined);
-    let captured: ((hasApproved: boolean) => Promise<void>) | undefined;
+    let captured:
+      | ((hasApproved: boolean, record: ResponseRecorder) => Promise<void>)
+      | undefined;
+    const recorded: Record<string, unknown>[] = [];
+    const record: ResponseRecorder = (data) => {
+      recorded.push(data);
+    };
 
     renderComponent(
       mockedStore({
         qrlStore: { addChain, selectBlockchain },
         dAppRequestStore: {
           setOnPermissionCallBack: (
-            callBack: (hasApproved: boolean) => Promise<void>,
+            callBack: (
+              hasApproved: boolean,
+              recorder: ResponseRecorder,
+            ) => Promise<void>,
           ) => {
             captured = callBack;
           },
@@ -127,7 +137,7 @@ describe("AddQrlChainContent", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Yes" }));
     expect(captured).toBeTypeOf("function");
-    await captured?.(true);
+    await captured?.(true, record);
 
     expect(addChain).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -140,5 +150,7 @@ describe("AddQrlChainContent", () => {
     // The slot is cleared by onPermission once the answer is on its way.
     // Clearing it here used to erase the requestId the answer needs.
     expect(clearRequest).not.toHaveBeenCalled();
+    // The result lands in this run's own bucket.
+    expect(recorded).toContainEqual({ result: true });
   });
 });

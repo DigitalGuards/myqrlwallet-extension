@@ -1,6 +1,7 @@
 import { Button } from "@/components/UI/Button";
 import { Card, CardContent, CardFooter } from "@/components/UI/Card";
 import { useStore } from "@/stores/store";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { Check, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -21,12 +22,14 @@ const AddQrlChainContent = observer(() => {
     onPermission,
     approvalProcessingStatus,
     setOnPermissionCallBack,
-    addToResponseData,
   } = dAppRequestStore;
   const { isProcessing } = approvalProcessingStatus;
 
   const addBlockchain = async () => {
-    const onPermissionCallBack = async (hasApproved: boolean) => {
+    const onPermissionCallBack = async (
+      hasApproved: boolean,
+      record: ResponseRecorder,
+    ) => {
       if (hasApproved) {
         const blockchain = dAppRequestData
           ?.params?.[0] as BlockchainBaseDataType;
@@ -58,7 +61,7 @@ const AddQrlChainContent = observer(() => {
           // which is what the prompt asks for in so many words.
           await selectBlockchain(blockchain?.chainId);
         }
-        addToResponseData({ result: true });
+        record({ result: true });
       }
     };
     // The pending-request slot is cleared by onPermission once the response

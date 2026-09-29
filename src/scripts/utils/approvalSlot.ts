@@ -26,6 +26,8 @@
  * approval prompt in the side panel next to site B's page.
  */
 
+import { registrableDomain } from "@/utilities/registrableDomain";
+
 /** How long an origin has to wait once it is past the refusal grace. */
 export const APPROVAL_ORIGIN_COOLDOWN_MS = 5_000;
 
@@ -78,9 +80,15 @@ type RefusalStreak = { count: number; lastAt: number };
 
 /**
  * Every key a refusal is charged to, and every key a claim is checked
- * against. The frame origin alone is not enough: a page can host an iframe
- * on a fresh subdomain for each attempt, and each one would arrive with a
- * clean streak.
+ * against.
+ *
+ * The frame origin alone is not enough: a page can host an iframe on a
+ * fresh subdomain for each attempt, and each one would arrive with a clean
+ * streak. The top-level origin therefore shares the charge, but only when
+ * the requesting frame belongs to the same site. A third-party frame such
+ * as an ad or an embedded widget answers for itself alone, so it cannot put
+ * the page that embeds it into cooldown and break a dApp its visitor is
+ * using.
  */
 const cooldownKeys = ({
   origin,
@@ -88,10 +96,27 @@ const cooldownKeys = ({
 }: {
   origin: string;
   topLevelOrigin?: string;
-}): string[] =>
-  topLevelOrigin === undefined || topLevelOrigin === origin
-    ? [origin]
-    : [origin, topLevelOrigin];
+}): string[] => {
+  if (topLevelOrigin === undefined || topLevelOrigin === origin) {
+    return [origin];
+  }
+  return isSameSite(origin, topLevelOrigin)
+    ? [origin, topLevelOrigin]
+    : [origin];
+};
+
+/** Whether two origins share a registrable domain. */
+const isSameSite = (left: string, right: string): boolean => {
+  const site = (value: string) => {
+    try {
+      return registrableDomain(new URL(value).hostname);
+    } catch {
+      return undefined;
+    }
+  };
+  const leftSite = site(left);
+  return leftSite !== undefined && leftSite === site(right);
+};
 
 let pendingApproval: PendingApproval | undefined;
 const cooldownUntilByOrigin = new Map<string, number>();

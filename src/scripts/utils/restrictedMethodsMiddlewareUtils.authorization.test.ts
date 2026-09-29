@@ -8,11 +8,21 @@ vi.mock("@/configuration/releaseProfile", async (importOriginal) => ({
 // plain object so the per-describe vi.restoreAllMocks() cannot strip the
 // implementation out from under it.
 const { lockState } = vi.hoisted(() => ({
-  lockState: { isLocked: false, hasPasswordSet: true },
+  lockState: { isLocked: false, hasPasswordSet: true, readFails: false },
 }));
 vi.mock("../lockManager/lockManager", () => ({
   __esModule: true,
-  default: { isLocked: async () => ({ ...lockState }) },
+  default: {
+    isLocked: async () => {
+      if (lockState.readFails) {
+        throw new Error("The lock state is unreadable.");
+      }
+      return {
+        isLocked: lockState.isLocked,
+        hasPasswordSet: lockState.hasPasswordSet,
+      };
+    },
+  },
 }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toChecksumAddress } from "@theqrl/wallet.js";
@@ -22,6 +32,7 @@ import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import {
   checkAccountHasBeenAuthorized,
   checkAccountAndChainHaveBeenAuthorized,
+  checkUrlOriginHasBeenConnected,
   checkWalletAddQrlChainParams,
   pickDefaultRpcUrl,
   normalizeChainId,
@@ -589,22 +600,37 @@ describe("pickDefaultRpcUrl (L5)", () => {
   );
 });
 
-// L6: while the wallet is locked, qrl_accounts, the provider state and
+// L6/L-1: while the wallet is locked, qrl_accounts, the provider state and
 // wallet_getPermissions all report nothing, so the authorization prechecks
 // must not answer differently for an authorized and an unauthorized address
-// either. Both reach the approval surface, which shows the unlock screen,
-// and revalidateAuthorizedDAppRequest enforces the grant after unlock.
-describe("locked-wallet authorization oracle (L6)", () => {
+// either. Every locked precheck refuses with one shared error, so the page
+// learns nothing and cannot raise the unlock screen on demand.
+// revalidateAuthorizedDAppRequest enforces the grant strictly after unlock.
+describe("locked-wallet authorization oracle (L6/L-1)", () => {
   const UNAUTHORIZED_ACCOUNT = `Q${"b".repeat(128)}`;
+  const LOCKED_REFUSAL_MESSAGE =
+    "The wallet is locked. Unlock it and try again.";
+  const UNAUTHORIZED_CODE = 4100;
 
   const capabilitiesRequest = (from: string) =>
     request(RESTRICTED_METHODS.WALLET_GET_CAPABILITIES, [from, ["0x301825"]]);
   const sendTransactionRequest = (from: string) =>
     request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [{ from }]);
 
+  const expectLockedRefusal = (result: {
+    canProceed: boolean;
+    proceedError?: { code?: number; message?: string };
+  }) => {
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.code).toBe(UNAUTHORIZED_CODE);
+    expect(result.proceedError?.message).toBe(LOCKED_REFUSAL_MESSAGE);
+    expect(result).not.toHaveProperty("authorizedChainId");
+  };
+
   beforeEach(() => {
     vi.restoreAllMocks();
     lockState.isLocked = false;
+    lockState.readFails = false;
     vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
       urlOrigin: ORIGIN,
       accounts: [ACCOUNT],
@@ -618,9 +644,10 @@ describe("locked-wallet authorization oracle (L6)", () => {
 
   afterEach(() => {
     lockState.isLocked = false;
+    lockState.readFails = false;
   });
 
-  it("answers wallet_getCapabilities the same for both accounts while locked", async () => {
+  it("refuses wallet_getCapabilities identically for both accounts while locked", async () => {
     lockState.isLocked = true;
 
     const authorized = await checkAccountHasBeenAuthorized(
@@ -630,11 +657,14 @@ describe("locked-wallet authorization oracle (L6)", () => {
       capabilitiesRequest(UNAUTHORIZED_ACCOUNT),
     );
 
-    expect(unauthorized.canProceed).toBe(authorized.canProceed);
-    expect(authorized.canProceed).toBe(true);
+    expectLockedRefusal(authorized);
+    expectLockedRefusal(unauthorized);
+    expect(unauthorized.proceedError?.message).toBe(
+      authorized.proceedError?.message,
+    );
   });
 
-  it("answers qrl_sendTransaction the same for both accounts while locked", async () => {
+  it("refuses qrl_sendTransaction identically for both accounts while locked", async () => {
     lockState.isLocked = true;
 
     const authorized = await checkAccountAndChainHaveBeenAuthorized(
@@ -644,14 +674,14 @@ describe("locked-wallet authorization oracle (L6)", () => {
       sendTransactionRequest(UNAUTHORIZED_ACCOUNT),
     );
 
-    expect(unauthorized.canProceed).toBe(authorized.canProceed);
-    expect(unauthorized).toMatchObject({
-      canProceed: true,
-      authorizedChainId: "0x301825",
-    });
+    expectLockedRefusal(authorized);
+    expectLockedRefusal(unauthorized);
+    expect(unauthorized.proceedError?.message).toBe(
+      authorized.proceedError?.message,
+    );
   });
 
-  it("answers qrl_sendTransaction the same for an origin with no grant at all while locked", async () => {
+  it("gives an origin with no grant at all the same locked refusal", async () => {
     lockState.isLocked = true;
     vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
       urlOrigin: ORIGIN,
@@ -660,14 +690,169 @@ describe("locked-wallet authorization oracle (L6)", () => {
       permissions: [],
     });
 
-    const result = await checkAccountAndChainHaveBeenAuthorized(
-      sendTransactionRequest(UNAUTHORIZED_ACCOUNT),
+    expectLockedRefusal(
+      await checkAccountHasBeenAuthorized(
+        capabilitiesRequest(UNAUTHORIZED_ACCOUNT),
+      ),
     );
+    expectLockedRefusal(
+      await checkAccountAndChainHaveBeenAuthorized(
+        sendTransactionRequest(UNAUTHORIZED_ACCOUNT),
+      ),
+    );
+  });
 
-    expect(result).toMatchObject({
-      canProceed: true,
-      authorizedChainId: "0x301825",
+  it("keeps every locked refusal free of address, chain and connection detail", async () => {
+    lockState.isLocked = true;
+    vi.mocked(StorageUtil.getActiveBlockChain).mockResolvedValue({
+      chainId: "0x1",
+    } as never);
+
+    const results = [
+      await checkAccountHasBeenAuthorized(
+        capabilitiesRequest(UNAUTHORIZED_ACCOUNT),
+      ),
+      await checkAccountAndChainHaveBeenAuthorized(
+        sendTransactionRequest(UNAUTHORIZED_ACCOUNT),
+      ),
+      await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [
+          { from: ACCOUNT, to: WRONG_CHECKSUM_ACCOUNT, chainId: "0x539" },
+        ]),
+      ),
+      await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.QRL_SIGN_MESSAGE, [ACCOUNT, "0xdeadbeef"]),
+      ),
+      await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.PERSONAL_SIGN, ["0x1234", ACCOUNT]),
+      ),
+    ];
+
+    results.forEach((result) => {
+      expectLockedRefusal(result);
+      const message = result.proceedError?.message ?? "";
+      expect(message).not.toContain(ACCOUNT);
+      expect(message).not.toContain(UNAUTHORIZED_ACCOUNT);
+      expect(message).not.toContain("0x301825");
+      expect(message).not.toContain("0x539");
+      expect(message).not.toContain("chain");
+      expect(message).not.toContain("authorized");
+      expect(message).not.toContain("connected");
     });
+  });
+
+  // wallet_addQRLChain, wallet_getCapabilities and wallet_switchQRLChain all
+  // run the same connection gate before their own parameter checks, so one
+  // gated call stands for each of the three.
+  const CONNECTION_GATED_METHODS = [
+    RESTRICTED_METHODS.WALLET_ADD_QRL_CHAIN,
+    RESTRICTED_METHODS.WALLET_GET_CAPABILITIES,
+    RESTRICTED_METHODS.WALLET_SWITCH_QRL_CHAIN,
+  ];
+  const UNCONNECTED_ORIGIN = "https://stranger-dapp.example";
+
+  it.each(CONNECTION_GATED_METHODS)(
+    "refuses the %s connection gate identically for a connected and an unconnected origin while locked",
+    async () => {
+      lockState.isLocked = true;
+
+      const connected = await checkUrlOriginHasBeenConnected(
+        `${ORIGIN}/request`,
+        true,
+      );
+      vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+        urlOrigin: UNCONNECTED_ORIGIN,
+        accounts: [],
+        blockchains: [],
+        permissions: [],
+      });
+      const unconnected = await checkUrlOriginHasBeenConnected(
+        `${UNCONNECTED_ORIGIN}/request`,
+        true,
+      );
+
+      expectLockedRefusal(connected);
+      expectLockedRefusal(unconnected);
+      expect(unconnected.proceedError?.message).toBe(
+        connected.proceedError?.message,
+      );
+      [connected, unconnected].forEach((result) => {
+        const message = result.proceedError?.message ?? "";
+        expect(message).not.toContain("connected");
+        expect(message).not.toContain(ORIGIN);
+        expect(message).not.toContain(UNCONNECTED_ORIGIN);
+      });
+    },
+  );
+
+  it.each(CONNECTION_GATED_METHODS)(
+    "keeps the unlocked %s connection distinction",
+    async () => {
+      const connected = await checkUrlOriginHasBeenConnected(
+        `${ORIGIN}/request`,
+        true,
+      );
+      vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+        urlOrigin: UNCONNECTED_ORIGIN,
+        accounts: [],
+        blockchains: [],
+        permissions: [],
+      });
+      const unconnected = await checkUrlOriginHasBeenConnected(
+        `${UNCONNECTED_ORIGIN}/request`,
+        true,
+      );
+
+      expect(connected.canProceed).toBe(true);
+      expect(unconnected.canProceed).toBe(false);
+      expect(unconnected.proceedError?.message).toBe(
+        "The dApp is not connected to MyQRLWallet.",
+      );
+    },
+  );
+
+  it("refuses the connection gate while the lock state cannot be read", async () => {
+    lockState.readFails = true;
+
+    expectLockedRefusal(
+      await checkUrlOriginHasBeenConnected(`${ORIGIN}/request`, true),
+    );
+  });
+
+  // qrl_accounts shares this gate and answers a locked wallet with an empty
+  // array (F8), so the default has to leave it exactly as it was.
+  it("leaves the ungated connection check untouched while locked", async () => {
+    lockState.isLocked = true;
+
+    const connected = await checkUrlOriginHasBeenConnected(`${ORIGIN}/request`);
+    expect(connected.canProceed).toBe(true);
+
+    vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+      urlOrigin: UNCONNECTED_ORIGIN,
+      accounts: [],
+      blockchains: [],
+      permissions: [],
+    });
+    const unconnected = await checkUrlOriginHasBeenConnected(
+      `${UNCONNECTED_ORIGIN}/request`,
+    );
+    expect(unconnected.canProceed).toBe(false);
+    expect(unconnected.proceedError?.message).toBe(
+      "The dApp is not connected to MyQRLWallet.",
+    );
+  });
+
+  it("refuses while the lock state cannot be read", async () => {
+    lockState.readFails = true;
+
+    expectLockedRefusal(
+      await checkAccountHasBeenAuthorized(capabilitiesRequest(ACCOUNT)),
+    );
+    expectLockedRefusal(
+      await checkAccountAndChainHaveBeenAuthorized(
+        sendTransactionRequest(ACCOUNT),
+      ),
+    );
   });
 
   it("keeps the unlocked wallet_getCapabilities distinction", async () => {
@@ -736,6 +921,39 @@ describe("locked-wallet authorization oracle (L6)", () => {
 
   it("revalidation still refuses an ungranted chain while locked", async () => {
     lockState.isLocked = true;
+    vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+      urlOrigin: ORIGIN,
+      accounts: [ACCOUNT],
+      blockchains: [],
+      permissions: [],
+    });
+
+    const result = await revalidateAuthorizedDAppRequest({
+      method: RESTRICTED_METHODS.QRL_SIGN_MESSAGE,
+      params: [ACCOUNT, "0xdeadbeef"],
+      requestId: "request-id",
+      authorizedChainId: "0x301825",
+      requestData: { senderData: { url: `${ORIGIN}/request` } },
+    });
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("not authorized to use");
+  });
+
+  it("revalidation after unlock refuses an unauthorized account", async () => {
+    const result = await revalidateAuthorizedDAppRequest({
+      method: RESTRICTED_METHODS.QRL_SEND_TRANSACTION,
+      params: [{ from: UNAUTHORIZED_ACCOUNT }],
+      requestId: "request-id",
+      authorizedChainId: "0x301825",
+      requestData: { senderData: { url: `${ORIGIN}/request` } },
+    });
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("has not been authorized");
+  });
+
+  it("revalidation after unlock refuses an ungranted chain", async () => {
     vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
       urlOrigin: ORIGIN,
       accounts: [ACCOUNT],

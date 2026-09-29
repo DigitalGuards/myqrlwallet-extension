@@ -193,8 +193,13 @@ export const checkRequestCanCompleteSilently = async (
 // a precheck to determine if the request can proceed
 const checkRequestCanProceed = async (req: JsonRpcRequest<JsonRpcRequest>) => {
   if (QRL_WALLET_DAPP_CONNECTION_REQUIRED_METHODS.includes(req.method)) {
+    // refuseWhileLocked: a locked wallet answers these three the same way
+    // for every origin. Without it, a connected origin and an unconnected
+    // one get two different 4100s here, which tells the page whether it
+    // holds a grant while the rest of the wallet reveals nothing.
     const originConnectResult = await checkUrlOriginHasBeenConnected(
       req?.senderData?.url ?? "",
+      true,
     );
     if (!originConnectResult.canProceed) {
       return originConnectResult;
@@ -270,6 +275,8 @@ export const APPROVAL_DISCONNECT_GRACE_MS = 20 * 1000;
  */
 type RestrictedMethodOutcome = DAppResponseType & {
   outcomeUnknown?: boolean;
+  /** Set when the approval reported a hash before it lost its surface. */
+  pendingTransactionHash?: string;
 };
 
 // get the result of the user approval/rejection of the request
@@ -331,6 +338,10 @@ const getRestrictedMethodResult = async (
   // broadcasting for this request, so neither the idle timeout nor a
   // torn-down surface may answer a rejection on the user's behalf.
   let userHasActed = false;
+  let userApproved = false;
+  // The hash the approval surface posts just before it broadcasts. It is
+  // the only thing that can name the transaction if the surface then dies.
+  let pendingTransactionHash: string | undefined;
   let isSettled = false;
   let timeoutHandle: ReturnType<typeof setTimeout>;
 
@@ -363,7 +374,7 @@ const getRestrictedMethodResult = async (
     settle(outcome);
   };
 
-  const abandon = async (reason: string, outcomeUnknown: boolean) => {
+  const abandon = async (reason: string) => {
     if (isSettled) return;
     console.warn(`QrlWeb3Wallet: dApp request abandoned (${reason})`);
     await clearStoredRequest();
@@ -372,7 +383,10 @@ const getRestrictedMethodResult = async (
       action: EXTENSION_MESSAGES.DAPP_RESPONSE,
       hasApproved: false,
       requestId,
-      outcomeUnknown,
+      // Only an approval the user granted leaves an outcome in doubt. A
+      // rejection that lost its surface is still a rejection.
+      outcomeUnknown: userHasActed && userApproved,
+      pendingTransactionHash,
     });
   };
 
@@ -388,20 +402,29 @@ const getRestrictedMethodResult = async (
     // approval that already ended cannot answer the current one.
     if (message.requestId !== requestId) return undefined;
 
+    if (
+      message.action === EXTENSION_MESSAGES.DAPP_REQUEST_PENDING_TRANSACTION
+    ) {
+      const hash = (message as { transactionHash?: unknown }).transactionHash;
+      if (typeof hash === "string" && hash) pendingTransactionHash = hash;
+      return undefined;
+    }
+
     if (message.action === EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS) {
-      if (isSettled) return undefined;
-      if (!userHasActed) {
-        userHasActed = true;
-        clearTimeout(timeoutHandle);
-        timeoutHandle = setTimeout(
-          () => void abandon("no response after the user acted", true),
-          APPROVAL_IN_PROGRESS_TIMEOUT_MS,
-        );
-      }
       // The acknowledgement the approval surface waits on before it signs
-      // or broadcasts anything. Answering only while the request is still
-      // live is what stops a surface resuming work for a request the
-      // worker has already given up on.
+      // or broadcasts anything. It is granted once per request: a second
+      // surface showing the same request (a reopened panel beside the
+      // popup) must be turned away, otherwise both would sign it.
+      if (isSettled || userHasActed) {
+        return Promise.resolve({ accepted: false });
+      }
+      userHasActed = true;
+      userApproved = message.hasApproved === true;
+      clearTimeout(timeoutHandle);
+      timeoutHandle = setTimeout(
+        () => void abandon("no response after the user acted"),
+        APPROVAL_IN_PROGRESS_TIMEOUT_MS,
+      );
       return Promise.resolve({ accepted: true });
     }
 
@@ -454,13 +477,13 @@ const getRestrictedMethodResult = async (
     if (isSettled) return;
     clearTimeout(timeoutHandle);
     timeoutHandle = setTimeout(
-      () => void abandon("the approval surface closed after the click", true),
+      () => void abandon("the approval surface closed after the click"),
       APPROVAL_DISCONNECT_GRACE_MS,
     );
   }
 
   timeoutHandle = setTimeout(
-    () => void abandon("no user response", false),
+    () => void abandon("no user response"),
     POPUP_RESPONSE_TIMEOUT_MS,
   );
   // Listen for the approval/rejection from the UI, plus the surface's
@@ -688,10 +711,26 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
           // honest answer is that the outcome is unknown. Reporting a user
           // rejection here would invite a retry for something that may
           // already have happened.
+          const lostTransactionHash =
+            restrictedMethodResult?.pendingTransactionHash;
           res.error = rpcErrors.internal({
-            message:
-              "The wallet approved this request and then lost contact with the approval window. The outcome is unknown. Check the wallet or the explorer before sending it again.",
+            message: lostTransactionHash
+              ? "The wallet approved this request and then lost contact with the approval window. The transaction was signed and may have been broadcast. Check the hash in this error before sending it again."
+              : "The wallet approved this request and then lost contact with the approval window. The outcome is unknown. Check the wallet or the explorer before sending it again.",
+            data: lostTransactionHash
+              ? { transactionHash: lostTransactionHash }
+              : undefined,
           });
+          // Watch for the hash the surface reported just before it
+          // broadcast. If it lands, the user is told, whatever the dApp
+          // decided to do with this error.
+          if (lostTransactionHash) {
+            await registerDAppTransactionWatchIfApproved(
+              req,
+              lostTransactionHash,
+              authorizedChainId,
+            );
+          }
         } else {
           res.error = providerErrors.userRejectedRequest();
         }

@@ -174,6 +174,34 @@ describe("approvalSlot", () => {
     });
   });
 
+  it("leaves the host page alone when a third-party frame is refused (L-5)", () => {
+    // An ad or widget frame answers for itself. Charging the page that
+    // embeds it would let any third party put a dApp its visitor is using
+    // into cooldown.
+    const HOST = "https://shop.example";
+    for (let attempt = 0; attempt <= APPROVAL_REFUSAL_GRACE + 2; attempt += 1) {
+      claimApprovalSlot({
+        origin: "https://ads.third-party.example",
+        topLevelOrigin: HOST,
+        tabId: 1,
+      });
+      releaseApprovalSlot({ startCooldown: true });
+    }
+
+    expect(
+      claimApprovalSlot({ origin: HOST, topLevelOrigin: HOST, tabId: 1 }),
+    ).toEqual({ claimed: true });
+    releaseApprovalSlot();
+    // The third party itself is still in cooldown.
+    expect(
+      claimApprovalSlot({
+        origin: "https://ads.third-party.example",
+        topLevelOrigin: HOST,
+        tabId: 1,
+      }),
+    ).toMatchObject({ claimed: false, reason: "cooldown" });
+  });
+
   it("clears the top-level streak on an approval too (L-3)", () => {
     const TOP = "https://a.example";
     for (let attempt = 0; attempt < APPROVAL_REFUSAL_GRACE; attempt += 1) {

@@ -8,22 +8,28 @@
  *
  * HOW THE DETECTOR USES THESE LISTS
  * PhishingDetector walks every config's `allowlist` first, across all configs,
- * before any blocklist or fuzzylist is consulted, and an allowlist entry also
- * covers every subdomain of it (dev.qrlwallet.com). The fuzzylist match is a
- * levenshtein distance computed on the domain *with its public suffix
- * stripped*, so qrlwallet.com and qrlwallet.xyz are distance 0 apart and every
- * domain we protect has to appear in the allowlist as well, or it would match
- * its own fuzzylist entry and be reported as phishing.
+ * before any blocklist or fuzzylist is consulted. An allowlist entry matches
+ * the domain itself *and every subdomain of it*: `matchPartsAgainstList()` in
+ * eth-phishing-detect compares the entry's labels from the public suffix
+ * inwards and ignores whatever extra labels the source carries. So listing
+ * qrlwallet.com already covers dev.qrlwallet.com and quantaswap.io already
+ * covers dev.quantaswap.io, and those staging hosts need no entry of their
+ * own. Only registrable domains belong in these lists.
  *
- * THE THREE LISTS BELOW
- * - PROTECTED_QRL_DOMAINS: everything we operate. All of it is allowlisted and
- *   all of it is compared against by the homograph check in homographCheck.ts.
- * - SIGNING_ORIGIN_DOMAINS + INFORMATIONAL_DOMAINS: the subset of the above
- *   that is worth a fuzzylist entry, split by how a near miss is treated.
- *   A lookalike of a signing origin is always phishing. A lookalike of an
- *   informational site is phishing only when it is a lookalike of the label
- *   too, because these brands legitimately appear under several public
- *   suffixes (see checkDomain() in phishingDetector.ts).
+ * The fuzzylist match is a levenshtein distance computed on the domain *with
+ * its public suffix stripped*, so qrlwallet.com and qrlwallet.xyz are distance
+ * 0 apart and every domain we protect has to appear in the allowlist as well,
+ * or it would match its own fuzzylist entry and be reported as phishing.
+ *
+ * THE LISTS BELOW
+ * - PROTECTED_BRAND_DOMAINS: the brands this config defends. Every one gets a
+ *   fuzzylist entry, an allowlist entry, and a homograph comparison. A copy of
+ *   one of these labels under another public suffix (zondscan.io, theqrl.net)
+ *   is a prime phishing registration and is flagged, which is why the real
+ *   sibling registrations of ours and of other people are named explicitly in
+ *   the allowlist below.
+ * - NON_FUZZY_QRL_DOMAINS: ours, allowlisted and homograph-protected, with no
+ *   fuzzylist entry.
  * - THIRD_PARTY_QRL_DOMAINS: other people's real sites, allowlisted so we
  *   never accuse them. They are deliberately absent from the fuzzylist.
  *
@@ -40,53 +46,47 @@
  * The shortest label protected here is six characters, where two edits rewrite
  * a third of the name and stop meaning "lookalike". Visually deceptive
  * substitutions that need more than one edit (qrlwaIIet.com) are caught by the
- * homograph check, which folds confusables and requires an exact match.
+ * homograph check, which folds confusables and requires an exact match on the
+ * label.
  */
 
 /**
- * Origins that can ask this wallet to connect, sign or send. Impersonating one
- * of these costs the user funds, so any near miss is treated as an attack,
- * including the same label under a different public suffix. Sorted.
+ * The brands this config defends. Impersonating any of them costs the user
+ * either funds or trust, so every near miss counts as an attack, including the
+ * same label under a different public suffix.
+ *
+ * The detector strips the public suffix before measuring its distance, so two
+ * registrations of one label (quantapool.com and quantapool.io) share a single
+ * fuzzy form and the second entry widens no coverage. Both are listed because
+ * both are real sites that the allowlist has to pass. Sorted.
  */
-const SIGNING_ORIGIN_DOMAINS = [
+const PROTECTED_BRAND_DOMAINS = [
   "myqrlwallet.com",
   "qrlwallet.com",
   "quantapool.com",
   "quantapool.io",
   "quantaswap.io",
+  // The planned mainnet block explorer, registered ahead of the cutover.
+  "shorscan.com",
+  "theqrl.org",
+  "zondscan.com",
 ];
-
-/**
- * Sites that only inform: they hold no key, ask for no signature and raise no
- * approval prompt. They are still worth a fuzzylist entry against character
- * substitution (theqr1.org, zondscan.co), and a copy of the same label under
- * another public suffix is treated as clean, because these brands really do
- * appear under several of them and flagging theqrl.com or a third-party
- * explorer on zondscan's label is a reputational risk with no user benefit.
- *
- * Residual, recorded deliberately: zondscan.com also hosts the dApp
- * example, so a copy of its label under another suffix could host a hostile
- * dApp and this tier lets that one shape through. Character substitutions
- * on the label and every homograph form stay flagged, and the approval
- * screen shows the registrable domain of whatever is asking. Move it to
- * SIGNING_ORIGIN_DOMAINS to trade that back for flagging third-party
- * explorers on the same label.
- * Sorted.
- */
-const INFORMATIONAL_DOMAINS = ["theqrl.org", "zondscan.com"];
 
 /**
  * Ours, allowlisted and homograph-protected, with no fuzzylist entry.
  * quantastark.com documents a verifier library and never asks the wallet for
  * anything, while its label sits one edit from ordinary product names
  * (quantastack, quantastar), so a fuzzylist entry for it only produced
- * accusations against unrelated businesses.
+ * accusations against unrelated businesses. The homograph check costs nothing
+ * here because it demands an exact skeleton match on the label.
  */
 const NON_FUZZY_QRL_DOMAINS = ["quantastark.com"];
 
 /**
- * Real sites run by other people in the QRL ecosystem. Allowlisted so that no
- * fuzzylist entry of ours can ever flag them. Sorted.
+ * Real sites run by other people in the QRL ecosystem, and our own sibling
+ * registrations of a protected label. Allowlisted by exact name so that no
+ * fuzzylist entry of ours can ever flag them, which is what makes it safe to
+ * treat every other public suffix on a protected label as phishing. Sorted.
  */
 const THIRD_PARTY_QRL_DOMAINS = [
   // The QRL Foundation ("Die QRL Stiftung"), the non-profit that funds QRL
@@ -98,43 +98,45 @@ const THIRD_PARTY_QRL_DOMAINS = [
   // competitor as a lookalike of ours.
   "quantascan.com",
   "quantascan.io",
-  // Serves the same site as theqrl.org, the foundation's main domain.
+  // Serves the same site as theqrl.org, the foundation's main domain. Distance
+  // 0 from it once the suffix is stripped, so without this entry the fuzzylist
+  // would accuse the foundation of impersonating itself.
   "theqrl.com",
 ];
 
 /**
- * Every registrable domain we operate. Feeds the allowlist and the homograph
- * comparison. Sorted.
+ * Every registrable domain of ours plus the brands we defend. Feeds the
+ * allowlist and the homograph comparison. Sorted.
  */
 export const PROTECTED_QRL_DOMAINS = [
-  ...SIGNING_ORIGIN_DOMAINS,
-  ...INFORMATIONAL_DOMAINS,
+  ...PROTECTED_BRAND_DOMAINS,
   ...NON_FUZZY_QRL_DOMAINS,
 ].sort();
 
 /**
  * The fuzzylist: the domains a levenshtein near miss is measured against.
  */
-export const QRL_FUZZY_DOMAINS = [
-  ...SIGNING_ORIGIN_DOMAINS,
-  ...INFORMATIONAL_DOMAINS,
-].sort();
+export const QRL_FUZZY_DOMAINS = [...PROTECTED_BRAND_DOMAINS].sort();
 
 /**
- * The fuzzylist entries where a same-label-different-suffix hit is not
- * phishing. checkDomain() consults this after the detector answers.
+ * Everything allowlisted by this config. The homograph check consults it too,
+ * so a real site can never be reported as a lookalike of itself or of a
+ * sibling registration.
  */
-export const LENIENT_SUFFIX_DOMAINS = [...INFORMATIONAL_DOMAINS];
+export const QRL_ALLOWLIST_DOMAINS = [
+  ...PROTECTED_QRL_DOMAINS,
+  ...THIRD_PARTY_QRL_DOMAINS,
+].sort();
 
 export const QRL_PHISHING_CONFIG = {
   name: "QRL",
-  version: 2,
+  version: 3,
   tolerance: 1,
   // Nothing is blocked outright here. Known-bad QRL domains would go in this
   // list; the fuzzylist is what catches lookalikes that nobody has reported
   // yet.
   blocklist: [] as string[],
-  allowlist: [...PROTECTED_QRL_DOMAINS, ...THIRD_PARTY_QRL_DOMAINS],
+  allowlist: [...QRL_ALLOWLIST_DOMAINS],
   fuzzylist: [...QRL_FUZZY_DOMAINS],
 };
 
