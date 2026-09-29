@@ -121,7 +121,14 @@ const ImportEncryptedWallet = observer(
         } else if (error instanceof WalletFileFormatError) {
           setFileError(t("importAccount.walletFileInvalid"));
         } else {
-          setFileError(`${t("importAccount.readError")} ${error}`);
+          // The raw exception goes to the console only. It carries
+          // library internals and can echo fragments of the file being
+          // decrypted, so the user sees a translated message.
+          console.error(
+            "[ImportEncryptedWallet] Wallet file could not be read:",
+            error,
+          );
+          setFileError(t("importAccount.walletFileReadFailed"));
         }
       } finally {
         if (token === parseTokenRef.current) {
@@ -177,8 +184,12 @@ const ImportEncryptedWallet = observer(
             ),
           });
         } else {
+          console.error(
+            "[ImportEncryptedWallet] Wallet file import failed:",
+            error,
+          );
           setError("password", {
-            message: `${t("importAccount.readError")} ${error}`,
+            message: t("importAccount.walletFileImportFailed"),
           });
         }
       }

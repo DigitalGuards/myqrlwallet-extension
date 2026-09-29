@@ -38,6 +38,7 @@ const ZRC20Token = observer(
         contractAddress={contractAddress}
         decimals={Number(token.decimals)}
         balance={getOptimalTokenBalance(token.balance.toString(), token.symbol)}
+        balanceBaseUnits={token.balanceBaseUnits}
         name={token.name}
         symbol={token.symbol}
         image={tokenImage}

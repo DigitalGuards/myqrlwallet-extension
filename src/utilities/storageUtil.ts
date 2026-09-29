@@ -140,6 +140,7 @@ type TransactionValuesType = {
     tokenDecimals: number;
     tokenImage: string;
     tokenBalance: string;
+    tokenBalanceBaseUnits?: string;
     tokenName: string;
     tokenSymbol: string;
   };

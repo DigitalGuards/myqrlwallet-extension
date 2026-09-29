@@ -33,6 +33,7 @@ describe("WatchAssetVerification", () => {
         getZrc20TokenDetails: async () => ({
           token: {
             balance: 2,
+            balanceBaseUnits: "2000000000000000000",
             decimals: 18n,
             image: "testImage",
             name: "Test Name",
@@ -86,6 +87,7 @@ describe("WatchAssetVerification", () => {
           getZrc20TokenDetails: async () => ({
             token: {
               balance: 2,
+              balanceBaseUnits: "2000000000000000000",
               decimals: 18n,
               image: "testImage",
               name: "Test Name",

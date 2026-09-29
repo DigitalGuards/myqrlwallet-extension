@@ -192,6 +192,66 @@ describe("NFTTransfer", () => {
     });
   });
 
+  it("refuses a Ledger account an NFT transfer with an explicit message", async () => {
+    const mockSignNftTransfer = vi.fn();
+
+    renderComponent(
+      defaultState,
+      mockedStore({
+        ledgerStore: { isLedgerAccount: () => true } as any,
+        qrlStore: { signNftTransfer: mockSignNftTransfer },
+      }),
+    );
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "receiverAddress" }),
+      RESOLVED_ACCOUNT,
+    );
+    await act(async () => {
+      await userEvent.click(screen.getByRole("button", { name: "Send NFT" }));
+    });
+
+    expect(mockSignNftTransfer).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(/Sending NFTs from a Ledger account/),
+    ).toBeInTheDocument();
+  });
+
+  it("does not settle an NFT transfer on a receipt for a different hash", async () => {
+    const updateTransaction = vi.fn().mockResolvedValue(undefined);
+
+    renderComponent(
+      defaultState,
+      mockedStore({
+        qrlStore: {
+          signNftTransfer: vi.fn().mockResolvedValue({
+            transactionHash: "0xtxhash",
+            rawTransaction: "0xraw",
+            error: "",
+          }),
+          // A receipt that belongs to some other transaction proves
+          // nothing about this one; the shared classifier rejects it.
+          sendRawTransaction: vi.fn().mockResolvedValue({
+            status: 1n,
+            blockNumber: 9n,
+            transactionHash: "0xsomethingelse",
+          }),
+        },
+        transactionHistoryStore: { updateTransaction },
+      }),
+    );
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "receiverAddress" }),
+      RESOLVED_ACCOUNT,
+    );
+    await act(async () => {
+      await userEvent.click(screen.getByRole("button", { name: "Send NFT" }));
+    });
+
+    expect(updateTransaction).not.toHaveBeenCalled();
+  });
+
   it("ignores an older in-flight QRNS result after the name changes", async () => {
     let resolveAlice!: (address: string) => void;
     let resolveBob!: (address: string) => void;

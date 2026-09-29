@@ -62,6 +62,7 @@ describe("ZRC20Token", () => {
             return {
               token: {
                 balance: 65,
+                balanceBaseUnits: "65000000000000000000",
                 decimals: BigInt(18),
                 name: "POWERCOIN",
                 symbol: "POW",

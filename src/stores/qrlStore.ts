@@ -18,6 +18,7 @@ import {
   ZRC_20_CONTRACT_ABI,
   ZRC_20_TOKEN_UNITS_OF_GAS,
 } from "@/constants/zrc20Token";
+import { SIGNING_NONCE_BLOCK_TAG } from "@/constants/transactionNonce";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { getOptimalTokenBalance } from "@/functions/getOptimalTokenBalance";
 import { toTokenBaseUnits } from "@/functions/tokenAmount";
@@ -518,17 +519,21 @@ class QrlStore {
     );
   }
 
+  /**
+   * Worst-case fee for a native transfer, in Quanta.
+   *
+   * Priced off maxFeePerGas. For the three preset tiers that equals
+   * baseFee + tip, and for an advanced override it is the ceiling the user
+   * authorised, which is what the send form has to reserve and guard
+   * against.
+   */
   async getNativeTokenGas(overrides?: GasFeeOverrides) {
     const gasLimit =
       overrides?.tier === "advanced" && overrides.gasLimit
         ? overrides.gasLimit
         : NATIVE_TOKEN_UNITS_OF_GAS;
-    const { baseFeePerGas, maxPriorityFeePerGas } =
-      await this.getGasFeeData(overrides);
-    return utils.fromPlanck(
-      BigInt(gasLimit) * (baseFeePerGas + maxPriorityFeePerGas),
-      "quanta",
-    );
+    const { maxFeePerGas } = await this.getGasFeeData(overrides);
+    return utils.fromPlanck(BigInt(gasLimit) * maxFeePerGas, "quanta");
   }
 
   async signNativeToken(
@@ -555,7 +560,10 @@ class QrlStore {
         overrides?.tier === "advanced" && overrides.gasLimit
           ? overrides.gasLimit
           : NATIVE_TOKEN_UNITS_OF_GAS;
-      const nonce = await this.qrlInstance?.getTransactionCount(from);
+      const nonce = await this.qrlInstance?.getTransactionCount(
+        from,
+        SIGNING_NONCE_BLOCK_TAG,
+      );
       const transactionObject = {
         from,
         to,
@@ -625,7 +633,20 @@ class QrlStore {
           Number(balanceUnformatted) / Math.pow(10, Number(decimals));
         return {
           ...tokenDetails,
-          token: { name, symbol, decimals, totalSupply, balance, image: "" },
+          token: {
+            name,
+            symbol,
+            decimals,
+            totalSupply,
+            balance,
+            // The exact on-chain integer. `balance` above is a float for
+            // display; anything that has to compare or spend the balance
+            // (the send form's guard and its Max) reads this one, so a
+            // balance smaller than the display rounding still sends and Max
+            // leaves no dust behind.
+            balanceBaseUnits: balanceUnformatted.toString(),
+            image: "",
+          },
         };
       } catch {
         return {
@@ -940,7 +961,7 @@ class QrlStore {
           useAdvancedGas
             ? Promise.resolve(null)
             : transferCall.estimateGas({ from }).catch(() => null),
-          this.qrlInstance?.getTransactionCount(from),
+          this.qrlInstance?.getTransactionCount(from, SIGNING_NONCE_BLOCK_TAG),
         ]);
         const { maxFeePerGas, maxPriorityFeePerGas } = gasFeeData;
         let gasLimit = useAdvancedGas ? overrides!.gasLimit! : NFT_UNITS_OF_GAS;
@@ -998,6 +1019,8 @@ class QrlStore {
     return result;
   }
 
+  /** Worst-case fee for a ZRC-20 transfer, in Quanta. Priced the same way
+   *  getNativeTokenGas is; see its comment. */
   async getZrc20TokenGas(
     from: string,
     to: string,
@@ -1011,23 +1034,19 @@ class QrlStore {
         ZRC_20_CONTRACT_ABI,
         contractAddress,
       );
-      const contractTransfer = contract.methods.transfer(
-        to,
-        toTokenBaseUnits(value, decimals),
-      );
-      const estimatedGasLimit = Number(
-        await contractTransfer.estimateGas({ from }),
-      );
-      const gasLimit =
-        overrides?.tier === "advanced" && overrides.gasLimit
-          ? overrides.gasLimit
-          : estimatedGasLimit;
-      const { baseFeePerGas, maxPriorityFeePerGas } =
-        await this.getGasFeeData(overrides);
-      return utils.fromPlanck(
-        BigInt(gasLimit) * (baseFeePerGas + maxPriorityFeePerGas),
-        "quanta",
-      );
+      const useAdvancedGasLimit =
+        overrides?.tier === "advanced" && !!overrides.gasLimit;
+      // An explicit advanced gas limit replaces the estimate outright, so
+      // the estimate RPC (which can revert) is skipped entirely.
+      const gasLimit = useAdvancedGasLimit
+        ? overrides.gasLimit!
+        : Number(
+            await contract.methods
+              .transfer(to, toTokenBaseUnits(value, decimals))
+              .estimateGas({ from }),
+          );
+      const { maxFeePerGas } = await this.getGasFeeData(overrides);
+      return utils.fromPlanck(BigInt(gasLimit) * maxFeePerGas, "quanta");
     }
     return "";
   }
@@ -1070,7 +1089,10 @@ class QrlStore {
           overrides?.tier === "advanced" && overrides.gasLimit
             ? overrides.gasLimit
             : ZRC_20_TOKEN_UNITS_OF_GAS;
-        const nonce = await this.qrlInstance?.getTransactionCount(from);
+        const nonce = await this.qrlInstance?.getTransactionCount(
+          from,
+          SIGNING_NONCE_BLOCK_TAG,
+        );
         const encodedData = contractTransfer.encodeABI();
         const transactionObject = {
           from,
@@ -1240,10 +1262,27 @@ class QrlStore {
     }
   }
 
-  async sendRawTransaction(rawTransaction: string) {
+  /**
+   * Broadcasts a signed transaction and resolves with its receipt.
+   *
+   * `onBroadcast` fires as soon as the node has accepted the transaction and
+   * returned its hash, well before the receipt exists. Callers that must
+   * distinguish "the node took it" from "it was mined" (the replacement
+   * flow, which only supersedes the original once the replacement is live)
+   * use it; the promise alone cannot tell the two apart.
+   */
+  async sendRawTransaction(
+    rawTransaction: string,
+    onBroadcast?: (transactionHash: string) => void,
+  ) {
     await this.assertSigningNetwork();
-    const receipt =
-      await this.qrlInstance?.sendSignedTransaction(rawTransaction);
+    const pending = this.qrlInstance?.sendSignedTransaction(rawTransaction);
+    if (onBroadcast && pending && typeof pending.on === "function") {
+      pending.on("transactionHash", (transactionHash) => {
+        onBroadcast(String(transactionHash));
+      });
+    }
+    const receipt = await pending;
     return receipt;
   }
 }

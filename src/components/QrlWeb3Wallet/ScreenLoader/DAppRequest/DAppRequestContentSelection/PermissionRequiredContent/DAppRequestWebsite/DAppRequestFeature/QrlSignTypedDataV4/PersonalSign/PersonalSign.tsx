@@ -10,6 +10,7 @@ import {
   isWalletLockedError,
   walletLockedProviderError,
 } from "@/functions/describeExtensionError";
+import { decodePersonalSignMessage } from "@/functions/decodePersonalSignMessage";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
@@ -17,7 +18,6 @@ import { sanitizeForDisplay } from "@/utilities/stringUtil";
 import { MLDSA87, ExtendedSeed } from "@theqrl/wallet.js";
 import { bytesToHex } from "@theqrl/web3-utils";
 import { parseAndValidateSeed } from "@theqrl/web3-qrl-accounts";
-import { Buffer } from "buffer";
 import { Copy } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -40,16 +40,8 @@ const PersonalSign = observer(() => {
 
   const params = dAppRequestData?.params;
   const rawMessage: string = params?.[0] ?? "";
-  const messageWithoutPrefix =
-    rawMessage.startsWith("0x") || rawMessage.startsWith("0X")
-      ? rawMessage.slice(2)
-      : rawMessage;
-  const isHexEncoded =
-    /^[0-9a-f]+$/i.test(messageWithoutPrefix) &&
-    messageWithoutPrefix.length % 2 === 0;
-  const decodedChallenge = isHexEncoded
-    ? Buffer.from(messageWithoutPrefix, "hex").toString("utf8")
-    : rawMessage;
+  const { text: decodedChallenge, wasHexDecoded: isHexEncoded } =
+    decodePersonalSignMessage(rawMessage);
   const { sanitized: challenge, hadHidden: hasHiddenChars } =
     sanitizeForDisplay(decodedChallenge);
   const fromAddress = params?.[1] ?? "";

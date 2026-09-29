@@ -6,6 +6,7 @@ import { NATIVE_TOKEN_UNITS_OF_GAS } from "@/constants/nativeToken";
 import { formatFiatCompact } from "@/functions/formatFiat";
 import { formatTransactionAmount } from "@/functions/formatTransactionAmount";
 import { getOptimalGasFee } from "@/functions/getOptimalGasFee";
+import { transactionFailureUpdate } from "@/functions/transactionOutcome";
 import { useStore } from "@/stores/store";
 import type {
   PendingStatus,
@@ -228,16 +229,23 @@ const TransactionDetail = observer(() => {
         return;
       }
 
-      // Mark original as replaced/cancelled
-      await transactionHistoryStore.updateTransaction(
-        transaction.from,
-        transaction.transactionHash,
-        {
-          pendingStatus: action === "speed-up" ? "replaced" : "cancelled",
-          replacementTransactionHash: result.transactionHash,
-          replacedByAction: action,
-        },
-      );
+      // The broadcast handler below marks the original, once the node has
+      // actually taken the replacement. At this point the replacement has
+      // only been signed, and a broadcast the node rejects (an underpriced
+      // replacement, a stale nonce) used to leave the original reading
+      // "Replaced" while it was still the only live transaction, with
+      // nothing to restore it.
+      const markOriginalReplaced = async () => {
+        await transactionHistoryStore.updateTransaction(
+          transaction.from,
+          transaction.transactionHash,
+          {
+            pendingStatus: action === "speed-up" ? "replaced" : "cancelled",
+            replacementTransactionHash: result.transactionHash,
+            replacedByAction: action,
+          },
+        );
+      };
 
       // For Speed Up: add the replacement TX to history as pending
       // For Cancel: don't add the self-send to history (it's just a technical detail)
@@ -278,34 +286,49 @@ const TransactionDetail = observer(() => {
       }
 
       // Send the replacement TX in the background (don't block navigation)
-      qrlStore.sendRawTransaction(result.rawTransaction).then(
-        (receipt) => {
-          if (action === "speed-up") {
-            const isSuccess = receipt?.status?.toString() === "1";
-            transactionHistoryStore.updateTransaction(
-              transaction.from,
-              result.transactionHash!,
-              {
-                pendingStatus: isSuccess ? "confirmed" : "failed",
-                status: isSuccess,
-                blockNumber: receipt?.blockNumber?.toString() ?? "",
-                gasUsed: receipt?.gasUsed?.toString() ?? "",
-                effectiveGasPrice: (receipt?.effectiveGasPrice ?? 0).toString(),
-              },
-            );
-          }
-        },
-        (err) => {
-          console.error("[handleReplacement] sendRawTransaction error:", err);
-          if (action === "speed-up") {
-            transactionHistoryStore.updateTransaction(
-              transaction.from,
-              result.transactionHash!,
-              { pendingStatus: "failed", status: false },
-            );
-          }
-        },
-      );
+      let originalMarked = false;
+      const markOriginalOnce = async () => {
+        if (originalMarked) return;
+        originalMarked = true;
+        await markOriginalReplaced();
+      };
+
+      qrlStore
+        .sendRawTransaction(result.rawTransaction, () => {
+          // The node accepted the broadcast: from here the original is
+          // genuinely superseded, whatever the replacement's own fate.
+          void markOriginalOnce();
+        })
+        .then(
+          async (receipt) => {
+            // A receipt implies the broadcast landed, so the original is
+            // settled here too for transports that report no hash event.
+            await markOriginalOnce();
+            if (action === "speed-up") {
+              const update = transactionFailureUpdate(
+                { receipt },
+                result.transactionHash,
+              );
+              if (update.receiptStatusVerified) {
+                await transactionHistoryStore.updateTransaction(
+                  transaction.from,
+                  result.transactionHash!,
+                  update,
+                );
+              }
+            }
+          },
+          async (err) => {
+            console.error("[handleReplacement] sendRawTransaction error:", err);
+            if (action === "speed-up") {
+              await transactionHistoryStore.updateTransaction(
+                transaction.from,
+                result.transactionHash!,
+                transactionFailureUpdate(err, result.transactionHash),
+              );
+            }
+          },
+        );
 
       // Navigate back to history immediately
       navigate(-1);
@@ -522,7 +545,9 @@ const TransactionDetail = observer(() => {
                     <span className="text-xs text-muted-foreground">
                       {t("txDetail.blockNumber")}
                     </span>
-                    <span className="font-numeric text-sm font-medium">{blockNumber}</span>
+                    <span className="font-numeric text-sm font-medium">
+                      {blockNumber}
+                    </span>
                   </div>
                   {hasGasBreakdown && (
                     <>

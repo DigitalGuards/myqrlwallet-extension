@@ -8,6 +8,7 @@ import {
   FormMessage,
 } from "@/components/UI/Form";
 import { Input } from "@/components/UI/Input";
+import { EXTENDED_SEED_HEX_LENGTH } from "@/constants/seed";
 import { useStore } from "@/stores/store";
 import { zodResolver } from "@hookform/resolvers/zod";
 import Web3, { Web3BaseWalletAccount } from "@theqrl/web3";
@@ -15,20 +16,27 @@ import { Download, Loader } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { z } from "zod";
 
 // Same validation the web wallet uses (ImportHexSeedForm.tsx): a 0x-prefixed
 // hexadecimal string. The QRL Dilithium hex seed is what seedToAccount consumes
-// directly, so no mnemonic round-trip is needed for this path.
-const FormSchema = z.object({
-  hexSeed: z
-    .string()
-    .min(1, "Hex seed is required")
-    .regex(
-      /^0x[0-9a-fA-F]+$/,
-      "Invalid hex seed format. Must start with '0x' followed by hex characters",
-    ),
-});
+// directly, so no mnemonic round-trip is needed for this path. The length is
+// exact: wallet.js accepts the 51-byte extended seed and nothing else, and a
+// seed of another length used to reach seedToAccount and come back as a raw
+// exception.
+const createFormSchema = (t: TFunction) =>
+  z.object({
+    hexSeed: z
+      .string()
+      .min(1, t("importAccount.hexSeedRequired"))
+      .regex(/^0x[0-9a-fA-F]+$/, t("importAccount.hexSeedInvalidFormat"))
+      .refine((value) => value.length === EXTENDED_SEED_HEX_LENGTH, {
+        message: t("importAccount.hexSeedInvalidLength", {
+          length: EXTENDED_SEED_HEX_LENGTH - 2,
+        }),
+      }),
+  });
 
 interface ImportHexSeedFormProps {
   onImported: (account: Web3BaseWalletAccount) => Promise<void>;
@@ -38,6 +46,7 @@ const ImportHexSeedForm = observer(({ onImported }: ImportHexSeedFormProps) => {
   const { t } = useTranslation();
   const { qrlStore } = useStore();
   const { qrlInstance } = qrlStore;
+  const FormSchema = createFormSchema(t);
 
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
@@ -65,8 +74,11 @@ const ImportHexSeedForm = observer(({ onImported }: ImportHexSeedFormProps) => {
         });
       }
     } catch (error) {
+      // The raw exception goes to the console only. It carries library
+      // internals and, for a malformed seed, fragments of the secret.
+      console.error("[ImportHexSeedForm] Hex seed import failed:", error);
       control.setError("hexSeed", {
-        message: `${t("importAccount.readError")} ${error}`,
+        message: t("importAccount.hexSeedImportFailed"),
       });
     }
   }

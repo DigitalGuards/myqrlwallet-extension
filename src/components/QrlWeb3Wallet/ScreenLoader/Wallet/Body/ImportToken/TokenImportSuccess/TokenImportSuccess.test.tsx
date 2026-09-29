@@ -23,6 +23,7 @@ describe("TokenImportSuccess", () => {
             onCancelImport={mockedOnCancelImport}
             token={{
               balance: 25,
+              balanceBaseUnits: "25000000000000000000",
               decimals: BigInt(18),
               name: "MOCK TOKEN",
               symbol: "MCK",

@@ -6,8 +6,9 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ImportHexSeedForm from "./ImportHexSeedForm";
 
-const VALID_HEX_SEED =
-  "0x0105000cf3d735daf68908cc31e7c9901234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+// The QRL extended seed is exactly 51 bytes, so 0x plus 102 hex characters.
+const VALID_HEX_SEED = `0x${"ab".repeat(51)}`;
+const SHORT_HEX_SEED = `0x${"ab".repeat(32)}`;
 
 describe("ImportHexSeedForm", () => {
   afterEach(cleanup);
@@ -77,10 +78,32 @@ describe("ImportHexSeedForm", () => {
     await waitFor(() => {
       expect(
         screen.getByText(
-          "Invalid hex seed format. Must start with '0x' followed by hex characters",
+          "Invalid hex seed format. It must start with 0x followed by hexadecimal characters",
         ),
       ).toBeInTheDocument();
     });
+    expect(onImported).not.toHaveBeenCalled();
+  });
+
+  it("rejects a well-formed hex seed of the wrong length", async () => {
+    const onImported = renderComponent();
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "hexSeed" }),
+      SHORT_HEX_SEED,
+    );
+
+    // wallet.js accepts the 51-byte extended seed and nothing else, so
+    // the form checks the length itself. seedToAccount used to throw a raw
+    // exception into the field.
+    expect(
+      await screen.findByText(
+        "Invalid hex seed length. It must be 0x followed by exactly 102 hexadecimal characters",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Import account" }),
+    ).toBeDisabled();
     expect(onImported).not.toHaveBeenCalled();
   });
 

@@ -14,7 +14,7 @@ import type { GasFeeOverrides, GasTier } from "@/types/gasFee";
 import { cn } from "@/utilities/stylingUtil";
 import { ChevronDown, ChevronUp, Info, Loader } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 type GasFeeSelectorProps = {
@@ -27,6 +27,7 @@ type GasFeeSelectorProps = {
   disabled?: boolean;
   onOverridesChange: (overrides: GasFeeOverrides) => void;
   onGasFeeCalculated?: (gasFee: string) => void;
+  onEstimateError?: (message: string) => void;
 };
 
 type TierConfig = {
@@ -46,6 +47,7 @@ export const GasFeeSelector = observer(
     disabled,
     onOverridesChange,
     onGasFeeCalculated,
+    onEstimateError,
   }: GasFeeSelectorProps) => {
     const { t } = useTranslation();
     const { settingsStore, qrlStore, priceStore } = useStore();
@@ -74,10 +76,12 @@ export const GasFeeSelector = observer(
     const qrlPrice = priceStore.getPrice(currency);
     const { getNativeTokenGas, getZrc20TokenGas } = qrlStore;
 
-    const initialTier =
+    // The stored "advanced" preference has no preset values behind it, so it
+    // starts the form on Market with the advanced panel closed.
+    const preferredTier =
       defaultGasTier === "advanced" ? "market" : defaultGasTier;
 
-    const [selectedTier, setSelectedTier] = useState<GasTier>(initialTier);
+    const [selectedTier, setSelectedTier] = useState<GasTier>(preferredTier);
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [advancedValues, setAdvancedValues] = useState({
       maxPriorityFeePerGas: "",
@@ -86,13 +90,34 @@ export const GasFeeSelector = observer(
     });
 
     const [tierCosts, setTierCosts] = useState<Record<string, string>>({});
+    const [advancedCost, setAdvancedCost] = useState("");
     const [isLoadingCosts, setIsLoadingCosts] = useState(true);
+    const [estimateFailed, setEstimateFailed] = useState(false);
+
+    // Read inside the cost effect without making it a dependency: the effect
+    // re-runs on the inputs it prices, and only needs the CURRENT selection
+    // when it reports a cost back. Closing over the state directly reported
+    // the cost of whichever tier was selected when the effect last started.
+    const selectedTierRef = useRef(selectedTier);
+    selectedTierRef.current = selectedTier;
+    const showAdvancedRef = useRef(showAdvanced);
+    showAdvancedRef.current = showAdvanced;
+    // Set once the user picks a tier themselves, after which a late-loading
+    // stored preference must not move their choice.
+    const tierChosenByUserRef = useRef(false);
 
     const hasValuesForGasCalculation = !!from && !!to && !!value;
 
-    const calculateGasForTier = useCallback(
-      async (tier: GasTier): Promise<string> => {
-        const overrides: GasFeeOverrides = { tier };
+    const reportEstimateFailure = useCallback(
+      (failed: boolean) => {
+        setEstimateFailed(failed);
+        onEstimateError?.(failed ? t("gasFee.estimateFailed") : "");
+      },
+      [onEstimateError, t],
+    );
+
+    const calculateGas = useCallback(
+      async (overrides: GasFeeOverrides): Promise<string> => {
         if (isZrc20Token) {
           return await getZrc20TokenGas(
             from,
@@ -117,45 +142,6 @@ export const GasFeeSelector = observer(
       ],
     );
 
-    useEffect(() => {
-      if (!hasValuesForGasCalculation) return;
-
-      let cancelled = false;
-      setIsLoadingCosts(true);
-
-      (async () => {
-        try {
-          const results = await Promise.all(
-            TIERS.map(async (tier) => {
-              const cost = await calculateGasForTier(tier.value);
-              return [tier.value, cost] as const;
-            }),
-          );
-          if (!cancelled) {
-            const costs: Record<string, string> = {};
-            for (const [tierValue, cost] of results) {
-              costs[tierValue] = cost;
-            }
-            setTierCosts(costs);
-            setIsLoadingCosts(false);
-
-            // Report the cost for the currently selected tier
-            if (!showAdvanced) {
-              onGasFeeCalculated?.(costs[selectedTier] ?? "");
-            }
-          }
-        } catch {
-          if (!cancelled) {
-            setIsLoadingCosts(false);
-          }
-        }
-      })();
-
-      return () => {
-        cancelled = true;
-      };
-    }, [from, to, value, hasValuesForGasCalculation, calculateGasForTier]);
-
     const buildOverrides = useCallback(
       (tier: GasTier, advanced = advancedValues): GasFeeOverrides => {
         if (tier === "advanced") {
@@ -175,9 +161,110 @@ export const GasFeeSelector = observer(
       [advancedValues],
     );
 
+    // The stored default tier is loaded asynchronously, so it can arrive
+    // after the first render. Until the user picks a tier themselves, keep
+    // the selection and the reported overrides on that preference: without
+    // this the setting was displayed in Settings but the form always signed
+    // at the store's market fallback.
+    useEffect(() => {
+      if (tierChosenByUserRef.current || showAdvancedRef.current) return;
+      setSelectedTier(preferredTier);
+      onOverridesChange({ tier: preferredTier });
+      onGasFeeCalculated?.(tierCosts[preferredTier] ?? "");
+    }, [preferredTier]);
+
+    useEffect(() => {
+      if (!hasValuesForGasCalculation) return;
+
+      let cancelled = false;
+      setIsLoadingCosts(true);
+
+      (async () => {
+        // allSettled keeps every tier that priced successfully. Under
+        // Promise.all one tier failing (a reverting estimate, a dropped
+        // RPC call) discarded the other two and left the send form with no
+        // fee at all, which silently turned the balance guard off.
+        const results = await Promise.allSettled(
+          TIERS.map((tier) => calculateGas({ tier: tier.value })),
+        );
+        if (cancelled) return;
+
+        const costs: Record<string, string> = {};
+        // Only a thrown estimate is a failure worth blocking the send on: an
+        // empty string just means the store had nothing to price against
+        // (no contract handle yet), which is a transient startup state.
+        let anyFailed = false;
+        results.forEach((result, index) => {
+          const tierValue = TIERS[index].value;
+          if (result.status === "fulfilled") {
+            if (result.value) costs[tierValue] = result.value;
+          } else {
+            anyFailed = true;
+            console.error(
+              "[GasFeeSelector] Gas estimate failed:",
+              result.reason,
+            );
+          }
+        });
+        setTierCosts(costs);
+        setIsLoadingCosts(false);
+
+        // Advanced mode has its own estimate and its own verdict; the
+        // effect below owns both while it is open.
+        if (!showAdvancedRef.current) {
+          reportEstimateFailure(anyFailed);
+          onGasFeeCalculated?.(costs[selectedTierRef.current] ?? "");
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [from, to, value, hasValuesForGasCalculation, calculateGas]);
+
+    // Advanced mode prices its own worst case (gas limit x max fee) on every
+    // change, so the send form keeps a real fee to guard the balance with
+    // and the user can see what their override costs.
+    useEffect(() => {
+      if (!showAdvanced || !hasValuesForGasCalculation) return;
+
+      let cancelled = false;
+      (async () => {
+        try {
+          const cost = await calculateGas(
+            buildOverrides("advanced", advancedValues),
+          );
+          if (cancelled) return;
+          setAdvancedCost(cost);
+          onGasFeeCalculated?.(cost);
+          reportEstimateFailure(false);
+        } catch (error) {
+          if (cancelled) return;
+          console.error(
+            "[GasFeeSelector] Advanced gas estimate failed:",
+            error,
+          );
+          setAdvancedCost("");
+          onGasFeeCalculated?.("");
+          reportEstimateFailure(true);
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [
+      showAdvanced,
+      advancedValues,
+      hasValuesForGasCalculation,
+      calculateGas,
+    ]);
+
     const selectTier = (tier: GasTier) => {
+      tierChosenByUserRef.current = true;
       setSelectedTier(tier);
       setShowAdvanced(false);
+      showAdvancedRef.current = false;
       const overrides = buildOverrides(tier);
       onOverridesChange(overrides);
       onGasFeeCalculated?.(tierCosts[tier] ?? "");
@@ -190,7 +277,9 @@ export const GasFeeSelector = observer(
         onOverridesChange(overrides);
         onGasFeeCalculated?.(tierCosts[selectedTier] ?? "");
         setShowAdvanced(false);
+        showAdvancedRef.current = false;
       } else {
+        tierChosenByUserRef.current = true;
         // Expand - pre-fill with current Market values
         try {
           const { maxPriorityFeePerGas, maxFeePerGas } =
@@ -201,14 +290,15 @@ export const GasFeeSelector = observer(
             gasLimit: String(NATIVE_TOKEN_UNITS_OF_GAS),
           };
           setAdvancedValues(prefilled);
-          const overrides = buildOverrides("advanced", prefilled);
-          onOverridesChange(overrides);
+          onOverridesChange(buildOverrides("advanced", prefilled));
         } catch {
-          const overrides = buildOverrides("advanced");
-          onOverridesChange(overrides);
+          onOverridesChange(buildOverrides("advanced"));
         }
-        onGasFeeCalculated?.("");
+        // The advanced cost effect reports the fee for these values; the
+        // previous tier's fee stays reported until it does, so the balance
+        // guard is never briefly disarmed.
         setShowAdvanced(true);
+        showAdvancedRef.current = true;
       }
     };
 
@@ -219,8 +309,7 @@ export const GasFeeSelector = observer(
       const sanitized = rawValue.replace(/[^0-9]/g, "");
       const updated = { ...advancedValues, [field]: sanitized };
       setAdvancedValues(updated);
-      const overrides = buildOverrides("advanced", updated);
-      onOverridesChange(overrides);
+      onOverridesChange(buildOverrides("advanced", updated));
     };
 
     if (!hasValuesForGasCalculation) return null;
@@ -323,11 +412,23 @@ export const GasFeeSelector = observer(
                   </TooltipContent>
                 </Tooltip>
               </div>
-              {showAdvanced ? (
-                <ChevronUp className="h-4 w-4 text-muted-foreground" />
-              ) : (
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-              )}
+              <div className="flex items-center gap-2">
+                {showAdvanced && advancedCost && (
+                  <div className="flex flex-col items-end text-right font-numeric text-xs text-muted-foreground">
+                    <span>{getOptimalGasFee(advancedCost)}</span>
+                    {showBalanceAndPrice && qrlPrice > 0 && (
+                      <span className="text-[10px]">
+                        {formatFiatCompact(advancedCost, qrlPrice, currency)}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {showAdvanced ? (
+                  <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                )}
+              </div>
             </button>
 
             {showAdvanced && (
@@ -393,6 +494,11 @@ export const GasFeeSelector = observer(
                   />
                 </div>
               </div>
+            )}
+            {estimateFailed && (
+              <p className="text-xs text-destructive">
+                {t("gasFee.estimateFailed")}
+              </p>
             )}
           </div>
         </div>
