@@ -176,6 +176,47 @@ describe("dApp chain authorization", () => {
     );
   });
 
+  it.each([undefined, "", "0x", "0X"])(
+    "refuses a contract creation that carries value but no data (%s)",
+    async (data) => {
+      const result = await checkAccountAndChainHaveBeenAuthorized(
+        request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [
+          {
+            from: ACCOUNT,
+            value: "0x1",
+            ...(data === undefined ? {} : { data }),
+          },
+        ]),
+      );
+
+      expect(result.canProceed).toBe(false);
+      expect(result.proceedError?.code).toBe(-32602);
+      expect(result.proceedError?.message).toContain(
+        "could never be recovered",
+      );
+    },
+  );
+
+  it("allows a contract creation that carries value and constructor data", async () => {
+    const result = await checkAccountAndChainHaveBeenAuthorized(
+      request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [
+        { from: ACCOUNT, value: "0x1", data: "0x6080604052" },
+      ]),
+    );
+
+    expect(result.canProceed).toBe(true);
+  });
+
+  it("allows a zero-value contract creation with no data", async () => {
+    const result = await checkAccountAndChainHaveBeenAuthorized(
+      request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [
+        { from: ACCOUNT, value: "0x0" },
+      ]),
+    );
+
+    expect(result.canProceed).toBe(true);
+  });
+
   it("accepts checksum-case variants of an authorized signing account", async () => {
     const upperPrefixLowerBody = `Q${ACCOUNT.slice(1).toLowerCase()}`;
     const result = await checkAccountAndChainHaveBeenAuthorized(

@@ -27,6 +27,7 @@ import {
 } from "./phishing/phishingDetector";
 import { showTransactionNotification } from "./utils/transactionNotification";
 import { checkForLastError } from "./utils/scriptUtils";
+import { isTrustedExtensionSender } from "./utils/trustedSender";
 import { isPrematureClose, setupMultiplex } from "./utils/streamUtils";
 import {
   notifyDAppAccountsChanged,
@@ -158,7 +159,15 @@ const prepareListeners = () => {
   // Listening for transaction notification requests from the popup.
   // IMPORTANT: Must NOT be async. Returning a Promise from onMessage claims the
   // message channel and prevents lockManagerListener from responding.
-  browser.runtime.onMessage.addListener((message) => {
+  browser.runtime.onMessage.addListener((message, sender) => {
+    // Any frame in any tab can post to the extension, so without this guard
+    // a content script could raise an OS "Transaction Confirmed" toast for a
+    // transaction that never happened (security review finding L8). Only
+    // extension pages send this now: the dApp transaction watcher calls
+    // showTransactionNotification directly inside the worker.
+    if (!isTrustedExtensionSender(sender)) {
+      return;
+    }
     if (message.name !== LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION) {
       return;
     }
