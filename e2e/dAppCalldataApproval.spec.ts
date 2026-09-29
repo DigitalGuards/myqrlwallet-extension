@@ -384,7 +384,9 @@ test("puts a decoded token approval in words on the approval screen", async () =
     await expect(
       extensionPage.getByText("Maximum fee", { exact: true }),
     ).toBeVisible();
-    await expect(extensionPage.getByText("0.00125 Quanta")).toBeVisible();
+    // 500,000 gas x the signed ceiling (base fee 1 gwei doubled plus the
+    // 1.5 gwei tip the market tier asks for).
+    await expect(extensionPage.getByText("0.00175 Quanta")).toBeVisible();
     await capture("unlimited-approve-360.png");
     await rejectApproval();
 

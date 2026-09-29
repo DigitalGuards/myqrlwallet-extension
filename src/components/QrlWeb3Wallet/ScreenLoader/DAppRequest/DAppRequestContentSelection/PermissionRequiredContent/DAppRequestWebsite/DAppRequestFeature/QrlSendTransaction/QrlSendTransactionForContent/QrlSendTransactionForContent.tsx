@@ -12,6 +12,8 @@ import {
 import { NATIVE_TOKEN } from "@/constants/nativeToken";
 import { SIGNING_NONCE_BLOCK_TAG } from "@/constants/transactionNonce";
 import {
+  feeCeilingExceededProviderError,
+  feeUnavailableProviderError,
   isWalletLockedError,
   walletLockedProviderError,
 } from "@/functions/describeExtensionError";
@@ -173,56 +175,106 @@ const QrlSendTransactionForContent = observer(
       }
     }, [isConnected, transactionType, dAppRequestData]);
 
-    // The fee the request could actually cost, rather than only the gas
-    // limit it asks for (security review finding M2). `maxFeePerGas` is read
-    // exactly the way the signing paths below read it, and
-    // pinDisplayedMaxFeePerGas keeps the signed ceiling equal to the one
-    // that was on screen. The wallet's own estimate is advisory: it is
-    // never written back into the request, so the dApp's gas limit is still
-    // the one sent.
-    const [feeBasis, setFeeBasis] = useState<{
+    // What this request is expected to cost and the worst it could cost
+    // (security review finding M2). Two numbers, deliberately:
+    //
+    //   feePerGas    base fee plus tip, which is what the block charges.
+    //   maxFeePerGas the ceiling that gets signed, base fee doubled plus
+    //                tip, the same fee-market headroom the desktop and web
+    //                wallets price with.
+    //
+    // The headroom is what makes the ceiling survive the approval window.
+    // Signing base plus tip exactly (as this used to) meant any rise in the
+    // base fee during the ninety seconds an approval may sit open pushed
+    // the fresh fee past the ceiling and aborted the send. Unused gas and
+    // unused ceiling both come back, so the ceiling costs the user nothing
+    // when it is not reached. `getGasFeeData` itself is untouched, so the
+    // wallet's own send screen keeps the fee semantics it has.
+    //
+    // The wallet's gas estimate is advisory: it is never written back into
+    // the request, so the dApp's gas limit is still the one sent.
+    type FeeBasis = {
+      feePerGas?: bigint;
       maxFeePerGas?: bigint;
       estimatedGas?: bigint;
-    }>({});
+    };
+    const [feeBasis, setFeeBasis] = useState<FeeBasis>({});
     // The approval callback is registered once per request, so it would
     // otherwise close over the fee basis as it stood when that effect ran.
     // Signing reads the ref; rendering reads the state.
-    const feeBasisRef = useRef<{
-      maxFeePerGas?: bigint;
-      estimatedGas?: bigint;
-    }>({});
+    const feeBasisRef = useRef<FeeBasis>({});
+    // The in-flight read, so an approval that arrives before it lands waits
+    // for it instead of finding no ceiling and refusing.
+    const feeLoadRef = useRef<Promise<void> | undefined>(undefined);
 
-    const applyFeeBasis = (next: {
-      maxFeePerGas?: bigint;
-      estimatedGas?: bigint;
-    }) => {
+    const applyFeeBasis = (next: FeeBasis) => {
       feeBasisRef.current = next;
       setFeeBasis(next);
     };
 
     /**
-     * Holds the signature to the maximum fee the user was shown. The fee
-     * market moves while an approval sits open, and re-reading it at
-     * signing time (as this used to) could sign a higher ceiling than the
-     * screen ever displayed (security review finding L-3). A fresh fee at
-     * or below the displayed one is harmless, because the displayed number
-     * is a ceiling and the block still charges base plus tip; a higher one
-     * stops the signature, updates the screen and asks for a fresh
-     * approval.
+     * Reads the current fee the same way the display did. A fee-market
+     * request gets the doubled-base ceiling; a legacy request is charged
+     * its gas price exactly, so there is no headroom to give it.
      */
-    const pinDisplayedMaxFeePerGas = (freshMaxFeePerGas: bigint): bigint => {
-      const displayed = feeBasisRef.current.maxFeePerGas;
-      if (displayed === undefined) return freshMaxFeePerGas;
-      if (freshMaxFeePerGas > displayed) {
+    type ReadFee = {
+      feePerGas: bigint;
+      maxFeePerGas: bigint;
+      maxPriorityFeePerGas: bigint;
+    };
+    const readFeeBasis = async (
+      requestType: string | undefined,
+    ): Promise<ReadFee> => {
+      if (requestType === "0x2") {
+        const feeData = await getGasFeeData();
+        // Coerced rather than trusted: these are typed as bigint, and
+        // mixing a bigint with anything else throws outright, which would
+        // take the whole approval screen down over a fee read.
+        const baseFeePerGas = BigInt(feeData.baseFeePerGas ?? 0);
+        const maxPriorityFeePerGas = BigInt(feeData.maxPriorityFeePerGas ?? 0);
+        return {
+          feePerGas: BigInt(feeData.maxFeePerGas ?? 0),
+          maxFeePerGas: baseFeePerGas * 2n + maxPriorityFeePerGas,
+          maxPriorityFeePerGas,
+        };
+      }
+      const gasPrice = BigInt((await requireQrlInstance().getGasPrice()) ?? 0);
+      return {
+        feePerGas: gasPrice,
+        maxFeePerGas: gasPrice,
+        maxPriorityFeePerGas: 0n,
+      };
+    };
+
+    /**
+     * Holds the signature to the maximum fee the user was shown (security
+     * review finding L-3). The fee market moves while an approval sits
+     * open, and re-reading it at signing time could sign a higher ceiling
+     * than the screen ever displayed. A fresh cost at or below the
+     * displayed ceiling signs that ceiling; a fresh cost above it stops,
+     * updates the screen and answers the dApp with a coded error so it can
+     * offer the request again.
+     */
+    const resolveApprovedMaxFeePerGas = (fresh: ReadFee): bigint => {
+      const approvedCeiling = feeBasisRef.current.maxFeePerGas;
+      if (approvedCeiling === undefined) {
+        // A missing instance is the older and more specific reason for an
+        // empty basis, and it has its own message everywhere else here.
+        requireQrlInstance();
+        // Otherwise nothing was ever displayed, so there is no ceiling the
+        // user agreed to. Signing the fresh fee would sign a number the
+        // screen showed as "Unavailable" (security review finding L-1).
+        throw feeUnavailableProviderError();
+      }
+      if (fresh.feePerGas > approvedCeiling) {
         applyFeeBasis({
           ...feeBasisRef.current,
-          maxFeePerGas: freshMaxFeePerGas,
+          feePerGas: fresh.feePerGas,
+          maxFeePerGas: fresh.maxFeePerGas,
         });
-        throw new Error(
-          "The network fee rose while this request was open. The maximum fee has been updated. Review it and approve again.",
-        );
+        throw feeCeilingExceededProviderError();
       }
-      return displayed;
+      return approvedCeiling;
     };
 
     useEffect(() => {
@@ -230,14 +282,11 @@ const QrlSendTransactionForContent = observer(
       const request = dAppRequestData?.params?.[0];
       const loadFeeBasis = async () => {
         if (!qrlInstance || !request) return;
-        let maxFeePerGas: bigint | undefined;
+        let fee: ReadFee | undefined;
         try {
-          maxFeePerGas =
-            request.type === "0x2"
-              ? (await getGasFeeData()).maxFeePerGas
-              : await qrlInstance.getGasPrice();
+          fee = await readFeeBasis(request.type);
         } catch {
-          maxFeePerGas = undefined;
+          fee = undefined;
         }
         let estimatedGas: bigint | undefined;
         try {
@@ -258,21 +307,37 @@ const QrlSendTransactionForContent = observer(
           estimatedGas = undefined;
         }
         if (!isCurrent) return;
-        applyFeeBasis({ maxFeePerGas, estimatedGas });
+        applyFeeBasis({
+          feePerGas: fee?.feePerGas,
+          maxFeePerGas: fee?.maxFeePerGas,
+          estimatedGas,
+        });
       };
-      void loadFeeBasis();
+      const load = loadFeeBasis();
+      feeLoadRef.current = load;
+      void load;
       return () => {
         isCurrent = false;
       };
     }, [qrlInstance, dAppRequestData]);
+
+    /** Lets an approval that beat the fee read wait for it. */
+    const awaitFeeBasis = async () => {
+      try {
+        await feeLoadRef.current;
+      } catch {
+        // loadFeeBasis swallows its own failures; an empty basis is the
+        // signal, and resolveApprovedMaxFeePerGas refuses on it.
+      }
+    };
 
     const maximumFee =
       feeBasis.maxFeePerGas !== undefined
         ? gasLimit * feeBasis.maxFeePerGas
         : undefined;
     const estimatedFee =
-      feeBasis.maxFeePerGas !== undefined && feeBasis.estimatedGas !== undefined
-        ? feeBasis.estimatedGas * feeBasis.maxFeePerGas
+      feeBasis.feePerGas !== undefined && feeBasis.estimatedGas !== undefined
+        ? feeBasis.estimatedGas * feeBasis.feePerGas
         : undefined;
     // Flagged, never silently corrected: a limit far above what the call
     // needs is how a dApp turns an approval into a much larger fee ceiling
@@ -549,6 +614,9 @@ const QrlSendTransactionForContent = observer(
       // stays fully narrowed.
       let pendingTransactionObject: TransactionObject | undefined;
       try {
+        // An approval can land before the opening fee read does. Waiting
+        // for it here is what keeps the ceiling the one that was shown.
+        await awaitFeeBasis();
         const { from, to, data, gas, type, value } = request;
 
         const isLedgerAccount = ledgerStore.isLedgerAccount(from ?? "");
@@ -568,19 +636,22 @@ const QrlSendTransactionForContent = observer(
         };
         pendingTransactionObject = transactionObject;
         if (type === "0x2") {
-          const { maxFeePerGas, maxPriorityFeePerGas } = await getGasFeeData();
-          const signedMaxFeePerGas = pinDisplayedMaxFeePerGas(maxFeePerGas);
+          const freshFee = await readFeeBasis("0x2");
+          const signedMaxFeePerGas = resolveApprovedMaxFeePerGas(freshFee);
           transactionObject.type = "0x2";
           // The tip can never exceed the ceiling the user approved.
           transactionObject.maxPriorityFeePerGas =
-            maxPriorityFeePerGas > signedMaxFeePerGas
+            freshFee.maxPriorityFeePerGas > signedMaxFeePerGas
               ? signedMaxFeePerGas
-              : maxPriorityFeePerGas;
+              : freshFee.maxPriorityFeePerGas;
           transactionObject.maxFeePerGas = `0x${signedMaxFeePerGas.toString(16)}`;
         } else {
-          transactionObject.gasPrice = pinDisplayedMaxFeePerGas(
-            BigInt(gasPrice ?? 0),
-          );
+          const legacyGasPrice = BigInt(gasPrice ?? 0);
+          transactionObject.gasPrice = resolveApprovedMaxFeePerGas({
+            feePerGas: legacyGasPrice,
+            maxFeePerGas: legacyGasPrice,
+            maxPriorityFeePerGas: 0n,
+          });
         }
 
         let rawTransactionToSend: string | undefined;
@@ -711,6 +782,9 @@ const QrlSendTransactionForContent = observer(
       // inside the try stays fully narrowed.
       let pendingTransactionObject: TransactionObject | undefined;
       try {
+        // See deployContractOrInteract: the displayed ceiling has to be in
+        // hand before anything decides what to sign.
+        await awaitFeeBasis();
         const { from, to, gas, type, value } = request;
 
         if (!from) {
@@ -749,19 +823,22 @@ const QrlSendTransactionForContent = observer(
         pendingTransactionObject = transactionObject;
 
         if (type === "0x2") {
-          const { maxFeePerGas, maxPriorityFeePerGas } = await getGasFeeData();
-          const signedMaxFeePerGas = pinDisplayedMaxFeePerGas(maxFeePerGas);
+          const freshFee = await readFeeBasis("0x2");
+          const signedMaxFeePerGas = resolveApprovedMaxFeePerGas(freshFee);
           transactionObject.type = "0x2";
           // The tip can never exceed the ceiling the user approved.
           transactionObject.maxPriorityFeePerGas =
-            maxPriorityFeePerGas > signedMaxFeePerGas
+            freshFee.maxPriorityFeePerGas > signedMaxFeePerGas
               ? signedMaxFeePerGas
-              : maxPriorityFeePerGas;
+              : freshFee.maxPriorityFeePerGas;
           transactionObject.maxFeePerGas = `0x${signedMaxFeePerGas.toString(16)}`;
         } else {
-          transactionObject.gasPrice = pinDisplayedMaxFeePerGas(
-            BigInt(gasPrice ?? 0),
-          );
+          const legacyGasPrice = BigInt(gasPrice ?? 0);
+          transactionObject.gasPrice = resolveApprovedMaxFeePerGas({
+            feePerGas: legacyGasPrice,
+            maxFeePerGas: legacyGasPrice,
+            maxPriorityFeePerGas: 0n,
+          });
         }
 
         let rawTransactionToSend: string | undefined;
@@ -865,9 +942,12 @@ const QrlSendTransactionForContent = observer(
         console.error("QRL Transfer failed:", error);
       }
     };
+    // Approve stays disabled until there is a maximum fee to approve
+    // (security review finding L-1). A screen that reads "Unavailable"
+    // where the ceiling belongs has nothing for the user to agree to.
     useEffect(() => {
-      setCanProceed(true);
-    }, []);
+      setCanProceed(feeBasis.maxFeePerGas !== undefined);
+    }, [feeBasis.maxFeePerGas]);
 
     return (
       <Tabs defaultValue="details" className="w-full">
@@ -989,6 +1069,9 @@ const QrlSendTransactionForContent = observer(
                 {maximumFee !== undefined
                   ? `${utils.fromPlanck(maximumFee, "quanta")} Quanta`
                   : t("dapp.sendTransaction.feeUnavailable")}
+              </div>
+              <div className="text-xs">
+                {t("dapp.sendTransaction.maximumFeeNote")}
               </div>
             </div>
           </div>

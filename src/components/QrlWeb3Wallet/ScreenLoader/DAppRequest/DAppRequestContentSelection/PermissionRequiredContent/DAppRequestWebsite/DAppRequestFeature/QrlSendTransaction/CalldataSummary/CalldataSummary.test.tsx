@@ -20,6 +20,7 @@ const SPENDER = `Q${"ab".repeat(64)}`;
 const RECIPIENT = `Q${"cd".repeat(64)}`;
 const SOURCE = `Q${"ef".repeat(64)}`;
 const CONTRACT = `Q${"12".repeat(64)}`;
+const OTHER_CONTRACT = `Q${"56".repeat(64)}`;
 const OWNER = `Q${"34".repeat(64)}`;
 
 const call = (signature: string, types: string[], values: unknown[]) =>
@@ -31,6 +32,8 @@ const AMBIGUOUS_UNLIMITED_WARNING =
   "If this contract is a token, this allows spending more than its entire supply and is effectively unlimited. If it is an NFT collection, the number below is a token ID.";
 const APPROVE_CAUTION =
   "The wallet does not know this contract. If it is a token, the number below is an amount. If it is an NFT collection, it is the ID of one item, and approving hands that exact item to the spender.";
+const APPROVE_CAUTION_NFT_REPORTED =
+  "The wallet does not know this contract. The contract reports it is an NFT collection, so the number below may be the ID of one item. A contract can report whatever it likes, so import the collection to settle it.";
 
 const word = (value: bigint) => `0x${value.toString(16).padStart(128, "0")}`;
 
@@ -303,19 +306,131 @@ describe("CalldataSummary", () => {
     expect(screen.queryByText(UNLIMITED_WARNING)).not.toBeInTheDocument();
   });
 
-  it("uses the contract probe when neither list knows the contract", async () => {
+  it("lets the contract probe add caution and nothing else", async () => {
+    // A contract decides for itself what supportsInterface returns, so a
+    // hybrid token or a maliciously upgraded one can claim to be a
+    // collection. The claim may change the note; it may not change the
+    // label, the amount, or the warning.
     renderSummary(
       call(
         "approve(address,uint256)",
         ["address", "uint256"],
-        [SPENDER, MAX_UINT256.toString()],
+        [SPENDER, (1n << 200n).toString()],
+      ),
+      probingStore({ isNft: true }),
+    );
+
+    expect(
+      await screen.findByText(APPROVE_CAUTION_NFT_REPORTED),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Approve an amount or one NFT"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Amount or token ID")).toBeInTheDocument();
+    expect(screen.queryByText("Token ID")).not.toBeInTheDocument();
+    expect(screen.getByText(AMBIGUOUS_UNLIMITED_WARNING)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("keeps the warning on a hybrid that claims to be a collection", async () => {
+    renderSummary(
+      call(
+        "approve(address,uint256)",
+        ["address", "uint256"],
+        [SPENDER, (1n << 200n).toString()],
+      ),
+      probingStore({ isNft: true, totalSupply: 1000n }),
+    );
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText("Approve one NFT")).not.toBeInTheDocument();
+  });
+
+  it("still drops the warning when the user imported the collection", async () => {
+    // The user's own list is the only thing that settles it, and it wins
+    // over whatever the contract says about itself.
+    vi.spyOn(StorageUtil, "getNFTCollectionsList").mockResolvedValue([
+      RELIC_COLLECTION,
+    ]);
+
+    renderSummary(
+      call(
+        "approve(address,uint256)",
+        ["address", "uint256"],
+        [SPENDER, (1n << 200n).toString()],
       ),
       probingStore({ isNft: true }),
     );
 
     expect(await screen.findByText("Approve one NFT")).toBeVisible();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByText("Token ID")).toBeInTheDocument();
+  });
+
+  it("renders the decoded call even while a probe is hanging", async () => {
+    const hangingStore = mockedStore({
+      qrlStore: {
+        qrlInstance: {
+          call: () => new Promise(() => {}),
+        } as any,
+      },
+    });
+
+    renderSummary(
+      call("approve(address,uint256)", ["address", "uint256"], [SPENDER, "5"]),
+      hangingStore,
+    );
+
+    expect(
+      await screen.findByText("Approve an amount or one NFT"),
+    ).toBeVisible();
+    expect(screen.getByText(APPROVE_CAUTION)).toBeInTheDocument();
+  });
+
+  it("clears a previous contract's probe answers when the request changes", async () => {
+    const answers: Record<string, boolean> = {
+      [CONTRACT]: true,
+    };
+    const store = mockedStore({
+      qrlStore: {
+        qrlInstance: {
+          call: async (transaction: { to?: string; data?: string }) => {
+            if (transaction.data?.slice(0, 10) !== "0x01ffc9a7") return "0x";
+            const answer = answers[transaction.to ?? ""];
+            if (answer === undefined) return new Promise(() => {});
+            return word(answer ? 1n : 0n);
+          },
+        } as any,
+      },
+    });
+    const approveCall = call(
+      "approve(address,uint256)",
+      ["address", "uint256"],
+      [SPENDER, "5"],
+    );
+    const { rerender } = renderSummary(approveCall, store);
+
+    expect(
+      await screen.findByText(APPROVE_CAUTION_NFT_REPORTED),
+    ).toBeInTheDocument();
+
+    rerender(
+      <StoreProvider value={store}>
+        <MemoryRouter>
+          <CalldataSummary
+            data={approveCall}
+            contractAddress={OTHER_CONTRACT}
+            fromAddress={OWNER}
+          />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(APPROVE_CAUTION)).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText(APPROVE_CAUTION_NFT_REPORTED),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the imported list ahead of the probe", async () => {

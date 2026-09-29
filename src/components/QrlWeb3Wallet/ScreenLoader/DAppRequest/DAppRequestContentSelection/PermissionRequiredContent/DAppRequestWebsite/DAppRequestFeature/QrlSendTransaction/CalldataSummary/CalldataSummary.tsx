@@ -16,6 +16,7 @@ import { useStore } from "@/stores/store";
 import type { TokenContractType } from "@/scripts/middlewares/middlewareTypes";
 import type { NFTCollectionType } from "@/types/nft";
 import StorageUtil from "@/utilities/storageUtil";
+import { withTimeout } from "@/functions/withTimeout";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { AlertTriangle } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -47,6 +48,9 @@ const SUPPORTS_INTERFACE_CALLDATA = `${encodeFunctionSignature(
   "supportsInterface(bytes4)",
 )}${encodeParameters(["bytes4"], [ZRC721_INTERFACE_ID]).slice(2)}`;
 const TOTAL_SUPPLY_CALLDATA = encodeFunctionSignature("totalSupply()");
+/** No contract read may hold the summary up for longer than this. */
+const CONTRACT_PROBE_TIMEOUT_MS = 5_000;
+
 /** A QRL 2.0 ABI word is 64 bytes, so one return value is 128 hex digits. */
 const RETURN_WORD_PATTERN = /^0x[0-9a-fA-F]{128}$/;
 
@@ -159,16 +163,26 @@ const CalldataSummary = observer(
     useEffect(() => {
       let isCurrent = true;
       const instance = qrlStore.qrlInstance;
+      // Cleared up front so a previous contract's answers can never be read
+      // against a new request while the fresh reads are still in flight.
+      setProbedNftStandard(undefined);
+      setTotalSupply(undefined);
       const probeContract = async () => {
         if (!instance || !contractAddress || !contractSelector) return;
         const callContract = async (callData: string) => {
           try {
-            return await instance.call(
-              {
-                to: contractAddress,
-                data: callData,
-              } as unknown as TransactionCall,
-              BlockTags.LATEST,
+            // A node that hangs must not leave the probe pending for the
+            // life of the approval, so each read has its own deadline.
+            return await withTimeout(
+              instance.call(
+                {
+                  to: contractAddress,
+                  data: callData,
+                } as unknown as TransactionCall,
+                BlockTags.LATEST,
+              ),
+              CONTRACT_PROBE_TIMEOUT_MS,
+              "Reading the contract",
             );
           } catch {
             return undefined;
@@ -276,10 +290,16 @@ const CalldataSummary = observer(
     // fungible allowance for an NFT approval is exactly how an attacker
     // gets an `approve(attacker, 1)` on a valuable collection to read as
     // dust (security review finding M-1).
+    //
+    // Only the user's own imported lists may settle the question. The
+    // contract probe below may add caution and never remove it: a contract
+    // decides for itself what `supportsInterface` returns, so a hybrid
+    // token (ERC-404 style) or a maliciously upgraded one could otherwise
+    // claim to be a collection and have a real allowance rendered as a
+    // harmless token ID with no warning at all.
     const isAmbiguousStandard = decoded.standard === "ZRC20_OR_ZRC721";
     const isKnownToken = token !== undefined;
-    const isKnownCollection =
-      collection !== undefined || (!isKnownToken && probedNftStandard === true);
+    const isKnownCollection = collection !== undefined;
     const isUnresolvedStandard =
       isAmbiguousStandard && !isKnownToken && !isKnownCollection;
     const treatAmountAsTokenId =
@@ -302,9 +322,13 @@ const CalldataSummary = observer(
       totalSupply !== undefined &&
       decoded.amount !== undefined &&
       decoded.amount > totalSupply;
+    // Gated on the imported collection list alone. An unresolved contract
+    // keeps the warning however loudly it reports itself as an NFT
+    // collection, because the same bytes are a real allowance if it is not
+    // one. Importing the collection is what settles it.
     const showsUnlimitedWarning =
       isAllowanceAction &&
-      !treatAmountAsTokenId &&
+      !isKnownCollection &&
       (decoded.isUnlimitedAmount === true || exceedsTotalSupply);
     const showsApprovalForAllWarning =
       decoded.action === CALLDATA_ACTIONS.SET_APPROVAL_FOR_ALL &&
@@ -319,15 +343,24 @@ const CalldataSummary = observer(
       if (decoded.action === CALLDATA_ACTIONS.APPROVE) {
         if (isKnownToken) return "dapp.calldata.actionApprove";
         if (isKnownCollection) return "dapp.calldata.actionApproveNft";
+        // Deliberately not swayed by the probe: the label stays ambiguous
+        // until one of the user's own lists settles it.
         return "dapp.calldata.actionApproveAmbiguous";
       }
       return ACTION_LABEL_KEYS[decoded.action] ?? "dapp.calldata.actionUnknown";
     })();
 
+    // The probe's only job: when the contract says it is a collection, the
+    // note says the contract says so. It changes no label, no amount and no
+    // warning.
     const ambiguousCautionKey = isUnresolvedStandard
       ? decoded.action === CALLDATA_ACTIONS.APPROVE
-        ? "dapp.calldata.approveAmbiguousCaution"
-        : "dapp.calldata.transferFromAmbiguousCaution"
+        ? probedNftStandard === true
+          ? "dapp.calldata.approveAmbiguousCautionNftReported"
+          : "dapp.calldata.approveAmbiguousCaution"
+        : probedNftStandard === true
+          ? "dapp.calldata.transferFromAmbiguousCautionNftReported"
+          : "dapp.calldata.transferFromAmbiguousCaution"
       : undefined;
 
     return (
