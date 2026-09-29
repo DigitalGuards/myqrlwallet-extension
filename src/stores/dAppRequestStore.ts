@@ -31,11 +31,14 @@ const originFromTabUrl = (url?: string): string => {
 class DAppRequestStore {
   private currentTabFetchGeneration = 0;
   private dAppRequestReadGeneration = 0;
-  // The request the user clicked on, plus the data that approval produces.
-  // Both are captured at click time and survive a newer request taking the
-  // slot mid-approval; see onPermission and addToResponseData.
+  // The request the user clicked on, and the data each running approval
+  // produces, kept per request id. A surface can have more than one
+  // approval in flight (a request that is still broadcasting while the user
+  // answers the next one), so a single shared bucket could hand one
+  // approval's transaction hash to another. Captured at click time so a
+  // newer request taking the slot cannot disturb either.
   private inFlightRequestId?: string;
-  private inFlightResponseData?: Record<string, unknown>;
+  private inFlightResponseData = new Map<string, Record<string, unknown>>();
   currentTabData?: CurrentTabData;
   dAppRequestData?: DAppRequestType;
   responseData: Record<string, unknown> = {};
@@ -163,11 +166,12 @@ class DAppRequestStore {
     // signature or a transaction hash into the shared field could either
     // be wiped mid-flight or be read back as the answer to the newer
     // request.
-    if (this.inFlightRequestId !== undefined) {
-      this.inFlightResponseData = {
-        ...(this.inFlightResponseData ?? {}),
+    const inFlightRequestId = this.inFlightRequestId;
+    if (inFlightRequestId !== undefined) {
+      this.inFlightResponseData.set(inFlightRequestId, {
+        ...(this.inFlightResponseData.get(inFlightRequestId) ?? {}),
         ...serializableData,
-      };
+      });
       return;
     }
     this.responseData = { ...this.responseData, ...serializableData };
@@ -203,51 +207,90 @@ class DAppRequestStore {
     // the answer to its retry.
     const requestId = this.dAppRequestData?.requestId;
     const method = this.dAppRequestData?.method ?? "";
-    this.inFlightRequestId = requestId;
-    this.inFlightResponseData = { ...this.responseData };
+    const bucketKey = requestId ?? "";
+    const previousInFlightRequestId = this.inFlightRequestId;
+    this.inFlightRequestId = bucketKey;
+    this.inFlightResponseData.set(bucketKey, { ...this.responseData });
     try {
       this.setApprovalProcessingStatus({
         isProcessing: true,
         hasApproved,
       });
-      // Tell the service worker the user has acted before the slow part
-      // starts, so its idle timeout stops counting down. Without this the
-      // timeout can answer the dApp 4001 while the broadcast is on the
-      // wire, and the retry that follows signs a second transaction.
-      if (requestId !== undefined) {
+
+      // Ask the service worker whether this request is still live before
+      // anything irreversible happens. It answers only while it is still
+      // waiting on this exact request, which both stands its idle timeout
+      // down (so it cannot answer 4001 while a broadcast is on the wire)
+      // and stops this surface signing for a request the worker has
+      // already given up on.
+      if (!(await this.confirmRequestIsLive(requestId))) {
+        // The worker has already answered or abandoned this one, so the
+        // entry on screen is stale. Clearing it takes the surface back to
+        // the wallet. Leaving it up would show a prompt whose buttons can
+        // no longer do anything.
         try {
-          await browser.runtime.sendMessage({
-            action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
-            requestId,
-          });
+          await StorageUtil.clearDAppsRequestDataForRequestId(requestId);
         } catch {
-          // The worker will fall back to its own timeouts.
+          // best-effort cleanup
         }
+        return;
       }
+
       await this.onPermissionCallBack(hasApproved);
       const response: DAppResponseType = {
         method,
         action: EXTENSION_MESSAGES.DAPP_RESPONSE,
         hasApproved,
         requestId,
-        response: this.inFlightResponseData,
+        response: this.inFlightResponseData.get(bucketKey),
       };
+      // The service worker clears the pending-request slot when it takes
+      // this answer, which keeps the clear ahead of the next request being
+      // written. Nothing clears it from here on the success path.
       await browser.runtime.sendMessage(response);
     } catch (error) {
       console.warn(
         "QrlWeb3Wallet: Error while resolving the permission request\n",
         error,
       );
+      // The answer never reached the worker, so nothing there will clear
+      // the slot and the surface would keep showing a request that can no
+      // longer be resolved. Scoped to this request id, so a newer one that
+      // took the slot in the meantime is left alone.
+      try {
+        await StorageUtil.clearDAppsRequestDataForRequestId(requestId);
+      } catch {
+        // best-effort cleanup
+      }
     } finally {
-      this.inFlightRequestId = undefined;
-      this.inFlightResponseData = undefined;
-      // Scoped to this request: clearing unconditionally would wipe a newer
-      // request that took the slot while this one was still running.
-      await StorageUtil.clearDAppsRequestDataForRequestId(requestId);
+      this.inFlightRequestId = previousInFlightRequestId;
+      this.inFlightResponseData.delete(bucketKey);
       this.setApprovalProcessingStatus({
         isProcessing: false,
         hasCompleted: true,
       });
+    }
+  }
+
+  /**
+   * Whether the service worker is still waiting on this request. A missing
+   * or negative acknowledgement means the approval has already been
+   * answered or abandoned there, and this surface must do no further work
+   * for it.
+   */
+  private async confirmRequestIsLive(requestId?: string): Promise<boolean> {
+    // A request with no id predates the acknowledgement protocol, so there
+    // is nothing to ask about.
+    if (requestId === undefined) return true;
+    try {
+      const acknowledgement = (await browser.runtime.sendMessage({
+        action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
+        requestId,
+      })) as { accepted?: boolean } | undefined;
+      return acknowledgement?.accepted === true;
+    } catch {
+      // No listener answered, so the worker is no longer waiting on it.
+      return false;
     }
   }
 }

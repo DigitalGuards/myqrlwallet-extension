@@ -5,9 +5,16 @@ import browser from "webextension-polyfill";
 // cache are both unavailable, so the wallet always has a baseline blocklist
 // to consult before the dApp approval popup renders.
 import bundledPhishingConfig from "./defaultPhishingConfig.json";
+import { findHomographMatch } from "./homographCheck";
 // Locally maintained QRL-ecosystem config, applied alongside whichever
 // MetaMask config is in use.
-import { QRL_PHISHING_CONFIG } from "./qrlPhishingConfig";
+import {
+  LENIENT_SUFFIX_DOMAINS,
+  PROTECTED_QRL_DOMAINS,
+  QRL_FUZZY_DOMAINS,
+  QRL_PHISHING_CONFIG,
+} from "./qrlPhishingConfig";
+import registrableDomain from "../../utilities/registrableDomain";
 
 const PHISHING_CONFIG_URL =
   "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/master/src/config.json";
@@ -236,6 +243,73 @@ export async function initializePhishingDetector(): Promise<void> {
   scheduleRetry();
 }
 
+const QRL_FUZZY_DOMAIN_SET = new Set(QRL_FUZZY_DOMAINS);
+const LENIENT_SUFFIX_DOMAIN_SET = new Set(LENIENT_SUFFIX_DOMAINS);
+
+/**
+ * How far a public suffix may sit from the protected one and still count as a
+ * lookalike of it: quantaswap.i0 and zondscan.co are one edit from .io and
+ * .com, while .org and .net are a different registration entirely.
+ */
+const SUFFIX_LOOKALIKE_DISTANCE = 1;
+
+/** Levenshtein distance. Inputs here are single labels or public suffixes. */
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      const substitution = previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1);
+      current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, substitution);
+    }
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+/** Splits a host into its registrable label and the public suffix under it. */
+function splitRegistrableDomain(
+  host: string,
+): { label: string; suffix: string } | null {
+  const registrable = registrableDomain(host);
+  const boundary = registrable.indexOf(".");
+  if (boundary <= 0 || boundary === registrable.length - 1) return null;
+  return {
+    label: registrable.slice(0, boundary),
+    suffix: registrable.slice(boundary + 1),
+  };
+}
+
+/**
+ * True when a fuzzy verdict says nothing more than "same label, different
+ * public suffix" for one of the informational domains.
+ *
+ * The detector strips the public suffix before measuring its distance, so
+ * theqrl.com scores 0 against theqrl.org and zondscan.io scores 0 against
+ * zondscan.com. For an origin that can ask the wallet to sign, that is still
+ * an attack and stays flagged. For a site that only informs, it is usually the
+ * brand's own other registration or an unrelated explorer, and accusing it is
+ * a reputational risk with no user benefit. A suffix within one edit of the
+ * protected one (.co for .com, .i0 for .io) is a lookalike of the suffix
+ * itself, so it stays flagged.
+ */
+function isTolerablePublicSuffixSwap(
+  hostname: string,
+  matchedDomain: string,
+): boolean {
+  if (!LENIENT_SUFFIX_DOMAIN_SET.has(matchedDomain)) return false;
+  const source = splitRegistrableDomain(hostname);
+  const target = splitRegistrableDomain(matchedDomain);
+  if (source === null || target === null) return false;
+  // A different label is a real lookalike (theqr1.org), whatever the suffix.
+  if (source.label !== target.label) return false;
+  // Identical domain: the allowlist owns that case, so treat it as a lookalike
+  // here and let the earlier allowlist pass speak for the real site.
+  if (source.suffix === target.suffix) return false;
+  return editDistance(source.suffix, target.suffix) > SUFFIX_LOOKALIKE_DISTANCE;
+}
+
 export function checkDomain(url: string): PhishingCheckResult {
   if (!detectorInstance) {
     // Surface degraded state to the UI so the dApp request popup can warn the
@@ -256,12 +330,51 @@ export function checkDomain(url: string): PhishingCheckResult {
     }
 
     const result = detectorInstance.check(hostname);
-    return {
-      isDomainPhishing: result.result,
-      matchType: result.type,
-      matchedDomain: result.match,
-      detectorStatus,
-    };
+
+    // An allowlist pass is authoritative, in either config.
+    if (result.type === "allowlist") {
+      return {
+        isDomainPhishing: false,
+        matchType: result.type,
+        matchedDomain: result.match,
+        detectorStatus,
+      };
+    }
+
+    // Only our own fuzzy verdicts are re-examined. MetaMask's list keeps its
+    // own tolerance and its own judgement.
+    const isOurFuzzyVerdict =
+      result.type === "fuzzy" &&
+      result.match !== undefined &&
+      QRL_FUZZY_DOMAIN_SET.has(result.match);
+    const isSuffixSwap =
+      isOurFuzzyVerdict &&
+      result.match !== undefined &&
+      isTolerablePublicSuffixSwap(hostname, result.match);
+
+    if (result.result && !isSuffixSwap) {
+      return {
+        isDomainPhishing: true,
+        matchType: result.type,
+        matchedDomain: result.match,
+        detectorStatus,
+      };
+    }
+
+    // Nothing the levenshtein path can decide. The hostname the URL parser
+    // handed us is already punycoded, so a Unicode lookalike only becomes
+    // visible after decoding and folding confusables.
+    const homograph = findHomographMatch(hostname, PROTECTED_QRL_DOMAINS);
+    if (homograph !== null) {
+      return {
+        isDomainPhishing: true,
+        matchType: "homograph",
+        matchedDomain: homograph.matchedDomain,
+        detectorStatus,
+      };
+    }
+
+    return { isDomainPhishing: false, detectorStatus };
   } catch {
     return { isDomainPhishing: false, detectorStatus };
   }

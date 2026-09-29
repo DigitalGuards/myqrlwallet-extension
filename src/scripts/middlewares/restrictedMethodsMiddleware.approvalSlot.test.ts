@@ -2,13 +2,16 @@ import { profileStorageKey } from "@/utilities/profileStorage";
 import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
+import { toChecksumAddress } from "@theqrl/wallet.js";
 import { EXTENSION_MESSAGES } from "../constants/streamConstants";
 import {
   APPROVAL_ORIGIN_COOLDOWN_MS,
   APPROVAL_REFUSAL_GRACE,
+  APPROVAL_REFUSAL_WINDOW_MS,
   resetApprovalSlot,
 } from "../utils/approvalSlot";
 import {
+  APPROVAL_DISCONNECT_GRACE_MS,
   APPROVAL_IN_PROGRESS_TIMEOUT_MS,
   POPUP_RESPONSE_TIMEOUT_MS,
   restrictedMethodsMiddleware,
@@ -45,6 +48,7 @@ vi.mock("../utils/approvalSurface", () => ({
 const ORIGIN_A = "https://a.example";
 const ORIGIN_B = "https://b.example";
 const DAPPS_KEY = profileStorageKey("DAPPS");
+const SILENT_ACCOUNT = toChecksumAddress(`Q${"a".repeat(128)}`);
 
 type ResponseShape = {
   result?: unknown;
@@ -88,10 +92,35 @@ describe("restricted method approval slot and timers", () => {
     return added.filter((listener) => !removed.has(listener));
   };
 
-  const post = (message: Partial<DAppResponseType>) => {
+  // What the approval surface looks like to the service worker: this
+  // extension's own id, on an extension-origin page.
+  const TRUSTED_SENDER = {
+    id: "mock-id",
+    url: "chrome-extension://mock-id/index.html",
+  };
+
+  const post = (
+    message: Partial<DAppResponseType>,
+    sender: unknown = TRUSTED_SENDER,
+  ) => {
+    const answers: unknown[] = [];
     for (const listener of liveMessageListeners()) {
-      (listener as (value: unknown) => unknown)(message);
+      const answer = (listener as (value: unknown, sender: unknown) => unknown)(
+        message,
+        sender,
+      );
+      if (answer !== undefined) answers.push(answer);
     }
+    return answers;
+  };
+
+  /** Drive the approval surface's click handshake and return the answer. */
+  const actOnPending = async (requestId?: string) => {
+    const answers = post({
+      action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
+      requestId: requestId ?? pendingRequestId(),
+    });
+    return answers.length === 0 ? undefined : await answers[0];
   };
 
   /** Wait until the middleware has written a request other than `previous`. */
@@ -116,6 +145,38 @@ describe("restricted method approval slot and timers", () => {
       response,
     });
     delete sessionStore[DAPPS_KEY];
+  };
+
+  /**
+   * Connect the approval surface's lifecycle port the way DAppRequest.tsx
+   * does, and hand back its disconnect trigger.
+   */
+  const connectApprovalPort = (sender: unknown = TRUSTED_SENDER) => {
+    const disconnectListeners: Array<() => unknown> = [];
+    const port = {
+      name: "qrl-wallet-dapp-request",
+      sender,
+      onDisconnect: {
+        addListener: (listener: () => unknown) => {
+          disconnectListeners.push(listener);
+        },
+        removeListener: (listener: () => unknown) => {
+          const index = disconnectListeners.indexOf(listener);
+          if (index >= 0) disconnectListeners.splice(index, 1);
+        },
+      },
+    };
+    for (const listener of vi
+      .mocked(browser.runtime.onConnect.addListener)
+      .mock.calls.map((call) => call[0])) {
+      (listener as (value: unknown) => unknown)(port);
+    }
+    return {
+      disconnect: async () => {
+        await Promise.all(disconnectListeners.map((listener) => listener()));
+      },
+      hasDisconnectListener: () => disconnectListeners.length > 0,
+    };
   };
 
   const isSettled = async (promise: unknown) => {
@@ -366,10 +427,7 @@ describe("restricted method approval slot and timers", () => {
 
     // The user clicks Approve with 15 seconds left on the idle clock.
     await vi.advanceTimersByTimeAsync(POPUP_RESPONSE_TIMEOUT_MS - 15_000);
-    post({
-      action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
-      requestId,
-    });
+    expect(await actOnPending(requestId)).toEqual({ accepted: true });
 
     // A slow node keeps the broadcast running well past where the idle
     // timeout would have answered 4001 underneath it.
@@ -400,17 +458,14 @@ describe("restricted method approval slot and timers", () => {
       expect(pendingRequestId()).toBeTypeOf("string");
     });
 
-    post({
-      action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
-      requestId: "some-other-request",
-    });
+    expect(await actOnPending("some-other-request")).toBeUndefined();
     await vi.advanceTimersByTimeAsync(POPUP_RESPONSE_TIMEOUT_MS + 1);
     await pending;
 
     expect(res.error?.code).toBe(4001);
   });
 
-  it("still bounds an approval that never answers after the click (M1)", async () => {
+  it("reports an unknown outcome when nothing answers after the click (M1)", async () => {
     const res = {} as ResponseShape;
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
@@ -422,14 +477,14 @@ describe("restricted method approval slot and timers", () => {
       expect(pendingRequestId()).toBeTypeOf("string");
     });
 
-    post({
-      action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
-      requestId: pendingRequestId(),
-    });
+    await actOnPending();
     await vi.advanceTimersByTimeAsync(APPROVAL_IN_PROGRESS_TIMEOUT_MS + 1);
     await pending;
 
-    expect(res.error?.code).toBe(4001);
+    // The user approved, so a rejection would be a lie and would invite a
+    // retry for work that may already have landed.
+    expect(res.error?.code).toBe(-32603);
+    expect(res.error?.message).toContain("outcome is unknown");
     // The slot came back, so the next request is served.
     const nextRes = {} as ResponseShape;
     const next = restrictedMethodsMiddleware(
@@ -470,5 +525,263 @@ describe("restricted method approval slot and timers", () => {
     answerPending(false);
     await pending;
     expect(res.error?.code).toBe(4001);
+  });
+
+  it("clears the request at once when the surface dies after the click (M-1)", async () => {
+    const res = {} as ResponseShape;
+    const pending = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      res as never,
+      vi.fn(),
+      vi.fn(),
+    );
+    const requestId = await awaitPendingRequest();
+    const port = connectApprovalPort();
+    await actOnPending(requestId);
+
+    // The action popup closed while the signature was still running.
+    await port.disconnect();
+
+    // Nothing is left for the next person who opens the wallet to approve
+    // a second time, and the badge has nothing to show.
+    await vi.waitFor(() => {
+      expect(pendingRequestId()).toBeUndefined();
+    });
+    // The dApp is still waiting: the answer may have been posted as the
+    // port went.
+    expect(await isSettled(pending)).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(APPROVAL_DISCONNECT_GRACE_MS + 1);
+    await pending;
+    expect(res.error?.code).toBe(-32603);
+    expect(res.error?.message).toContain("outcome is unknown");
+  });
+
+  it("takes an answer that was already in flight when the surface died (M-1)", async () => {
+    const res = {} as ResponseShape;
+    const pending = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      res as never,
+      vi.fn(),
+      vi.fn(),
+    );
+    const requestId = await awaitPendingRequest();
+    const port = connectApprovalPort();
+    await actOnPending(requestId);
+    await port.disconnect();
+
+    post({
+      method: "qrl_requestAccounts",
+      action: EXTENSION_MESSAGES.DAPP_RESPONSE,
+      hasApproved: true,
+      requestId,
+      response: { accounts: [], blockchains: [] },
+    });
+    await pending;
+
+    expect(res.error).toBeUndefined();
+  });
+
+  it("frees the slot for the next site after an unknown outcome (M-1)", async () => {
+    const first = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      {} as never,
+      vi.fn(),
+      vi.fn(),
+    );
+    const requestId = await awaitPendingRequest();
+    const port = connectApprovalPort();
+    await actOnPending(requestId);
+    await port.disconnect();
+    await vi.advanceTimersByTimeAsync(APPROVAL_DISCONNECT_GRACE_MS + 1);
+    await first;
+
+    const nextRes = {} as ResponseShape;
+    const next = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_B, 22),
+      nextRes as never,
+      vi.fn(),
+      vi.fn(),
+    );
+    await awaitPendingRequest();
+    expect(nextRes.error).toBeUndefined();
+    answerPending(false);
+    await next;
+  });
+
+  it("rejects when the surface dies before the user clicked (M-1)", async () => {
+    const res = {} as ResponseShape;
+    const pending = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      res as never,
+      vi.fn(),
+      vi.fn(),
+    );
+    await awaitPendingRequest();
+    const port = connectApprovalPort();
+
+    await port.disconnect();
+    await pending;
+
+    expect(res.error?.code).toBe(4001);
+  });
+
+  it("ignores a response from an untrusted sender (L-1)", async () => {
+    const res = {} as ResponseShape;
+    const pending = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      res as never,
+      vi.fn(),
+      vi.fn(),
+    );
+    const requestId = await awaitPendingRequest();
+
+    // A content script running on the dApp page: same extension id, page
+    // origin in the url.
+    const contentScriptSender = { id: "mock-id", url: `${ORIGIN_A}/app` };
+    post(
+      {
+        method: "qrl_requestAccounts",
+        action: EXTENSION_MESSAGES.DAPP_RESPONSE,
+        hasApproved: true,
+        requestId,
+        response: { accounts: ["QAttacker"], blockchains: [] },
+      },
+      contentScriptSender,
+    );
+    post({ action: EXTENSION_MESSAGES.DAPP_RESPONSE }, undefined);
+    expect(await isSettled(pending)).toBe(false);
+
+    // The in-progress handshake is refused for the same sender.
+    const answers = post(
+      {
+        action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
+        requestId,
+      },
+      contentScriptSender,
+    );
+    expect(answers).toEqual([]);
+
+    answerPending(false);
+    await pending;
+    expect(res.error?.code).toBe(4001);
+  });
+
+  it("ignores a lifecycle port from an untrusted sender (L-1)", async () => {
+    const res = {} as ResponseShape;
+    const pending = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      res as never,
+      vi.fn(),
+      vi.fn(),
+    );
+    await awaitPendingRequest();
+
+    const port = connectApprovalPort({ id: "mock-id", url: `${ORIGIN_A}/app` });
+    expect(port.hasDisconnectListener()).toBe(false);
+    await port.disconnect();
+    expect(await isSettled(pending)).toBe(false);
+
+    answerPending(false);
+    await pending;
+  });
+
+  it("charges a refusal to the top-level origin of an iframe request (L-3)", async () => {
+    const iframeRequest = (frameOrigin: string) => {
+      const req = buildRequest(frameOrigin, 11);
+      (req.senderData as { mainFrameOrigin?: string }).mainFrameOrigin =
+        ORIGIN_A;
+      return req;
+    };
+
+    // Each attempt comes from a fresh subdomain, so the frame origin alone
+    // would hand every one of them a clean streak.
+    for (let attempt = 0; attempt <= APPROVAL_REFUSAL_GRACE; attempt += 1) {
+      const pending = restrictedMethodsMiddleware(
+        iframeRequest(`https://frame${attempt}.a.example`),
+        {} as never,
+        vi.fn(),
+        vi.fn(),
+      );
+      await awaitPendingRequest();
+      answerPending(false);
+      await pending;
+    }
+
+    const blockedRes = {} as ResponseShape;
+    await restrictedMethodsMiddleware(
+      iframeRequest("https://frame-next.a.example"),
+      blockedRes as never,
+      vi.fn(),
+      vi.fn(),
+    );
+
+    expect(blockedRes.error?.code).toBe(-32002);
+  });
+
+  it("keeps the refusal window longer than the idle timeout (L-3)", () => {
+    // A site that simply reopens a prompt the user ignores each time must
+    // still build a streak, which needs the window to outlast the timeout
+    // that ends each of those attempts.
+    expect(APPROVAL_REFUSAL_WINDOW_MS).toBeGreaterThanOrEqual(
+      POPUP_RESPONSE_TIMEOUT_MS,
+    );
+  });
+
+  it("leaves the slot alone for a request that completes silently (L-4)", async () => {
+    // A stored grant lets qrl_requestAccounts answer without a prompt.
+    vi.mocked(browser.storage.local.get).mockImplementation(
+      async (key: unknown) => {
+        if (key === profileStorageKey("DAPPS")) {
+          return {
+            [profileStorageKey("DAPPS")]: {
+              ALL_DAPPS: {
+                [ORIGIN_A]: {
+                  urlOrigin: ORIGIN_A,
+                  accounts: [SILENT_ACCOUNT],
+                  blockchains: [],
+                  permissions: [],
+                },
+              },
+            },
+          };
+        }
+        if (key === profileStorageKey("ACCOUNTS")) {
+          return {
+            [profileStorageKey("ACCOUNTS")]: {
+              ALL_ACCOUNTS: [SILENT_ACCOUNT],
+            },
+          };
+        }
+        return {};
+      },
+    );
+
+    const silentRes = {} as ResponseShape;
+    const otherRes = {} as ResponseShape;
+    const silent = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      silentRes as never,
+      vi.fn(),
+      vi.fn(),
+    );
+    // A second site asks while the silent one is still running its async
+    // checks. Holding the slot across those checks used to answer this one
+    // "a request is already pending" and open a surface for it.
+    const other = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_B, 22),
+      otherRes as never,
+      vi.fn(),
+      vi.fn(),
+    );
+
+    await silent;
+    expect(silentRes.result).toEqual([SILENT_ACCOUNT]);
+    expect(silentRes.error).toBeUndefined();
+
+    await awaitPendingRequest();
+    expect(otherRes.error).toBeUndefined();
+    answerPending(false);
+    await other;
   });
 });

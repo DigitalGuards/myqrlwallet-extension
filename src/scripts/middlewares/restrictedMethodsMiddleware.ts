@@ -16,6 +16,7 @@ import LockManager from "../lockManager/lockManager";
 import { checkDomain } from "../phishing/phishingDetector";
 import { claimApprovalSlot, releaseApprovalSlot } from "../utils/approvalSlot";
 import { openApprovalSurface } from "../utils/approvalSurface";
+import { isTrustedExtensionSender } from "../utils/trustedSender";
 import { resolveTrustedSenderOrigin } from "../utils/dAppAccountNotifications";
 import {
   buildDAppSendTransactionErrorData,
@@ -243,18 +244,39 @@ const checkRequestCanProceed = async (req: JsonRpcRequest<JsonRpcRequest>) => {
 export const POPUP_RESPONSE_TIMEOUT_MS = 90 * 1000;
 
 /**
- * Backstop once the user has clicked. Signing with ML-DSA-87 and waiting on
- * a node broadcast takes seconds, and this only has to be longer than the
- * slowest honest click-to-answer path while still bounding a wedged
- * approval surface so it cannot hold the approval slot indefinitely.
+ * Backstop once the user has clicked and the approval surface is still
+ * alive. Signing with ML-DSA-87 and waiting on a node broadcast takes
+ * seconds, and this only has to be longer than the slowest honest
+ * click-to-answer path while still bounding a wedged surface so it cannot
+ * hold the approval slot indefinitely.
  */
 export const APPROVAL_IN_PROGRESS_TIMEOUT_MS = 3 * 60 * 1000;
+
+/**
+ * Grace after the approval surface dies with the user's click already in
+ * flight. The surface's own script died with it, so no answer is coming
+ * from it; the only reason to wait at all is the case where the response
+ * message was already on its way when the port went. Short, because the
+ * slot is held for the whole window.
+ */
+export const APPROVAL_DISCONNECT_GRACE_MS = 20 * 1000;
+
+/**
+ * What an approval ended in. `outcomeUnknown` marks the cases where the
+ * user did approve but the wallet cannot say whether the work completed,
+ * which must reach the dApp as an internal error in place of a rejection:
+ * telling a page its transaction was rejected while the broadcast may have
+ * landed is what makes it retry into a second transfer.
+ */
+type RestrictedMethodOutcome = DAppResponseType & {
+  outcomeUnknown?: boolean;
+};
 
 // get the result of the user approval/rejection of the request
 const getRestrictedMethodResult = async (
   req: JsonRpcRequest<JsonRpcRequest>,
   authorizedChainId?: string,
-): Promise<DAppResponseType> => {
+): Promise<RestrictedMethodOutcome> => {
   const settings = await StorageUtil.getSettings();
   const phishingEnabled = settings.phishingDetectionEnabled !== false;
   // Phishing is checked against both the requesting frame origin AND the
@@ -294,6 +316,158 @@ const getRestrictedMethodResult = async (
     authorizedChainId,
   };
 
+  // Listeners go up before the request is stored and the surface opens.
+  // The surface can post its in-progress acknowledgement the moment it
+  // renders, and a listener attached afterwards would miss it and leave the
+  // idle timeout running underneath a signature.
+  let settle: (response: RestrictedMethodOutcome) => void = () => undefined;
+  const answered = new Promise<RestrictedMethodOutcome>((resolve) => {
+    settle = resolve;
+  });
+
+  let popupPort: browser.Runtime.Port | undefined;
+  // Set by the DAPP_REQUEST_IN_PROGRESS message the approval surface posts
+  // the instant the user clicks. From that point the wallet is signing and
+  // broadcasting for this request, so neither the idle timeout nor a
+  // torn-down surface may answer a rejection on the user's behalf.
+  let userHasActed = false;
+  let isSettled = false;
+  let timeoutHandle: ReturnType<typeof setTimeout>;
+
+  const cleanup = () => {
+    clearTimeout(timeoutHandle);
+    browser.runtime.onMessage.removeListener(handleMessage);
+    browser.runtime.onConnect.removeListener(handlePortConnect);
+    popupPort?.onDisconnect.removeListener(handlePortDisconnect);
+  };
+
+  /**
+   * Drop this request from the approval slot in session storage. Scoped to
+   * its own id, because a slow approval can finish after a newer request
+   * has taken the slot. Doing it here in the worker keeps it ahead of
+   * releaseApprovalSlot, so the next request cannot be written in between
+   * and then cleared by this one.
+   */
+  const clearStoredRequest = async () => {
+    try {
+      await StorageUtil.clearDAppsRequestDataForRequestId(requestId);
+    } catch {
+      // best-effort cleanup
+    }
+  };
+
+  const resolveOnce = (outcome: RestrictedMethodOutcome) => {
+    if (isSettled) return;
+    isSettled = true;
+    cleanup();
+    settle(outcome);
+  };
+
+  const abandon = async (reason: string, outcomeUnknown: boolean) => {
+    if (isSettled) return;
+    console.warn(`QrlWeb3Wallet: dApp request abandoned (${reason})`);
+    await clearStoredRequest();
+    resolveOnce({
+      method: req.method,
+      action: EXTENSION_MESSAGES.DAPP_RESPONSE,
+      hasApproved: false,
+      requestId,
+      outcomeUnknown,
+    });
+  };
+
+  function handleMessage(
+    message: DAppResponseType,
+    sender?: browser.Runtime.MessageSender,
+  ) {
+    // Only this extension's own surfaces may resolve an approval. A content
+    // script reports the page's origin here, so a dApp cannot answer its
+    // own request by posting a runtime message.
+    if (!isTrustedExtensionSender(sender)) return undefined;
+    // Every branch is keyed by requestId, so a message left over from an
+    // approval that already ended cannot answer the current one.
+    if (message.requestId !== requestId) return undefined;
+
+    if (message.action === EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS) {
+      if (isSettled) return undefined;
+      if (!userHasActed) {
+        userHasActed = true;
+        clearTimeout(timeoutHandle);
+        timeoutHandle = setTimeout(
+          () => void abandon("no response after the user acted", true),
+          APPROVAL_IN_PROGRESS_TIMEOUT_MS,
+        );
+      }
+      // The acknowledgement the approval surface waits on before it signs
+      // or broadcasts anything. Answering only while the request is still
+      // live is what stops a surface resuming work for a request the
+      // worker has already given up on.
+      return Promise.resolve({ accepted: true });
+    }
+
+    if (message.action === EXTENSION_MESSAGES.DAPP_RESPONSE) {
+      void (async () => {
+        await clearStoredRequest();
+        resolveOnce(message);
+      })();
+      return undefined;
+    }
+    return undefined;
+  }
+
+  function handlePortConnect(port: browser.Runtime.Port) {
+    if (port.name !== DAPP_REQUEST_PORT_NAME) return;
+    if (!isTrustedExtensionSender(port.sender)) return;
+    popupPort = port;
+    port.onDisconnect.addListener(handlePortDisconnect);
+  }
+
+  async function handlePortDisconnect() {
+    if (isSettled) return;
+    if (!userHasActed) {
+      // The user closed the approval surface without answering, which is a
+      // rejection.
+      await clearStoredRequest();
+      resolveOnce({
+        method: req.method,
+        action: EXTENSION_MESSAGES.DAPP_RESPONSE,
+        hasApproved: false,
+        requestId,
+      });
+      return;
+    }
+
+    // The surface died with the click already in flight, for example
+    // because the action popup lost focus mid-signature. Its script is
+    // gone, so nothing will finish the work or post an answer.
+    //
+    // The stored request goes immediately. Leaving it in place kept the
+    // badge lit and let the next person to open the wallet approve the
+    // very same request a second time, which for qrl_sendTransaction signs
+    // a second distinct transfer against a pending nonce.
+    //
+    // The message listener stays up for a short grace, because the
+    // response may already have been posted when the port went, and the
+    // wallet cannot tell whether a broadcast landed. Saying so explicitly
+    // beats reporting a rejection for a transaction that may be on chain.
+    await clearStoredRequest();
+    if (isSettled) return;
+    clearTimeout(timeoutHandle);
+    timeoutHandle = setTimeout(
+      () => void abandon("the approval surface closed after the click", true),
+      APPROVAL_DISCONNECT_GRACE_MS,
+    );
+  }
+
+  timeoutHandle = setTimeout(
+    () => void abandon("no user response", false),
+    POPUP_RESPONSE_TIMEOUT_MS,
+  );
+  // Listen for the approval/rejection from the UI, plus the surface's
+  // lifecycle port so we can resolve immediately when it disconnects.
+  browser.runtime.onMessage.addListener(handleMessage);
+  browser.runtime.onConnect.addListener(handlePortConnect);
+
   // The request must be in session storage BEFORE the surface opens so a
   // freshly-created popup/window/panel finds it on mount.
   await StorageUtil.setDAppsRequestData(request);
@@ -301,99 +475,7 @@ const getRestrictedMethodResult = async (
   // gesture; it stays UI-only context and is no part of any trust decision.
   await openApprovalSurface({ tabId: req.senderData?.tabId });
 
-  return new Promise((resolve) => {
-    let popupPort: browser.Runtime.Port | undefined;
-    // Set by the DAPP_REQUEST_IN_PROGRESS message the approval surface
-    // posts the instant the user clicks. From that point the wallet is
-    // signing and broadcasting for this request, so neither the idle
-    // timeout nor a torn-down surface may answer on the user's behalf.
-    let userHasActed = false;
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-
-    const cleanup = () => {
-      clearTimeout(timeoutHandle);
-      browser.runtime.onMessage.removeListener(handleMessage);
-      browser.runtime.onConnect.removeListener(handlePortConnect);
-      popupPort?.onDisconnect.removeListener(handlePortDisconnect);
-    };
-
-    const abandon = async (reason: string) => {
-      cleanup();
-      console.warn(`QrlWeb3Wallet: dApp request abandoned (${reason})`);
-      try {
-        // Scoped to this requestId: by the time a long-running approval
-        // gives up, the slot may already hold somebody else's request.
-        await StorageUtil.clearDAppsRequestDataForRequestId(requestId);
-      } catch {
-        // best-effort cleanup
-      }
-      resolve({
-        method: req.method,
-        action: EXTENSION_MESSAGES.DAPP_RESPONSE,
-        hasApproved: false,
-        requestId,
-      });
-    };
-
-    function handleMessage(message: DAppResponseType) {
-      // Every branch is keyed by requestId, so a message left over from an
-      // approval that already ended cannot answer the current one.
-      if (message.requestId !== requestId) return;
-      if (message.action === EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS) {
-        if (userHasActed) return;
-        userHasActed = true;
-        clearTimeout(timeoutHandle);
-        timeoutHandle = setTimeout(
-          () => void abandon("no response after the user acted"),
-          APPROVAL_IN_PROGRESS_TIMEOUT_MS,
-        );
-        return;
-      }
-      if (message.action === EXTENSION_MESSAGES.DAPP_RESPONSE) {
-        cleanup();
-        resolve(message);
-      }
-    }
-
-    function handlePortConnect(port: browser.Runtime.Port) {
-      if (port.name === DAPP_REQUEST_PORT_NAME) {
-        popupPort = port;
-        port.onDisconnect.addListener(handlePortDisconnect);
-      }
-    }
-
-    async function handlePortDisconnect() {
-      // A surface that goes away before the user acted is a rejection: the
-      // user closed the popup. A surface that goes away after the click is
-      // the ordinary self-close once the response has been posted, and on
-      // the rare path where the click's work is still running, answering
-      // 4001 here would tell the dApp its transaction was rejected while
-      // the broadcast is on the wire. The in-progress backstop bounds that
-      // case instead.
-      if (userHasActed) return;
-      cleanup();
-      try {
-        await StorageUtil.clearDAppsRequestDataForRequestId(requestId);
-      } catch {
-        // best-effort cleanup
-      }
-      resolve({
-        method: req.method,
-        action: EXTENSION_MESSAGES.DAPP_RESPONSE,
-        hasApproved: false,
-        requestId,
-      });
-    }
-
-    timeoutHandle = setTimeout(
-      () => void abandon("no user response"),
-      POPUP_RESPONSE_TIMEOUT_MS,
-    );
-    // Listen for the approval/rejection from the UI, plus the popup's
-    // lifecycle port so we can resolve immediately when it disconnects.
-    browser.runtime.onMessage.addListener(handleMessage);
-    browser.runtime.onConnect.addListener(handlePortConnect);
-  });
+  return answered;
 };
 
 type RestrictedMethodValue =
@@ -418,13 +500,50 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
       });
       return end();
     }
-    // Claimed before the first await: the precheck and the silent-completion
-    // check below both suspend, and two requests that arrived in the same
-    // tick used to sail past a flag set only after them.
-    const slotClaim = claimApprovalSlot(requesterOrigin, req.senderData?.tabId);
+    // check if the request can proceed
+    const precheckResult = await checkRequestCanProceed(req);
+    const { canProceed, proceedError } = precheckResult;
+    const authorizedChainId =
+      "authorizedChainId" in precheckResult
+        ? (precheckResult.authorizedChainId as string | undefined)
+        : undefined;
+    if (!canProceed) {
+      // @ts-expect-error - proceedError type from provider library is not assignable to res.error's narrow type
+      res.error = proceedError;
+      return end();
+    }
+
+    // check if the request can complete silently without user interaction
+    const { hasCompleted, completionResult, completionError } =
+      await checkRequestCanCompleteSilently(req);
+    if (hasCompleted) {
+      res.result = completionResult;
+      return end();
+    } else if (completionError) {
+      // @ts-expect-error - completionError type from rpcErrors is not assignable to res.error's narrow type
+      res.error = completionError;
+      return end();
+    }
+
+    // The slot is claimed here, once this request is certain to put a
+    // prompt in front of the user, and synchronously: from the resumption
+    // above down to the first await below nothing else can run, so two
+    // requests that arrived in the same tick cannot both pass. Claiming any
+    // earlier made a silent completion or a rejected precheck hold the slot
+    // across its own awaits, which answered an unrelated dApp "a request is
+    // already pending" and opened a surface for a request that was never
+    // going to show one.
+    const slotClaim = claimApprovalSlot({
+      origin: requesterOrigin,
+      topLevelOrigin: resolveTrustedSenderOrigin({
+        origin: (req.senderData as { mainFrameOrigin?: string } | undefined)
+          ?.mainFrameOrigin,
+      }),
+      tabId: req.senderData?.tabId,
+    });
     if (!slotClaim.claimed) {
       if (slotClaim.reason === "cooldown") {
-        // The origin just had an approval rejected or time out. Opening a
+        // The origin has had approvals refused back to back. Opening a
         // surface here would let one page reopen the wallet in a loop.
         res.error = rpcErrors.resourceUnavailable({
           message:
@@ -444,39 +563,13 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
       }
       return end();
     }
+
     // Only an approval the user actually saw and turned down (or left to
-    // time out) arms the per-origin cooldown. A precheck rejection or a
-    // silent completion never reached the user, so it must not throttle the
-    // origin's next request.
+    // time out) arms the per-origin cooldown.
     let approvalWasRefused = false;
     try {
-      // check if the request can proceed
-      const precheckResult = await checkRequestCanProceed(req);
-      const { canProceed, proceedError } = precheckResult;
-      const authorizedChainId =
-        "authorizedChainId" in precheckResult
-          ? (precheckResult.authorizedChainId as string | undefined)
-          : undefined;
-      if (!canProceed) {
-        // @ts-expect-error - proceedError type from provider library is not assignable to res.error's narrow type
-        res.error = proceedError;
-        return end();
-      }
-
-      // check if the request can complete silently without user interaction
-      const { hasCompleted, completionResult, completionError } =
-        await checkRequestCanCompleteSilently(req);
-      if (hasCompleted) {
-        res.result = completionResult;
-        return end();
-      } else if (completionError) {
-        // @ts-expect-error - completionError type from rpcErrors is not assignable to res.error's narrow type
-        res.error = completionError;
-        return end();
-      }
-
       // open the popup and wait for the user to approve/reject the request
-      let restrictedMethodResult: DAppResponseType = {
+      let restrictedMethodResult: RestrictedMethodOutcome = {
         method: "",
         action: "",
         hasApproved: false,
@@ -488,7 +581,10 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
         );
       } finally {
         const hasApproved = restrictedMethodResult?.hasApproved;
-        approvalWasRefused = !hasApproved;
+        // An unknown outcome followed a real click, so it is no refusal and
+        // must not count towards the origin's back-off streak.
+        approvalWasRefused =
+          !hasApproved && !restrictedMethodResult?.outcomeUnknown;
         if (hasApproved) {
           switch (restrictedMethodResult?.method) {
             case RESTRICTED_METHODS.WALLET_ADD_QRL_CHAIN:
@@ -587,6 +683,15 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
               res.error = providerErrors.unsupportedMethod();
               break;
           }
+        } else if (restrictedMethodResult?.outcomeUnknown) {
+          // The user approved and the wallet lost track of the work, so the
+          // honest answer is that the outcome is unknown. Reporting a user
+          // rejection here would invite a retry for something that may
+          // already have happened.
+          res.error = rpcErrors.internal({
+            message:
+              "The wallet approved this request and then lost contact with the approval window. The outcome is unknown. Check the wallet or the explorer before sending it again.",
+          });
         } else {
           res.error = providerErrors.userRejectedRequest();
         }

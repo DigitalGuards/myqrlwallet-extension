@@ -20,6 +20,37 @@ import {
   Permission,
 } from "../middlewares/middlewareTypes";
 import { registerDAppTransactionWatch } from "./dAppTransactionWatcher";
+import LockManager from "../lockManager/lockManager";
+
+/**
+ * A locked wallet has to answer an authorization precheck identically for an
+ * authorized and an unauthorized origin or address. `qrl_accounts`, the
+ * provider state and `wallet_getPermissions` all report nothing while
+ * locked, so a precheck that refused an unauthorized address outright and
+ * opened a prompt for an authorized one handed the page an oracle for its
+ * own grants through a method it cannot complete anyway (L6).
+ *
+ * Deferring here lets the request reach the approval surface, which shows
+ * the unlock screen first, so the page learns only that a prompt opened.
+ * Authorization is then enforced for real:
+ * `revalidateAuthorizedDAppRequest` re-runs the full check with
+ * `enforceWhileLocked` set before anything is signed or broadcast, and
+ * every approval component calls it on the approve path.
+ *
+ * @param enforceWhileLocked true for post-approval revalidation, where the
+ * answer decides whether a signature happens.
+ */
+const shouldDeferAuthorizationToApproval = async (
+  enforceWhileLocked: boolean,
+): Promise<boolean> => {
+  if (enforceWhileLocked) return false;
+  try {
+    return (await LockManager.isLocked()).isLocked;
+  } catch {
+    // An unreadable lock state fails closed: keep the strict answer.
+    return false;
+  }
+};
 
 const getFromAddress = (req: JsonRpcRequest<JsonRpcRequest>) => {
   switch (req.method) {
@@ -40,6 +71,7 @@ const getFromAddress = (req: JsonRpcRequest<JsonRpcRequest>) => {
 
 export const checkAccountHasBeenAuthorized = async (
   req: JsonRpcRequest<JsonRpcRequest>,
+  enforceWhileLocked = false,
 ) => {
   const fromAddress = getFromAddress(req);
   const urlOrigin = new URL(req?.senderData?.url ?? "").origin;
@@ -50,7 +82,9 @@ export const checkAccountHasBeenAuthorized = async (
       areAddressesEquivalent(address, fromAddress),
     ) ?? false;
   return {
-    canProceed: hasAddressConnected,
+    canProceed:
+      hasAddressConnected ||
+      (await shouldDeferAuthorizationToApproval(enforceWhileLocked)),
     proceedError: providerErrors.unauthorized({
       message: `The requested account ${fromAddress} has not been authorized by the user.`,
     }),
@@ -100,8 +134,12 @@ const getTypedDataChainId = (req: JsonRpcRequest<JsonRpcRequest>) => {
 export const checkAccountAndChainHaveBeenAuthorized = async (
   req: JsonRpcRequest<JsonRpcRequest>,
   expectedChainId?: string,
+  enforceWhileLocked = false,
 ) => {
-  const accountResult = await checkAccountHasBeenAuthorized(req);
+  const accountResult = await checkAccountHasBeenAuthorized(
+    req,
+    enforceWhileLocked,
+  );
   if (!accountResult.canProceed) return accountResult;
 
   if (req.method === RESTRICTED_METHODS.QRL_SEND_TRANSACTION) {
@@ -201,9 +239,12 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
     };
   }
 
-  const isAuthorized = (connectedData?.blockchains ?? []).some(
-    (chain) => normalizeChainId(chain.chainId) === effectiveChainId,
-  );
+  // The chain grant is per origin, so refusing it while locked would leak
+  // the same thing the account check above stopped leaking (L6).
+  const isAuthorized =
+    (connectedData?.blockchains ?? []).some(
+      (chain) => normalizeChainId(chain.chainId) === effectiveChainId,
+    ) || (await shouldDeferAuthorizationToApproval(enforceWhileLocked));
   if (!isAuthorized) {
     return {
       canProceed: false,
@@ -245,6 +286,10 @@ export const revalidateAuthorizedDAppRequest = async (
     };
   }
 
+  // enforceWhileLocked: the precheck defers an unauthorized answer while
+  // the wallet is locked so a page cannot probe its grants (L6). This is
+  // the check that decides whether a signature happens, so it answers
+  // strictly whatever the lock state is.
   const authorization = await checkAccountAndChainHaveBeenAuthorized(
     {
       id: request.requestId,
@@ -254,6 +299,7 @@ export const revalidateAuthorizedDAppRequest = async (
       senderData: request.requestData.senderData,
     } as JsonRpcRequest<JsonRpcRequest>,
     request.authorizedChainId,
+    true,
   );
   if (!authorization.canProceed) return authorization;
   try {
@@ -286,7 +332,44 @@ export const revalidateAuthorizedDAppRequest = async (
       senderData: request.requestData.senderData,
     } as JsonRpcRequest<JsonRpcRequest>,
     request.authorizedChainId,
+    true,
   );
+};
+
+/** IPv4 addresses that resolve inside the user's own machine or network. */
+const isPrivateIpv4Address = (address: string): boolean => {
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(address);
+  if (!ipv4) return false;
+  const [first, second] = ipv4.slice(1).map(Number);
+  if (first === 127 || first === 0 || first === 10) return true;
+  if (first === 169 && second === 254) return true;
+  if (first === 192 && second === 168) return true;
+  if (first === 172 && second >= 16 && second <= 31) return true;
+  // Carrier-grade NAT (100.64.0.0/10, RFC 6598): shared address space on
+  // the provider side of the user's router, reachable from the machine the
+  // wallet runs on and never a public RPC endpoint.
+  if (first === 100 && second >= 64 && second <= 127) return true;
+  return false;
+};
+
+/**
+ * The IPv4 address embedded in an IPv4-mapped IPv6 literal, in dotted form.
+ * The URL parser rewrites `[::ffff:127.0.0.1]` to `[::ffff:7f00:1]`, so the
+ * hex-group spelling has to be recognised alongside the dotted one. The
+ * leading run of zero hextets covers the fully written
+ * `0:0:0:0:0:ffff:127.0.0.1`, and the optional zero hextet after `ffff:`
+ * covers the IPv4-translated `::ffff:0:0/96` form.
+ */
+const getIpv4MappedAddress = (host: string): string | undefined => {
+  const mapped = /^(?:0{1,4}:){0,5}:{0,2}ffff:(?:0{1,4}:)?(.+)$/.exec(host);
+  if (!mapped) return undefined;
+  const tail = mapped[1];
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(tail)) return tail;
+  const hexPair = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(tail);
+  if (!hexPair) return undefined;
+  const high = parseInt(hexPair[1], 16);
+  const low = parseInt(hexPair[2], 16);
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
 };
 
 /**
@@ -296,21 +379,29 @@ export const revalidateAuthorizedDAppRequest = async (
  * in the wallet's own form may use them.
  */
 const isPrivateOrLoopbackHost = (hostname: string): boolean => {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  // A trailing dot makes the name absolute, so `localhost.` and
+  // `printer.local.` resolve exactly like their dotless spellings while
+  // slipping past every equality and suffix test below (L5).
+  const host = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.+$/, "");
   if (host === "localhost" || host.endsWith(".localhost")) return true;
   if (host.endsWith(".local") || host.endsWith(".internal")) return true;
   if (host === "::1" || host === "::" || host === "0.0.0.0") return true;
-  // IPv6 unique-local (fc00::/7) and link-local (fe80::/10).
+  // IPv6 unique-local (fc00::/7, so a first hextet of fc00 through fdff)
+  // and link-local (fe80::/10, so fe80 through febf).
   if (/^f[cd][0-9a-f]{2}:/.test(host)) return true;
   if (/^fe[89ab][0-9a-f]:/.test(host)) return true;
-  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!ipv4) return false;
-  const [first, second] = ipv4.slice(1).map(Number);
-  if (first === 127 || first === 0 || first === 10) return true;
-  if (first === 169 && second === 254) return true;
-  if (first === 192 && second === 168) return true;
-  if (first === 172 && second >= 16 && second <= 31) return true;
-  return false;
+  // The NAT64 well-known prefix (64:ff9b::/96 and 64:ff9b:1::/48, RFC 6052
+  // and RFC 8215) carries an embedded IPv4 destination, so a host inside it
+  // reaches whatever that IPv4 address reaches.
+  if (/^64:ff9b:/.test(host)) return true;
+  // An IPv4-mapped literal reaches the embedded IPv4 address, so it has to
+  // answer to the IPv4 rules.
+  const mappedIpv4 = getIpv4MappedAddress(host);
+  if (mappedIpv4 !== undefined) return isPrivateIpv4Address(mappedIpv4);
+  return isPrivateIpv4Address(host);
 };
 
 /**

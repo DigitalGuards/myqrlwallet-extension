@@ -254,3 +254,175 @@ describe("phishingDetector QRL ecosystem coverage (L7b)", () => {
     expect(result.isDomainPhishing).toBe(false);
   });
 });
+
+/**
+ * L-7: the first cut of the QRL config ran a tolerance of 2 over a fuzzylist
+ * that held every domain we operate. Measured against the real detector, that
+ * accused a list of real, unrelated sites: quantascan.io and quantascan.com (a
+ * third-party QRL explorer), theqrl.com, theqrl.net, zondscan.io,
+ * zondscan.org, quantastack.com and quantastar.com. Three changes answer it,
+ * and all of them are exercised here through the real detector:
+ *
+ * 1. Third-party ecosystem domains are allowlisted in qrlPhishingConfig.ts.
+ * 2. The tolerance is 1, quantastark.com left the fuzzylist, and a fuzzy
+ *    verdict that amounts to "same label, different public suffix" on an
+ *    informational domain is dropped by checkDomain().
+ * 3. A homograph check decodes punycode and folds confusables, catching what
+ *    a levenshtein distance over an xn-- string never could.
+ */
+describe("phishingDetector lookalike precision (L-7)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    // The H1 suite vi.doMock()s the detector class with a constructor that
+    // always throws. vi.resetModules() clears the module registry and leaves
+    // that mock registered, so it has to be dropped explicitly.
+    vi.doUnmock("eth-phishing-detect/src/detector");
+    clearLocalStore();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("network unavailable")),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const loadReadyDetector = async () => {
+    const module = await import("./phishingDetector");
+    await module.initializePhishingDetector();
+    expect(module.getPhishingDetectorStatus()).toBe("ready");
+    return module;
+  };
+
+  /**
+   * Punycodes a Unicode hostname exactly as a browser does before the origin
+   * ever reaches checkDomain(), so these cases start from the same xn-- string
+   * the extension sees in production.
+   */
+  const asBrowserHostname = (unicodeHost: string) =>
+    new URL(`https://${unicodeHost}`).hostname;
+
+  it.each([
+    // Third-party QRL explorer. Two edits from quantaswap once the public
+    // suffix is stripped, so the old tolerance of 2 flagged it.
+    "https://quantascan.io",
+    "https://quantascan.com",
+    // The foundation's own domains: distance 0 from theqrl.org on the label.
+    "https://theqrl.com",
+    "https://theqrl.net",
+    // Distance 0 from zondscan.com on the label.
+    "https://zondscan.io",
+    "https://zondscan.org",
+    // One and two edits from quantastark, which has left the fuzzylist.
+    "https://quantastack.com",
+    "https://quantastar.com",
+  ])("no longer accuses the real third-party domain %s", async (url) => {
+    const { checkDomain } = await loadReadyDetector();
+
+    expect(checkDomain(url).isDomainPhishing).toBe(false);
+  });
+
+  it.each([
+    // Capital i standing in for a lowercase L, lowercased by URL parsing.
+    ["https://qrlwaIlet.com", "qrlwallet.com"],
+    ["https://qr1wallet.com", "qrlwallet.com"],
+    // A signing origin under another public suffix stays flagged.
+    ["https://qrlwallet.net", "qrlwallet.com"],
+    ["https://quantaswap.com", "quantaswap.io"],
+    // A lookalike of the public suffix itself stays flagged, informational
+    // domain or not.
+    ["https://quantaswap.i0", "quantaswap.io"],
+    ["https://zondscan.co", "zondscan.com"],
+    // A different label stays flagged on an informational domain too.
+    ["https://theqr1.org", "theqrl.org"],
+    ["https://zondscam.com", "zondscan.com"],
+  ])("still flags the lookalike %s", async (url, expectedMatch) => {
+    const { checkDomain } = await loadReadyDetector();
+
+    const result = checkDomain(url);
+
+    expect(result.isDomainPhishing).toBe(true);
+    expect(result.matchedDomain).toBe(expectedMatch);
+  });
+
+  it.each([
+    // Cyrillic a (U+0430) for the latin a of qrlwallet.com.
+    ["qrlwаllet.com", "qrlwallet.com"],
+    // Cyrillic o (U+043E) for the latin o of zondscan.com.
+    ["zоndscan.com", "zondscan.com"],
+    // Cyrillic o twice, inside quantapool.com.
+    ["quantapооl.com", "quantapool.com"],
+  ])(
+    "flags the punycoded homograph of %s as a homograph",
+    async (unicodeHost, expectedMatch) => {
+      const { checkDomain } = await loadReadyDetector();
+      const hostname = asBrowserHostname(unicodeHost);
+      // The detector only ever sees the ASCII form, where a levenshtein
+      // distance against the protected domain is meaningless.
+      expect(hostname.startsWith("xn--")).toBe(true);
+
+      const result = checkDomain(`https://${hostname}`);
+
+      expect(result.isDomainPhishing).toBe(true);
+      expect(result.matchType).toBe("homograph");
+      expect(result.matchedDomain).toBe(expectedMatch);
+    },
+  );
+
+  it("flags a homograph on a subdomain of the lookalike", async () => {
+    const { checkDomain } = await loadReadyDetector();
+    // Cyrillic a inside qrlwallet, with a subdomain in front of it.
+    const hostname = asBrowserHostname("login.qrlwаllet.com");
+
+    const result = checkDomain(`https://${hostname}`);
+
+    expect(result.isDomainPhishing).toBe(true);
+    expect(result.matchType).toBe("homograph");
+    expect(result.matchedDomain).toBe("qrlwallet.com");
+  });
+
+  it.each([
+    // Two capital i's: two edits, past the tolerance of 1, and caught by the
+    // confusable folding instead.
+    ["qrlwaIIet.com", "qrlwallet.com"],
+    // "rn" reads as "m" at any size, and costs two edits.
+    ["rnyqrlwallet.com", "myqrlwallet.com"],
+  ])("flags the ASCII lookalike %s as a homograph", async (host, expected) => {
+    const { checkDomain } = await loadReadyDetector();
+
+    const result = checkDomain(`https://${host}`);
+
+    expect(result.isDomainPhishing).toBe(true);
+    expect(result.matchType).toBe("homograph");
+    expect(result.matchedDomain).toBe(expected);
+  });
+
+  it.each([
+    "https://qrlwallet.com",
+    "https://dev.qrlwallet.com",
+    "https://quantastark.com",
+    "https://docs.quantastark.com",
+    "https://theqrl.org",
+    "https://quantascan.io",
+    "https://explorer.quantascan.io",
+    "https://qrl.foundation",
+  ])("passes the allowlisted domain %s clean", async (url) => {
+    const { checkDomain } = await loadReadyDetector();
+
+    expect(checkDomain(url).isDomainPhishing).toBe(false);
+  });
+
+  it.each([
+    "https://example.com",
+    "https://github.com",
+    "https://en.wikipedia.org",
+    // An ordinary internationalised domain is decoded and folded like any
+    // other, and matches nothing.
+    "https://münchen.example",
+  ])("leaves the unrelated domain %s alone", async (url) => {
+    const { checkDomain } = await loadReadyDetector();
+
+    expect(checkDomain(url).isDomainPhishing).toBe(false);
+  });
+});

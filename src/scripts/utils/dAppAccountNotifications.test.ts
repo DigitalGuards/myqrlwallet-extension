@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import StorageUtil from "@/utilities/storageUtil";
 import {
   notifyDAppAccountsChanged,
   registerDAppAccountNotificationStream,
@@ -193,5 +194,90 @@ describe("dApp account notifications lock mirror", () => {
     expect(stream.write).toHaveBeenCalledWith(
       expect.objectContaining({ params: [] }),
     );
+  });
+});
+
+describe("dApp account notifications on lock transitions (L-6)", () => {
+  const cleanups: Array<() => void> = [];
+  const ORIGIN = "https://dapp.example";
+
+  beforeEach(() => {
+    setWalletLockedForDAppNotifications(false);
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    cleanups.splice(0).forEach((cleanup) => cleanup());
+    setWalletLockedForDAppNotifications(false);
+  });
+
+  const register = () => {
+    const stream = { write: vi.fn() };
+    cleanups.push(
+      registerDAppAccountNotificationStream({ origin: ORIGIN }, stream),
+    );
+    return stream;
+  };
+
+  it("takes the accounts away from a connected page when the wallet locks", async () => {
+    const stream = register();
+
+    setWalletLockedForDAppNotifications(true);
+
+    await vi.waitFor(() => {
+      expect(stream.write).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: "qrlWallet_accountsChanged",
+          params: [],
+        }),
+      );
+    });
+  });
+
+  it("hands the granted accounts back when the wallet unlocks", async () => {
+    setWalletLockedForDAppNotifications(true);
+    const stream = register();
+    vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
+      urlOrigin: ORIGIN,
+      accounts: ["QAccount"],
+      blockchains: [],
+      permissions: [],
+    } as never);
+
+    setWalletLockedForDAppNotifications(false);
+
+    await vi.waitFor(() => {
+      expect(stream.write).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: "qrlWallet_accountsChanged",
+          params: ["QAccount"],
+        }),
+      );
+    });
+  });
+
+  it("emits nothing when the lock state is set to what it already was", async () => {
+    const stream = register();
+
+    setWalletLockedForDAppNotifications(false);
+    await Promise.resolve();
+
+    expect(stream.write).not.toHaveBeenCalled();
+  });
+
+  it("treats an unreadable grant as no accounts on unlock", async () => {
+    setWalletLockedForDAppNotifications(true);
+    const stream = register();
+    vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockRejectedValue(
+      new Error("storage unavailable"),
+    );
+
+    setWalletLockedForDAppNotifications(false);
+
+    await vi.waitFor(() => {
+      expect(stream.write).toHaveBeenCalledWith(
+        expect.objectContaining({ params: [] }),
+      );
+    });
   });
 });

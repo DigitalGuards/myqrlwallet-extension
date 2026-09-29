@@ -1,3 +1,5 @@
+import StorageUtil from "@/utilities/storageUtil";
+
 type StorageChange = {
   oldValue?: unknown;
   newValue?: unknown;
@@ -37,9 +39,61 @@ const streamsByOrigin = new Map<string, Set<NotificationStream>>();
  */
 let walletLocked = true;
 
-/** Called by LockManager whenever the in-memory key state changes. */
+/**
+ * Called by LockManager whenever the in-memory key state changes.
+ *
+ * A transition is an account change from every connected page's point of
+ * view, so it is pushed out: locking takes the accounts away, and unlocking
+ * hands the granted ones back. Without this, a page loaded while unlocked
+ * keeps showing accounts after the wallet locks, and a page loaded while
+ * locked never learns about them when the user unlocks.
+ */
 export const setWalletLockedForDAppNotifications = (isLocked: boolean) => {
+  if (walletLocked === isLocked) return;
   walletLocked = isLocked;
+  void broadcastLockStateToStreams(isLocked);
+};
+
+const writeToStreams = (origin: string, accounts: string[]) => {
+  const streams = streamsByOrigin.get(origin);
+  if (!streams) return;
+  const notification = {
+    jsonrpc: "2.0",
+    method: "qrlWallet_accountsChanged",
+    params: accounts,
+  };
+  for (const stream of streams) {
+    try {
+      stream.write(notification);
+    } catch {
+      streams.delete(stream);
+    }
+  }
+  if (streams.size === 0) streamsByOrigin.delete(origin);
+};
+
+/**
+ * Tell every connected page what the lock transition did to its accounts.
+ * Unlike the storage-change path this runs on its own, so the grant lookup
+ * may await. The in-page provider drops a list that matches the one it
+ * already holds, so a page whose view did not actually change sees nothing.
+ */
+const broadcastLockStateToStreams = async (isLocked: boolean) => {
+  for (const origin of [...streamsByOrigin.keys()]) {
+    let accounts: string[] = [];
+    if (!isLocked) {
+      try {
+        const granted = await StorageUtil.getDAppsConnectedAccountsData(origin);
+        accounts = granted?.accounts ?? [];
+      } catch {
+        // A grant the worker cannot read is treated as no grant.
+        accounts = [];
+      }
+    }
+    // The flag may have flipped back while the lookups ran.
+    if (walletLocked !== isLocked) return;
+    writeToStreams(origin, accounts);
+  }
 };
 
 const normalizeOrigin = (url: string): string | undefined => {
@@ -113,20 +167,6 @@ export const notifyDAppAccountsChanged = (change?: StorageChange): void => {
     const nextAccounts = next.get(origin) ?? [];
     if (accountsEqual(previousAccounts, nextAccounts)) continue;
 
-    const streams = streamsByOrigin.get(origin);
-    if (!streams) continue;
-    const notification = {
-      jsonrpc: "2.0",
-      method: "qrlWallet_accountsChanged",
-      params: walletLocked ? [] : nextAccounts,
-    };
-    for (const stream of streams) {
-      try {
-        stream.write(notification);
-      } catch {
-        streams.delete(stream);
-      }
-    }
-    if (streams.size === 0) streamsByOrigin.delete(origin);
+    writeToStreams(origin, walletLocked ? [] : nextAccounts);
   }
 };

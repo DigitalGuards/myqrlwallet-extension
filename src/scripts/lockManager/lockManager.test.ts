@@ -760,15 +760,43 @@ describe("LockManager", () => {
       });
 
       it("resets the auto-lock timer on a dApp approval response, matched by its action field", async () => {
-        await LockManager.lockManagerListener(
-          { action: "QRL_WALLET_DAPP_RESPONSE", data: { hasApproved: true } },
-          TRUSTED_SENDER,
-        );
+        // The listener answers undefined for this one so the approval
+        // middleware keeps the reply, and postpones the timer alongside, so
+        // the assertion waits for that to land.
+        expect(
+          LockManager.lockManagerListener(
+            { action: "QRL_WALLET_DAPP_RESPONSE", data: { hasApproved: true } },
+            TRUSTED_SENDER,
+          ),
+        ).toBeUndefined();
 
-        expect(mockAlarms.create).toHaveBeenCalledWith(
-          LockManager.AUTO_LOCK_ALARM,
-          { delayInMinutes: 5 },
-        );
+        await vi.waitFor(() => {
+          expect(mockAlarms.create).toHaveBeenCalledWith(
+            LockManager.AUTO_LOCK_ALARM,
+            { delayInMinutes: 5 },
+          );
+        });
+      });
+
+      it("answers undefined for a message it does not own, leaving the reply to its owner", () => {
+        // An async listener supplies the single reply browser.runtime
+        // delivers, which would steal the approval middleware's in-progress
+        // acknowledgement.
+        expect(
+          LockManager.lockManagerListener(
+            {
+              action: "QRL_WALLET_DAPP_REQUEST_IN_PROGRESS",
+              data: { requestId: "request-a" },
+            },
+            TRUSTED_SENDER,
+          ),
+        ).toBeUndefined();
+        expect(
+          LockManager.lockManagerListener(
+            { name: "SOME_OTHER_EXTENSION_MESSAGE" },
+            TRUSTED_SENDER,
+          ),
+        ).toBeUndefined();
       });
 
       it("does NOT reset the auto-lock timer on IS_LOCKED polling", async () => {

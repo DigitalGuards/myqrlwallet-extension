@@ -37,10 +37,12 @@ export const APPROVAL_ORIGIN_COOLDOWN_MS = 5_000;
 export const APPROVAL_REFUSAL_GRACE = 2;
 
 /**
- * How long a refusal counts towards the streak. A site the user turns down
- * once an hour is not the pattern this guards against.
+ * How long a refusal counts towards the streak. It has to exceed the
+ * approval idle timeout, otherwise a site that simply reopens a prompt the
+ * user ignores each time never builds a streak: every refusal would land
+ * after the previous one had already expired.
  */
-export const APPROVAL_REFUSAL_WINDOW_MS = 60_000;
+export const APPROVAL_REFUSAL_WINDOW_MS = 5 * 60_000;
 
 /**
  * Upper bound on remembered cooldowns. Expired entries are pruned on every
@@ -49,7 +51,21 @@ export const APPROVAL_REFUSAL_WINDOW_MS = 60_000;
 const MAX_TRACKED_COOLDOWNS = 100;
 
 export type PendingApproval = {
+  /** The origin of the frame that sent the request. */
   origin: string;
+  /**
+   * The origin of the tab that hosts it, when it differs. Content scripts
+   * run in every frame, so a page can spend its cooldowns through a fresh
+   * subdomain iframe each time; charging the top-level origin as well keeps
+   * one page from doing that.
+   */
+  topLevelOrigin?: string;
+  tabId?: number;
+};
+
+export type ApprovalSlotRequest = {
+  origin: string;
+  topLevelOrigin?: string;
   tabId?: number;
 };
 
@@ -59,6 +75,23 @@ export type ApprovalSlotClaim =
   | { claimed: false; reason: "cooldown"; retryAfterMs: number };
 
 type RefusalStreak = { count: number; lastAt: number };
+
+/**
+ * Every key a refusal is charged to, and every key a claim is checked
+ * against. The frame origin alone is not enough: a page can host an iframe
+ * on a fresh subdomain for each attempt, and each one would arrive with a
+ * clean streak.
+ */
+const cooldownKeys = ({
+  origin,
+  topLevelOrigin,
+}: {
+  origin: string;
+  topLevelOrigin?: string;
+}): string[] =>
+  topLevelOrigin === undefined || topLevelOrigin === origin
+    ? [origin]
+    : [origin, topLevelOrigin];
 
 let pendingApproval: PendingApproval | undefined;
 const cooldownUntilByOrigin = new Map<string, number>();
@@ -89,10 +122,11 @@ const pruneTracking = (now: number) => {
  * Take the approval slot for `origin`. Synchronous by design: callers must
  * claim before their first await.
  */
-export const claimApprovalSlot = (
-  origin: string,
-  tabId?: number,
-): ApprovalSlotClaim => {
+export const claimApprovalSlot = ({
+  origin,
+  topLevelOrigin,
+  tabId,
+}: ApprovalSlotRequest): ApprovalSlotClaim => {
   if (pendingApproval !== undefined) {
     return {
       claimed: false,
@@ -102,19 +136,25 @@ export const claimApprovalSlot = (
   }
 
   const now = Date.now();
-  const cooldownUntil = cooldownUntilByOrigin.get(origin);
-  if (cooldownUntil !== undefined) {
+  let longestCooldown = 0;
+  for (const key of cooldownKeys({ origin, topLevelOrigin })) {
+    const cooldownUntil = cooldownUntilByOrigin.get(key);
+    if (cooldownUntil === undefined) continue;
     if (cooldownUntil > now) {
-      return {
-        claimed: false,
-        reason: "cooldown",
-        retryAfterMs: cooldownUntil - now,
-      };
+      longestCooldown = Math.max(longestCooldown, cooldownUntil - now);
+      continue;
     }
-    cooldownUntilByOrigin.delete(origin);
+    cooldownUntilByOrigin.delete(key);
+  }
+  if (longestCooldown > 0) {
+    return {
+      claimed: false,
+      reason: "cooldown",
+      retryAfterMs: longestCooldown,
+    };
   }
 
-  pendingApproval = { origin, tabId };
+  pendingApproval = { origin, topLevelOrigin, tabId };
   return { claimed: true };
 };
 
@@ -136,25 +176,25 @@ export const releaseApprovalSlot = ({
   if (released === undefined) return;
 
   const now = Date.now();
+  const keys = cooldownKeys(released);
   if (!startCooldown) {
     // An approval the user granted clears the streak, so a site in regular
     // use is never throttled by refusals from earlier in the session.
-    refusalStreakByOrigin.delete(released.origin);
+    for (const key of keys) refusalStreakByOrigin.delete(key);
     return;
   }
 
   pruneTracking(now);
-  const previous = refusalStreakByOrigin.get(released.origin);
-  const withinWindow =
-    previous !== undefined &&
-    now - previous.lastAt <= APPROVAL_REFUSAL_WINDOW_MS;
-  const count = (withinWindow ? previous.count : 0) + 1;
-  refusalStreakByOrigin.set(released.origin, { count, lastAt: now });
-  if (count > APPROVAL_REFUSAL_GRACE) {
-    cooldownUntilByOrigin.set(
-      released.origin,
-      now + APPROVAL_ORIGIN_COOLDOWN_MS,
-    );
+  for (const key of keys) {
+    const previous = refusalStreakByOrigin.get(key);
+    const withinWindow =
+      previous !== undefined &&
+      now - previous.lastAt <= APPROVAL_REFUSAL_WINDOW_MS;
+    const count = (withinWindow ? previous.count : 0) + 1;
+    refusalStreakByOrigin.set(key, { count, lastAt: now });
+    if (count > APPROVAL_REFUSAL_GRACE) {
+      cooldownUntilByOrigin.set(key, now + APPROVAL_ORIGIN_COOLDOWN_MS);
+    }
   }
 };
 

@@ -231,7 +231,33 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
       DAppRequestStore.prototype,
       "fetchCurrentTabData",
     ).mockResolvedValue();
+    // The service worker acknowledges a live request; see confirmRequestIsLive.
+    acknowledgeInProgress({ accepted: true });
   });
+
+  /**
+   * Answer the in-progress acknowledgement with `ack` and every other
+   * runtime message with undefined, the way the worker does.
+   */
+  const acknowledgeInProgress = (ack: unknown) => {
+    vi.mocked(browser.runtime.sendMessage).mockImplementation(
+      async (message: unknown) => {
+        const action = (message as { action?: string })?.action;
+        if (action === EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS) return ack;
+        return undefined;
+      },
+    );
+  };
+
+  const sentMessages = () =>
+    vi
+      .mocked(browser.runtime.sendMessage)
+      .mock.calls.map((call) => call[0] as Record<string, unknown>);
+
+  const sentResponse = () =>
+    sentMessages().find(
+      (message) => message.action === EXTENSION_MESSAGES.DAPP_RESPONSE,
+    );
 
   const buildStore = (requestId: string, method = "qrl_sendTransaction") => {
     const store = new DAppRequestStore();
@@ -255,10 +281,6 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
   };
 
   it("posts the requestId captured at click time (M1)", async () => {
-    vi.spyOn(
-      StorageUtil,
-      "clearDAppsRequestDataForRequestId",
-    ).mockResolvedValue(undefined);
     const store = buildStore("request-a");
     store.setOnPermissionCallBack(async () => {
       swapInAnotherRequest(store);
@@ -266,11 +288,7 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
 
     await store.onPermission(true);
 
-    const response = vi
-      .mocked(browser.runtime.sendMessage)
-      .mock.calls.map((call) => call[0] as Record<string, unknown>)
-      .find((message) => message.action === EXTENSION_MESSAGES.DAPP_RESPONSE);
-    expect(response).toMatchObject({
+    expect(sentResponse()).toMatchObject({
       requestId: "request-a",
       method: "qrl_sendTransaction",
       hasApproved: true,
@@ -278,10 +296,6 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
   });
 
   it("keeps the approval's own result out of the newer request (M1)", async () => {
-    vi.spyOn(
-      StorageUtil,
-      "clearDAppsRequestDataForRequestId",
-    ).mockResolvedValue(undefined);
     const store = buildStore("request-a");
     store.setOnPermissionCallBack(async () => {
       swapInAnotherRequest(store);
@@ -290,28 +304,54 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
 
     await store.onPermission(true);
 
-    const response = vi
-      .mocked(browser.runtime.sendMessage)
-      .mock.calls.map((call) => call[0] as Record<string, unknown>)
-      .find((message) => message.action === EXTENSION_MESSAGES.DAPP_RESPONSE);
-    expect(response?.response).toEqual({ transactionHash: "0xabc" });
+    expect(sentResponse()?.response).toEqual({ transactionHash: "0xabc" });
     // The newer request's own view starts empty.
     expect(store.responseData).toEqual({});
   });
 
-  it("tells the service worker the user has acted before the slow part (M1)", async () => {
-    vi.spyOn(
-      StorageUtil,
-      "clearDAppsRequestDataForRequestId",
-    ).mockResolvedValue(undefined);
+  it("keeps two approvals in flight apart (L-8)", async () => {
+    const store = buildStore("request-a");
+    let releaseFirst: (() => void) | undefined;
+    store.setOnPermissionCallBack(async () => {
+      store.addToResponseData({ transactionHash: "0xfirst" });
+      await new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+    });
+    const first = store.onPermission(true);
+    await vi.waitFor(() => {
+      expect(releaseFirst).toBeTypeOf("function");
+    });
+
+    // A second approval runs to completion while the first is still
+    // waiting on its broadcast.
+    store.dAppRequestData = {
+      requestId: "request-b",
+      method: "qrl_signMessage",
+    };
+    store.setOnPermissionCallBack(async () => {
+      store.addToResponseData({ signature: "0xsecond" });
+    });
+    await store.onPermission(true);
+    releaseFirst?.();
+    await first;
+
+    const responses = sentMessages().filter(
+      (message) => message.action === EXTENSION_MESSAGES.DAPP_RESPONSE,
+    );
+    expect(
+      responses.find((message) => message.requestId === "request-b")?.response,
+    ).toEqual({ signature: "0xsecond" });
+    expect(
+      responses.find((message) => message.requestId === "request-a")?.response,
+    ).toEqual({ transactionHash: "0xfirst" });
+  });
+
+  it("asks the service worker before it does any work (L-2)", async () => {
     const seenBeforeCallback: unknown[] = [];
     const store = buildStore("request-a");
     store.setOnPermissionCallBack(async () => {
-      seenBeforeCallback.push(
-        ...vi
-          .mocked(browser.runtime.sendMessage)
-          .mock.calls.map((call) => call[0]),
-      );
+      seenBeforeCallback.push(...sentMessages());
     });
 
     await store.onPermission(true);
@@ -324,25 +364,76 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
     ]);
   });
 
-  it("clears the slot only while it still holds this request (M1)", async () => {
+  it.each([undefined, { accepted: false }, {}])(
+    "does no work when the worker does not acknowledge the request (%s) (L-2)",
+    async (ack) => {
+      const clear = vi
+        .spyOn(StorageUtil, "clearDAppsRequestDataForRequestId")
+        .mockResolvedValue(undefined);
+      acknowledgeInProgress(ack);
+      const callBack = vi.fn().mockResolvedValue(undefined);
+      const store = buildStore("request-a");
+      store.setOnPermissionCallBack(callBack);
+
+      await store.onPermission(true);
+
+      expect(callBack).not.toHaveBeenCalled();
+      expect(sentResponse()).toBeUndefined();
+      expect(store.approvalProcessingStatus.isProcessing).toBe(false);
+      // The stale prompt is taken off the screen.
+      expect(clear).toHaveBeenCalledWith("request-a");
+    },
+  );
+
+  it("does no work when the acknowledgement cannot be delivered (L-2)", async () => {
+    vi.mocked(browser.runtime.sendMessage).mockRejectedValue(
+      new Error("Receiving end does not exist"),
+    );
+    const callBack = vi.fn().mockResolvedValue(undefined);
+    const store = buildStore("request-a");
+    store.setOnPermissionCallBack(callBack);
+
+    await store.onPermission(true);
+
+    expect(callBack).not.toHaveBeenCalled();
+  });
+
+  it("leaves the slot to the service worker on the answered path (L-9)", async () => {
     const clear = vi
       .spyOn(StorageUtil, "clearDAppsRequestDataForRequestId")
       .mockResolvedValue(undefined);
     const store = buildStore("request-a");
-    store.setOnPermissionCallBack(async () => {
-      swapInAnotherRequest(store);
-    });
+    store.setOnPermissionCallBack(async () => undefined);
 
-    await store.onPermission(false);
+    await store.onPermission(true);
+
+    // The worker clears it as it takes the answer, which keeps the clear
+    // ahead of the next request being written.
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it("clears its own request when the answer cannot be delivered (L-9)", async () => {
+    const clear = vi
+      .spyOn(StorageUtil, "clearDAppsRequestDataForRequestId")
+      .mockResolvedValue(undefined);
+    vi.mocked(browser.runtime.sendMessage).mockImplementation(
+      async (message: unknown) => {
+        const action = (message as { action?: string })?.action;
+        if (action === EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS) {
+          return { accepted: true };
+        }
+        throw new Error("Receiving end does not exist");
+      },
+    );
+    const store = buildStore("request-a");
+    store.setOnPermissionCallBack(async () => undefined);
+
+    await store.onPermission(true);
 
     expect(clear).toHaveBeenCalledWith("request-a");
   });
 
-  it("still answers when the callback throws (M1)", async () => {
-    vi.spyOn(
-      StorageUtil,
-      "clearDAppsRequestDataForRequestId",
-    ).mockResolvedValue(undefined);
+  it("still finishes when the callback throws (M1)", async () => {
     const store = buildStore("request-a");
     store.setOnPermissionCallBack(async () => {
       throw new Error("signing failed");
