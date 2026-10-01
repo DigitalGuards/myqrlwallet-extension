@@ -13,6 +13,7 @@ import { Pencil } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import RetryConnection from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/RetryConnection/RetryConnection";
 import ChainIcon from "../ChainIcon/ChainIcon";
 
 const connectivityStatusClasses = cva("h-3 w-3 rounded-full", {
@@ -69,6 +70,7 @@ const ActiveChain = observer(() => {
                 {t("chain.balancesStale")}
               </span>
             )}
+            {!isLoading && !isConnected && <RetryConnection className="mt-2" />}
           </div>
         </div>
         <div>

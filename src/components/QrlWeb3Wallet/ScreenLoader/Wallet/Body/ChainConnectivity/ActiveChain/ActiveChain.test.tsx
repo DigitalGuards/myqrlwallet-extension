@@ -4,6 +4,7 @@ import { ROUTES } from "@/router/router";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import ActiveChain from "./ActiveChain";
 
@@ -41,5 +42,31 @@ describe("ActiveChain", () => {
     expect(link).toHaveAttribute("href", ROUTES.ADD_EDIT_CHAIN);
     const editChainButton = screen.getByRole("button", { name: "Edit chain" });
     expect(editChainButton).toBeInTheDocument();
+  });
+
+  it("offers no retry control on a healthy chain", () => {
+    renderComponent();
+
+    expect(
+      screen.queryByRole("button", { name: "Retry connection" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers a retry control once the node stops answering", async () => {
+    const probeConnectionNow = vi.fn().mockResolvedValue(false);
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          probeConnectionNow,
+          qrlConnection: { isConnected: false, isLoading: false },
+        },
+      }),
+    );
+
+    expect(screen.getByText("The node is not answering")).toBeInTheDocument();
+    const retry = screen.getByRole("button", { name: "Retry connection" });
+    await userEvent.click(retry);
+
+    expect(probeConnectionNow).toHaveBeenCalledWith({ manual: true });
   });
 });

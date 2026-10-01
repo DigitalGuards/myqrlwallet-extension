@@ -76,10 +76,39 @@ export const BALANCE_POLL_INTERVAL_MS = 30000;
  *  probes regardless, so recovery is noticed within one interval. */
 export const CONNECTION_REPROBE_TICKS = 4;
 
-/** Ceiling on the backoff applied while the node is down. A wallet left open
- *  against a dead node settles at one probe every five minutes, which still
- *  notices recovery quickly without hammering an endpoint that is failing. */
+/** Ceiling on the backoff applied while the node is down and no surface is
+ *  on screen. Nobody is reading the numbers, so a dead endpoint is left
+ *  alone for minutes at a time. */
 export const MAX_POLL_BACKOFF_MS = 300000;
+
+/** Ceiling on the backoff while a surface is visible. A wallet the user is
+ *  looking at should never be more than a minute behind reality, so the
+ *  doubling stops here instead of settling at the five-minute cap. */
+export const VISIBLE_MAX_POLL_BACKOFF_MS = 60000;
+
+/** Minimum gap between two manual probes. Tracked apart from the automatic
+ *  backoff, so holding down Retry connection cannot keep the automatic
+ *  schedule pinned at zero. */
+export const MANUAL_PROBE_COOLDOWN_MS = 5000;
+
+/** Ceiling on a single balance read. A blackholed route leaves fetch
+ *  hanging for the OS TCP timeout, which would keep a poll tick open for
+ *  minutes and, with the in-flight guard, block every later tick behind
+ *  it. Matches the timeout the network assertion already uses. */
+export const BALANCE_READ_TIMEOUT_MS = 10000;
+
+/** Rejects when `work` outlives `timeoutMs`. The underlying request is not
+ *  cancellable here, so it is abandoned rather than aborted; the caller
+ *  treats the rejection as an unreachable node. */
+const withTimeout = <T>(work: Promise<T>, timeoutMs: number): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("The node did not answer in time"));
+    }, timeoutMs);
+    work.then(resolve, reject).finally(() => {
+      clearTimeout(timer);
+    });
+  });
 
 class QrlStore {
   qrlInstance?: Web3QRLInterface;
@@ -90,6 +119,10 @@ class QrlStore {
      *  longer answering. The balances on screen are then the last known
      *  values, and the UI says so. */
     areBalancesStale: false,
+    /** True only while a manual probe is running. Kept apart from
+     *  isLoading, which background re-probes deliberately leave alone so
+     *  the status dot does not pulse every few minutes. */
+    isProbing: false,
     blockchain: DEFAULT_BLOCKCHAIN,
   };
   qrlAccounts: QrlAccountsType = { accounts: [], isLoading: false };
@@ -107,6 +140,12 @@ class QrlStore {
   private consecutivePollFailures = 0;
   /** Timestamp before which poll ticks are skipped, set by the backoff. */
   private nextPollAllowedAt = 0;
+  /** The poll currently running, if any. The interval used to be able to
+   *  stack ticks, because the next-allowed timestamp is only written once
+   *  the previous tick settles. */
+  private pollInFlight: Promise<void> | null = null;
+  /** When the last manual probe started, for the manual cooldown. */
+  private lastManualProbeAt = 0;
 
   constructor() {
     makeAutoObservable(this, {
@@ -127,6 +166,7 @@ class QrlStore {
       fetchAccounts: action.bound,
       refreshBalancesQuietly: action.bound,
       pollBalancesAndConnection: action.bound,
+      probeConnectionNow: action.bound,
       startBalancePolling: action.bound,
       stopBalancePolling: action.bound,
       setPollingAllowed: action.bound,
@@ -230,6 +270,25 @@ class QrlStore {
    * doubling each time up to MAX_POLL_BACKOFF_MS. Recovery resets it.
    */
   async pollBalancesAndConnection() {
+    // One tick at a time. A slow node, or one that swallows the request
+    // until the read times out, used to let the interval start a second
+    // tick on top of the first.
+    if (this.pollInFlight) {
+      await this.pollInFlight;
+      return;
+    }
+    const tick = this.runPollTick();
+    this.pollInFlight = tick;
+    try {
+      await tick;
+    } finally {
+      runInAction(() => {
+        this.pollInFlight = null;
+      });
+    }
+  }
+
+  private async runPollTick() {
     const refreshed = await this.refreshBalancesQuietly();
     this.ticksSinceConnectionProbe += 1;
     const shouldProbe =
@@ -243,6 +302,56 @@ class QrlStore {
     this.applyPollBackoff(refreshed && this.qrlConnection.isConnected);
   }
 
+  /**
+   * Probe the node right now, outside the automatic schedule.
+   *
+   * The backoff recovers on its own, but only on its own clock, so a node
+   * that came back can go unnoticed for a while on a surface that stays
+   * open. This is the single entry point for everything with reason to
+   * believe the answer just changed: the browser regaining its connection,
+   * a surface coming back to the front, and the Retry connection control.
+   *
+   * Resolves to whether the node answered.
+   */
+  async probeConnectionNow(options?: { manual?: boolean }): Promise<boolean> {
+    if (!this.qrlInstance || !this.isPollingAllowed)
+      return this.qrlConnection.isConnected;
+    if (this.qrlConnection.isProbing) return this.qrlConnection.isConnected;
+    if (options?.manual === true) {
+      const now = Date.now();
+      if (now - this.lastManualProbeAt < MANUAL_PROBE_COOLDOWN_MS)
+        return this.qrlConnection.isConnected;
+      this.lastManualProbeAt = now;
+    }
+    runInAction(() => {
+      this.consecutivePollFailures = 0;
+      this.nextPollAllowedAt = 0;
+      this.ticksSinceConnectionProbe = CONNECTION_REPROBE_TICKS;
+      this.qrlConnection = { ...this.qrlConnection, isProbing: true };
+    });
+    try {
+      await this.pollBalancesAndConnection();
+    } finally {
+      runInAction(() => {
+        this.qrlConnection = { ...this.qrlConnection, isProbing: false };
+      });
+    }
+    return this.qrlConnection.isConnected;
+  }
+
+  /**
+   * Ceiling on the spacing between poll ticks.
+   *
+   * A surface the user is looking at should never be more than a minute
+   * behind reality, so the doubling stops short while the document is
+   * visible. A hidden document skips its ticks anyway, and a context with
+   * no document at all keeps the long cap.
+   */
+  private maxPollBackoffMs() {
+    if (typeof document === "undefined") return MAX_POLL_BACKOFF_MS;
+    return document.hidden ? MAX_POLL_BACKOFF_MS : VISIBLE_MAX_POLL_BACKOFF_MS;
+  }
+
   /** Spaces out ticks while the node is failing and restores the plain
    *  cadence the moment it answers again. */
   private applyPollBackoff(healthy: boolean) {
@@ -254,7 +363,7 @@ class QrlStore {
     this.consecutivePollFailures += 1;
     const delay = Math.min(
       BALANCE_POLL_INTERVAL_MS * 2 ** this.consecutivePollFailures,
-      MAX_POLL_BACKOFF_MS,
+      this.maxPollBackoffMs(),
     );
     this.nextPollAllowedAt = Date.now() + delay;
   }
@@ -285,7 +394,10 @@ class QrlStore {
         await Promise.all(
           storedAccountsList.map(async (account) => {
             const accountBalance =
-              (await provider.getBalance(account)) ?? BigInt(0);
+              (await withTimeout(
+                Promise.resolve(provider.getBalance(account)),
+                BALANCE_READ_TIMEOUT_MS,
+              )) ?? BigInt(0);
             return {
               accountAddress: account,
               accountBalance: getOptimalTokenBalance(

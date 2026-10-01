@@ -47,8 +47,11 @@ vi.mock("@/configuration/releaseProfile", async () => {
 
 import QrlStore, {
   BALANCE_POLL_INTERVAL_MS,
+  BALANCE_READ_TIMEOUT_MS,
   CONNECTION_REPROBE_TICKS,
+  MANUAL_PROBE_COOLDOWN_MS,
   MAX_POLL_BACKOFF_MS,
+  VISIBLE_MAX_POLL_BACKOFF_MS,
 } from "./qrlStore";
 
 const ACCOUNT = "Q79b662ce3d663643df4454a8ba3f532c0de6887f";
@@ -142,9 +145,9 @@ describe("QrlStore connection health", () => {
     const afterSecondFailure = mockGetBalance.mock.calls.length;
     expect(afterSecondFailure).toBeGreaterThan(afterFirstFailure);
 
-    // The second failure doubles it again, so two more intervals still
-    // buy no call.
-    await vi.advanceTimersByTimeAsync(BALANCE_POLL_INTERVAL_MS * 2);
+    // The doubling would go further, but a visible surface caps the
+    // spacing at a minute, so the next interval is still skipped.
+    await vi.advanceTimersByTimeAsync(BALANCE_POLL_INTERVAL_MS);
     await flush();
     expect(mockGetBalance.mock.calls.length).toBe(afterSecondFailure);
 
@@ -162,7 +165,7 @@ describe("QrlStore connection health", () => {
     store.stopBalancePolling();
   });
 
-  it("caps the backoff so a long outage still gets probed", async () => {
+  it("caps the backoff at a minute while a surface is visible", async () => {
     const store = await connectedStore();
     mockGetBalance.mockRejectedValue(new Error("rpc down"));
     mockIsListening.mockResolvedValue(false);
@@ -173,10 +176,114 @@ describe("QrlStore connection health", () => {
       await flush();
     }
     const beforeCappedWait = mockGetBalance.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(MAX_POLL_BACKOFF_MS);
+    // A wallet on screen is never left more than the visible cap behind,
+    // so one of those is enough to buy another probe.
+    await vi.advanceTimersByTimeAsync(VISIBLE_MAX_POLL_BACKOFF_MS);
     await flush();
 
     expect(mockGetBalance.mock.calls.length).toBeGreaterThan(beforeCappedWait);
+    store.stopBalancePolling();
+  });
+
+  it("probes at once when asked, resetting the backoff", async () => {
+    const store = await connectedStore();
+    mockGetBalance.mockRejectedValue(new Error("rpc down"));
+    mockIsListening.mockResolvedValue(false);
+
+    // Sit out enough failures to be parked on the cap.
+    for (let i = 0; i < 6; i++) {
+      await vi.advanceTimersByTimeAsync(VISIBLE_MAX_POLL_BACKOFF_MS);
+      await flush();
+    }
+    expect(store.qrlConnection.isConnected).toBe(false);
+
+    mockGetBalance.mockResolvedValue(BigInt(9e18));
+    mockIsListening.mockResolvedValue(true);
+    const beforeProbe = mockIsListening.mock.calls.length;
+
+    await store.probeConnectionNow();
+    await flush();
+
+    expect(mockIsListening.mock.calls.length).toBe(beforeProbe + 1);
+    expect(store.qrlConnection.isConnected).toBe(true);
+    expect(store.qrlConnection.areBalancesStale).toBe(false);
+    expect(store.qrlConnection.isProbing).toBe(false);
+
+    // The schedule is back to the plain cadence, so the next ordinary
+    // interval polls again.
+    const afterProbe = mockGetBalance.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(BALANCE_POLL_INTERVAL_MS);
+    await flush();
+    expect(mockGetBalance.mock.calls.length).toBeGreaterThan(afterProbe);
+    store.stopBalancePolling();
+  });
+
+  it("refuses a second manual probe inside the cooldown", async () => {
+    const store = await connectedStore();
+    mockGetBalance.mockRejectedValue(new Error("rpc down"));
+    mockIsListening.mockResolvedValue(false);
+    await vi.advanceTimersByTimeAsync(BALANCE_POLL_INTERVAL_MS);
+    await flush();
+
+    const beforeFirst = mockIsListening.mock.calls.length;
+    await store.probeConnectionNow({ manual: true });
+    await flush();
+    const afterFirst = mockIsListening.mock.calls.length;
+    expect(afterFirst).toBeGreaterThan(beforeFirst);
+
+    // Impatient second click, inside the window.
+    await store.probeConnectionNow({ manual: true });
+    await flush();
+    expect(mockIsListening.mock.calls.length).toBe(afterFirst);
+
+    // Past the window it is allowed again.
+    await vi.advanceTimersByTimeAsync(MANUAL_PROBE_COOLDOWN_MS);
+    await store.probeConnectionNow({ manual: true });
+    await flush();
+    expect(mockIsListening.mock.calls.length).toBeGreaterThan(afterFirst);
+    store.stopBalancePolling();
+  });
+
+  it("does not let an automatic probe bypass an in-flight poll", async () => {
+    const store = await connectedStore();
+    let release: (() => void) | undefined;
+    mockGetBalance.mockImplementation(
+      () =>
+        new Promise<bigint>((resolve) => {
+          release = () => {
+            resolve(BigInt(2e18));
+          };
+        }),
+    );
+
+    const first = store.pollBalancesAndConnection();
+    await flush();
+    const callsDuringFirst = mockGetBalance.mock.calls.length;
+
+    // A second tick landing on top of the first must join it rather than
+    // start its own round of reads.
+    const second = store.pollBalancesAndConnection();
+    await flush();
+    expect(mockGetBalance.mock.calls.length).toBe(callsDuringFirst);
+
+    release?.();
+    await first;
+    await second;
+    store.stopBalancePolling();
+  });
+
+  it("gives up on a balance read that never answers", async () => {
+    const store = await connectedStore();
+    // A blackholed route: the request neither resolves nor rejects.
+    mockGetBalance.mockImplementation(() => new Promise<bigint>(() => {}));
+    mockIsListening.mockResolvedValue(false);
+
+    const tick = store.pollBalancesAndConnection();
+    await vi.advanceTimersByTimeAsync(BALANCE_READ_TIMEOUT_MS);
+    await tick;
+
+    expect(store.qrlConnection.areBalancesStale).toBe(true);
+    expect(store.qrlConnection.isConnected).toBe(false);
     store.stopBalancePolling();
   });
 

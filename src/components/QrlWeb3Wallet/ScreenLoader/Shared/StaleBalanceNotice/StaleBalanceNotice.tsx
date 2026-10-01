@@ -2,6 +2,7 @@ import { useStore } from "@/stores/store";
 import { WifiOff } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
+import RetryConnection from "../RetryConnection/RetryConnection";
 
 /**
  * Warns on a send form that the balance it is guarding against is no
@@ -24,13 +25,18 @@ const StaleBalanceNotice = observer(() => {
   if (!areBalancesStale) return null;
 
   return (
-    <p
-      role="status"
-      className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive"
-    >
-      <WifiOff className="mt-0.5 h-3 w-3 shrink-0" />
-      <span>{t("transfer.balancesStaleWarning")}</span>
-    </p>
+    <div className="flex flex-col gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2">
+      <p
+        role="status"
+        className="flex items-start gap-2 text-xs text-destructive"
+      >
+        <WifiOff className="mt-0.5 h-3 w-3 shrink-0" />
+        <span>{t("transfer.balancesStaleWarning")}</span>
+      </p>
+      {/* The automatic probe still runs; this only skips the rest of the
+          current wait for someone who is looking at the form. */}
+      <RetryConnection />
+    </div>
   );
 });
 

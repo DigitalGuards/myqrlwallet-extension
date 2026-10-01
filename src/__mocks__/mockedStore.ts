@@ -44,6 +44,8 @@ const mockedStoreValues: StoreType = {
     qrlConnection: {
       isConnected: true,
       isLoading: false,
+      isProbing: false,
+      areBalancesStale: false,
       blockchain: DEFAULT_BLOCKCHAIN,
     },
     initProgress: {
@@ -54,6 +56,7 @@ const mockedStoreValues: StoreType = {
     qrlInstance: undefined,
     fetchAccounts: async () => {},
     fetchQrlConnection: async () => {},
+    probeConnectionNow: async () => true,
     getAccountBalance: (_accountAddress: string) => {
       return "0.0 Quanta";
     },
