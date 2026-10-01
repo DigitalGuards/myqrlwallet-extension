@@ -103,12 +103,15 @@ const CreateAccount = observer(() => {
       );
       return;
     }
+    // Name it before the pointer moves, so the first render that shows this
+    // account already has a name for the header chip. Naming after
+    // activation left the chip nameless for two storage round trips. A
+    // naming failure must not block the account itself: the header falls
+    // back to the account's position and syncLabels backstops the stored
+    // label later.
+    await accountLabelsStore.ensureLabel(account.address).catch(() => {});
     try {
       await setActiveAccount(account.address);
-      // Name it now so the header reads "Account N" immediately. Otherwise it
-      // shows the raw address until some other screen happens to run
-      // syncLabels.
-      await accountLabelsStore.ensureLabel(account.address);
     } catch (error) {
       setNeedsRetryOnPersist(true);
       setPersistError(

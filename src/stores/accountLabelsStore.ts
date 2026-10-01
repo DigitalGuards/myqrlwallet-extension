@@ -23,6 +23,17 @@ const nextAvailable = (used: Set<number>) => {
   return n;
 };
 
+/**
+ * Name for an account that has no stored label yet, derived from its
+ * position in the wallet's account list.
+ *
+ * Purely a display value: nothing persists it, and a stored label always
+ * wins over it. It exists so a screen can name an account during the
+ * milliseconds before the stored labels come back from storage, without
+ * ever falling back to the raw address.
+ */
+export const positionalAccountLabel = (index: number) => `Account ${index + 1}`;
+
 class AccountLabelsStore {
   labels: Record<string, string> = {};
   isLoading = false;
@@ -126,6 +137,26 @@ class AccountLabelsStore {
 
   getLabel(address: string): string {
     return this.labels[address] ?? "";
+  }
+
+  /**
+   * The name to show for an account right now, with no storage round trip.
+   *
+   * Stored labels (including renamed and "Ledger N" ones) win. An account
+   * the wallet already lists but has no stored label for gets its
+   * positional name, which covers the window between an account becoming
+   * active and `loadLabels` resolving. An address the wallet does not list
+   * yet resolves to the empty string, so the caller can show a neutral
+   * placeholder instead of the raw address.
+   */
+  displayLabel(address: string, accounts: readonly AccountLike[]): string {
+    if (!address) return "";
+    const stored = this.labels[address];
+    if (stored) return stored;
+    const index = accounts.findIndex(
+      (account) => account.accountAddress === address,
+    );
+    return index === -1 ? "" : positionalAccountLabel(index);
   }
 
   async removeLabel(address: string) {

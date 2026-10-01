@@ -297,6 +297,7 @@ const mockedStoreValues: StoreType = {
     ensureLabel: async () => {},
     setLabel: async () => {},
     getLabel: () => "",
+    displayLabel: () => "",
     removeLabel: async () => {},
     clearLabels: async () => {},
   },
