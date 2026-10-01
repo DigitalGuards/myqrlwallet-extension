@@ -37,16 +37,23 @@ const AccountBadge = observer(() => {
   const location = useLocation();
   const pathName = location.pathname;
   const { qrlStore, accountLabelsStore } = useStore();
-  const { activeAccount } = qrlStore;
+  const { activeAccount, qrlAccounts } = qrlStore;
   const { accountAddress } = activeAccount;
 
+  // Start the read at mount. Waiting for an address meant the read only
+  // began after the account was already on screen, so the chip was
+  // guaranteed at least one render with no name to show.
   useEffect(() => {
-    if (accountAddress) {
-      accountLabelsStore.loadLabels();
-    }
-  }, [accountAddress]);
+    accountLabelsStore.loadLabels();
+  }, []);
 
-  const label = accountLabelsStore.getLabel(accountAddress);
+  // Positional name while the stored one is still in flight, so the chip
+  // never flashes the raw address between the account becoming active and
+  // its label arriving.
+  const label = accountLabelsStore.displayLabel(
+    accountAddress,
+    qrlAccounts.accounts,
+  );
 
   return (
     !!accountAddress && (
@@ -62,14 +69,12 @@ const AccountBadge = observer(() => {
               aria-label={`${t("nav.accounts")}: ${accountAddress}`}
             >
               <Wallet className="h-3 w-3 shrink-0" />
+              {/* No name yet means the wallet icon stands alone. The chip
+                  carries a name; the address has its own places: the
+                  tooltip below and the account list. */}
               {label ? (
                 <span className="max-w-20 truncate">{label}</span>
-              ) : (
-                <AddressFingerprint
-                  address={accountAddress}
-                  className="hidden text-[10px] min-[430px]:inline"
-                />
-              )}
+              ) : null}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">

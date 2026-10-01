@@ -248,6 +248,33 @@ describe("AccountLabelsStore", () => {
     });
   });
 
+  describe("displayLabel", () => {
+    const FIRST = "Q20B714091cF2a62DADda2847803e3f1B9D2D3779";
+    const SECOND = "Q20fB08fF1f1376A14C055E9F56df80563E16722b";
+    const accounts = [{ accountAddress: FIRST }, { accountAddress: SECOND }];
+
+    it("prefers the stored label", () => {
+      store.labels = { [SECOND]: "Savings" };
+
+      expect(store.displayLabel(SECOND, accounts)).toBe("Savings");
+    });
+
+    it("names a listed account from its position before labels load", () => {
+      // The storage read is still in flight here, which is the window the
+      // header chip used to fill with the raw address.
+      expect(store.displayLabel(FIRST, accounts)).toBe("Account 1");
+      expect(store.displayLabel(SECOND, accounts)).toBe("Account 2");
+    });
+
+    it("returns nothing for an address the wallet does not list yet", () => {
+      expect(store.displayLabel("Q0000", accounts)).toBe("");
+    });
+
+    it("returns nothing for an empty address", () => {
+      expect(store.displayLabel("", accounts)).toBe("");
+    });
+  });
+
   describe("ensureLabel", () => {
     const ADDRESS = "Q20B714091cF2a62DADda2847803e3f1B9D2D3779";
     const OTHER = "Q20fB08fF1f1376A14C055E9F56df80563E16722b";
