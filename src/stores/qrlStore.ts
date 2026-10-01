@@ -131,7 +131,9 @@ class QrlStore {
       stopBalancePolling: action.bound,
       setPollingAllowed: action.bound,
       getGasFeeData: action.bound,
-      getAccountBalance: action.bound,
+      // Deliberately unannotated: see the reader itself for why it must
+      // stay outside MobX's action wrapper.
+      getAccountBalance: false,
       getNativeTokenGas: action.bound,
       signNativeToken: action.bound,
       getZrc20TokenDetails: action.bound,
@@ -643,13 +645,20 @@ class QrlStore {
     return { baseFeePerGas, maxPriorityFeePerGas, maxFeePerGas };
   }
 
-  getAccountBalance(accountAddress: string) {
-    return (
-      this.qrlAccounts.accounts.find(
-        (account) => account.accountAddress === accountAddress,
-      )?.accountBalance ?? "0.0 Quanta"
-    );
-  }
+  /**
+   * Last known balance of an account, as the display string the UI shows.
+   *
+   * A pure reader, and it has to stay one. Annotated as an action it ran
+   * untracked, so an observer component reading it during render
+   * registered no dependency on `qrlAccounts` and the row kept its first
+   * painted number until something else it reads happened to change. Bound
+   * as a class field because every call site destructures it off the
+   * store, which a plain prototype method would not survive.
+   */
+  getAccountBalance = (accountAddress: string): string =>
+    this.qrlAccounts.accounts.find(
+      (account) => account.accountAddress === accountAddress,
+    )?.accountBalance ?? "0.0 Quanta";
 
   /**
    * Worst-case fee for a native transfer, in Quanta.

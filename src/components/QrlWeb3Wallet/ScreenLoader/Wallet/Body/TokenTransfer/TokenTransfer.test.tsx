@@ -1,4 +1,5 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
+import { ObservableBalances } from "@/__mocks__/observableBalances";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -1100,6 +1101,59 @@ describe("TokenTransfer", () => {
     });
   });
 
+  it("clears the insufficient-balance error once the balance catches up", async () => {
+    const balances = new ObservableBalances({ [ACCOUNT_A]: "5.0 Quanta" });
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          getAccountBalance: balances.getAccountBalance,
+          getNativeTokenGas: vi.fn(async () => "0.001"),
+        },
+      }),
+    );
+
+    const receiverAddressField = screen.getByRole("textbox", {
+      name: "receiverAddress",
+    });
+    const amountField = screen.getByRole("textbox", { name: "amount" });
+    await waitFor(
+      async () => {
+        await userEvent.type(receiverAddressField, ACCOUNT_B);
+        await userEvent.type(amountField, "10");
+      },
+      { timeout: 5000 },
+    );
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(
+            "Insufficient Quanta balance (amount + gas fee exceeds balance)",
+          ),
+        ).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+
+    // The guard read the balance from an effect whose dependency list left
+    // it out, so an incoming transfer left the form refusing a send it
+    // could now afford.
+    act(() => {
+      balances.set(ACCOUNT_A, "100.0 Quanta");
+    });
+
+    await waitFor(
+      () => {
+        expect(
+          screen.queryByText(
+            "Insufficient Quanta balance (amount + gas fee exceeds balance)",
+          ),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+  });
+
   it("should display insufficient balance error when native Quanta amount exceeds balance", async () => {
     renderComponent(
       mockedStore({
@@ -1303,6 +1357,37 @@ describe("TokenTransfer", () => {
         await userEvent.click(maxButton);
         expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue(
           "9.5",
+        );
+      });
+    });
+
+    it("uses the balance as it is now, not as it was on first paint", async () => {
+      const balances = new ObservableBalances({ [ACCOUNT_A]: "10.0 Quanta" });
+      renderComponent(
+        mockedStore({
+          qrlStore: { getAccountBalance: balances.getAccountBalance },
+        }),
+      );
+
+      const maxButton = await screen.findByRole("button", { name: "Max" });
+      await userEvent.click(maxButton);
+      await waitFor(() => {
+        expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue(
+          "10",
+        );
+      });
+
+      // A poll tick or a confirmed send lands. Max read the balance from a
+      // memo whose dependencies never mentioned it, so it kept spending the
+      // old number.
+      act(() => {
+        balances.set(ACCOUNT_A, "70.0 Quanta");
+      });
+
+      await userEvent.click(maxButton);
+      await waitFor(() => {
+        expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue(
+          "70",
         );
       });
     });
