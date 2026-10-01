@@ -19,10 +19,12 @@ import {
 import { RESTRICTED_METHODS } from "@/scripts/constants/requestConstants";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import { useStore } from "@/stores/store";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { sanitizeForDisplay } from "@/utilities/stringUtil";
+import { useCopy } from "@/hooks/useCopy";
 import { Buffer } from "buffer";
-import { Copy } from "lucide-react";
+import { Check, Copy, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { useEffect, useState } from "react";
@@ -37,16 +39,12 @@ import { useEffect, useState } from "react";
  */
 const QrlPqSign = observer(() => {
   const { t } = useTranslation();
+  const { copied, failed: copyFailed, copy } = useCopy();
   const { lockStore, qrlStore, dAppRequestStore } = useStore();
   const { getMnemonicPhrases, readLockState } = lockStore;
-  const { qrlInstance, qrlConnection } = qrlStore;
-  const { isConnected } = qrlConnection;
-  const {
-    dAppRequestData,
-    setOnPermissionCallBack,
-    setCanProceed,
-    addToResponseData,
-  } = dAppRequestStore;
+  const { qrlInstance } = qrlStore;
+  const { dAppRequestData, setOnPermissionCallBack, setCanProceed } =
+    dAppRequestStore;
   const [isWalletLocked, setIsWalletLocked] = useState(false);
 
   const method = dAppRequestData?.method;
@@ -93,31 +91,35 @@ const QrlPqSign = observer(() => {
       : "";
   const hasChainId = domainChainId !== "";
 
+  // Registered whatever the node is doing. Signing is local, and a send
+  // that needs the node fails with a real error; the callback being absent
+  // instead let the store's no-op default answer the page with an empty
+  // success. The effect also no longer re-runs on a connectivity flip.
   useEffect(() => {
-    if (isConnected) {
-      setOnPermissionCallBack(async (hasApproved: boolean) => {
+    setOnPermissionCallBack(
+      async (hasApproved: boolean, record: ResponseRecorder) => {
         if (hasApproved) {
           const authorization =
             await revalidateAuthorizedDAppRequest(dAppRequestData);
           if (!authorization.canProceed) {
-            addToResponseData({ error: authorization.proceedError });
+            record({ error: authorization.proceedError });
             return;
           }
-          await pqSign();
+          await pqSign(record);
         }
-      });
-    }
-  }, [isConnected, dAppRequestData]);
+      },
+    );
+  }, [dAppRequestData]);
 
   useEffect(() => {
     setCanProceed(true);
   }, []);
 
   const copyMessage = () => {
-    navigator.clipboard.writeText(challenge);
+    void copy(challenge);
   };
 
-  const pqSign = async () => {
+  const pqSign = async (record: ResponseRecorder) => {
     try {
       const mnemonicPhrases = await getMnemonicPhrases(fromAddress);
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
@@ -129,7 +131,7 @@ const QrlPqSign = observer(() => {
       const result = isTypedData
         ? signTypedData(typedPayload as TypedDataPayload, seed)
         : signMessage(rawMessage, seed);
-      addToResponseData({ ...result });
+      record({ ...result });
     } catch (error) {
       if (isWalletLockedError(error)) {
         // getMnemonicPhrases() hit the SW's locked-wallet guard (L1, PR
@@ -139,10 +141,10 @@ const QrlPqSign = observer(() => {
         // EIP-1193 error; the raw guard text never reaches the dApp response.
         setIsWalletLocked(true);
         void readLockState();
-        addToResponseData({ error: walletLockedProviderError() });
+        record({ error: walletLockedProviderError() });
         return;
       }
-      addToResponseData({ error });
+      record({ error });
     }
   };
 
@@ -225,13 +227,23 @@ const QrlPqSign = observer(() => {
             <Tooltip delayDuration={0}>
               <TooltipTrigger asChild>
                 <Button
-                  className="h-7 w-8 hover:text-secondary"
+                  className={`h-7 w-8 hover:text-secondary ${copyFailed ? "text-destructive" : ""}`}
                   variant="outline"
                   size="icon"
-                  aria-label="Copy message"
+                  aria-label={
+                    copyFailed
+                      ? t("common.copyFailed")
+                      : t("dapp.signature.copyMessage")
+                  }
                   onClick={copyMessage}
                 >
-                  <Copy size="16" />
+                  {copyFailed ? (
+                    <X size="16" />
+                  ) : copied ? (
+                    <Check size="16" />
+                  ) : (
+                    <Copy size="16" />
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="left">

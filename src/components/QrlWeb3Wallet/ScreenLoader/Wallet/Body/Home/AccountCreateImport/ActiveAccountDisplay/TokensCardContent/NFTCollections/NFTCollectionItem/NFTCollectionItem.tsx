@@ -92,7 +92,10 @@ const NFTCollectionItem = observer(
         // claiming "0 NFTs".
         if (!getExplorerApiBase(blockchain.chainId)) return;
         const owned = await getOwnedNftTokens(contractAddress, "ZRC1155");
-        if (!cancelled) setOwnedCount(owned.length);
+        // A failed read leaves the count unknown, so the row shows the
+        // collection name and no count. Treating it as zero would claim
+        // "0 NFTs" for a collection this account may well hold.
+        if (!cancelled && !owned.failed) setOwnedCount(owned.tokens.length);
       })();
       return () => {
         cancelled = true;

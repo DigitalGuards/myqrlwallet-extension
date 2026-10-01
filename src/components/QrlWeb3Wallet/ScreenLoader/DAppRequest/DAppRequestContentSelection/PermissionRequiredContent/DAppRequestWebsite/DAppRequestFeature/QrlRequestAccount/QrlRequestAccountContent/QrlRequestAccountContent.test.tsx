@@ -9,9 +9,24 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import QrlRequestAccountContent from "./QrlRequestAccountContent";
+import StorageUtil from "@/utilities/storageUtil";
 
 const ACTIVE_ACCOUNT = `Q${"a".repeat(128)}`;
 const GRANTED_ACCOUNT = `Q${"b".repeat(128)}`;
+const ACTIVE_TAB_ACCOUNT = `Q${"c".repeat(128)}`;
+const REQUEST_ORIGIN = "https://dapp.example";
+
+/** A request from REQUEST_ORIGIN, whatever the active browser tab shows. */
+const requestFrom = (url: string) => ({
+  method: "qrl_requestAccounts",
+  requestId: "request-a",
+  requestData: { senderData: { url } },
+});
+
+const grantsByOrigin = (grants: Record<string, unknown>) =>
+  vi
+    .spyOn(StorageUtil, "getDAppsConnectedAccountsData")
+    .mockImplementation(async (origin) => grants[origin ?? ""] as never);
 
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlRequestAccount/QrlRequestAccountContent/QrlRequestAccountAccountSelection/QrlRequestAccountAccountSelection",
@@ -39,13 +54,14 @@ describe("QrlRequestAccountContent", () => {
     );
 
   it("should render the qrl request account content component", async () => {
+    grantsByOrigin({
+      [REQUEST_ORIGIN]: { accounts: [GRANTED_ACCOUNT], blockchains: [] },
+    });
     renderComponent(
       mockedStore({
         qrlStore: { qrlAccounts: { isLoading: false } },
         dAppRequestStore: {
-          currentTabData: {
-            connectedAccounts: [GRANTED_ACCOUNT],
-          },
+          dAppRequestData: requestFrom(`${REQUEST_ORIGIN}/app`),
         },
       }),
     );
@@ -64,6 +80,7 @@ describe("QrlRequestAccountContent", () => {
   });
 
   it("should preselect the active account and active chain on a first connect", async () => {
+    grantsByOrigin({});
     const addToResponseData = vi.fn();
     const setCanProceed = vi.fn();
     renderComponent(
@@ -71,7 +88,7 @@ describe("QrlRequestAccountContent", () => {
         dAppRequestStore: {
           addToResponseData,
           setCanProceed,
-          currentTabData: {},
+          dAppRequestData: requestFrom(`${REQUEST_ORIGIN}/app`),
         },
       }),
     );
@@ -88,17 +105,20 @@ describe("QrlRequestAccountContent", () => {
     });
   });
 
-  it("should keep the site's existing grants instead of the defaults", async () => {
+  it("should keep the site's existing grants when it has some", async () => {
     const addToResponseData = vi.fn();
     const grantedChain = QRL_BLOCKCHAINS[0];
+    grantsByOrigin({
+      [REQUEST_ORIGIN]: {
+        accounts: [GRANTED_ACCOUNT],
+        blockchains: [grantedChain],
+      },
+    });
     renderComponent(
       mockedStore({
         dAppRequestStore: {
           addToResponseData,
-          currentTabData: {
-            connectedAccounts: [GRANTED_ACCOUNT],
-            connectedBlockchains: [grantedChain],
-          },
+          dAppRequestData: requestFrom(`${REQUEST_ORIGIN}/app`),
         },
       }),
     );
@@ -111,5 +131,67 @@ describe("QrlRequestAccountContent", () => {
         ],
       });
     });
+  });
+
+  it("should read the grants of the requesting origin, never the active tab (L4)", async () => {
+    const addToResponseData = vi.fn();
+    const getGrants = grantsByOrigin({
+      [REQUEST_ORIGIN]: { accounts: [GRANTED_ACCOUNT], blockchains: [] },
+      "https://other.example": {
+        accounts: [ACTIVE_TAB_ACCOUNT],
+        blockchains: [],
+      },
+    });
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          addToResponseData,
+          dAppRequestData: requestFrom(`${REQUEST_ORIGIN}/app`),
+          // The tab the user happens to be looking at.
+          currentTabData: {
+            urlOrigin: "https://other.example",
+            connectedAccounts: [ACTIVE_TAB_ACCOUNT],
+            connectedBlockchains: [],
+          },
+        },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(addToResponseData).toHaveBeenCalledWith(
+        expect.objectContaining({ accounts: [GRANTED_ACCOUNT] }),
+      );
+    });
+    expect(getGrants).toHaveBeenCalledWith(REQUEST_ORIGIN);
+    expect(getGrants).not.toHaveBeenCalledWith("https://other.example");
+    const preselected = addToResponseData.mock.calls.flatMap(
+      (call) => (call[0] as { accounts?: string[] }).accounts ?? [],
+    );
+    expect(preselected).not.toContain(ACTIVE_TAB_ACCOUNT);
+  });
+
+  it("should fall back to the defaults when the sender url is unusable (L4)", async () => {
+    const addToResponseData = vi.fn();
+    const getGrants = grantsByOrigin({});
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          addToResponseData,
+          dAppRequestData: requestFrom("not a url"),
+          currentTabData: {
+            urlOrigin: "https://other.example",
+            connectedAccounts: [ACTIVE_TAB_ACCOUNT],
+            connectedBlockchains: [],
+          },
+        },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(addToResponseData).toHaveBeenCalledWith(
+        expect.objectContaining({ accounts: [ACTIVE_ACCOUNT] }),
+      );
+    });
+    expect(getGrants).not.toHaveBeenCalled();
   });
 });

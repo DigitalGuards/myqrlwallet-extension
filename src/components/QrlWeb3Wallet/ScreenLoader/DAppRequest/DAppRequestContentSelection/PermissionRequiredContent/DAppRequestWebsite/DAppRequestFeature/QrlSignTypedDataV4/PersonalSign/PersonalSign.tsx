@@ -10,14 +10,15 @@ import {
   isWalletLockedError,
   walletLockedProviderError,
 } from "@/functions/describeExtensionError";
+import { decodePersonalSignMessage } from "@/functions/decodePersonalSignMessage";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { sanitizeForDisplay } from "@/utilities/stringUtil";
 import { MLDSA87, ExtendedSeed } from "@theqrl/wallet.js";
 import { bytesToHex } from "@theqrl/web3-utils";
 import { parseAndValidateSeed } from "@theqrl/web3-qrl-accounts";
-import { Buffer } from "buffer";
 import { Copy } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -28,57 +29,49 @@ const PersonalSign = observer(() => {
   const { t } = useTranslation();
   const { lockStore, qrlStore, dAppRequestStore } = useStore();
   const { getMnemonicPhrases, readLockState } = lockStore;
-  const { qrlInstance, qrlConnection } = qrlStore;
-  const { isConnected } = qrlConnection;
-  const {
-    dAppRequestData,
-    setOnPermissionCallBack,
-    setCanProceed,
-    addToResponseData,
-  } = dAppRequestStore;
+  const { qrlInstance } = qrlStore;
+  const { dAppRequestData, setOnPermissionCallBack, setCanProceed } =
+    dAppRequestStore;
   const [isWalletLocked, setIsWalletLocked] = useState(false);
 
   const params = dAppRequestData?.params;
   const rawMessage: string = params?.[0] ?? "";
-  const messageWithoutPrefix =
-    rawMessage.startsWith("0x") || rawMessage.startsWith("0X")
-      ? rawMessage.slice(2)
-      : rawMessage;
-  const isHexEncoded =
-    /^[0-9a-f]+$/i.test(messageWithoutPrefix) &&
-    messageWithoutPrefix.length % 2 === 0;
-  const decodedChallenge = isHexEncoded
-    ? Buffer.from(messageWithoutPrefix, "hex").toString("utf8")
-    : rawMessage;
+  const { text: decodedChallenge, wasHexDecoded: isHexEncoded } =
+    decodePersonalSignMessage(rawMessage);
   const { sanitized: challenge, hadHidden: hasHiddenChars } =
     sanitizeForDisplay(decodedChallenge);
   const fromAddress = params?.[1] ?? "";
 
+  // Registered whatever the node is doing. Signing is local, and a send
+  // that needs the node fails with a real error; the callback being absent
+  // instead let the store's no-op default answer the page with an empty
+  // success. The effect also no longer re-runs on a connectivity flip.
   useEffect(() => {
-    if (isConnected) {
-      const onPermissionCallBack = async (hasApproved: boolean) => {
-        if (hasApproved) {
-          const authorization =
-            await revalidateAuthorizedDAppRequest(dAppRequestData);
-          if (!authorization.canProceed) {
-            addToResponseData({ error: authorization.proceedError });
-            return;
-          }
-          // Must await: onPermission reads responseData the moment this
-          // resolves, so a bare call would send the dApp an empty result
-          // before signing finishes.
-          await personalSign();
+    const onPermissionCallBack = async (
+      hasApproved: boolean,
+      record: ResponseRecorder,
+    ) => {
+      if (hasApproved) {
+        const authorization =
+          await revalidateAuthorizedDAppRequest(dAppRequestData);
+        if (!authorization.canProceed) {
+          record({ error: authorization.proceedError });
+          return;
         }
-      };
-      setOnPermissionCallBack(onPermissionCallBack);
-    }
-  }, [isConnected, dAppRequestData]);
+        // Must await: onPermission reads responseData the moment this
+        // resolves, so a bare call would send the dApp an empty result
+        // before signing finishes.
+        await personalSign(record);
+      }
+    };
+    setOnPermissionCallBack(onPermissionCallBack);
+  }, [dAppRequestData]);
 
   const copyMessage = () => {
     navigator.clipboard.writeText(challenge);
   };
 
-  const personalSign = async () => {
+  const personalSign = async (record: ResponseRecorder) => {
     try {
       const mnemonicPhrases = await getMnemonicPhrases(fromAddress ?? "");
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
@@ -98,7 +91,7 @@ const PersonalSign = observer(() => {
       const publicKey = bytesToHex(acc.getPK());
 
       if (signature && publicKey) {
-        addToResponseData({
+        record({
           signature,
           publicKey,
         });
@@ -114,10 +107,10 @@ const PersonalSign = observer(() => {
         // EIP-1193 error; the raw guard text never reaches the dApp response.
         setIsWalletLocked(true);
         void readLockState();
-        addToResponseData({ error: walletLockedProviderError() });
+        record({ error: walletLockedProviderError() });
         return;
       }
-      addToResponseData({ error });
+      record({ error });
     }
   };
 
@@ -163,7 +156,7 @@ const PersonalSign = observer(() => {
                 className="h-7 w-8 hover:text-secondary"
                 variant="outline"
                 size="icon"
-                aria-label="Copy message"
+                aria-label={t("dapp.signature.copyMessage")}
                 onClick={copyMessage}
               >
                 <Copy size="16" />

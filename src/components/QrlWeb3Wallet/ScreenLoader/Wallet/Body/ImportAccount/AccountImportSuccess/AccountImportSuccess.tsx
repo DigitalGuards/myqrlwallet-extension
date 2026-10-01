@@ -9,8 +9,8 @@ import {
 import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
 import { ROUTES } from "@/router/router";
 import { Web3BaseWalletAccount } from "@theqrl/web3";
-import { Check, Copy } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCopy } from "@/hooks/useCopy";
+import { Check, Copy, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
@@ -22,25 +22,7 @@ const AccountImportSuccess = ({ account }: AccountImportSuccessProps) => {
   const { t } = useTranslation();
   const accountAddress = account?.address ?? "";
 
-  const [hasJustCopied, setHasJustCopied] = useState(false);
-  const [timer, setTimer] = useState<NodeJS.Timeout>();
-
-  useEffect(() => {
-    return () => {
-      if (timer) {
-        clearTimeout(timer);
-      }
-    };
-  }, [timer]);
-
-  const onCopy = () => {
-    setHasJustCopied(true);
-    navigator.clipboard.writeText(accountAddress);
-    const newTimer = setTimeout(() => {
-      setHasJustCopied(false);
-    }, 1000);
-    setTimer(newTimer);
-  };
+  const { copied, failed, copy } = useCopy({ resetAfterMs: 1000 });
 
   return (
     <Card className="w-full">
@@ -59,13 +41,21 @@ const AccountImportSuccess = ({ account }: AccountImportSuccessProps) => {
       </CardContent>
       <CardFooter className="gap-4">
         <Button
-          className="w-full"
+          className={`w-full ${failed ? "text-destructive" : ""}`}
           type="button"
           variant="outline"
-          onClick={onCopy}
+          onClick={() => void copy(accountAddress)}
         >
-          <Copy className="mr-2 h-4 w-4" />
-          {hasJustCopied ? t("account.copied") : t("account.copy")}
+          {failed ? (
+            <X className="mr-2 h-4 w-4" />
+          ) : (
+            <Copy className="mr-2 h-4 w-4" />
+          )}
+          {failed
+            ? t("common.copyFailed")
+            : copied
+              ? t("account.copied")
+              : t("account.copy")}
         </Button>
         <Link
           className="w-full"

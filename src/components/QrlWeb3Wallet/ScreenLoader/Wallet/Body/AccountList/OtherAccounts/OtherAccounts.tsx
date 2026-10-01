@@ -18,6 +18,7 @@ import {
 } from "@/components/UI/DropdownMenu";
 import { Input } from "@/components/UI/Input";
 import { Label } from "@/components/UI/Label";
+import { useCopy } from "@/hooks/useCopy";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
 import StorageUtil from "@/utilities/storageUtil";
@@ -108,6 +109,11 @@ const OtherAccountCard = observer(
         {isEditing && (
           <div className="flex items-center gap-1">
             <Input
+              // Several rows can be in edit mode at once, so the account
+              // address keeps each field's id and name unique.
+              id={`accountLabel-${accountAddress}`}
+              name={`accountLabel-${accountAddress}`}
+              autoComplete="off"
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
               onKeyDown={(e) => {
@@ -146,11 +152,16 @@ const OtherAccountCard = observer(
           <div className="shrink-0">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <EllipsisVertical
-                  size="16"
-                  className="cursor-pointer"
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 shrink-0 hover:bg-accent hover:text-secondary"
+                  aria-label={t("common.more")}
                   data-testid="account-menu"
-                />
+                >
+                  <EllipsisVertical size="16" />
+                </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuGroup>
@@ -283,6 +294,7 @@ const OtherAccounts = observer(() => {
     accountLabelsStore,
   } = useStore();
   const { qrlAccounts, activeAccount, setActiveAccount } = qrlStore;
+  const { copy } = useCopy();
   const { accountAddress: activeAccountAddress } = activeAccount;
   const { accounts } = qrlAccounts;
 
@@ -296,7 +308,10 @@ const OtherAccounts = observer(() => {
   );
 
   const copyAccount = (accountAddress: string) => {
-    navigator.clipboard.writeText(accountAddress);
+    // The menu closes on click, so there is nowhere to show a result here;
+    // useCopy still awaits the write so a rejected clipboard call cannot
+    // surface as an unhandled rejection.
+    void copy(accountAddress);
   };
 
   const receiveAccount = (accountAddress: string) => {

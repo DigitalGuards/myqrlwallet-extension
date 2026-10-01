@@ -36,6 +36,14 @@ import { ZRC_20_ITEMS_DISPLAY_LIMIT } from "@/constants/zrc20Token";
 import { NFT_ITEMS_DISPLAY_LIMIT } from "@/constants/nftToken";
 import { cn } from "@/utilities/stylingUtil";
 
+// Send / History / Receive share one row down to a 320px side panel, so
+// they carry tighter metrics than a full-width button and grow back to the
+// default ones once there is room. min-w-0 is what lets a flex child shrink
+// below its content, which is what keeps the row unwrapped.
+const HOME_ACTION_CLASS =
+  "w-full min-w-0 gap-1 px-1 text-xs min-[460px]:gap-2 min-[460px]:px-3 min-[460px]:text-sm";
+const HOME_ACTION_ICON_CLASS = "h-4 w-4 shrink-0";
+
 const AccountCreateImport = observer(() => {
   const { t } = useTranslation();
   const { qrlStore } = useStore();
@@ -48,8 +56,7 @@ const AccountCreateImport = observer(() => {
   const [tokenCount, setTokenCount] = useState(0);
   const [nftCollectionsCount, setNftCollectionsCount] = useState(0);
   const [discoveredTokenCount, setDiscoveredTokenCount] = useState(0);
-  const [discoveredCollectionCount, setDiscoveredCollectionCount] =
-    useState(0);
+  const [discoveredCollectionCount, setDiscoveredCollectionCount] = useState(0);
 
   // Explorer-side asset discovery: count what the explorer sees on this
   // address but the user has not imported yet, and surface a hint above
@@ -73,9 +80,7 @@ const AccountCreateImport = observer(() => {
         storedTokens.map((token) => token.address.toLowerCase()),
       );
       const existingCollections = new Set(
-        storedCollections.map((collection) =>
-          collection.address.toLowerCase(),
-        ),
+        storedCollections.map((collection) => collection.address.toLowerCase()),
       );
       setDiscoveredTokenCount(
         tokens.filter(
@@ -94,6 +99,11 @@ const AccountCreateImport = observer(() => {
     };
   }, [accountAddress, blockchain]);
 
+  // Send in the Active account card is the one primary action on this
+  // screen. Every import / create entry point below it uses the quiet
+  // outline variant, matching "Import an existing account" and
+  // "Connect Ledger", so three solid blocks of brand blue do not compete
+  // with it in the narrow side panel.
   return (
     <div className="page-enter flex flex-col gap-8">
       {hasActiveAccount && (
@@ -101,32 +111,51 @@ const AccountCreateImport = observer(() => {
           <Card className="surface-ember relative w-full overflow-hidden [background:linear-gradient(180deg,hsl(var(--primary)/0.06),transparent_46%),hsl(var(--card)/0.45)]">
             <div className="relative z-10">
               <CardHeader>
-                <CardTitle>{t('home.activeAccount')}</CardTitle>
+                <CardTitle>{t("home.activeAccount")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <ActiveAccountDisplay />
               </CardContent>
-              <CardFooter className="gap-2">
+              {/* One row at every supported width. A previous fix gave
+                  each action an 8rem floor to stop it clipping at the
+                  320px side-panel minimum, but three 8rem buttons plus
+                  their gaps need about 400px, so Receive dropped to its
+                  own row at ordinary panel widths. The row shrinks its
+                  gaps, padding and type instead: each action is an equal
+                  share of the row with no width floor, and the label
+                  truncates only if a translation still overruns. */}
+              <CardFooter className="flex-nowrap gap-1.5 px-4 min-[460px]:gap-2 min-[460px]:px-6">
                 <Link
-                  className="flex-1"
+                  className="min-w-0 flex-1"
                   to={ROUTES.TOKEN_TRANSFER}
                   state={{ shouldStartFresh: true }}
                 >
-                  <Button className="w-full" type="button">
-                    <Send className="mr-2 h-4 w-4" />
-                    {t('home.send')}
+                  <Button className={HOME_ACTION_CLASS} type="button">
+                    <Send className={HOME_ACTION_ICON_CLASS} />
+                    <span className="truncate">{t("home.send")}</span>
                   </Button>
                 </Link>
-                <Link className="flex-1" to={ROUTES.TRANSACTION_HISTORY}>
-                  <Button className="w-full" type="button" variant="outline">
-                    <History className="mr-2 h-4 w-4" />
-                    {t('home.history')}
+                <Link
+                  className="min-w-0 flex-1"
+                  to={ROUTES.TRANSACTION_HISTORY}
+                >
+                  <Button
+                    className={HOME_ACTION_CLASS}
+                    type="button"
+                    variant="outline"
+                  >
+                    <History className={HOME_ACTION_ICON_CLASS} />
+                    <span className="truncate">{t("home.history")}</span>
                   </Button>
                 </Link>
-                <Link className="flex-1" to={ROUTES.RECEIVE}>
-                  <Button className="w-full" type="button" variant="secondary">
-                    <QrCode className="mr-2 h-4 w-4" />
-                    {t('home.receive')}
+                <Link className="min-w-0 flex-1" to={ROUTES.RECEIVE}>
+                  <Button
+                    className={HOME_ACTION_CLASS}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <QrCode className={HOME_ACTION_ICON_CLASS} />
+                    <span className="truncate">{t("home.receive")}</span>
                   </Button>
                 </Link>
               </CardFooter>
@@ -134,7 +163,7 @@ const AccountCreateImport = observer(() => {
           </Card>
           <Card className="w-full">
             <CardHeader>
-              <CardTitle>{t('home.tokens')}</CardTitle>
+              <CardTitle>{t("home.tokens")}</CardTitle>
             </CardHeader>
             {/* hidden (not unmounted) when empty so the list still fetches;
                 an empty CardContent otherwise doubles the header gap.
@@ -154,7 +183,7 @@ const AccountCreateImport = observer(() => {
                 </div>
               )}
               <Link className="w-full" to={ROUTES.IMPORT_TOKEN}>
-                <Button className="w-full" type="button">
+                <Button className="w-full" type="button" variant="outline">
                   {discoveredTokenCount > 0 ? (
                     <>
                       <Plus className="mr-2 h-4 w-4" />
@@ -172,7 +201,7 @@ const AccountCreateImport = observer(() => {
                 <Link className="w-full" to={ROUTES.ALL_ZRC_20_TOKENS}>
                   <Button className="w-full" type="button" variant="outline">
                     <Logs className="mr-2 h-4 w-4" />
-                    {t('home.viewAllTokens')}
+                    {t("home.viewAllTokens")}
                   </Button>
                 </Link>
               )}
@@ -180,7 +209,7 @@ const AccountCreateImport = observer(() => {
           </Card>
           <Card className="w-full">
             <CardHeader>
-              <CardTitle>{t('home.nftCollections')}</CardTitle>
+              <CardTitle>{t("home.nftCollections")}</CardTitle>
             </CardHeader>
             <CardContent className={cn(nftCollectionsCount === 0 && "hidden")}>
               <NFTCollections onCountChange={setNftCollectionsCount} />
@@ -195,7 +224,7 @@ const AccountCreateImport = observer(() => {
                 </div>
               )}
               <Link className="w-full" to={ROUTES.IMPORT_NFT_COLLECTION}>
-                <Button className="w-full" type="button">
+                <Button className="w-full" type="button" variant="outline">
                   {discoveredCollectionCount > 0 ? (
                     <>
                       <Plus className="mr-2 h-4 w-4" />
@@ -223,28 +252,26 @@ const AccountCreateImport = observer(() => {
       )}
       <Card className="w-full">
         <CardHeader>
-          <CardTitle>{t('home.addAccounts')}</CardTitle>
-          <CardDescription>
-            {t('home.addAccountsDescription')}
-          </CardDescription>
+          <CardTitle>{t("home.addAccounts")}</CardTitle>
+          <CardDescription>{t("home.addAccountsDescription")}</CardDescription>
         </CardHeader>
         <CardFooter className="flex-col gap-4">
           <Link className="w-full" to={ROUTES.CREATE_ACCOUNT}>
-            <Button className="w-full" type="button">
+            <Button className="w-full" type="button" variant="outline">
               <Plus className="mr-2 h-4 w-4" />
-              {t('home.createAccount')}
+              {t("home.createAccount")}
             </Button>
           </Link>
           <Link className="w-full" to={ROUTES.IMPORT_ACCOUNT}>
             <Button className="w-full" type="button" variant="outline">
               <Download className="mr-2 h-4 w-4" />
-              {t('home.importAccount')}
+              {t("home.importAccount")}
             </Button>
           </Link>
           <Link className="w-full" to={ROUTES.IMPORT_LEDGER}>
             <Button className="w-full" type="button" variant="outline">
               <Usb className="mr-2 h-4 w-4" />
-              {t('home.connectLedger')}
+              {t("home.connectLedger")}
             </Button>
           </Link>
         </CardFooter>

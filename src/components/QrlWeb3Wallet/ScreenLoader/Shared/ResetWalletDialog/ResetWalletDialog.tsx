@@ -95,10 +95,16 @@ const ResetWalletDialog = observer(
               {t("resetWallet.confirmInstruction", { word: confirmWord })}
             </p>
             <Input
+              id="resetWalletConfirmation"
+              name="resetWalletConfirmation"
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
               placeholder={confirmWord}
               disabled={isResetting}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               aria-label={t("resetWallet.confirmInstruction", {
                 word: confirmWord,
               })}

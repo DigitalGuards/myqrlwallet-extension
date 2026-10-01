@@ -4,6 +4,7 @@ import { Json, JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
 import { checkUrlOriginHasBeenConnected } from "../utils/restrictedMethodsMiddlewareUtils";
 import { executeUnrestrictedMethod } from "../utils/unrestrictedMethodExecutor";
+import LockManager from "../lockManager/lockManager";
 
 const QRL_WALLET_DAPP_CONNECTION_REQUIRED_METHODS: string[] = [
   UNRESTRICTED_METHODS.QRL_ACCOUNTS,
@@ -12,11 +13,26 @@ const QRL_WALLET_DAPP_CONNECTION_REQUIRED_METHODS: string[] = [
 // a precheck to determine if the request can proceed
 const checkRequestCanProceed = async (req: JsonRpcRequest<JsonRpcRequest>) => {
   if (QRL_WALLET_DAPP_CONNECTION_REQUIRED_METHODS.includes(req.method)) {
-    const originConnectResult = await checkUrlOriginHasBeenConnected(
-      req?.senderData?.url ?? "",
-    );
-    if (!originConnectResult.canProceed) {
-      return originConnectResult;
+    // A locked wallet answers qrl_accounts with an empty array for every
+    // origin (the F8 rule in unrestrictedMethodExecutor). Running the
+    // connection gate while locked would answer a connected origin with
+    // that empty array and an unconnected one with "not connected", which
+    // is the grant state the locked wallet is supposed to withhold. An
+    // unreadable lock state takes the same path, since the empty array is
+    // the safe answer either way.
+    let isLocked = true;
+    try {
+      ({ isLocked } = await LockManager.isLocked());
+    } catch {
+      isLocked = true;
+    }
+    if (!isLocked) {
+      const originConnectResult = await checkUrlOriginHasBeenConnected(
+        req?.senderData?.url ?? "",
+      );
+      if (!originConnectResult.canProceed) {
+        return originConnectResult;
+      }
     }
   }
   return {

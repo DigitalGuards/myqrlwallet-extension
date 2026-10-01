@@ -1,5 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
-import { DiscoveredToken, discoverTokens } from "@/services/assetDiscovery";
+import {
+  DiscoveredToken,
+  discoverTokens,
+  MAX_DISCOVERED_TOKENS,
+} from "@/services/assetDiscovery";
 import { useStore } from "@/stores/store";
 import StorageUtil from "@/utilities/storageUtil";
 import { ChevronRight, Loader, Sparkles } from "lucide-react";
@@ -29,6 +33,9 @@ const DiscoveredTokens = observer(({ onReview }: DiscoveredTokensProps) => {
 
   const [pendingTokens, setPendingTokens] = useState<DiscoveredToken[]>([]);
   const [reviewingAddress, setReviewingAddress] = useState<string>();
+  // The explorer response is capped, so a heavily airdropped account sees
+  // only part of what it holds. Saying so beats a list that silently ends.
+  const [wasTruncated, setWasTruncated] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +49,7 @@ const DiscoveredTokens = observer(({ onReview }: DiscoveredTokensProps) => {
       const existing = new Set(
         stored.map((token) => token.address.toLowerCase()),
       );
+      setWasTruncated(discovered.length >= MAX_DISCOVERED_TOKENS);
       setPendingTokens(
         discovered.filter(
           (token) => !existing.has(token.address.toLowerCase()),
@@ -77,6 +85,11 @@ const DiscoveredTokens = observer(({ onReview }: DiscoveredTokensProps) => {
         <p className="text-sm text-muted-foreground">
           {t("discovery.tokenPickerHint")}
         </p>
+        {wasTruncated && (
+          <p className="text-xs text-muted-foreground">
+            {t("discovery.truncated", { limit: MAX_DISCOVERED_TOKENS })}
+          </p>
+        )}
         <ul className="flex max-h-60 flex-col gap-2 overflow-y-auto">
           {pendingTokens.map((token) => {
             const key = token.address.toLowerCase();
@@ -93,7 +106,9 @@ const DiscoveredTokens = observer(({ onReview }: DiscoveredTokensProps) => {
                   onClick={() => void review(token)}
                 >
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="text-sm font-medium">
+                    {/* A token name with no spaces (a spam token's calling
+                        card) otherwise runs past the 360px panel edge. */}
+                    <span className="break-words text-sm font-medium">
                       {token.name}{" "}
                       <span className="text-muted-foreground">
                         ({token.symbol})

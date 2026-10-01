@@ -40,6 +40,7 @@ const QrlRequestAccountBlockchainSelection = observer(
               <div key={blockchain.chainId} className="flex items-start space-x-3">
                 <Checkbox
                   id={blockchain.chainId}
+                  name={`dappBlockchain-${blockchain.chainId}`}
                   checked={selectedBlockchainIds.includes(blockchain.chainId)}
                   aria-label="blockchainCheckbox"
                   onCheckedChange={(checked) =>

@@ -207,6 +207,11 @@ describe("TransactionHistoryItem", () => {
     const storeWithPrice = mockedStore({
       priceStore: {
         getPrice: () => 1.5,
+        quoteFor: (currency: string) => ({
+          price: 1.5,
+          currency,
+          change24h: 0,
+        }),
       },
       settingsStore: {
         showBalanceAndPrice: true,
@@ -232,6 +237,11 @@ describe("TransactionHistoryItem", () => {
     const storeHidden = mockedStore({
       priceStore: {
         getPrice: () => 1.5,
+        quoteFor: (currency: string) => ({
+          price: 1.5,
+          currency,
+          change24h: 0,
+        }),
       },
       settingsStore: {
         showBalanceAndPrice: false,
@@ -256,6 +266,11 @@ describe("TransactionHistoryItem", () => {
     const storeWithPrice = mockedStore({
       priceStore: {
         getPrice: () => 1.5,
+        quoteFor: (currency: string) => ({
+          price: 1.5,
+          currency,
+          change24h: 0,
+        }),
       },
       settingsStore: {
         showBalanceAndPrice: true,
@@ -284,6 +299,7 @@ describe("TransactionHistoryItem", () => {
     const storeNoPrice = mockedStore({
       priceStore: {
         getPrice: () => 0,
+        quoteFor: (currency: string) => ({ price: 0, currency, change24h: 0 }),
       },
       settingsStore: {
         showBalanceAndPrice: true,

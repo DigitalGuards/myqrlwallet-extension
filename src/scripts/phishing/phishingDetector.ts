@@ -5,6 +5,14 @@ import browser from "webextension-polyfill";
 // cache are both unavailable, so the wallet always has a baseline blocklist
 // to consult before the dApp approval popup renders.
 import bundledPhishingConfig from "./defaultPhishingConfig.json";
+import { findHomographMatch } from "./homographCheck";
+// Locally maintained QRL-ecosystem config, applied alongside whichever
+// MetaMask config is in use.
+import {
+  PROTECTED_QRL_DOMAINS,
+  QRL_ALLOWLIST_DOMAINS,
+  QRL_PHISHING_CONFIG,
+} from "./qrlPhishingConfig";
 
 const PHISHING_CONFIG_URL =
   "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/master/src/config.json";
@@ -105,6 +113,13 @@ async function setCachedConfig(config: PhishingConfig): Promise<void> {
   }
 }
 
+// Builds the detector from two configs: whichever MetaMask blocklist the
+// caller managed to obtain (remote, cache, or the bundled snapshot) and our
+// locally maintained QRL one. MetaMask's fuzzylist covers ethereum-ecosystem
+// brands only, so without the second config a QRL-targeted lookalike domain
+// is never flagged. PhishingDetector consults every config's allowlist before
+// any blocklist or fuzzylist, so the order of the two entries changes nothing
+// for allowlisted domains.
 function createDetector(config: PhishingConfig) {
   return new PhishingDetector([
     {
@@ -115,6 +130,7 @@ function createDetector(config: PhishingConfig) {
       name: "MetaMask",
       version: 1,
     },
+    QRL_PHISHING_CONFIG,
   ]);
 }
 
@@ -228,8 +244,8 @@ export async function initializePhishingDetector(): Promise<void> {
 export function checkDomain(url: string): PhishingCheckResult {
   if (!detectorInstance) {
     // Surface degraded state to the UI so the dApp request popup can warn the
-    // user that phishing detection is unavailable, rather than implying a
-    // clean check (F-4).
+    // user that phishing detection is unavailable. A result carrying this
+    // status implies nothing about the domain on its own (F-4).
     return { isDomainPhishing: false, detectorStatus };
   }
 
@@ -245,12 +261,51 @@ export function checkDomain(url: string): PhishingCheckResult {
     }
 
     const result = detectorInstance.check(hostname);
-    return {
-      isDomainPhishing: result.result,
-      matchType: result.type,
-      matchedDomain: result.match,
-      detectorStatus,
-    };
+
+    // An allowlist pass is authoritative, in either config.
+    if (result.type === "allowlist") {
+      return {
+        isDomainPhishing: false,
+        matchType: result.type,
+        matchedDomain: result.match,
+        detectorStatus,
+      };
+    }
+
+    // Every verdict the detector reaches is taken as it stands. A copy of a
+    // protected label under another public suffix (zondscan.io, theqrl.net)
+    // scores distance 0 on the fuzzylist and is phishing: the real sibling
+    // registrations are named in the allowlist above, which the detector
+    // consulted first.
+    if (result.result) {
+      return {
+        isDomainPhishing: true,
+        matchType: result.type,
+        matchedDomain: result.match,
+        detectorStatus,
+      };
+    }
+
+    // Nothing the levenshtein path can decide. The hostname the URL parser
+    // handed us is already punycoded, so a Unicode lookalike only becomes
+    // visible after decoding and folding confusables. This is also what
+    // catches a homograph that swapped the public suffix as well, where the
+    // fuzzylist only ever sees an xn-- string.
+    const homograph = findHomographMatch(
+      hostname,
+      PROTECTED_QRL_DOMAINS,
+      QRL_ALLOWLIST_DOMAINS,
+    );
+    if (homograph !== null) {
+      return {
+        isDomainPhishing: true,
+        matchType: "homograph",
+        matchedDomain: homograph.matchedDomain,
+        detectorStatus,
+      };
+    }
+
+    return { isDomainPhishing: false, detectorStatus };
   } catch {
     return { isDomainPhishing: false, detectorStatus };
   }

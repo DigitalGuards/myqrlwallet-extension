@@ -42,6 +42,8 @@ class SettingsStore {
   notificationsEnabled = true;
   phishingDetectionEnabled = true;
 
+  #settingsLoaded: Promise<void>;
+
   constructor() {
     makeAutoObservable(this, {
       isDarkMode: observable,
@@ -87,11 +89,32 @@ class SettingsStore {
     const isTab = urlParams.has("tab");
     this.isPopupWindow = !this.isSidePanel && !isTab;
 
-    this.#loadSettings();
+    this.#settingsLoaded = this.#loadSettings();
+  }
+
+  /**
+   * Resolves once the stored settings have been applied.
+   *
+   * Every field above starts at a default, so anything that acts on a
+   * setting at construction time acts on the default, before the user's
+   * choice is known. Callers await this first.
+   */
+  whenSettingsLoaded(): Promise<void> {
+    return this.#settingsLoaded;
   }
 
   async #loadSettings() {
-    const settings = await StorageUtil.getSettings();
+    let settings: Awaited<ReturnType<typeof StorageUtil.getSettings>>;
+    try {
+      settings = await StorageUtil.getSettings();
+    } catch (error) {
+      // Unreadable storage leaves every field on its default, which is a
+      // usable wallet. Letting the rejection escape would reject
+      // whenSettingsLoaded() too, and everything chained off it (the price
+      // refresh) would never be wired up for the rest of the session.
+      console.error("Failed to load settings:", error);
+      return;
+    }
     runInAction(() => {
       if (settings.themePreference) {
         this.themePreference = settings.themePreference;

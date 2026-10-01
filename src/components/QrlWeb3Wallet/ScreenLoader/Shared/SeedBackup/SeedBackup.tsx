@@ -165,10 +165,13 @@ const SeedBackup = ({
                   </Label>
                   <Input
                     id={inputId}
+                    // A recovery-phrase word: never offered to autofill or
+                    // to a password manager, and never corrected on entry.
+                    name={`recoveryPhraseWord${position + 1}`}
                     value={answers[index]}
                     onChange={(e) => setAnswer(index, e.target.value)}
                     autoComplete="off"
-                    autoCapitalize="none"
+                    autoCapitalize="off"
                     autoCorrect="off"
                     spellCheck={false}
                     disabled={busy}

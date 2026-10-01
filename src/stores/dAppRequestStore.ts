@@ -1,4 +1,5 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
+import { approvalProducedNothingProviderError } from "@/functions/describeExtensionError";
 import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 import { EXTENSION_MESSAGES } from "@/scripts/constants/streamConstants";
 import {
@@ -9,6 +10,14 @@ import { getSerializableObject } from "@/scripts/utils/scriptUtils";
 import StorageUtil from "@/utilities/storageUtil";
 import { action, makeAutoObservable, observable } from "mobx";
 import browser from "webextension-polyfill";
+
+/**
+ * Records a result into one specific approval run. Each permission callback
+ * gets its own, bound to the request id that was on screen when the user
+ * clicked, so a second approval starting while the first is still
+ * broadcasting cannot collect the first one's transaction hash.
+ */
+export type ResponseRecorder = (data: Record<string, unknown>) => void;
 
 type CurrentTabData = {
   favIconUrl: string;
@@ -31,12 +40,21 @@ const originFromTabUrl = (url?: string): string => {
 class DAppRequestStore {
   private currentTabFetchGeneration = 0;
   private dAppRequestReadGeneration = 0;
+  // What each running approval has produced, kept per request id. A
+  // surface can have more than one approval in flight (a request that is
+  // still broadcasting while the user answers the next one), so a single
+  // shared bucket could hand one approval's transaction hash to another.
+  // Writes land here through the recorder handed to that run's callback,
+  // which is bound to the id that was on screen when the user clicked.
+  private inFlightResponseData = new Map<string, Record<string, unknown>>();
   currentTabData?: CurrentTabData;
   dAppRequestData?: DAppRequestType;
   responseData: Record<string, unknown> = {};
   canProceed: boolean = false;
-  onPermissionCallBack: (hasApproved: boolean) => Promise<void> = async () =>
-    undefined;
+  onPermissionCallBack: (
+    hasApproved: boolean,
+    record: ResponseRecorder,
+  ) => Promise<void> = async () => undefined;
   approvalProcessingStatus = {
     isProcessing: false,
     hasApproved: false,
@@ -52,6 +70,7 @@ class DAppRequestStore {
       setCanProceed: action.bound,
       setOnPermissionCallBack: action.bound,
       onPermission: action.bound,
+      reportPendingTransactionHash: action.bound,
       approvalProcessingStatus: observable.struct,
       fetchCurrentTabData: action.bound,
       disconnectFromCurrentTab: action.bound,
@@ -150,16 +169,41 @@ class DAppRequestStore {
     this.dAppRequestData = storedDAppRequestData;
   }
 
+  /**
+   * What the screen has collected for the request currently on display,
+   * before the user clicks: the account and chain selections. Everything an
+   * approval produces after the click goes through that run's own recorder.
+   */
   addToResponseData(data: Record<string, unknown>) {
     const serializableData = getSerializableObject(data);
     this.responseData = { ...this.responseData, ...serializableData };
+  }
+
+  /** Merge into one approval run's own bucket. */
+  private recordForRequest(
+    bucketKey: string,
+    data: Record<string, unknown>,
+  ): void {
+    const serializableData = getSerializableObject(data);
+    this.inFlightResponseData.set(bucketKey, {
+      ...(this.inFlightResponseData.get(bucketKey) ?? {}),
+      ...serializableData,
+    });
+  }
+
+  /** Whether this run produced anything at all for the dApp. */
+  private hasRecordedResponse(bucketKey: string): boolean {
+    const recorded = this.inFlightResponseData.get(bucketKey);
+    return !!recorded && Object.keys(recorded).length > 0;
   }
 
   setCanProceed(decision: boolean) {
     this.canProceed = decision;
   }
 
-  setOnPermissionCallBack(callBack: (hasApproved: boolean) => Promise<void>) {
+  setOnPermissionCallBack(
+    callBack: (hasApproved: boolean, record: ResponseRecorder) => Promise<void>,
+  ) {
     this.onPermissionCallBack = callBack;
   }
 
@@ -175,31 +219,139 @@ class DAppRequestStore {
   }
 
   async onPermission(hasApproved: boolean) {
+    // Everything that identifies the request is read once, at click time.
+    // The callback below can run for a long time (signing, then a broadcast
+    // that waits on the node), and the storage subscription swaps
+    // dAppRequestData out the instant another request takes the slot.
+    // Reading the id after the callback therefore used to address the
+    // answer to whichever request happened to be pending by then, which
+    // meant a dApp could receive the first request's transaction hash as
+    // the answer to its retry.
+    const requestId = this.dAppRequestData?.requestId;
+    const method = this.dAppRequestData?.method ?? "";
+    const bucketKey = requestId ?? "";
+    // Bound to this run for as long as it lasts, whatever the screen goes
+    // on to show.
+    const record: ResponseRecorder = (data) =>
+      this.recordForRequest(bucketKey, data);
+    this.inFlightResponseData.set(bucketKey, { ...this.responseData });
     try {
       this.setApprovalProcessingStatus({
         isProcessing: true,
         hasApproved,
       });
-      await this.onPermissionCallBack(hasApproved);
+
+      // Ask the service worker whether this request is still live before
+      // anything irreversible happens. It answers only while it is still
+      // waiting on this exact request, which both stands its idle timeout
+      // down (so it cannot answer 4001 while a broadcast is on the wire)
+      // and stops this surface signing for a request the worker has
+      // already given up on.
+      if (!(await this.confirmRequestIsLive(requestId, hasApproved))) {
+        // The worker has already answered or abandoned this one, so the
+        // entry on screen is stale. Clearing it takes the surface back to
+        // the wallet. Leaving it up would show a prompt whose buttons can
+        // no longer do anything.
+        try {
+          await StorageUtil.clearDAppsRequestDataForRequestId(requestId);
+        } catch {
+          // best-effort cleanup
+        }
+        return;
+      }
+
+      await this.onPermissionCallBack(hasApproved, record);
+      // An approval that produced nothing is a failure, and the dApp is
+      // told so. The screens register their signing callback from an
+      // effect while Approve is enabled from another, so a screen whose
+      // callback had not arrived ran the store's no-op default and the
+      // page received a truthy empty object, which the middleware turns
+      // into a success carrying no signature and no hash. Every surface
+      // that legitimately answers without one of its own (account
+      // selection) has already filled the bucket from responseData above.
+      if (hasApproved && !this.hasRecordedResponse(bucketKey)) {
+        record({ error: approvalProducedNothingProviderError() });
+      }
       const response: DAppResponseType = {
-        method: this.dAppRequestData?.method ?? "",
+        method,
         action: EXTENSION_MESSAGES.DAPP_RESPONSE,
         hasApproved,
-        requestId: this.dAppRequestData?.requestId,
-        response: this.responseData,
+        requestId,
+        response: this.inFlightResponseData.get(bucketKey),
       };
+      // The service worker clears the pending-request slot when it takes
+      // this answer, which keeps the clear ahead of the next request being
+      // written. Nothing clears it from here on the success path.
       await browser.runtime.sendMessage(response);
     } catch (error) {
       console.warn(
         "QrlWeb3Wallet: Error while resolving the permission request\n",
         error,
       );
+      // The answer never reached the worker, so nothing there will clear
+      // the slot and the surface would keep showing a request that can no
+      // longer be resolved. Scoped to this request id, so a newer one that
+      // took the slot in the meantime is left alone.
+      try {
+        await StorageUtil.clearDAppsRequestDataForRequestId(requestId);
+      } catch {
+        // best-effort cleanup
+      }
     } finally {
-      await StorageUtil.clearDAppsRequestData();
+      this.inFlightResponseData.delete(bucketKey);
       this.setApprovalProcessingStatus({
         isProcessing: false,
         hasCompleted: true,
       });
+    }
+  }
+
+  /**
+   * Tell the service worker the hash of the transaction this approval is
+   * about to broadcast. It arrives before the broadcast does, so a request
+   * whose surface dies mid-flight can still be named in the answer and
+   * watched for on chain. Best effort: a failure here leaves the broadcast
+   * itself untouched.
+   */
+  async reportPendingTransactionHash(transactionHash: string): Promise<void> {
+    const requestId = this.dAppRequestData?.requestId;
+    if (requestId === undefined || !transactionHash) return;
+    try {
+      await browser.runtime.sendMessage({
+        action: EXTENSION_MESSAGES.DAPP_REQUEST_PENDING_TRANSACTION,
+        requestId,
+        transactionHash,
+      });
+    } catch {
+      // The worker falls back to answering without a hash.
+    }
+  }
+
+  /**
+   * Whether the service worker is still waiting on this request. A missing
+   * or negative acknowledgement means the approval has already been
+   * answered or abandoned there, and this surface must do no further work
+   * for it.
+   */
+  private async confirmRequestIsLive(
+    requestId: string | undefined,
+    hasApproved: boolean,
+  ): Promise<boolean> {
+    // A request with no id predates the acknowledgement protocol, so there
+    // is nothing to ask about.
+    if (requestId === undefined) return true;
+    try {
+      const acknowledgement = (await browser.runtime.sendMessage({
+        action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
+        requestId,
+        // Which way the user answered, so a surface that dies before the
+        // answer arrives is reported as the rejection it was.
+        hasApproved,
+      })) as { accepted?: boolean } | undefined;
+      return acknowledgement?.accepted === true;
+    } catch {
+      // No listener answered, so the worker is no longer waiting on it.
+      return false;
     }
   }
 }

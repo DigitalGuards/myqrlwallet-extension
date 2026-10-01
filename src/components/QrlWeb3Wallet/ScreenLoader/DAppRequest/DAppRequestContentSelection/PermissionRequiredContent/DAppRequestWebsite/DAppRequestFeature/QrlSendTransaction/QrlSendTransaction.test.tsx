@@ -93,6 +93,53 @@ describe("QrlSendTransaction", () => {
     );
 
     expect(screen.getByText("Transfer Quanta")).toBeInTheDocument();
-    expect(screen.getByText("This site wants to send Quanta")).toBeInTheDocument();
+    expect(
+      screen.getByText("This site wants to send Quanta"),
+    ).toBeInTheDocument();
+  });
+
+  it("labels a call with no amount and no data instead of leaving it blank", () => {
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          dAppRequestData: {
+            params: [
+              {
+                from: `Q${"a".repeat(128)}`,
+                to: `Q${"b".repeat(128)}`,
+                gas: "0x1cbb3",
+                type: "0x2",
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(screen.getByText("Send a call")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This site wants to send a transaction with no amount and no data",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("gives an unclassifiable request a heading rather than an empty one", () => {
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          dAppRequestData: {
+            params: [{ from: `Q${"a".repeat(128)}`, gas: "0x1cbb3" }],
+          },
+        },
+      }),
+    );
+
+    expect(screen.getByText("Review this request")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This site sent a transaction the wallet could not classify. Check every field before you approve it.",
+      ),
+    ).toBeInTheDocument();
   });
 });

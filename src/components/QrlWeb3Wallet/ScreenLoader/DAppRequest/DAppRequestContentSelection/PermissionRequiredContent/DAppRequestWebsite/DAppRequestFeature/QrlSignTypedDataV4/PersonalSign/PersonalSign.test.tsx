@@ -1,11 +1,19 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "@/components/UI/Tooltip";
+import { toChecksumAddress } from "@theqrl/wallet.js";
 import PersonalSign from "./PersonalSign";
+
+// The mocked lock store hands back an address where a mnemonic belongs, so
+// the real derivation would throw before signing is ever reached.
+vi.mock("@/functions/getHexSeedFromMnemonic", () => ({
+  getHexSeedFromMnemonic: () => `0x${"ab".repeat(51)}`,
+}));
 
 vi.mock("@/scripts/utils/restrictedMethodsMiddlewareUtils", () => ({
   revalidateAuthorizedDAppRequest: vi.fn(async () => ({
@@ -51,9 +59,112 @@ describe("PersonalSign", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Message")).toBeInTheDocument();
     expect(screen.getByText(expectedMessage)).toBeInTheDocument();
-    const copyButton = screen.getByRole("button", { name: "Copy message" });
+    const copyButton = screen.getByRole("button", { name: "Copy Message" });
     expect(copyButton).toBeInTheDocument();
     expect(copyButton).toBeEnabled();
+  });
+
+  it("shows unprefixed hex verbatim, because that is what gets signed", async () => {
+    // hashMessage hex-decodes only 0x-prefixed input, so this request signs
+    // ten literal characters. Decoding it for display showed "Hello" over a
+    // signature of "48656c6c6f".
+    const unprefixedHex = "48656c6c6f";
+    const signerAddress = toChecksumAddress(`Q${"a".repeat(128)}`);
+    const sign = vi.fn(() => ({ signature: "0xsig" }));
+    let capturedPermissionCallback:
+      | ((hasApproved: boolean, record: ResponseRecorder) => Promise<void>)
+      | null = null;
+
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          qrlInstance: {
+            accounts: {
+              seedToAccount: () => ({ address: signerAddress }),
+              sign,
+            },
+          } as never,
+        },
+        dAppRequestStore: {
+          dAppRequestData: {
+            params: [unprefixedHex, signerAddress],
+          },
+          setOnPermissionCallBack: (
+            callback: (
+              hasApproved: boolean,
+              record: ResponseRecorder,
+            ) => Promise<void>,
+          ) => {
+            capturedPermissionCallback = callback;
+          },
+        },
+      }),
+    );
+
+    expect(screen.getByText(unprefixedHex)).toBeInTheDocument();
+    expect(screen.queryByText("Hello")).not.toBeInTheDocument();
+
+    expect(capturedPermissionCallback).not.toBeNull();
+    await act(async () => {
+      await capturedPermissionCallback!(true, () => undefined);
+    });
+
+    // The displayed text and the signed payload are the same string.
+    expect(sign).toHaveBeenCalledWith(unprefixedHex, expect.any(String));
+  });
+
+  it("still registers its signing callback while the node is unreachable", async () => {
+    // Signing is local, and Approve was enabled whatever the connection
+    // was doing. Registering the callback only while connected therefore
+    // left the store's no-op default to answer the dApp with an empty
+    // success during an outage.
+    const signerAddress = toChecksumAddress(`Q${"a".repeat(128)}`);
+    const sign = vi.fn(() => ({ signature: "0xsig" }));
+    let capturedPermissionCallback:
+      | ((hasApproved: boolean, record: ResponseRecorder) => Promise<void>)
+      | null = null;
+    const recorded: Record<string, unknown>[] = [];
+
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          qrlConnection: { isConnected: false, isLoading: false },
+          qrlInstance: {
+            accounts: {
+              seedToAccount: () => ({ address: signerAddress }),
+              sign,
+            },
+          } as never,
+        },
+        dAppRequestStore: {
+          dAppRequestData: {
+            params: [message, signerAddress],
+          },
+          setOnPermissionCallBack: (
+            callback: (
+              hasApproved: boolean,
+              record: ResponseRecorder,
+            ) => Promise<void>,
+          ) => {
+            capturedPermissionCallback = callback;
+          },
+        },
+      }),
+    );
+
+    expect(capturedPermissionCallback).not.toBeNull();
+    await act(async () => {
+      await capturedPermissionCallback!(true, (data) => {
+        recorded.push(data);
+      });
+    });
+
+    // The signing path ran and the approval answered with something. The
+    // fixture seed cannot produce a public key, so the answer here is an
+    // error; what matters is that an answer exists at all.
+    expect(sign).toHaveBeenCalled();
+    expect(recorded).toHaveLength(1);
+    expect(Object.keys(recorded[0] ?? {})).not.toHaveLength(0);
   });
 
   it("should copy the message to clipboard", async () => {
@@ -73,7 +184,7 @@ describe("PersonalSign", () => {
       },
       writable: true,
     });
-    const copyButton = screen.getByRole("button", { name: "Copy message" });
+    const copyButton = screen.getByRole("button", { name: "Copy Message" });
     await userEvent.click(copyButton);
     expect(clipboardMock).toHaveBeenCalledTimes(1);
     expect(clipboardMock).toHaveBeenCalledWith(
@@ -83,10 +194,12 @@ describe("PersonalSign", () => {
 
   it("shows a translated message, re-polls lock state, and sends a stable 4100 error to the dApp when signing hits a locked wallet (L1)", async () => {
     let capturedPermissionCallback:
-      | ((hasApproved: boolean) => Promise<void>)
+      | ((hasApproved: boolean, record: ResponseRecorder) => Promise<void>)
       | null = null;
     const mockReadLockState = vi.fn().mockResolvedValue(undefined);
-    const addToResponseData = vi.fn();
+    // The approval's own recorder: results go to the run that produced
+    // them, never to whatever request the screen shows by then.
+    const record = vi.fn();
 
     renderComponent(
       mockedStore({
@@ -97,7 +210,6 @@ describe("PersonalSign", () => {
           setOnPermissionCallBack: (cb: any) => {
             capturedPermissionCallback = cb;
           },
-          addToResponseData,
         },
         lockStore: {
           getMnemonicPhrases: vi
@@ -109,13 +221,13 @@ describe("PersonalSign", () => {
     );
 
     expect(capturedPermissionCallback).not.toBeNull();
-    await act(async () => capturedPermissionCallback!(true));
+    await act(async () => capturedPermissionCallback!(true, record));
 
     expect(
       screen.getByText("The wallet is locked. Unlock it to continue."),
     ).toBeInTheDocument();
     expect(mockReadLockState).toHaveBeenCalled();
-    expect(addToResponseData).toHaveBeenCalledWith({
+    expect(record).toHaveBeenCalledWith({
       error: expect.objectContaining({
         code: 4100,
         message: "The wallet is locked",

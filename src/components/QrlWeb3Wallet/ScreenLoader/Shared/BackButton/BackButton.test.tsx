@@ -2,6 +2,7 @@ import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import BackButton from "./BackButton";
 
@@ -10,7 +11,9 @@ const { mockedNavigateFunction } = vi.hoisted(() => ({
 }));
 vi.mock("react-router-dom", async () => {
   const originalModule =
-    await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom",
+    );
   return {
     __esModule: true,
     ...originalModule,
@@ -34,6 +37,26 @@ describe("BackButton", () => {
     renderComponent();
 
     expect(screen.getByText("Back")).toBeInTheDocument();
+  });
+
+  it("exposes a real button with a translated accessible name", () => {
+    renderComponent();
+
+    const backButton = screen.getByRole("button", { name: "Back" });
+    expect(backButton).toBeInTheDocument();
+    expect(backButton).toHaveAttribute("type", "button");
+  });
+
+  it("is reachable by keyboard and activates on Enter", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+
+    await user.tab();
+    const backButton = screen.getByRole("button", { name: "Back" });
+    expect(backButton).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    expect(mockedNavigateFunction).toHaveBeenCalledTimes(1);
   });
 
   it("should call the navigate function to return back on clicking the button", async () => {

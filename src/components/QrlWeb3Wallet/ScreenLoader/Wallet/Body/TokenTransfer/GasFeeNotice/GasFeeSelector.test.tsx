@@ -214,6 +214,209 @@ describe("GasFeeSelector", () => {
     expect(onOverridesChange).toHaveBeenCalledWith({ tier: "market" });
   });
 
+  it("reports the stored default tier on mount, without the user touching it", async () => {
+    const onOverridesChange = vi.fn();
+    renderComponent(
+      mockedStore({ settingsStore: { defaultGasTier: "low" as const } }),
+      { onOverridesChange },
+    );
+
+    // The setting used to be seeded into local state only, so the parent
+    // kept `undefined` overrides and every send priced itself at the
+    // store's market fallback instead.
+    await waitFor(() => {
+      expect(onOverridesChange).toHaveBeenCalledWith({ tier: "low" });
+    });
+  });
+
+  it("applies a default tier that arrives after the first render", async () => {
+    const onOverridesChange = vi.fn();
+    const store = mockedStore();
+    const { rerender } = render(
+      <StoreProvider value={store}>
+        <MemoryRouter>
+          <GasFeeSelector
+            {...defaultProps}
+            onOverridesChange={onOverridesChange}
+          />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    await waitFor(() => {
+      expect(onOverridesChange).toHaveBeenCalledWith({ tier: "market" });
+    });
+
+    // Settings load asynchronously from extension storage.
+    const loadedStore = mockedStore({
+      settingsStore: { defaultGasTier: "aggressive" as const },
+    });
+    rerender(
+      <StoreProvider value={loadedStore}>
+        <MemoryRouter>
+          <GasFeeSelector
+            {...defaultProps}
+            onOverridesChange={onOverridesChange}
+          />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    await waitFor(() => {
+      expect(onOverridesChange).toHaveBeenLastCalledWith({
+        tier: "aggressive",
+      });
+    });
+  });
+
+  it("does not move a tier the user picked when the stored default lands late", async () => {
+    const onOverridesChange = vi.fn();
+    const store = mockedStore();
+    const { rerender } = render(
+      <StoreProvider value={store}>
+        <MemoryRouter>
+          <GasFeeSelector
+            {...defaultProps}
+            onOverridesChange={onOverridesChange}
+          />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    await act(async () => {
+      await userEvent.click(screen.getByText("Low"));
+    });
+
+    rerender(
+      <StoreProvider
+        value={mockedStore({
+          settingsStore: { defaultGasTier: "aggressive" as const },
+        })}
+      >
+        <MemoryRouter>
+          <GasFeeSelector
+            {...defaultProps}
+            onOverridesChange={onOverridesChange}
+          />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    await waitFor(() => {
+      expect(onOverridesChange).toHaveBeenLastCalledWith({ tier: "low" });
+    });
+  });
+
+  it("keeps the other tiers priced when one estimate throws", async () => {
+    const onGasFeeCalculated = vi.fn();
+    const getNativeTokenGas = vi.fn(async (overrides?: { tier: string }) => {
+      if (overrides?.tier === "aggressive") throw new Error("RPC error");
+      return "0.042";
+    });
+    renderComponent(mockedStore({ qrlStore: { getNativeTokenGas } }), {
+      onGasFeeCalculated,
+    });
+
+    // Promise.all used to discard every result when one tier rejected,
+    // which left the send form with no fee and its balance guard off.
+    await waitFor(() => {
+      expect(onGasFeeCalculated).toHaveBeenCalledWith("0.042");
+    });
+    expect(
+      screen.getByText(/gas fee could not be estimated/i),
+    ).toBeInTheDocument();
+  });
+
+  it("surfaces a failed estimate through onEstimateError", async () => {
+    const onEstimateError = vi.fn();
+    const getNativeTokenGas = vi.fn(async () => {
+      throw new Error("execution reverted");
+    });
+    renderComponent(mockedStore({ qrlStore: { getNativeTokenGas } }), {
+      onEstimateError,
+    });
+
+    await waitFor(() => {
+      expect(onEstimateError).toHaveBeenCalledWith(
+        expect.stringMatching(/gas fee could not be estimated/i),
+      );
+    });
+  });
+
+  it("clears a failed estimate once there is nothing left to price", async () => {
+    const onEstimateError = vi.fn();
+    const getNativeTokenGas = vi.fn(async () => {
+      throw new Error("execution reverted");
+    });
+    const store = mockedStore({ qrlStore: { getNativeTokenGas } });
+    const view = renderComponent(store, { onEstimateError });
+
+    await waitFor(() => {
+      expect(onEstimateError).toHaveBeenCalledWith(
+        expect.stringMatching(/gas fee could not be estimated/i),
+      );
+    });
+
+    // Clearing the amount removes the component entirely, so the verdict
+    // it left behind could no longer be seen or cleared, and the send
+    // button stayed disabled with no message explaining why.
+    view.rerender(
+      <StoreProvider value={store}>
+        <MemoryRouter>
+          <GasFeeSelector
+            {...defaultProps}
+            onEstimateError={onEstimateError}
+            value=""
+          />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    await waitFor(() => {
+      expect(onEstimateError).toHaveBeenLastCalledWith("");
+    });
+  });
+
+  it("reports a worst-case fee for advanced values on every change", async () => {
+    const onGasFeeCalculated = vi.fn();
+    const getNativeTokenGas = vi.fn(
+      async (overrides?: {
+        tier: string;
+        gasLimit?: number;
+      }): Promise<string> => (overrides?.tier === "advanced" ? "0.5" : "0.042"),
+    );
+    const getGasFeeData = vi.fn(async () => ({
+      baseFeePerGas: BigInt(1000),
+      maxPriorityFeePerGas: BigInt(300),
+      maxFeePerGas: BigInt(1300),
+    }));
+    renderComponent(
+      mockedStore({ qrlStore: { getNativeTokenGas, getGasFeeData } }),
+      { onGasFeeCalculated },
+    );
+
+    await act(async () => {
+      await userEvent.click(screen.getByText("Advanced"));
+    });
+
+    // Expanding used to report "" and disarm the send form's balance guard.
+    await waitFor(() => {
+      expect(onGasFeeCalculated).toHaveBeenLastCalledWith("0.5");
+    });
+
+    const inputs = screen.getAllByRole("textbox");
+    getNativeTokenGas.mockImplementation(async () => "0.75");
+    await act(async () => {
+      await userEvent.clear(inputs[1]);
+      await userEvent.type(inputs[1], "5000");
+    });
+
+    // Typing used to report nothing at all.
+    await waitFor(() => {
+      expect(onGasFeeCalculated).toHaveBeenLastCalledWith("0.75");
+    });
+  });
+
   it("should disable all buttons when disabled prop is true", () => {
     renderComponent(undefined, { disabled: true });
 

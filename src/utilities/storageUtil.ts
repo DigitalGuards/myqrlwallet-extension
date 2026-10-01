@@ -128,6 +128,12 @@ export type WalletSettings = {
 export type PriceCache = {
   prices: Record<string, number>;
   change24h: Record<string, number>;
+  /**
+   * When each individual currency was last quoted. Optional: a cache
+   * written by an older build carries only `timestamp`, and every quote in
+   * it is dated to that instead.
+   */
+  updatedAt?: Record<string, number>;
   timestamp: number;
 };
 
@@ -140,6 +146,7 @@ type TransactionValuesType = {
     tokenDecimals: number;
     tokenImage: string;
     tokenBalance: string;
+    tokenBalanceBaseUnits?: string;
     tokenName: string;
     tokenSymbol: string;
   };
@@ -621,6 +628,26 @@ class StorageUtil {
     return storedDAppsRequestData?.[DAPPS_REQUEST_DATA_IDENTIFIER] as
       | DAppRequestType
       | undefined;
+  }
+
+  /**
+   * Clear the pending dApp request only while the slot still holds the
+   * given request. Anything that resolves an approval asynchronously (the
+   * approval surface after its callback, the middleware's timeouts) can
+   * finish after a newer request has taken the slot, and an unconditional
+   * clear there wipes the request the user is currently looking at.
+   *
+   * An undefined requestId falls back to the unconditional clear so callers
+   * from before requestIds existed keep working.
+   */
+  static async clearDAppsRequestDataForRequestId(requestId?: string) {
+    if (requestId === undefined) {
+      await this.clearDAppsRequestData();
+      return;
+    }
+    const storedDAppsRequestData = await this.getDAppsRequestData();
+    if (storedDAppsRequestData?.requestId !== requestId) return;
+    await this.clearDAppsRequestData();
   }
 
   static async clearDAppsRequestData() {

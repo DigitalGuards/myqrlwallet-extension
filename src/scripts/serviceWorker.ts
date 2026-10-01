@@ -25,10 +25,13 @@ import {
   PHISHING_ALARM_NAME,
   setupPhishingRefreshAlarm,
 } from "./phishing/phishingDetector";
+import { showTransactionNotification } from "./utils/transactionNotification";
 import { checkForLastError } from "./utils/scriptUtils";
-import { setupMultiplex } from "./utils/streamUtils";
+import { isTrustedExtensionSender } from "./utils/trustedSender";
+import { isPrematureClose, setupMultiplex } from "./utils/streamUtils";
 import {
   notifyDAppAccountsChanged,
+  notifyDAppChainChanged,
   registerDAppAccountNotificationStream,
 } from "./utils/dAppAccountNotifications";
 import { initializeContentScriptProviderConnection } from "./utils/providerConnectionLifecycle";
@@ -133,6 +136,7 @@ const prepareListeners = () => {
   browser.storage.onChanged.addListener(async (changes, areaName) => {
     if (areaName === "local") {
       notifyDAppAccountsChanged(changes[profileStorageKey("DAPPS")]);
+      notifyDAppChainChanged(changes[profileStorageKey("BLOCKCHAINS")]);
     }
     const storedDAppRequestData = await StorageUtil.getDAppsRequestData();
     if (storedDAppRequestData) {
@@ -157,38 +161,19 @@ const prepareListeners = () => {
   // Listening for transaction notification requests from the popup.
   // IMPORTANT: Must NOT be async. Returning a Promise from onMessage claims the
   // message channel and prevents lockManagerListener from responding.
-  browser.runtime.onMessage.addListener((message) => {
+  browser.runtime.onMessage.addListener((message, sender) => {
+    // Any frame in any tab can post to the extension, so without this guard
+    // a content script could raise an OS "Transaction Confirmed" toast for a
+    // transaction that never happened (security review finding L8). Only
+    // extension pages send this now: the dApp transaction watcher calls
+    // showTransactionNotification directly inside the worker.
+    if (!isTrustedExtensionSender(sender)) {
+      return;
+    }
     if (message.name !== LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION) {
       return;
     }
-    (async () => {
-      const settings = await StorageUtil.getSettings();
-      if (
-        !settings.notificationsEnabled &&
-        settings.notificationsEnabled !== undefined
-      ) {
-        return;
-      }
-      const { status, amount, tokenSymbol, txHash } = message.data ?? {};
-      const isConfirmed = status === "confirmed";
-      const title = isConfirmed
-        ? "Transaction Confirmed"
-        : "Transaction Failed";
-      const body =
-        amount !== undefined && tokenSymbol
-          ? `Your transaction of ${amount} ${tokenSymbol} ${isConfirmed ? "was confirmed" : "failed"}.`
-          : `Your transaction ${isConfirmed ? "was confirmed" : "failed"}.`;
-      try {
-        await browser.notifications.create(`tx-${txHash ?? Date.now()}`, {
-          type: "basic",
-          iconUrl: browser.runtime.getURL("icons/qrl/48.png"),
-          title,
-          message: body,
-        });
-      } catch (error) {
-        console.error("QrlWeb3Wallet: Failed to create notification:", error);
-      }
-    })();
+    void showTransactionNotification(message.data ?? {});
   });
 };
 
@@ -265,7 +250,13 @@ const setupProviderConnectionEip1193 = async (port: browser.Runtime.Port) => {
 
   pipeline(outStream, providerStream, outStream, (err) => {
     unregisterAccountNotifications();
-    console.warn("QrlWeb3Wallet: Error in stream pipeline\n", err);
+    if (isPrematureClose(err)) {
+      // The normal end of a dApp connection; kept at debug level as a
+      // breadcrumb for connection-lifecycle debugging.
+      console.debug("QrlWeb3Wallet: dApp stream closed", err);
+    } else if (err) {
+      console.warn("QrlWeb3Wallet: Error in stream pipeline\n", err);
+    }
     // handle any middleware cleanup
     // @ts-expect-error - _middleware is a private property on JsonRpcEngine not exposed in type definitions
     engine?._middleware?.forEach((mid: { destroy?: () => void }) => {
@@ -282,6 +273,14 @@ const establishContenScriptConnection = () => {
   browser.runtime.onConnect.addListener(async (port) => {
     // Ensuring the port connected to is the content script
     if (port.name === QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT) {
+      // The page side closes this port on tab close, navigation and entry
+      // into the back/forward cache. Reading lastError here keeps each of
+      // those from logging an "Unchecked runtime.lastError".
+      let disconnected = false;
+      port.onDisconnect.addListener(() => {
+        disconnected = true;
+        checkForLastError();
+      });
       // The connection event itself is never dropped - this listener is
       // registered synchronously at module evaluation, before
       // initializeServiceWorker() runs at all. Waiting here delays only
@@ -292,6 +291,9 @@ const establishContenScriptConnection = () => {
       // a timeout (see its own comment) still lets this connection proceed
       // even if a future startup step somehow hangs.
       await waitForServiceWorkerReady();
+      // A tab that closed while this connection waited has nothing left to
+      // wire up, and posting CONNECTION_READY to its dead port would throw.
+      if (disconnected) return;
       await initializeContentScriptProviderConnection(
         port,
         setupProviderConnectionEip1193,

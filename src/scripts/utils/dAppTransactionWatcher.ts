@@ -4,7 +4,8 @@ import { transactionFailureUpdate } from "@/functions/transactionOutcome";
 import { withTimeout } from "@/functions/withTimeout";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import browser from "webextension-polyfill";
-import LockManager, { LOCK_MANAGER_MESSAGES } from "../lockManager/lockManager";
+import LockManager from "../lockManager/lockManager";
+import { showTransactionNotification } from "./transactionNotification";
 import { getQrlProperties } from "./unrestrictedMethodExecutor";
 
 /**
@@ -112,26 +113,22 @@ async function notifyWatchOutcome(
 ): Promise<void> {
   // While locked, history is still updated (the caller does that before
   // calling here); only the notification is withheld. Checked the same way
-  // the rest of the service worker does, and read-only: it restores
-  // already-decrypted keys from the session backup if the SW just
-  // restarted, the same self-healing every other isLocked() caller
-  // triggers, and never prompts for or accepts a password.
+  // the rest of the service worker does, and read-only: it reports on the
+  // keys the worker currently holds in memory and never prompts for or
+  // accepts a password.
   const { isLocked } = await LockManager.isLocked();
   if (isLocked) return;
-  // Same message shape and recipient the history store's own poller uses
-  // (transactionHistoryStore.ts startPolling), so serviceWorker.ts's
-  // existing SEND_TX_NOTIFICATION handler covers both without change.
-  browser.runtime
-    .sendMessage({
-      name: LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION,
-      data: {
-        status,
-        amount: entry?.amount,
-        tokenSymbol: entry?.tokenSymbol,
-        txHash: watch.hash,
-      },
-    })
-    .catch(() => {});
+  // Called directly. This runs in the service worker, and Chrome drops a
+  // context's own runtime messages, so a posted SEND_TX_NOTIFICATION would
+  // reach no listener at all. The wallet surfaces still reach that
+  // listener by message (transactionHistoryStore.ts startPolling), and
+  // both paths end up in the same function.
+  await showTransactionNotification({
+    status,
+    amount: entry?.amount,
+    tokenSymbol: entry?.tokenSymbol,
+    txHash: watch.hash,
+  });
 }
 
 /**

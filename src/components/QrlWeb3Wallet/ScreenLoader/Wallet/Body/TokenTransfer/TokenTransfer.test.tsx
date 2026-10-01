@@ -1,4 +1,5 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
+import { ObservableBalances } from "@/__mocks__/observableBalances";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -264,7 +265,10 @@ describe("TokenTransfer", () => {
         ACCOUNT_B,
         "1",
         expect.any(String),
-        undefined,
+        // The stored default gas tier is applied on mount, so every send
+        // carries it. Before this fix the overrides stayed undefined and
+        // the store fell back to market.
+        { tier: "market" },
       );
     });
   });
@@ -487,7 +491,7 @@ describe("TokenTransfer", () => {
         ACCOUNT_B,
         amount,
         expect.any(String),
-        undefined,
+        { tier: "market" },
       );
       expect(add).toHaveBeenCalledWith(
         ACCOUNT_A,
@@ -575,7 +579,7 @@ describe("TokenTransfer", () => {
         expect.any(String),
         CONTRACT_C,
         decimals,
-        undefined,
+        { tier: "market" },
       );
     },
   );
@@ -597,9 +601,340 @@ describe("TokenTransfer", () => {
       mockedStore({ qrlStore: { signZrc20Token: sign } }),
     );
     await screen.findByRole("button", { name: "Send TST" });
-    await fillAndSubmitForm("Send TST", "1.1");
+    await waitFor(
+      async () => {
+        await userEvent.type(
+          screen.getByRole("textbox", { name: "receiverAddress" }),
+          ACCOUNT_B,
+        );
+        await userEvent.type(
+          screen.getByRole("textbox", { name: "amount" }),
+          "1.1",
+        );
+      },
+      { timeout: 5000 },
+    );
+
+    // Caught by the form schema while typing, so Send never becomes
+    // pressable and the user is told before they commit to anything.
+    expect(
+      await screen.findByText(/at most 0 decimal places/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send TST" })).toBeDisabled();
     expect(sign).not.toHaveBeenCalled();
-    expect(screen.getByText(/at most 0 decimal places/)).toBeInTheDocument();
+  });
+
+  describe("token balances below the display rounding", () => {
+    // 0.00005 of an 8-decimal token. getOptimalTokenBalance renders four
+    // decimals, so the display string is "0.0 MQW" and every comparison
+    // made against it read the balance as zero.
+    const SMALL_BALANCE_DETAILS = {
+      isZrc20Token: true,
+      tokenContractAddress: CONTRACT_D,
+      tokenDecimals: 8,
+      tokenImage: "token.png",
+      tokenBalance: "0.0 MQW",
+      tokenBalanceBaseUnits: "5000",
+      tokenName: "Mini Token",
+      tokenSymbol: "MQW",
+    };
+
+    it("sends an amount within a balance the display rounds to zero", async () => {
+      const sign = vi.fn().mockResolvedValue(successSignResult);
+      renderComponentWithState(
+        { tokenDetails: SMALL_BALANCE_DETAILS },
+        mockedStore({
+          qrlStore: {
+            signZrc20Token: sign,
+            getAccountBalance: () => "10.0 Quanta",
+            getZrc20TokenGas: async () => "0.001",
+            sendRawTransaction: vi.fn().mockResolvedValue(undefined),
+          },
+        }),
+      );
+
+      await screen.findByRole("button", { name: "Send MQW" });
+      await fillAndSubmitForm("Send MQW", "0.00005");
+
+      expect(
+        screen.queryByText("Insufficient MQW balance"),
+      ).not.toBeInTheDocument();
+      expect(sign).toHaveBeenCalledWith(
+        ACCOUNT_A,
+        ACCOUNT_B,
+        "0.00005",
+        expect.any(String),
+        CONTRACT_D,
+        8,
+        { tier: "market" },
+      );
+    });
+
+    it("still refuses an amount above that balance", async () => {
+      const sign = vi.fn().mockResolvedValue(successSignResult);
+      renderComponentWithState(
+        { tokenDetails: SMALL_BALANCE_DETAILS },
+        mockedStore({
+          qrlStore: {
+            signZrc20Token: sign,
+            getAccountBalance: () => "10.0 Quanta",
+            getZrc20TokenGas: async () => "0.001",
+          },
+        }),
+      );
+
+      await screen.findByRole("button", { name: "Send MQW" });
+      await waitFor(
+        async () => {
+          await userEvent.type(
+            screen.getByRole("textbox", { name: "receiverAddress" }),
+            ACCOUNT_B,
+          );
+          await userEvent.type(
+            screen.getByRole("textbox", { name: "amount" }),
+            "0.0001",
+          );
+        },
+        { timeout: 5000 },
+      );
+
+      expect(
+        await screen.findByText("Insufficient MQW balance"),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Send MQW" })).toBeDisabled();
+      expect(sign).not.toHaveBeenCalled();
+    });
+
+    it("leaves no dust behind when Max is pressed", async () => {
+      renderComponentWithState(
+        { tokenDetails: SMALL_BALANCE_DETAILS },
+        mockedStore({
+          qrlStore: {
+            getAccountBalance: () => "10.0 Quanta",
+            getZrc20TokenGas: async () => "0.001",
+          },
+        }),
+      );
+
+      await screen.findByRole("button", { name: "Send MQW" });
+      await act(async () => {
+        await userEvent.click(screen.getByRole("button", { name: "Max" }));
+      });
+
+      expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue(
+        "0.00005",
+      );
+    });
+  });
+
+  describe("token ceilings from a cold open", () => {
+    // 24 decimals, one unit above a whole token. BigNumber's global
+    // DECIMAL_PLACES is 18 with ROUND_DOWN, so dividing by 10^24 dropped
+    // that trailing unit and Max left dust behind.
+    const WIDE_DECIMALS_DETAILS = {
+      isZrc20Token: true,
+      tokenContractAddress: CONTRACT_D,
+      tokenDecimals: 24,
+      tokenImage: "token.png",
+      tokenBalance: "1.0 WIDE",
+      tokenBalanceBaseUnits: "1000000000000000000000001",
+      tokenName: "Wide Token",
+      tokenSymbol: "WIDE",
+    };
+
+    it("spends a >18-decimal balance to the last unit on Max", async () => {
+      renderComponentWithState(
+        { tokenDetails: WIDE_DECIMALS_DETAILS },
+        mockedStore({
+          qrlStore: {
+            getAccountBalance: () => "10.0 Quanta",
+            getZrc20TokenGas: async () => "0.001",
+          },
+        }),
+      );
+
+      await screen.findByRole("button", { name: "Send WIDE" });
+      await act(async () => {
+        await userEvent.click(screen.getByRole("button", { name: "Max" }));
+      });
+
+      expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue(
+        "1.000000000000000000000001",
+      );
+    });
+
+    it("refuses a send against a restored ceiling the chain no longer backs", async () => {
+      const sign = vi.fn().mockResolvedValue(successSignResult);
+      // Storage still holds a whole token from an earlier session; the
+      // chain says half of it is left. A stale ceiling let the send pass
+      // this guard and revert on chain, burning the fee.
+      const getZrc20TokenDetails = vi.fn().mockResolvedValue({
+        token: {
+          balance: 0.5,
+          balanceBaseUnits: "50000000",
+          decimals: BigInt(8),
+          name: "Mini Token",
+          symbol: "MQW",
+          totalSupply: 1000,
+          image: "",
+        },
+        error: "",
+      });
+
+      renderComponentWithState(
+        {
+          tokenDetails: {
+            isZrc20Token: true,
+            tokenContractAddress: CONTRACT_D,
+            tokenDecimals: 8,
+            tokenImage: "token.png",
+            tokenBalance: "1.0 MQW",
+            tokenBalanceBaseUnits: "100000000",
+            tokenName: "Mini Token",
+            tokenSymbol: "MQW",
+          },
+        },
+        mockedStore({
+          qrlStore: {
+            signZrc20Token: sign,
+            getZrc20TokenDetails,
+            getAccountBalance: () => "10.0 Quanta",
+            getZrc20TokenGas: async () => "0.001",
+          },
+        }),
+      );
+
+      await screen.findByRole("button", { name: "Send MQW" });
+      await waitFor(() =>
+        expect(getZrc20TokenDetails).toHaveBeenCalledWith(CONTRACT_D),
+      );
+
+      await waitFor(
+        async () => {
+          await userEvent.type(
+            screen.getByRole("textbox", { name: "receiverAddress" }),
+            ACCOUNT_B,
+          );
+          await userEvent.type(
+            screen.getByRole("textbox", { name: "amount" }),
+            "0.8",
+          );
+        },
+        { timeout: 5000 },
+      );
+
+      expect(
+        await screen.findByText("Insufficient MQW balance"),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Send MQW" })).toBeDisabled();
+      expect(sign).not.toHaveBeenCalled();
+    });
+  });
+
+  it("warns on the send form while the balances are stale, without blocking Send", async () => {
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          getAccountBalance: () => "10.0 Quanta",
+          qrlConnection: {
+            // The node answers net_listening while qrl_getBalance keeps
+            // failing, so the chain reads as connected and the amounts on
+            // screen are old.
+            isConnected: true,
+            isLoading: false,
+            areBalancesStale: true,
+            blockchain: { chainId: "0x1" },
+          },
+        },
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        "The node is not answering, so this balance may be out of date.",
+      ),
+    ).toBeInTheDocument();
+
+    await fillAndSubmitForm("Send Quanta", "1");
+  });
+
+  it("shows no stale warning while the balances are current", async () => {
+    renderComponent(
+      mockedStore({ qrlStore: { getAccountBalance: () => "10.0 Quanta" } }),
+    );
+
+    expect(
+      screen.queryByText(
+        "The node is not answering, so this balance may be out of date.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("re-applies Max when a dearer gas tier raises the reserve", async () => {
+    const getNativeTokenGas = vi.fn(async (overrides?: { tier?: string }) =>
+      overrides?.tier === "aggressive" ? "3" : "1",
+    );
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          getAccountBalance: () => "10.0 Quanta",
+          getNativeTokenGas,
+        },
+      }),
+    );
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "receiverAddress" }),
+      ACCOUNT_B,
+    );
+    await act(async () => {
+      await userEvent.click(screen.getByRole("button", { name: "Max" }));
+    });
+
+    const amountField = screen.getByRole("textbox", { name: "amount" });
+    await waitFor(() => expect(amountField).toHaveValue("9"));
+
+    // Raising the tier raises the reserve, so the amount Max picked under
+    // the cheaper tier no longer leaves enough for gas.
+    await act(async () => {
+      await userEvent.click(screen.getByText("Aggressive"));
+    });
+
+    await waitFor(() => expect(amountField).toHaveValue("7"));
+  });
+
+  it("refuses a Ledger account a token transfer with an explicit message", async () => {
+    const sign = vi.fn();
+    renderComponentWithState(
+      {
+        tokenDetails: {
+          isZrc20Token: true,
+          tokenContractAddress: CONTRACT_C,
+          tokenDecimals: 18,
+          tokenImage: "token.png",
+          tokenBalance: "100.0 TST",
+          tokenBalanceBaseUnits: "100000000000000000000",
+          tokenName: "Test Token",
+          tokenSymbol: "TST",
+        },
+      },
+      mockedStore({
+        ledgerStore: { isLedgerAccount: () => true } as any,
+        qrlStore: {
+          signZrc20Token: sign,
+          getAccountBalance: () => "10.0 Quanta",
+          getZrc20TokenGas: async () => "0.001",
+        },
+      }),
+    );
+
+    await screen.findByRole("button", { name: "Send TST" });
+    await fillAndSubmitForm("Send TST", "1");
+
+    expect(sign).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(/Sending tokens from a Ledger account/),
+    ).toBeInTheDocument();
   });
 
   it("should call addTransaction with pending entry on successful sign", async () => {
@@ -764,6 +1099,59 @@ describe("TokenTransfer", () => {
     await waitFor(() => {
       expect(mockClearTransactionValues).toHaveBeenCalled();
     });
+  });
+
+  it("clears the insufficient-balance error once the balance catches up", async () => {
+    const balances = new ObservableBalances({ [ACCOUNT_A]: "5.0 Quanta" });
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          getAccountBalance: balances.getAccountBalance,
+          getNativeTokenGas: vi.fn(async () => "0.001"),
+        },
+      }),
+    );
+
+    const receiverAddressField = screen.getByRole("textbox", {
+      name: "receiverAddress",
+    });
+    const amountField = screen.getByRole("textbox", { name: "amount" });
+    await waitFor(
+      async () => {
+        await userEvent.type(receiverAddressField, ACCOUNT_B);
+        await userEvent.type(amountField, "10");
+      },
+      { timeout: 5000 },
+    );
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(
+            "Insufficient Quanta balance (amount + gas fee exceeds balance)",
+          ),
+        ).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+
+    // The guard read the balance from an effect whose dependency list left
+    // it out, so an incoming transfer left the form refusing a send it
+    // could now afford.
+    act(() => {
+      balances.set(ACCOUNT_A, "100.0 Quanta");
+    });
+
+    await waitFor(
+      () => {
+        expect(
+          screen.queryByText(
+            "Insufficient Quanta balance (amount + gas fee exceeds balance)",
+          ),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
   });
 
   it("should display insufficient balance error when native Quanta amount exceeds balance", async () => {
@@ -969,6 +1357,37 @@ describe("TokenTransfer", () => {
         await userEvent.click(maxButton);
         expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue(
           "9.5",
+        );
+      });
+    });
+
+    it("uses the balance as it is at the moment Max is pressed", async () => {
+      const balances = new ObservableBalances({ [ACCOUNT_A]: "10.0 Quanta" });
+      renderComponent(
+        mockedStore({
+          qrlStore: { getAccountBalance: balances.getAccountBalance },
+        }),
+      );
+
+      const maxButton = await screen.findByRole("button", { name: "Max" });
+      await userEvent.click(maxButton);
+      await waitFor(() => {
+        expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue(
+          "10",
+        );
+      });
+
+      // A poll tick or a confirmed send lands. Max read the balance from a
+      // memo whose dependencies never mentioned it, so it kept spending the
+      // old number.
+      act(() => {
+        balances.set(ACCOUNT_A, "70.0 Quanta");
+      });
+
+      await userEvent.click(maxButton);
+      await waitFor(() => {
+        expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue(
+          "70",
         );
       });
     });

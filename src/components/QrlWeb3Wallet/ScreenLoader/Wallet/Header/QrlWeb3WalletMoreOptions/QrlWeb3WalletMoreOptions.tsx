@@ -1,3 +1,4 @@
+import { Button } from "@/components/UI/Button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,11 +67,16 @@ const QrlWeb3WalletMoreOptions = observer(() => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <EllipsisVertical
-          size="16"
-          className="shrink-0 cursor-pointer"
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7 shrink-0 hover:bg-accent hover:text-secondary"
+          aria-label={t("common.more")}
           data-testid="ellipsis-icon"
-        />
+        >
+          <EllipsisVertical size="16" />
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         <DropdownMenuGroup>
@@ -81,7 +87,7 @@ const QrlWeb3WalletMoreOptions = observer(() => {
             >
               <div className="flex gap-2">
                 <Expand size="16" />
-                <button aria-label="Open in tab">{t('header.openInTab')}</button>
+                <span>{t("header.openInTab")}</span>
               </div>
             </DropdownMenuItem>
           )}
@@ -92,7 +98,7 @@ const QrlWeb3WalletMoreOptions = observer(() => {
             >
               <div className="flex gap-2">
                 <PanelRight size="16" />
-                <button aria-label="Open as Side Panel">{t('header.openSidePanel')}</button>
+                <span>{t("header.openSidePanel")}</span>
               </div>
             </DropdownMenuItem>
           )}
@@ -103,7 +109,7 @@ const QrlWeb3WalletMoreOptions = observer(() => {
             >
               <div className="flex gap-2">
                 <PanelLeft size="16" />
-                <button aria-label="Switch to Popup">{t('header.switchToPopup')}</button>
+                <span>{t("header.switchToPopup")}</span>
               </div>
             </DropdownMenuItem>
           )}
@@ -113,7 +119,7 @@ const QrlWeb3WalletMoreOptions = observer(() => {
           >
             <div className="flex gap-2">
               <BookUser size="16" />
-              <button aria-label="Contacts">{t('header.contacts')}</button>
+              <span>{t("header.contacts")}</span>
             </div>
           </DropdownMenuItem>
           <DropdownMenuItem
@@ -122,7 +128,7 @@ const QrlWeb3WalletMoreOptions = observer(() => {
           >
             <div className="flex gap-2">
               <Settings size="16" />
-              <button aria-label="Settings">{t('header.settings')}</button>
+              <span>{t("header.settings")}</span>
             </div>
           </DropdownMenuItem>
           <DropdownMenuItem
@@ -131,7 +137,7 @@ const QrlWeb3WalletMoreOptions = observer(() => {
           >
             <div className="flex gap-2">
               <LockKeyhole size="16" />
-              <button aria-label="Lock Wallet">{t('header.lockWallet')}</button>
+              <span>{t("header.lockWallet")}</span>
             </div>
           </DropdownMenuItem>
         </DropdownMenuGroup>

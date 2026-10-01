@@ -18,13 +18,15 @@ import {
 } from "@/functions/describeExtensionError";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { sanitizeForDisplay } from "@/utilities/stringUtil";
+import { useCopy } from "@/hooks/useCopy";
 import { MLDSA87, ExtendedSeed } from "@theqrl/wallet.js";
 import { bytesToHex } from "@theqrl/web3-utils";
 import { getEncodedEip712Data } from "@theqrl/web3-qrl-abi";
 import { parseAndValidateSeed, sign } from "@theqrl/web3-qrl-accounts";
-import { Copy } from "lucide-react";
+import { Check, Copy, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { useEffect, useState } from "react";
@@ -130,18 +132,14 @@ const TypedDataValue = ({
 
 const QrlSignTypedDataV4Content = observer(() => {
   const { t } = useTranslation();
+  const { copied, failed: copyFailed, copy } = useCopy();
   const { lockStore, qrlStore, dAppRequestStore } = useStore();
   const { getMnemonicPhrases, readLockState } = lockStore;
   const { qrlInstance, qrlConnection } = qrlStore;
-  const { isConnected } = qrlConnection;
   const activeChainId = qrlConnection?.blockchain?.chainId;
   const [isWalletLocked, setIsWalletLocked] = useState(false);
-  const {
-    dAppRequestData,
-    setOnPermissionCallBack,
-    setCanProceed,
-    addToResponseData,
-  } = dAppRequestStore;
+  const { dAppRequestData, setOnPermissionCallBack, setCanProceed } =
+    dAppRequestStore;
 
   const params = dAppRequestData?.params;
   const fromAddress = params?.[0] ?? "";
@@ -205,31 +203,36 @@ const QrlSignTypedDataV4Content = observer(() => {
     | bigint
     | undefined;
 
+  // Registered whatever the node is doing. Signing is local, and a send
+  // that needs the node fails with a real error; the callback being absent
+  // instead let the store's no-op default answer the page with an empty
+  // success. The effect also no longer re-runs on a connectivity flip.
   useEffect(() => {
-    if (isConnected) {
-      const onPermissionCallBack = async (hasApproved: boolean) => {
-        if (hasApproved) {
-          const authorization =
-            await revalidateAuthorizedDAppRequest(dAppRequestData);
-          if (!authorization.canProceed) {
-            addToResponseData({ error: authorization.proceedError });
-            return;
-          }
-          // Must await: onPermission reads responseData the moment this
-          // resolves, so a bare call would send the dApp an empty result
-          // before signing finishes.
-          await signTypedDataV4();
+    const onPermissionCallBack = async (
+      hasApproved: boolean,
+      record: ResponseRecorder,
+    ) => {
+      if (hasApproved) {
+        const authorization =
+          await revalidateAuthorizedDAppRequest(dAppRequestData);
+        if (!authorization.canProceed) {
+          record({ error: authorization.proceedError });
+          return;
         }
-      };
-      setOnPermissionCallBack(onPermissionCallBack);
-    }
-  }, [isConnected, dAppRequestData]);
+        // Must await: onPermission reads responseData the moment this
+        // resolves, so a bare call would send the dApp an empty result
+        // before signing finishes.
+        await signTypedDataV4(record);
+      }
+    };
+    setOnPermissionCallBack(onPermissionCallBack);
+  }, [dAppRequestData]);
 
   const copyMessageData = () => {
-    navigator.clipboard.writeText(JSON.stringify(typedData));
+    void copy(JSON.stringify(typedData));
   };
 
-  const signTypedDataV4 = async () => {
+  const signTypedDataV4 = async (record: ResponseRecorder) => {
     try {
       const mnemonicPhrases = await getMnemonicPhrases(fromAddress ?? "");
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
@@ -247,7 +250,7 @@ const QrlSignTypedDataV4Content = observer(() => {
       const publicKey = bytesToHex(acc.getPK());
 
       if (signature) {
-        addToResponseData({
+        record({
           signature,
           publicKey,
         });
@@ -263,10 +266,10 @@ const QrlSignTypedDataV4Content = observer(() => {
         // EIP-1193 error; the raw guard text never reaches the dApp response.
         setIsWalletLocked(true);
         void readLockState();
-        addToResponseData({ error: walletLockedProviderError() });
+        record({ error: walletLockedProviderError() });
         return;
       }
-      addToResponseData({ error });
+      record({ error });
     }
   };
 
@@ -292,34 +295,38 @@ const QrlSignTypedDataV4Content = observer(() => {
       </div>
       <div className="rounded-md bg-muted/50 p-2 text-xs">
         <div className="font-semibold">
-          Structured-data signature ({primaryType})
+          {t("dapp.signTypedData.title", { primaryType })}
         </div>
         <div className="text-muted-foreground">
-          This is an EIP-712 signature, distinct from a transaction. Review
-          every field carefully; a signature here may authorise token transfers
-          or contract actions on your behalf.
+          {t("dapp.signTypedData.explainer")}
         </div>
       </div>
       {isApprovalSignature && (
         <div className="rounded-md border border-destructive/60 bg-destructive/10 p-2 text-xs text-destructive dark:text-red-200">
-          <strong>Token approval:</strong> this signature ({primaryType})
-          authorises the spender below to move tokens from your account once
-          submitted on-chain. Verify each field carefully before approving.
+          <strong>{t("dapp.signTypedData.approvalLabel")}:</strong>{" "}
+          {t("dapp.signTypedData.approvalBody", { primaryType })}
           <div className="mt-1 flex flex-col gap-1">
             {approvalSpender && (
               <div>
-                <span className="font-semibold">Spender:</span>{" "}
+                <span className="font-semibold">
+                  {t("dapp.signTypedData.spender")}:
+                </span>{" "}
                 <span className="break-all">{String(approvalSpender)}</span>
               </div>
             )}
             {approvalAmount && (
               <div>
-                <span className="font-semibold">Amount:</span> {approvalAmount}
+                <span className="font-semibold">
+                  {t("dapp.signTypedData.amount")}:
+                </span>{" "}
+                {approvalAmount}
               </div>
             )}
             {approvalDeadline !== undefined && (
               <div>
-                <span className="font-semibold">Deadline:</span>{" "}
+                <span className="font-semibold">
+                  {t("dapp.signTypedData.deadline")}:
+                </span>{" "}
                 {String(approvalDeadline)}
               </div>
             )}
@@ -328,17 +335,17 @@ const QrlSignTypedDataV4Content = observer(() => {
       )}
       {chainIdMissing && (
         <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
-          <strong>Warning:</strong> the dApp did not declare a chainId in the
-          EIP-712 domain. This signature is not bound to any chain and could be
-          replayed on any chain hosting the verifying contract.
+          <strong>{t("dapp.signTypedData.warningLabel")}:</strong>{" "}
+          {t("dapp.signTypedData.noChainIdWarning")}
         </div>
       )}
       {chainIdMismatch && (
         <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
-          <strong>Warning:</strong> the EIP-712 domain chainId (
-          {declaredChainId}) does not match the wallet&apos;s active chain (
-          {activeChainId}). The signature will be valid on the declared chain
-          only.
+          <strong>{t("dapp.signTypedData.warningLabel")}:</strong>{" "}
+          {t("dapp.signTypedData.chainIdMismatchWarning", {
+            declaredChainId,
+            activeChainId,
+          })}
         </div>
       )}
       <Accordion
@@ -348,13 +355,13 @@ const QrlSignTypedDataV4Content = observer(() => {
       >
         <AccordionItem value="domain" className="border-b-0">
           <AccordionTrigger className="rounded-md bg-muted p-2">
-            Domain
+            {t("dapp.signTypedData.domainSection")}
           </AccordionTrigger>
           <AccordionContent className="mt-2 rounded-md p-2 text-xs">
             <div className="flex flex-col gap-2">
               {domain?.name !== undefined && (
                 <div className="flex flex-col gap-1">
-                  <div>Name</div>
+                  <div>{t("dapp.signTypedData.name")}</div>
                   <div className="font-bold text-secondary">
                     {String(domain.name)}
                   </div>
@@ -362,21 +369,23 @@ const QrlSignTypedDataV4Content = observer(() => {
               )}
               {domain?.version !== undefined && (
                 <div className="flex flex-col gap-1">
-                  <div>Version</div>
+                  <div>{t("dapp.signTypedData.version")}</div>
                   <div className="font-bold text-secondary">
                     {String(domain.version)}
                   </div>
                 </div>
               )}
               <div className="flex flex-col gap-1">
-                <div>Chain ID</div>
+                <div>{t("dapp.signTypedData.chainId")}</div>
                 <div className="font-bold text-secondary">
-                  {chainIdMissing ? "(not declared)" : declaredChainId}
+                  {chainIdMissing
+                    ? t("dapp.signTypedData.chainIdNotDeclared")
+                    : declaredChainId}
                 </div>
               </div>
               {verifyingContract && (
                 <div className="flex flex-col gap-1">
-                  <div>Verifying Contract</div>
+                  <div>{t("dapp.signTypedData.verifyingContract")}</div>
                   <FullAddress
                     address={verifyingContract}
                     className="w-full font-bold text-secondary"
@@ -385,7 +394,7 @@ const QrlSignTypedDataV4Content = observer(() => {
               )}
               {domain?.salt !== undefined && (
                 <div className="flex flex-col gap-1">
-                  <div>Salt</div>
+                  <div>{t("dapp.signTypedData.salt")}</div>
                   <div className="break-all font-bold text-secondary">
                     {String(domain.salt)}
                   </div>
@@ -396,25 +405,35 @@ const QrlSignTypedDataV4Content = observer(() => {
         </AccordionItem>
         <AccordionItem value="message" className="border-b-0">
           <AccordionTrigger className="rounded-md bg-muted p-2">
-            Message
+            {t("dapp.signTypedData.messageSection")}
           </AccordionTrigger>
           <AccordionContent className="mt-2 rounded-md p-2 text-xs">
             <div className="flex flex-col gap-2">
               <div className="flex justify-between gap-2">
                 <div className="flex flex-col gap-1">
-                  <div>Primary Type</div>
+                  <div>{t("dapp.signTypedData.primaryType")}</div>
                   <div className="font-bold text-secondary">{primaryType}</div>
                 </div>
                 <Tooltip delayDuration={0}>
                   <TooltipTrigger asChild>
                     <Button
-                      className="size-7 hover:text-secondary"
+                      className={`size-7 hover:text-secondary ${copyFailed ? "text-destructive" : ""}`}
                       variant="outline"
                       size="icon"
-                      aria-label="Copy message data"
+                      aria-label={
+                        copyFailed
+                          ? t("common.copyFailed")
+                          : t("dapp.signature.copyMessageData")
+                      }
                       onClick={copyMessageData}
                     >
-                      <Copy size="16" />
+                      {copyFailed ? (
+                        <X size="16" />
+                      ) : copied ? (
+                        <Check size="16" />
+                      ) : (
+                        <Copy size="16" />
+                      )}
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left">

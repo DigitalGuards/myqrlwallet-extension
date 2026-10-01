@@ -11,7 +11,24 @@ import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 const QrlRequestAccountContent = observer(() => {
   const { t } = useTranslation();
   const { dAppRequestStore, qrlStore } = useStore();
-  const { addToResponseData, setCanProceed, currentTabData } = dAppRequestStore;
+  const { addToResponseData, setCanProceed, dAppRequestData } =
+    dAppRequestStore;
+
+  // The origin that actually sent this request. The active browser tab is a
+  // different thing: the approval surface outlives tab switches, and an
+  // iframe request comes from an origin the tab bar never shows. Ticking
+  // the active tab's grants here could pre-select accounts the requesting
+  // site was never granted, one click away from being handed to it.
+  const requestOrigin = (() => {
+    try {
+      const origin = new URL(
+        dAppRequestData?.requestData?.senderData?.url ?? "",
+      ).origin;
+      return origin === "null" ? "" : origin;
+    } catch {
+      return "";
+    }
+  })();
 
   const [isLoadingBlockchains, setIsLoadingBlockchains] = useState(true);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
@@ -22,15 +39,20 @@ const QrlRequestAccountContent = observer(() => {
     BlockchainDataType[]
   >([]);
 
+  const activeAddress = qrlStore.activeAccount.accountAddress;
+  const activeChainId = qrlStore.qrlConnection.blockchain.chainId;
+
   useEffect(() => {
     (async () => {
       const allBlockchains = await StorageUtil.getAllBlockChains();
+      const grantedToRequestOrigin = requestOrigin
+        ? await StorageUtil.getDAppsConnectedAccountsData(requestOrigin)
+        : undefined;
 
       // First connect for this site: preselect the active account and the
       // wallet's current chain so the default approval is a single click.
       // Sites with prior grants keep exactly what they had.
-      const storedAccounts = currentTabData?.connectedAccounts ?? [];
-      const activeAddress = qrlStore.activeAccount.accountAddress;
+      const storedAccounts = grantedToRequestOrigin?.accounts ?? [];
       setSelectedAccounts(
         storedAccounts.length
           ? storedAccounts
@@ -39,10 +61,9 @@ const QrlRequestAccountContent = observer(() => {
             : [],
       );
 
-      const storedBlockchains = currentTabData?.connectedBlockchains ?? [];
+      const storedBlockchains = grantedToRequestOrigin?.blockchains ?? [];
       const activeBlockchain = allBlockchains.find(
-        (blockchain) =>
-          blockchain.chainId === qrlStore.qrlConnection.blockchain.chainId,
+        (blockchain) => blockchain.chainId === activeChainId,
       );
       setAllBlockchains(allBlockchains);
       setSelectedBlockchains(
@@ -54,7 +75,10 @@ const QrlRequestAccountContent = observer(() => {
       );
       setIsLoadingBlockchains(false);
     })();
-  }, [currentTabData]);
+    // The wallet is often still booting when this screen mounts, so the
+    // active account and chain arrive after the first pass. Both are in the
+    // dependency list so the defaults land once they do.
+  }, [requestOrigin, activeAddress, activeChainId]);
 
   useEffect(() => {
     addToResponseData({
@@ -102,13 +126,13 @@ const QrlRequestAccountContent = observer(() => {
           value="accounts"
           className="w-full data-[state=active]:text-secondary"
         >
-          {t('dapp.requestAccount.tabAccounts')}
+          {t("dapp.requestAccount.tabAccounts")}
         </TabsTrigger>
         <TabsTrigger
           value="blockchains"
           className="w-full data-[state=active]:text-secondary"
         >
-          {t('dapp.requestAccount.tabBlockchains')}
+          {t("dapp.requestAccount.tabBlockchains")}
         </TabsTrigger>
       </TabsList>
       <TabsContent value="accounts" className="rounded-md p-2">

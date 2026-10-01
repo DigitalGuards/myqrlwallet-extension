@@ -44,6 +44,9 @@ const mockedStoreValues: StoreType = {
     qrlConnection: {
       isConnected: true,
       isLoading: false,
+      isProbing: false,
+      nextManualProbeAt: 0,
+      areBalancesStale: false,
       blockchain: DEFAULT_BLOCKCHAIN,
     },
     initProgress: {
@@ -54,6 +57,7 @@ const mockedStoreValues: StoreType = {
     qrlInstance: undefined,
     fetchAccounts: async () => {},
     fetchQrlConnection: async () => {},
+    probeConnectionNow: async () => ({ probed: true, isConnected: true }),
     getAccountBalance: (_accountAddress: string) => {
       return "0.0 Quanta";
     },
@@ -97,7 +101,7 @@ const mockedStoreValues: StoreType = {
       collection: undefined,
       error: "",
     }),
-    getOwnedNftTokens: async () => [],
+    getOwnedNftTokens: async () => ({ tokens: [], failed: false }),
     getErc1155TokenBalance: async () => undefined,
     getNftTokenUri: async () => "",
     signNftTransfer: async () => ({
@@ -162,7 +166,10 @@ const mockedStoreValues: StoreType = {
     hasDAppRequest: true,
     responseData: {},
     canProceed: false,
-    onPermissionCallBack: async (_hasApproved: boolean) => {},
+    onPermissionCallBack: async (
+      _hasApproved: boolean,
+      _record: (data: Record<string, unknown>) => void,
+    ) => {},
     approvalProcessingStatus: {
       hasApproved: false,
       isProcessing: false,
@@ -172,7 +179,10 @@ const mockedStoreValues: StoreType = {
     addToResponseData: (_data: any) => {},
     setCanProceed: (_decision: boolean) => {},
     setOnPermissionCallBack: (
-      _callBack: (hasApproved: boolean) => Promise<void>,
+      _callBack: (
+        hasApproved: boolean,
+        record: (data: Record<string, unknown>) => void,
+      ) => Promise<void>,
     ) => {},
     setApprovalProcessingStatus: async (_status: {
       isProcessing?: boolean;
@@ -180,6 +190,7 @@ const mockedStoreValues: StoreType = {
       hasCompleted?: boolean;
     }) => {},
     onPermission: async (_hasApproved: boolean) => {},
+    reportPendingTransactionHash: async (_transactionHash: string) => {},
     fetchCurrentTabData: async () => {},
     disconnectFromCurrentTab: async () => {},
   } as unknown as DAppRequestStore,
@@ -193,14 +204,12 @@ const mockedStoreValues: StoreType = {
     },
     encryptAccount: async (
       _account: Web3BaseWalletAccount,
-      _password: string,
+      _password?: string,
     ) => {},
     initialize: () => {},
     lock: async () => {},
     initializeStorageListener: () => {},
-    getWalletPassword: async () => {
-      return "test-password";
-    },
+    ensureWalletPassword: async () => {},
     getMnemonicPhrases: async (accountAddress: string) => {
       return accountAddress;
     },
@@ -306,13 +315,19 @@ const mockedStoreValues: StoreType = {
     isLoading: false,
     hasError: false,
     getPrice: () => 0,
+    quoteFor: (currency: string) => ({ price: 0, currency, change24h: 0 }),
+    updatedAt: {},
     isCacheStale: false,
     initialize: async () => {},
     fetchPrices: async () => {},
+    setRefreshEnabled: () => {},
     startAutoRefresh: () => {},
     stopAutoRefresh: () => {},
     getChange24h: () => 0,
   } as any,
+  // The real store wires its polling reactions in the constructor and keeps
+  // the disposer; nothing is wired here, so tearing down is a no-op.
+  disposeDataLifecycle: () => {},
 };
 
 export const mockedStore = (

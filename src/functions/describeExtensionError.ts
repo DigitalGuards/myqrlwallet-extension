@@ -1,4 +1,7 @@
-import { providerErrors } from "@theqrl/qrl-wallet-provider/rpc-errors";
+import {
+  providerErrors,
+  rpcErrors,
+} from "@theqrl/qrl-wallet-provider/rpc-errors";
 import type { TFunction } from "i18next";
 
 // Chrome's own message-passing errors when the service worker is between
@@ -32,6 +35,46 @@ export function isWalletLockedError(error: unknown): boolean {
  */
 export function walletLockedProviderError() {
   return providerErrors.unauthorized({ message: "The wallet is locked" });
+}
+
+/**
+ * The dApp's answer when the network fee climbed past the maximum the user
+ * approved. Signing a higher ceiling than the screen showed is not an
+ * option, so the request is refused with the same -32003 code every other
+ * failed send uses, carrying a message that says what to do about it.
+ */
+export function feeCeilingExceededProviderError() {
+  return rpcErrors.transactionRejected({
+    message:
+      "The network fee rose above the maximum you approved; try again from the site.",
+  });
+}
+
+/**
+ * The dApp's answer when the wallet never managed to read a fee at all. It
+ * refuses instead of signing an unbounded ceiling nobody was shown.
+ */
+export function feeUnavailableProviderError() {
+  return rpcErrors.transactionRejected({
+    message:
+      "The wallet could not read the current network fee, so it did not sign. Try again from the site.",
+  });
+}
+
+/**
+ * The dApp's answer when an approval finished without producing anything.
+ *
+ * Approve used to be enabled on its own schedule while the surface's
+ * signing callback was registered on another, so a screen whose callback
+ * never arrived ran the store's no-op default and the page received a
+ * success carrying no signature and no hash. An approval that produced
+ * nothing is a failure, and it says so.
+ */
+export function approvalProducedNothingProviderError() {
+  return rpcErrors.internal({
+    message:
+      "The wallet approved this request but produced no result. Try again from the site.",
+  });
 }
 
 /**

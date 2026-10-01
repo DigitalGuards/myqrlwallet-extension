@@ -2,7 +2,14 @@ import { mockedStore } from "@/__mocks__/mockedStore";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 import { StoreProvider } from "@/stores/store";
-import { afterEach, describe, expect, it, vi, type MockedFunction } from "vitest";
+import {
+  afterEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockedFunction,
+} from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ComponentProps } from "react";
@@ -206,7 +213,7 @@ describe("AddEditChainForm", () => {
         defaultBlockExplorerUrl: "https://testDefaultExplorerUrl",
         defaultIconUrl: "https://testDefaultIconUrl",
         isTestnet: false,
-        defaultWsRpcUrl: "http://127.0.0.1:8545",
+        defaultWsRpcUrl: "",
         isCustomChain: true,
       },
     ];
@@ -288,7 +295,7 @@ describe("AddEditChainForm", () => {
         defaultBlockExplorerUrl: "https://testDefaultExplorerUrl",
         defaultIconUrl: "https://testDefaultIconUrl",
         isTestnet: false,
-        defaultWsRpcUrl: "http://127.0.0.1:8545",
+        defaultWsRpcUrl: "",
         isCustomChain: true,
       },
       {
@@ -306,7 +313,7 @@ describe("AddEditChainForm", () => {
         defaultBlockExplorerUrl: "",
         defaultIconUrl: "",
         isTestnet: false,
-        defaultWsRpcUrl: "http://127.0.0.1:8545",
+        defaultWsRpcUrl: "",
         isCustomChain: true,
       },
     ];
@@ -409,7 +416,7 @@ describe("AddEditChainForm", () => {
         defaultBlockExplorerUrl: "https://testDefaultExplorerUrl",
         defaultIconUrl: "https://testDefaultIconUrl",
         isTestnet: false,
-        defaultWsRpcUrl: "http://127.0.0.1:8545",
+        defaultWsRpcUrl: "",
         isCustomChain: true,
       },
     ];

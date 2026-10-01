@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/UI/Input";
 import { useStore } from "@/stores/store";
 import { zodResolver } from "@hookform/resolvers/zod";
+import type { TFunction } from "i18next";
 import { Loader, RefreshCw } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useState } from "react";
@@ -28,9 +29,10 @@ import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackgrou
 import DiscoveredNFTCollections from "./DiscoveredNFTCollections/DiscoveredNFTCollections";
 import NFTCollectionImportSuccess from "./NFTCollectionImportSuccess/NFTCollectionImportSuccess";
 
-const FormSchema = z.object({
-  contractAddress: z.string().min(1, "Contract address is required"),
-});
+const createFormSchema = (t: TFunction) =>
+  z.object({
+    contractAddress: z.string().min(1, t("validation.contractAddressRequired")),
+  });
 
 const ImportNFTCollection = observer(() => {
   const { t } = useTranslation();
@@ -42,6 +44,8 @@ const ImportNFTCollection = observer(() => {
       Awaited<ReturnType<typeof getNftCollectionDetails>>["collection"]
     >();
   const [hasImported, setHasImported] = useState(false);
+
+  const FormSchema = createFormSchema(t);
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     const details = await getNftCollectionDetails(formData.contractAddress);
@@ -96,7 +100,7 @@ const ImportNFTCollection = observer(() => {
             >
               <Card>
                 <CardHeader>
-                  <CardTitle>{t('nft.importCollection')}</CardTitle>
+                  <CardTitle>{t("nft.importCollection")}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-8">
                   <FormField
@@ -110,11 +114,11 @@ const ImportNFTCollection = observer(() => {
                             aria-label={field.name}
                             autoComplete="off"
                             disabled={isSubmitting}
-                            placeholder={t('nft.contractPlaceholder')}
+                            placeholder={t("nft.contractPlaceholder")}
                           />
                         </FormControl>
                         <FormDescription>
-                          {t('nft.contractDescription')}
+                          {t("nft.contractDescription")}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -132,9 +136,7 @@ const ImportNFTCollection = observer(() => {
                     ) : (
                       <RefreshCw className="mr-2 h-4 w-4" />
                     )}
-                    {isSubmitting
-                      ? t('nft.detecting')
-                      : t('nft.detectButton')}
+                    {isSubmitting ? t("nft.detecting") : t("nft.detectButton")}
                   </Button>
                 </CardFooter>
               </Card>

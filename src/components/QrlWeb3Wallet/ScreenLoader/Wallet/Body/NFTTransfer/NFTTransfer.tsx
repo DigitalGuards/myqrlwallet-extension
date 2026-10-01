@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/UI/Input";
 import { Label } from "@/components/UI/Label";
 import { isWalletLockedError } from "@/functions/describeExtensionError";
+import { transactionFailureUpdate } from "@/functions/transactionOutcome";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
 import type { NFTStandard } from "@/types/nft";
@@ -36,6 +37,7 @@ import type { TFunction } from "i18next";
 import { z } from "zod";
 import BackButton from "../../../Shared/BackButton/BackButton";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
+import StaleBalanceNotice from "../../../Shared/StaleBalanceNotice/StaleBalanceNotice";
 import CopyableAddress from "../../../Shared/CopyableAddress/CopyableAddress";
 import RecipientPicker from "../TokenTransfer/RecipientPicker/RecipientPicker";
 
@@ -75,7 +77,8 @@ const NFTTransfer = observer(() => {
   const { t } = useTranslation();
   const { state } = useLocation();
   const navigate = useNavigate();
-  const { lockStore, qrlStore, transactionHistoryStore } = useStore();
+  const { lockStore, qrlStore, ledgerStore, transactionHistoryStore } =
+    useStore();
   const { getMnemonicPhrases } = lockStore;
   const {
     activeAccount,
@@ -162,6 +165,15 @@ const NFTTransfer = observer(() => {
         receiver = resolvedAddress;
       }
 
+      if (ledgerStore.isLedgerAccount(accountAddress)) {
+        // No device signing path for contract calls yet; without this the
+        // flow fell through to an empty key and a generic failure.
+        control.setError("receiverAddress", {
+          message: t("transfer.errorLedgerNftUnsupported"),
+        });
+        return;
+      }
+
       const mnemonicPhrases = await getMnemonicPhrases(accountAddress);
       const signResult = await signNftTransfer(
         accountAddress,
@@ -232,18 +244,14 @@ const NFTTransfer = observer(() => {
 
       sendRawTransaction(rawTransaction).then(
         async (receipt) => {
-          if (receipt) {
-            const isSuccess = receipt.status?.toString() === "1";
+          // Shared classifier: a receipt whose hash or block does not match
+          // proves nothing, and only a real status field settles the entry.
+          const update = transactionFailureUpdate({ receipt }, transactionHash);
+          if (update.receiptStatusVerified) {
             await transactionHistoryStore.updateTransaction(
               accountAddress,
               transactionHash,
-              {
-                pendingStatus: isSuccess ? "confirmed" : "failed",
-                status: isSuccess,
-                blockNumber: receipt.blockNumber?.toString() ?? "",
-                gasUsed: receipt.gasUsed?.toString() ?? "",
-                effectiveGasPrice: (receipt.effectiveGasPrice ?? 0).toString(),
-              },
+              update,
             );
             await fetchAccounts();
           }
@@ -253,7 +261,7 @@ const NFTTransfer = observer(() => {
           await transactionHistoryStore.updateTransaction(
             accountAddress,
             transactionHash,
-            { pendingStatus: "failed", status: false },
+            transactionFailureUpdate(err, transactionHash),
           );
         },
       );
@@ -367,6 +375,7 @@ const NFTTransfer = observer(() => {
               <CardTitle>{t("nft.sendNft")}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-6">
+              <StaleBalanceNotice />
               <div className="flex items-center gap-4">
                 <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md bg-muted">
                   {nftImageUrl && !imageError ? (

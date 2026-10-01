@@ -1,9 +1,4 @@
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/UI/Card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { ROUTES } from "@/router/router";
 import {
   ChevronRight,
@@ -22,9 +17,21 @@ const Settings = () => {
   const { t } = useTranslation();
 
   const MENU_ITEMS = [
-    { label: t("settings.appearance"), icon: Palette, route: ROUTES.SETTINGS_APPEARANCE },
-    { label: t("settings.security"), icon: Shield, route: ROUTES.SETTINGS_SECURITY },
-    { label: t("settings.preferences"), icon: Globe, route: ROUTES.SETTINGS_PREFERENCES },
+    {
+      label: t("settings.appearance"),
+      icon: Palette,
+      route: ROUTES.SETTINGS_APPEARANCE,
+    },
+    {
+      label: t("settings.security"),
+      icon: Shield,
+      route: ROUTES.SETTINGS_SECURITY,
+    },
+    {
+      label: t("settings.preferences"),
+      icon: Globe,
+      route: ROUTES.SETTINGS_PREFERENCES,
+    },
     { label: t("settings.data"), icon: Download, route: ROUTES.SETTINGS_DATA },
     { label: t("settings.about"), icon: Info, route: ROUTES.SETTINGS_ABOUT },
   ];
@@ -39,19 +46,20 @@ const Settings = () => {
           </CardHeader>
           <CardContent className="p-0">
             {MENU_ITEMS.map((item, index) => (
-              <div
+              <button
                 key={item.label}
-                className={`flex cursor-pointer items-center justify-between px-6 py-3 transition-colors hover:bg-accent ${
+                type="button"
+                className={`flex w-full items-center justify-between px-6 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
                   index < MENU_ITEMS.length - 1 ? "border-b" : ""
                 }`}
                 onClick={() => navigate(item.route)}
               >
-                <div className="flex items-center gap-3">
+                <span className="flex items-center gap-3">
                   <item.icon className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm">{item.label}</span>
-                </div>
+                </span>
                 <ChevronRight className="h-4 w-4 text-muted-foreground" />
-              </div>
+              </button>
             ))}
           </CardContent>
         </Card>

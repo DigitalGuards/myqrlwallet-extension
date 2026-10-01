@@ -35,6 +35,7 @@ const QrlRequestAccountAccountSelection = observer(
               <div key={account} className="flex min-w-0 items-start space-x-3">
                 <Checkbox
                   id={account}
+                  name={`dappAccount-${account}`}
                   checked={selectedAccounts.includes(account)}
                   aria-label="accountsCheckbox"
                   onCheckedChange={(checked) =>

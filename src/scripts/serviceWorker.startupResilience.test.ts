@@ -128,7 +128,10 @@ async function connectContentScriptAndWait() {
   const connectListeners = onConnectAddListener.mock.calls.map(
     (call: any) => call[0],
   );
-  const mockPort = { name: "myqrlwallet-content-script" };
+  const mockPort = {
+    name: "myqrlwallet-content-script",
+    onDisconnect: { addListener: vi.fn() },
+  };
   for (const listener of connectListeners) {
     await listener(mockPort);
   }
@@ -158,6 +161,31 @@ describe("serviceWorker startup resilience (H1)", () => {
     await connectContentScriptAndWait();
 
     expect(mockInitializeContentScriptProviderConnection).toHaveBeenCalled();
+  });
+
+  it("a content-script port that disconnects while waiting for readiness is not wired up", async () => {
+    await import("./serviceWorker");
+    const browserModule = await import("webextension-polyfill");
+    const connectListeners = (
+      (browserModule.default as any).runtime.onConnect
+        .addListener as ReturnType<typeof vi.fn>
+    ).mock.calls.map((call: any) => call[0]);
+    const disconnectListeners: Array<() => void> = [];
+    const mockPort = {
+      name: "myqrlwallet-content-script",
+      onDisconnect: {
+        addListener: (cb: () => void) => disconnectListeners.push(cb),
+      },
+    };
+
+    const handled = connectListeners.map((listener: any) => listener(mockPort));
+    // The tab closes before the worker finishes starting up.
+    for (const cb of disconnectListeners) cb();
+    await Promise.all(handled);
+
+    expect(
+      mockInitializeContentScriptProviderConnection,
+    ).not.toHaveBeenCalled();
   });
 
   it("a malformed cached phishing blocklist still resolves readiness and a provider connection gets answered", async () => {

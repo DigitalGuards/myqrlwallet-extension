@@ -7,20 +7,25 @@ const {
   getNetworkId,
   requestManagerSend,
   mockIsLocked,
+  getActiveBlockChain,
 } = vi.hoisted(() => ({
   getConnectedAccounts: vi.fn(),
   getChainId: vi.fn(),
   getNetworkId: vi.fn(),
   requestManagerSend: vi.fn(),
   mockIsLocked: vi.fn(),
+  getActiveBlockChain: vi.fn(),
 }));
+
+const ACTIVE_CHAIN = {
+  defaultRpcUrl: "https://rpc.example",
+  defaultWsRpcUrl: "https://ws.example",
+  chainId: "0x539",
+};
 
 vi.mock("@/utilities/storageUtil", () => ({
   default: {
-    getActiveBlockChain: vi.fn().mockResolvedValue({
-      defaultRpcUrl: "https://rpc.example",
-      defaultWsRpcUrl: "https://ws.example",
-    }),
+    getActiveBlockChain,
     getDAppsConnectedAccountsData: getConnectedAccounts,
   },
 }));
@@ -73,8 +78,12 @@ const TOPIC = `0x${"ab".repeat(64)}`;
 
 describe("qrlWallet_getProviderState", () => {
   beforeEach(() => {
+    mockIsLocked
+      .mockReset()
+      .mockResolvedValue({ isLocked: false, hasPasswordSet: true });
     getChainId.mockReset().mockResolvedValue(1337n);
     getNetworkId.mockReset().mockResolvedValue(1337n);
+    getActiveBlockChain.mockReset().mockResolvedValue(ACTIVE_CHAIN);
     getConnectedAccounts
       .mockReset()
       .mockImplementation(async (origin) =>
@@ -107,15 +116,15 @@ describe("qrlWallet_getProviderState", () => {
     );
   });
 
-  it("reads the latest accounts after deferred network initialization", async () => {
-    let resolveChainId: ((chainId: bigint) => void) | undefined;
+  it("reads the latest accounts after the network identity", async () => {
+    let resolveChain: ((chain: typeof ACTIVE_CHAIN) => void) | undefined;
     let connected = { accounts: ["QConnected"] } as
       | { accounts: string[] }
       | undefined;
-    getChainId.mockImplementationOnce(
+    getActiveBlockChain.mockImplementationOnce(
       () =>
-        new Promise<bigint>((resolve) => {
-          resolveChainId = resolve;
+        new Promise<typeof ACTIVE_CHAIN>((resolve) => {
+          resolveChain = resolve;
         }),
     );
     getConnectedAccounts.mockImplementation(async () => connected);
@@ -124,17 +133,156 @@ describe("qrlWallet_getProviderState", () => {
       request("https://connected.example/swap"),
     );
     await vi.waitFor(() => {
-      expect(resolveChainId).toBeTypeOf("function");
+      expect(resolveChain).toBeTypeOf("function");
     });
     expect(getConnectedAccounts).not.toHaveBeenCalled();
 
     connected = undefined;
-    resolveChainId?.(1337n);
+    resolveChain?.(ACTIVE_CHAIN);
 
     await expect(providerState).resolves.toMatchObject({ accounts: [] });
     expect(getConnectedAccounts).toHaveBeenCalledWith(
       "https://connected.example",
     );
+  });
+
+  it("answers from the stored chain without asking the node", async () => {
+    await expect(
+      executeUnrestrictedMethod(request("https://connected.example/swap")),
+    ).resolves.toMatchObject({ chainId: "0x539", networkVersion: "1337" });
+
+    // The node is asked nothing. A page load used to issue two RPC calls
+    // here, so an unreachable node logged an RPC error and a "please
+    // report this bug" line on every website.
+    expect(getChainId).not.toHaveBeenCalled();
+    expect(getNetworkId).not.toHaveBeenCalled();
+  });
+
+  it("still answers with a correct chain id while the node is down", async () => {
+    getChainId.mockRejectedValue(new Error("Failed to fetch"));
+    getNetworkId.mockRejectedValue(new Error("Failed to fetch"));
+    getActiveBlockChain.mockResolvedValue({
+      ...ACTIVE_CHAIN,
+      chainId: "0x301825",
+    });
+
+    await expect(
+      executeUnrestrictedMethod(request("https://connected.example/swap")),
+    ).resolves.toMatchObject({
+      chainId: "0x301825",
+      networkVersion: "3151909",
+      isUnlocked: true,
+    });
+  });
+
+  it("falls back to the node when the stored chain id is unusable", async () => {
+    getActiveBlockChain.mockResolvedValue({
+      ...ACTIVE_CHAIN,
+      chainId: "not-a-chain-id",
+    });
+
+    await expect(
+      executeUnrestrictedMethod(request("https://connected.example/swap")),
+    ).resolves.toMatchObject({ chainId: "0x539", networkVersion: "1337" });
+    expect(getChainId).toHaveBeenCalled();
+  });
+
+  it("reports the wallet as unlocked and returns the connected accounts", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: false, hasPasswordSet: true });
+
+    await expect(
+      executeUnrestrictedMethod(request("https://connected.example/swap")),
+    ).resolves.toMatchObject({
+      isUnlocked: true,
+      accounts: ["QConnected"],
+    });
+  });
+
+  it("reports the wallet as locked and hides the connected accounts", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+
+    await expect(
+      executeUnrestrictedMethod(request("https://connected.example/swap")),
+    ).resolves.toMatchObject({
+      isUnlocked: false,
+      accounts: [],
+    });
+  });
+});
+
+describe("wallet_getPermissions (F8)", () => {
+  const permissionsRequest = (origin: string) =>
+    ({
+      id: 1,
+      jsonrpc: "2.0",
+      method: UNRESTRICTED_METHODS.WALLET_GET_PERMISSIONS,
+      senderData: { url: origin },
+    }) as never;
+
+  const storedPermissions = [
+    {
+      parentCapability: "qrl_accounts",
+      caveats: [{ type: "restrictReturnedAccounts", value: ["QConnected"] }],
+    },
+  ];
+
+  beforeEach(() => {
+    mockIsLocked.mockReset();
+    getConnectedAccounts.mockReset();
+    getChainId.mockReset().mockResolvedValue(1337n);
+    getNetworkId.mockReset().mockResolvedValue(1337n);
+    getActiveBlockChain.mockReset().mockResolvedValue(ACTIVE_CHAIN);
+  });
+
+  it("returns an empty permission list while the wallet is locked", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+    getConnectedAccounts.mockResolvedValue({ permissions: storedPermissions });
+
+    await expect(
+      executeUnrestrictedMethod(
+        permissionsRequest("https://connected.example"),
+      ),
+    ).resolves.toEqual([]);
+    // The caveats carry the account addresses, so nothing is looked up.
+    expect(getConnectedAccounts).not.toHaveBeenCalled();
+  });
+
+  it("returns the stored permissions once unlocked", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: false, hasPasswordSet: true });
+    getConnectedAccounts.mockResolvedValue({ permissions: storedPermissions });
+
+    await expect(
+      executeUnrestrictedMethod(
+        permissionsRequest("https://connected.example"),
+      ),
+    ).resolves.toEqual(storedPermissions);
+  });
+});
+
+describe("websocket subscription methods are unsupported (L1)", () => {
+  beforeEach(() => {
+    mockIsLocked
+      .mockReset()
+      .mockResolvedValue({ isLocked: false, hasPasswordSet: true });
+    getChainId.mockReset().mockResolvedValue(1337n);
+    getNetworkId.mockReset().mockResolvedValue(1337n);
+    getActiveBlockChain.mockReset().mockResolvedValue(ACTIVE_CHAIN);
+  });
+
+  it.each([
+    [UNRESTRICTED_METHODS.QRL_SUBSCRIBE, ["logs", { topics: [TOPIC] }]],
+    [UNRESTRICTED_METHODS.QRL_UNSUBSCRIBE, ["0xsubscription"]],
+  ])("rejects %s without issuing any request", async (method, params) => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}"));
+
+    await expect(
+      executeUnrestrictedMethod(rpcRequest(method, params)),
+    ).rejects.toThrow("is not supported by this wallet");
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
 
@@ -231,5 +379,42 @@ describe("qrl_accounts (F8)", () => {
     await expect(
       executeUnrestrictedMethod(request("https://stranger.example")),
     ).resolves.toEqual([]);
+  });
+});
+
+describe("qrl_accounts hides the grant state while locked (L-1)", () => {
+  // A locked wallet answers every origin the same way here. Answering a
+  // connected origin [] and an unconnected one "not connected" would tell
+  // the page whether it holds a grant.
+  it("answers an unconnected origin the same empty array as a connected one", async () => {
+    mockIsLocked.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+
+    const { unrestrictedMethodsMiddleware } =
+      await import("@/scripts/middlewares/unrestrictedMethodsMiddleware");
+
+    const answer = async (url: string) => {
+      const res = {} as { result?: unknown; error?: { code?: number } };
+      await unrestrictedMethodsMiddleware(
+        {
+          id: 1,
+          jsonrpc: "2.0",
+          method: "qrl_accounts",
+          params: [],
+          senderData: { url },
+        } as never,
+        res as never,
+        vi.fn(),
+        vi.fn(),
+      );
+      return res;
+    };
+
+    const connected = await answer("https://dapp.example/app");
+    const unconnected = await answer("https://stranger.example/app");
+
+    expect(connected.result).toEqual([]);
+    expect(unconnected.result).toEqual([]);
+    expect(connected.error).toBeUndefined();
+    expect(unconnected.error).toBeUndefined();
   });
 });

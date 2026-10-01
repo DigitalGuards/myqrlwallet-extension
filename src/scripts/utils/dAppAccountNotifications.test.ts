@@ -1,7 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import StorageUtil from "@/utilities/storageUtil";
 import {
   notifyDAppAccountsChanged,
+  notifyDAppChainChanged,
   registerDAppAccountNotificationStream,
+  setWalletLockedForDAppNotifications,
 } from "./dAppAccountNotifications";
 
 const dAppsStorage = (accountsByOrigin: Record<string, string[]>) => ({
@@ -15,6 +19,10 @@ const dAppsStorage = (accountsByOrigin: Record<string, string[]>) => ({
 
 describe("dApp account notifications", () => {
   const cleanups: Array<() => void> = [];
+
+  beforeEach(() => {
+    setWalletLockedForDAppNotifications(false);
+  });
 
   afterEach(() => {
     cleanups.splice(0).forEach((cleanup) => cleanup());
@@ -85,7 +93,7 @@ describe("dApp account notifications", () => {
     { origin: "not an origin", url: "https://fallback.example/frame" },
     { url: "about:blank" },
     { url: "file:///tmp/dapp.html" },
-  ])("rejects opaque or malformed sender identity %#", (sender) => {
+  ])("rejects opaque or malformed sender identity %#", async (sender) => {
     const stream = { write: vi.fn() };
     registerDAppAccountNotificationStream(sender, stream);
 
@@ -110,5 +118,262 @@ describe("dApp account notifications", () => {
     });
 
     expect(stream.write).not.toHaveBeenCalled();
+  });
+
+  it("emits the real account list while the wallet is unlocked (F8)", () => {
+    setWalletLockedForDAppNotifications(false);
+    const stream = register("https://dapp.example");
+
+    notifyDAppAccountsChanged({
+      oldValue: dAppsStorage({ "https://dapp.example": [] }),
+      newValue: dAppsStorage({ "https://dapp.example": ["QAccount"] }),
+    });
+
+    expect(stream.write).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      method: "qrlWallet_accountsChanged",
+      params: ["QAccount"],
+    });
+  });
+
+  it("emits an empty account list while the wallet is locked (F8)", () => {
+    setWalletLockedForDAppNotifications(true);
+    const stream = register("https://dapp.example");
+
+    notifyDAppAccountsChanged({
+      oldValue: dAppsStorage({ "https://dapp.example": [] }),
+      newValue: dAppsStorage({ "https://dapp.example": ["QAccount"] }),
+    });
+
+    expect(stream.write).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      method: "qrlWallet_accountsChanged",
+      params: [],
+    });
+  });
+
+  it("stays silent for an unchanged origin while locked (F8)", () => {
+    setWalletLockedForDAppNotifications(true);
+    const stream = register("https://dapp.example");
+    const accounts = ["QAccount"];
+
+    notifyDAppAccountsChanged({
+      oldValue: dAppsStorage({ "https://dapp.example": accounts }),
+      newValue: dAppsStorage({ "https://dapp.example": accounts }),
+    });
+
+    expect(stream.write).not.toHaveBeenCalled();
+  });
+});
+
+describe("dApp account notifications lock mirror", () => {
+  const cleanups: Array<() => void> = [];
+
+  afterEach(() => {
+    cleanups.splice(0).forEach((cleanup) => cleanup());
+    setWalletLockedForDAppNotifications(false);
+  });
+
+  it("starts out locked so a fresh worker never leaks accounts (F8)", async () => {
+    // A freshly evaluated module has no keys in memory. Re-import it to
+    // observe the state the service worker starts in.
+    vi.resetModules();
+    const fresh = await import("./dAppAccountNotifications");
+    const stream = { write: vi.fn() };
+    cleanups.push(
+      fresh.registerDAppAccountNotificationStream(
+        { origin: "https://dapp.example" },
+        stream,
+      ),
+    );
+
+    fresh.notifyDAppAccountsChanged({
+      oldValue: dAppsStorage({}),
+      newValue: dAppsStorage({ "https://dapp.example": ["QAccount"] }),
+    });
+
+    expect(stream.write).toHaveBeenCalledWith(
+      expect.objectContaining({ params: [] }),
+    );
+  });
+});
+
+describe("dApp account notifications on lock transitions (L-6)", () => {
+  const cleanups: Array<() => void> = [];
+  const ORIGIN = "https://dapp.example";
+
+  beforeEach(() => {
+    setWalletLockedForDAppNotifications(false);
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    cleanups.splice(0).forEach((cleanup) => cleanup());
+    setWalletLockedForDAppNotifications(false);
+  });
+
+  const register = () => {
+    const stream = { write: vi.fn() };
+    cleanups.push(
+      registerDAppAccountNotificationStream({ origin: ORIGIN }, stream),
+    );
+    return stream;
+  };
+
+  it("takes the accounts away from a connected page when the wallet locks", async () => {
+    const stream = register();
+
+    setWalletLockedForDAppNotifications(true);
+
+    await vi.waitFor(() => {
+      expect(stream.write).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: "qrlWallet_accountsChanged",
+          params: [],
+        }),
+      );
+    });
+  });
+
+  it("hands the granted accounts back when the wallet unlocks", async () => {
+    setWalletLockedForDAppNotifications(true);
+    const stream = register();
+    vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
+      urlOrigin: ORIGIN,
+      accounts: ["QAccount"],
+      blockchains: [],
+      permissions: [],
+    } as never);
+
+    setWalletLockedForDAppNotifications(false);
+
+    await vi.waitFor(() => {
+      expect(stream.write).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: "qrlWallet_accountsChanged",
+          params: ["QAccount"],
+        }),
+      );
+    });
+  });
+
+  it("emits nothing when the lock state is set to what it already was", async () => {
+    const stream = register();
+
+    setWalletLockedForDAppNotifications(false);
+    await Promise.resolve();
+
+    expect(stream.write).not.toHaveBeenCalled();
+  });
+
+  it("treats an unreadable grant as no accounts on unlock", async () => {
+    setWalletLockedForDAppNotifications(true);
+    const stream = register();
+    vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockRejectedValue(
+      new Error("storage unavailable"),
+    );
+
+    setWalletLockedForDAppNotifications(false);
+
+    await vi.waitFor(() => {
+      expect(stream.write).toHaveBeenCalledWith(
+        expect.objectContaining({ params: [] }),
+      );
+    });
+  });
+});
+
+describe("dApp chain-change notifications", () => {
+  const cleanups: Array<() => void> = [];
+
+  afterEach(() => {
+    cleanups.splice(0).forEach((cleanup) => cleanup());
+  });
+
+  const register = (origin: string) => {
+    const stream = { write: vi.fn() };
+    cleanups.push(registerDAppAccountNotificationStream({ origin }, stream));
+    return stream;
+  };
+
+  const chainStorage = (activeChainId: unknown) => ({
+    ACTIVE_BLOCKCHAIN: activeChainId,
+    ALL_BLOCKCHAINS: [{ chainId: "0x301825" }, { chainId: "0x539" }],
+  });
+
+  it("tells every connected page that the active chain moved", () => {
+    const alpha = register("https://alpha.example/path");
+    const beta = register("https://beta.example/path");
+
+    notifyDAppChainChanged({
+      oldValue: chainStorage("0x539"),
+      newValue: chainStorage("0x301825"),
+    });
+
+    const notification = {
+      jsonrpc: "2.0",
+      method: "qrlWallet_chainChanged",
+      params: { chainId: "0x301825", networkVersion: "3151909" },
+    };
+    expect(alpha.write).toHaveBeenCalledWith(notification);
+    expect(beta.write).toHaveBeenCalledWith(notification);
+  });
+
+  it("says nothing when the active chain is unchanged", () => {
+    const stream = register("https://dapp.example");
+
+    notifyDAppChainChanged({
+      oldValue: chainStorage("0x301825"),
+      newValue: chainStorage("0X301825"),
+    });
+
+    expect(stream.write).not.toHaveBeenCalled();
+  });
+
+  it("says nothing for a write that carries no active chain", () => {
+    const stream = register("https://dapp.example");
+
+    notifyDAppChainChanged({
+      oldValue: chainStorage("0x539"),
+      newValue: { ALL_BLOCKCHAINS: [] },
+    });
+    notifyDAppChainChanged(undefined);
+
+    expect(stream.write).not.toHaveBeenCalled();
+  });
+
+  it("says nothing when two unusable ids resolve to the same chain", () => {
+    const stream = register("https://dapp.example");
+
+    // Both name no known chain, so both resolve to the built-in default
+    // and the active chain has not actually moved.
+    notifyDAppChainChanged({
+      oldValue: { ...chainStorage("not-a-chain-id") },
+      newValue: { ...chainStorage("0xdeadbe") },
+    });
+
+    expect(stream.write).not.toHaveBeenCalled();
+  });
+
+  it("resolves the active chain the way a page reload would", () => {
+    const stream = register("https://dapp.example");
+
+    // StorageUtil.getActiveBlockChain falls back to the built-in default
+    // when the stored id names no chain in the list. Broadcasting the raw
+    // string would have claimed one chain while the next page load
+    // reported another.
+    notifyDAppChainChanged({
+      oldValue: chainStorage("0x539"),
+      newValue: {
+        ACTIVE_BLOCKCHAIN: "0xdeadbe",
+        ALL_BLOCKCHAINS: [{ chainId: "0x301825" }, { chainId: "0x539" }],
+      },
+    });
+
+    expect(stream.write).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      method: "qrlWallet_chainChanged",
+      params: { chainId: "0x301825", networkVersion: "3151909" },
+    });
   });
 });

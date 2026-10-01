@@ -32,6 +32,8 @@ vi.mock("@/utilities/storageUtil", () => ({
 vi.mock("@/services/assetDiscovery", () => ({
   discoverTokens: vi.fn(async () => []),
   discoverNftCollections: vi.fn(async () => []),
+  MAX_DISCOVERED_TOKENS: 50,
+  MAX_DISCOVERED_COLLECTIONS: 50,
 }));
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/ActiveAccountDisplay",

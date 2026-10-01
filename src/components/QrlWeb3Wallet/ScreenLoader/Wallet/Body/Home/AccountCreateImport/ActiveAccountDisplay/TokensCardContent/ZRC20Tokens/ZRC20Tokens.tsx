@@ -2,6 +2,7 @@ import { useStore } from "@/stores/store";
 import StorageUtil from "@/utilities/storageUtil";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import ZRC20Token from "./ZRC20Token/ZRC20Token";
 import { ZRC_20_ITEMS_DISPLAY_LIMIT } from "@/constants/zrc20Token";
 import { TokenContractType } from "@/scripts/middlewares/middlewareTypes";
@@ -16,6 +17,7 @@ type ZRC20TokensProps = {
 
 const ZRC20Tokens = observer(
   ({ shouldDisplayAllTokens = false, onCountChange }: ZRC20TokensProps) => {
+    const { t } = useTranslation();
     const { qrlStore } = useStore();
     const { activeAccount, qrlConnection } = qrlStore;
     const { accountAddress } = activeAccount;
@@ -45,19 +47,22 @@ const ZRC20Tokens = observer(
     };
 
     if (shouldDisplayAllTokens && !numberOfTokens) {
-      return <div>There are no tokens.</div>;
+      return <div>{t("tokens.empty")}</div>;
     }
 
     return (
       <>
-        {tokenContractsList.slice(0, displayLimit).map(({ address, image }) => (
-          <ZRC20Token
-            key={address}
-            contractAddress={address}
-            tokenImage={image}
-            triggerReRender={triggerReRender}
-          />
-        ))}
+        {tokenContractsList
+          .slice(0, displayLimit)
+          .map(({ address, image, symbol }) => (
+            <ZRC20Token
+              key={address}
+              contractAddress={address}
+              tokenImage={image}
+              storedSymbol={symbol}
+              triggerReRender={triggerReRender}
+            />
+          ))}
       </>
     );
   },

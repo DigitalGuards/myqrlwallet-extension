@@ -13,6 +13,7 @@ import withSuspense from "@/functions/withSuspense";
 import { useStore } from "@/stores/store";
 import { zodResolver } from "@hookform/resolvers/zod";
 import Web3, { Web3BaseWalletAccount } from "@theqrl/web3";
+import type { TFunction } from "i18next";
 import { Download, Loader } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { lazy } from "react";
@@ -27,9 +28,10 @@ const MnemonicWordListing = withSuspense(
   ),
 );
 
-const FormSchema = z.object({
-  mnemonicPhrases: z.string().min(1, "Mnemonic phrases are required"),
-});
+const createFormSchema = (t: TFunction) =>
+  z.object({
+    mnemonicPhrases: z.string().min(1, t("validation.mnemonicRequired")),
+  });
 
 interface ImportMnemonicFormProps {
   onImported: (account: Web3BaseWalletAccount) => Promise<void>;
@@ -40,6 +42,8 @@ const ImportMnemonicForm = observer(
     const { t } = useTranslation();
     const { qrlStore } = useStore();
     const { qrlInstance } = qrlStore;
+
+    const FormSchema = createFormSchema(t);
 
     const form = useForm<z.infer<typeof FormSchema>>({
       resolver: zodResolver(FormSchema),
@@ -93,8 +97,14 @@ const ImportMnemonicForm = observer(
                   <FormControl>
                     <Input
                       {...field}
+                      id="mnemonicPhrases"
                       aria-label={field.name}
+                      // Secret material: never offered to autofill or to a
+                      // password manager, and never corrected on entry.
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
                       disabled={isSubmitting}
                       placeholder={t("mnemonic.phrases")}
                     />

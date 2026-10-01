@@ -37,7 +37,7 @@ describe("ContactItem", () => {
       <ContactItem contact={contact} onEdit={onEdit} onDelete={vi.fn()} />,
     );
 
-    await userEvent.click(screen.getByLabelText("Edit contact"));
+    await userEvent.click(screen.getByLabelText("Edit"));
     expect(onEdit).toHaveBeenCalledWith(contact);
   });
 
@@ -47,7 +47,7 @@ describe("ContactItem", () => {
       <ContactItem contact={contact} onEdit={vi.fn()} onDelete={onDelete} />,
     );
 
-    await userEvent.click(screen.getByLabelText("Delete contact"));
+    await userEvent.click(screen.getByLabelText("Delete"));
     expect(onDelete).toHaveBeenCalledWith(contact.address);
   });
 });

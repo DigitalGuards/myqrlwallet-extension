@@ -93,7 +93,7 @@ describe("ContactsPage", () => {
       }),
     );
 
-    await userEvent.click(screen.getByLabelText("Edit contact"));
+    await userEvent.click(screen.getByLabelText("Edit"));
 
     expect(screen.getByPlaceholderText("Contact name")).toHaveValue("Alice");
   });
@@ -114,7 +114,7 @@ describe("ContactsPage", () => {
       }),
     );
 
-    await userEvent.click(screen.getByLabelText("Delete contact"));
+    await userEvent.click(screen.getByLabelText("Delete"));
 
     expect(removeContact).toHaveBeenCalledWith(ALICE_ADDRESS);
   });
@@ -173,7 +173,7 @@ describe("ContactsPage", () => {
       }),
     );
 
-    await userEvent.click(screen.getByLabelText("Edit contact"));
+    await userEvent.click(screen.getByLabelText("Edit"));
 
     const nameInput = screen.getByPlaceholderText("Contact name");
     await userEvent.clear(nameInput);

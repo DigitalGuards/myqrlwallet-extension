@@ -1,10 +1,5 @@
 import { Button } from "@/components/UI/Button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/UI/Card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { ROUTES } from "@/router/router";
 import { Separator } from "@/components/UI/Separator";
 import StorageUtil from "@/utilities/storageUtil";
@@ -63,11 +58,17 @@ const SettingsData = observer(() => {
         <Card className="w-full">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <MoveLeft
-                className="cursor-pointer transition-all hover:text-secondary"
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8 shrink-0 transition-all hover:text-secondary"
+                aria-label={t("common.back")}
                 onClick={() => navigate(ROUTES.SETTINGS)}
                 data-testid="back-arrow"
-              />
+              >
+                <MoveLeft />
+              </Button>
               {t("settings.data.title")}
             </CardTitle>
           </CardHeader>
@@ -82,7 +83,9 @@ const SettingsData = observer(() => {
               disabled={exporting}
             >
               <Download className="mr-1 h-3.5 w-3.5" />
-              {exporting ? t("settings.data.exportingButton") : t("settings.data.exportButton")}
+              {exporting
+                ? t("settings.data.exportingButton")
+                : t("settings.data.exportButton")}
             </Button>
             <Separator className="my-5" />
             <p className="mb-3 text-xs text-muted-foreground">

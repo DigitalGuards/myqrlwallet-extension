@@ -51,4 +51,31 @@ describe("AccountId", () => {
     expect(screen.getByText(address)).toHaveClass("sr-only");
     expect(screen.getByTitle(address)).toBeInTheDocument();
   });
+  it("shows the new account's balance immediately when the prop changes", () => {
+    const balances: Record<string, string> = {
+      Q20fB08fF1f1376A14C055E9F56df80563E16722b: "10.0 QRL",
+      Q20B714091cF2a62DADda2847803e3f1B9D2D3779: "42.0 QRL",
+    };
+    const store = mockedStore({
+      qrlStore: {
+        getAccountBalance: (account: string) => balances[account] ?? "0.0 QRL",
+      },
+    });
+    const view = renderComponent(store);
+    expect(screen.getByText("10.00 QRL")).toBeInTheDocument();
+
+    // The element is reused across the switch (no key), and the balance
+    // used to be mirrored into state by an effect that did not depend on
+    // `account`, so the previous account's balance stayed on screen.
+    view.rerender(
+      <StoreProvider value={store}>
+        <MemoryRouter>
+          <AccountId account="Q20B714091cF2a62DADda2847803e3f1B9D2D3779" />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    expect(screen.getByText("42.00 QRL")).toBeInTheDocument();
+    expect(screen.queryByText("10.00 QRL")).not.toBeInTheDocument();
+  });
 });

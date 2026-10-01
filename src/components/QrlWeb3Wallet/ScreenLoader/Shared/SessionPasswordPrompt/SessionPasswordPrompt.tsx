@@ -137,6 +137,7 @@ const SessionPasswordPrompt = observer(
                   <FormControl>
                     <Input
                       {...field}
+                      id="sessionUnlockPassword"
                       aria-label={t("lock.unlock.passwordPlaceholder")}
                       autoComplete="current-password"
                       disabled={isSubmitting || isWaiting}

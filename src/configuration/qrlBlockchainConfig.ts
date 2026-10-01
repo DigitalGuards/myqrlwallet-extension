@@ -31,6 +31,9 @@ export type BlockchainAdditionalDataType = {
   defaultBlockExplorerUrl: string;
   defaultIconUrl: string;
   isTestnet: boolean;
+  // Retained so stored chain records and the wallet_addQRLChain internal-keys
+  // allowlist keep their shape. The wallet no longer issues any request to
+  // this URL.
   defaultWsRpcUrl: string;
   isCustomChain: boolean;
   qrnsRegistryAddress?: string;
@@ -46,7 +49,7 @@ export const QRL_BLOCKCHAINS: BlockchainDataType[] = [
     defaultBlockExplorerUrl: QRL_TESTNET_DATA.blockExplorerUrls[0],
     defaultIconUrl: QRL_TESTNET_DATA.iconUrls[0],
     isTestnet: true,
-    defaultWsRpcUrl: "http://localhost:3000",
+    defaultWsRpcUrl: "",
     isCustomChain: false,
   },
 ];

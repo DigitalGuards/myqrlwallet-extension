@@ -1,9 +1,5 @@
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/UI/Card";
+import { Button } from "@/components/UI/Button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { Label } from "@/components/UI/Label";
 import {
   Select,
@@ -55,11 +51,17 @@ const SettingsPreferences = observer(() => {
         <Card className="w-full">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <MoveLeft
-                className="cursor-pointer transition-all hover:text-secondary"
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8 shrink-0 transition-all hover:text-secondary"
+                aria-label={t("common.back")}
                 onClick={() => navigate(ROUTES.SETTINGS)}
                 data-testid="back-arrow"
-              />
+              >
+                <MoveLeft />
+              </Button>
               {t("settings.preferences.title")}
             </CardTitle>
           </CardHeader>
@@ -68,8 +70,14 @@ const SettingsPreferences = observer(() => {
               <Label className="mb-2 block text-xs text-muted-foreground">
                 {t("settings.preferences.currencyLabel")}
               </Label>
-              <Select value={currency} onValueChange={setCurrency}>
-                <SelectTrigger aria-label="Display currency">
+              <Select
+                name="displayCurrency"
+                value={currency}
+                onValueChange={setCurrency}
+              >
+                <SelectTrigger
+                  aria-label={t("settings.preferences.currencyLabel")}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -86,8 +94,14 @@ const SettingsPreferences = observer(() => {
               <Label className="mb-2 block text-xs text-muted-foreground">
                 {t("settings.preferences.languageLabel")}
               </Label>
-              <Select value={language} onValueChange={setLanguage}>
-                <SelectTrigger aria-label="Language">
+              <Select
+                name="displayLanguage"
+                value={language}
+                onValueChange={setLanguage}
+              >
+                <SelectTrigger
+                  aria-label={t("settings.preferences.languageLabel")}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -105,10 +119,11 @@ const SettingsPreferences = observer(() => {
                 {t("settings.preferences.gasLabel")}
               </Label>
               <Select
+                name="defaultGasTier"
                 value={defaultGasTier}
                 onValueChange={(v) => setDefaultGasTier(v as GasTier)}
               >
-                <SelectTrigger aria-label="Default gas fee">
+                <SelectTrigger aria-label={t("settings.preferences.gasLabel")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

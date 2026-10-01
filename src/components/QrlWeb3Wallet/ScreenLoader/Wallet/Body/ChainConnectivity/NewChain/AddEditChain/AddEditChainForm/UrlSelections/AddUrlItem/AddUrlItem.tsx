@@ -24,6 +24,7 @@ import {
   TooltipTrigger,
 } from "@/components/UI/Tooltip";
 import { zodResolver } from "@hookform/resolvers/zod";
+import type { TFunction } from "i18next";
 import { Plus, X } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -34,13 +35,19 @@ type AddUrlItemProps = {
   addUrl: (url: string) => void;
 };
 
-const FormSchema = z.object({
-  url: z.string().min(1, "URL is required").url("Invalid URL"),
-});
+const createFormSchema = (t: TFunction) =>
+  z.object({
+    url: z
+      .string()
+      .min(1, t("validation.urlRequired"))
+      .url(t("validation.urlInvalid")),
+  });
 
 const AddUrlItem = ({ addUrl }: AddUrlItemProps) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+
+  const FormSchema = createFormSchema(t);
 
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
@@ -65,7 +72,7 @@ const AddUrlItem = ({ addUrl }: AddUrlItemProps) => {
 
   return (
     <div className="flex justify-between gap-2">
-      <div>{t('chain.addUrlDescription')}</div>
+      <div>{t("chain.addUrlDescription")}</div>
       <Form {...form}>
         <form name="addUrlItemForm" aria-label="addUrlItemForm">
           <Dialog open={open} onOpenChange={setOpen}>
@@ -77,7 +84,7 @@ const AddUrlItem = ({ addUrl }: AddUrlItemProps) => {
                     variant="outline"
                     size="icon"
                     type="button"
-                    aria-label={t('chain.addUrl')}
+                    aria-label={t("chain.addUrl")}
                     onClick={() => {
                       setOpen(true);
                     }}
@@ -87,12 +94,12 @@ const AddUrlItem = ({ addUrl }: AddUrlItemProps) => {
                 </DialogTrigger>
               </TooltipTrigger>
               <TooltipContent side="left">
-                <Label>{t('chain.addUrl')}</Label>
+                <Label>{t("chain.addUrl")}</Label>
               </TooltipContent>
             </Tooltip>
             <DialogContent className="w-80 rounded-md">
               <DialogHeader className="text-left">
-                <DialogTitle>{t('chain.addUrl')}</DialogTitle>
+                <DialogTitle>{t("chain.addUrl")}</DialogTitle>
               </DialogHeader>
               <FormField
                 control={control}
@@ -110,7 +117,7 @@ const AddUrlItem = ({ addUrl }: AddUrlItemProps) => {
                         type="text"
                       />
                     </FormControl>
-                    <FormDescription>{t('chain.enterUrl')}</FormDescription>
+                    <FormDescription>{t("chain.enterUrl")}</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -121,21 +128,21 @@ const AddUrlItem = ({ addUrl }: AddUrlItemProps) => {
                     className="w-full"
                     type="button"
                     variant="outline"
-                    aria-label={t('common.cancel')}
+                    aria-label={t("common.cancel")}
                   >
                     <X className="mr-2 h-4 w-4" />
-                    {t('common.cancel')}
+                    {t("common.cancel")}
                   </Button>
                 </DialogClose>
                 <Button
                   className="w-full"
                   type="button"
                   disabled={isSubmitting || !isValid}
-                  aria-label={t('common.add')}
+                  aria-label={t("common.add")}
                   onClick={handleSubmit(onSubmit)}
                 >
                   <Plus className="mr-2 h-4 w-4" />
-                  {t('common.add')}
+                  {t("common.add")}
                 </Button>
               </DialogFooter>
             </DialogContent>

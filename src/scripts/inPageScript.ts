@@ -1,12 +1,17 @@
 import { WindowPostMessageStream } from "@theqrl/qrl-wallet-provider/post-message-stream";
-import { initializeProvider } from "@theqrl/qrl-wallet-provider/providers";
-import log from "loglevel";
+import {
+  eip6963AnnounceProvider,
+  QrlWalletInpageProvider,
+  type BaseProvider,
+} from "@theqrl/qrl-wallet-provider/providers";
 import { v4 as uuid } from "uuid";
+import { providerLogger } from "./utils/providerLogger";
 import {
   QRL_POST_MESSAGE_STREAM,
   QRL_WALLET_PROVIDER_NAME,
   QRL_WEB3_WALLET_PROVIDER_INFO,
 } from "./constants/streamConstants";
+import { withBoundMethods } from "./utils/boundProvider";
 
 const initializeInPageScript = () => {
   try {
@@ -15,16 +20,24 @@ const initializeInPageScript = () => {
       target: QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT,
     });
 
-    initializeProvider({
-      connectionStream: qrlStream,
+    // Built and announced here, in place of the package's own
+    // initializeProvider, which announces a Proxy whose methods come back
+    // unbound. See withBoundMethods. Everything else initializeProvider
+    // did is these three lines.
+    const provider = new QrlWalletInpageProvider(qrlStream, {
       jsonRpcStreamName: QRL_WALLET_PROVIDER_NAME,
-      logger: log,
-      providerInfo: {
+      logger: providerLogger,
+      maxEventListeners: 100,
+    });
+
+    eip6963AnnounceProvider({
+      info: {
         uuid: uuid(),
         name: QRL_WEB3_WALLET_PROVIDER_INFO.NAME,
         icon: QRL_WEB3_WALLET_PROVIDER_INFO.ICON,
         rdns: QRL_WEB3_WALLET_PROVIDER_INFO.RDNS,
       },
+      provider: withBoundMethods(provider) as unknown as BaseProvider,
     });
   } catch (error) {
     console.warn(
