@@ -1,5 +1,9 @@
 import StorageUtil from "@/utilities/storageUtil";
 import {
+  providerNetworkIdentity,
+  type ProviderNetworkIdentity,
+} from "@/utilities/providerNetwork";
+import {
   assertV3Network,
   V3_CHAIN_ID,
   V3_GENESIS_HASH,
@@ -35,6 +39,23 @@ export const getQrlProperties = async () => {
   const qrlHttpProvider = new Web3.providers.HttpProvider(defaultRpcUrl);
   const { provider, qrl } = new Web3({ provider: qrlHttpProvider });
   return { provider, qrl };
+};
+
+/**
+ * Last resort for the provider state when the stored chain id cannot be
+ * read as a number.
+ *
+ * Only a malformed stored chain reaches this, since the built-in default
+ * always carries a valid id and the add-chain path validates the field. It
+ * is kept so a corrupted entry still produces real numbers where the node
+ * can supply them.
+ */
+const networkIdentityFromNode = async (
+  qrl: Awaited<ReturnType<typeof getQrlProperties>>["qrl"],
+): Promise<ProviderNetworkIdentity> => {
+  const chainId = await qrl.getChainId();
+  const networkVersion = (await qrl.net.getId())?.toString() ?? "";
+  return { chainId: `0x${chainId.toString(16)}`, networkVersion };
 };
 
 export const executeUnrestrictedMethod = async (
@@ -80,9 +101,23 @@ export const executeUnrestrictedMethod = async (
     method === UNRESTRICTED_METHODS.QRL_WEB3_WALLET_GET_PROVIDER_STATE
   ) {
     const urlOrigin = new URL(req?.senderData?.url ?? "").origin;
-    const chainId = await qrl.getChainId();
-    const networkVersion = (await qrl?.net.getId())?.toString() ?? "";
-    // Read accounts after the network calls so a revoke that arrives while
+    // Served from the stored active chain, with no RPC round trip.
+    //
+    // These were two live calls to the node. Every page load injects the
+    // provider, which asks for this state, so an unreachable node made
+    // every website log "QrlWallet - RPC Error" followed by
+    // "QrlWallet: Failed to get initial state. Please report this bug.",
+    // upstream MetaMask wording for what is a transient network failure
+    // here. Worse, the provider then initialized with a null chainId and
+    // stayed dead until the page was reloaded, even once the node came
+    // back. The stored chain already carries the id and net_version is its
+    // decimal, so the node is only consulted when the stored id is
+    // unusable.
+    const activeChain = await StorageUtil.getActiveBlockChain();
+    const storedIdentity = providerNetworkIdentity(activeChain.chainId);
+    const { chainId, networkVersion } =
+      storedIdentity ?? (await networkIdentityFromNode(qrl));
+    // Read accounts after the network identity so a revoke that arrives while
     // provider initialization is pending cannot be overwritten by a stale
     // initial-state response.
     const connectedAccountsData =
@@ -95,7 +130,7 @@ export const executeUnrestrictedMethod = async (
     // list cannot act on it; this is a disclosure fix.
     const { isLocked } = await LockManager.isLocked();
     return {
-      chainId: `0x${chainId.toString(16)}`,
+      chainId,
       networkVersion,
       isUnlocked: !isLocked,
       accounts: isLocked ? [] : (connectedAccountsData?.accounts ?? []),

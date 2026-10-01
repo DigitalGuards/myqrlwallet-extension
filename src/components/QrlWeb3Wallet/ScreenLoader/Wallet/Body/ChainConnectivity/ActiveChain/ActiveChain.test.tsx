@@ -4,6 +4,7 @@ import { ROUTES } from "@/router/router";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import ActiveChain from "./ActiveChain";
 
@@ -41,5 +42,64 @@ describe("ActiveChain", () => {
     expect(link).toHaveAttribute("href", ROUTES.ADD_EDIT_CHAIN);
     const editChainButton = screen.getByRole("button", { name: "Edit chain" });
     expect(editChainButton).toBeInTheDocument();
+  });
+
+  it("offers no retry control on a healthy chain", () => {
+    renderComponent();
+
+    expect(
+      screen.queryByRole("button", { name: "Retry connection" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers a retry control once the node stops answering", async () => {
+    const probeConnectionNow = vi
+      .fn()
+      .mockResolvedValue({ probed: true, isConnected: false });
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          probeConnectionNow,
+          qrlConnection: { isConnected: false, isLoading: false },
+        },
+      }),
+    );
+
+    expect(screen.getByText("The node is not answering")).toBeInTheDocument();
+    const retry = screen.getByRole("button", { name: "Retry connection" });
+    await userEvent.click(retry);
+
+    expect(probeConnectionNow).toHaveBeenCalledWith({ manual: true });
+  });
+
+  it("offers a retry control when the dot is green over stale balances", async () => {
+    // net_listening answered while the balance reads kept failing, so the
+    // card shows a healthy chain over numbers nobody has confirmed. That
+    // is exactly the state someone would want to retry out of.
+    const probeConnectionNow = vi
+      .fn()
+      .mockResolvedValue({ probed: true, isConnected: true });
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          probeConnectionNow,
+          qrlConnection: {
+            isConnected: true,
+            isLoading: false,
+            areBalancesStale: true,
+          },
+        },
+      }),
+    );
+
+    expect(screen.getByText("Balances may be out of date")).toBeInTheDocument();
+    expect(
+      screen.queryByText("The node is not answering"),
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Retry connection" }),
+    );
+
+    expect(probeConnectionNow).toHaveBeenCalledWith({ manual: true });
   });
 });

@@ -1,3 +1,4 @@
+import { profileStorageKey } from "@/utilities/profileStorage";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -21,11 +22,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   mockOnMessageAddListener,
   mockOnConnectAddListener,
+  mockOnStorageChangedAddListener,
+  mockNotifyDAppAccountsChanged,
+  mockNotifyDAppChainChanged,
   mockLockManagerListener,
   mockInitializeContentScriptProviderConnection,
 } = vi.hoisted(() => ({
   mockOnMessageAddListener: vi.fn(),
   mockOnConnectAddListener: vi.fn(),
+  mockOnStorageChangedAddListener: vi.fn(),
+  mockNotifyDAppAccountsChanged: vi.fn(),
+  mockNotifyDAppChainChanged: vi.fn(),
   mockLockManagerListener: vi.fn().mockResolvedValue({ success: true }),
   mockInitializeContentScriptProviderConnection: vi
     .fn()
@@ -41,7 +48,7 @@ vi.mock("webextension-polyfill", () => ({
       clear: vi.fn().mockResolvedValue(true),
     },
     storage: {
-      onChanged: { addListener: vi.fn() },
+      onChanged: { addListener: mockOnStorageChangedAddListener },
       local: { get: vi.fn().mockResolvedValue({}) },
     },
     runtime: {
@@ -106,7 +113,8 @@ vi.mock("./utils/sidePanelSurface", () => ({
 }));
 
 vi.mock("./utils/dAppAccountNotifications", () => ({
-  notifyDAppAccountsChanged: vi.fn(),
+  notifyDAppAccountsChanged: mockNotifyDAppAccountsChanged,
+  notifyDAppChainChanged: mockNotifyDAppChainChanged,
   registerDAppAccountNotificationStream: vi.fn(() => () => {}),
   resolveTrustedSenderOrigin: vi.fn(),
 }));
@@ -137,6 +145,27 @@ describe("serviceWorker listener registration survives a stuck async init", () =
     // and two onConnect listeners (content script, lock manager port).
     expect(mockOnMessageAddListener).toHaveBeenCalledTimes(2);
     expect(mockOnConnectAddListener).toHaveBeenCalledTimes(2);
+  });
+
+  it("forwards a local storage change to both dApp notifiers", async () => {
+    await import("./serviceWorker");
+    const listener = mockOnStorageChangedAddListener.mock.calls[0]?.[0];
+    expect(listener).toBeTypeOf("function");
+
+    const dappsChange = { oldValue: {}, newValue: {} };
+    const chainChange = { oldValue: {}, newValue: {} };
+    await listener(
+      {
+        [profileStorageKey("DAPPS")]: dappsChange,
+        [profileStorageKey("BLOCKCHAINS")]: chainChange,
+      },
+      "local",
+    );
+
+    expect(mockNotifyDAppAccountsChanged).toHaveBeenCalledWith(dappsChange);
+    // Without this a page open across a network switch kept the chain id
+    // it was injected with until someone reloaded it.
+    expect(mockNotifyDAppChainChanged).toHaveBeenCalledWith(chainChange);
   });
 
   it("a message dispatched before init resolves is still handled by lockManagerListener", async () => {

@@ -62,6 +62,22 @@ export function feeUnavailableProviderError() {
 }
 
 /**
+ * The dApp's answer when an approval finished without producing anything.
+ *
+ * Approve used to be enabled on its own schedule while the surface's
+ * signing callback was registered on another, so a screen whose callback
+ * never arrived ran the store's no-op default and the page received a
+ * success carrying no signature and no hash. An approval that produced
+ * nothing is a failure, and it says so.
+ */
+export function approvalProducedNothingProviderError() {
+  return rpcErrors.internal({
+    message:
+      "The wallet approved this request but produced no result. Try again from the site.",
+  });
+}
+
+/**
  * Turns a caught error into user-facing copy. The wallet-locked guard above
  * and Chrome's transient connection-drop errors each get their own
  * friendly, translated message (L4, R1); any other Error surfaces its own

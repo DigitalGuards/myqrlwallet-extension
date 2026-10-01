@@ -113,6 +113,60 @@ describe("PersonalSign", () => {
     expect(sign).toHaveBeenCalledWith(unprefixedHex, expect.any(String));
   });
 
+  it("still registers its signing callback while the node is unreachable", async () => {
+    // Signing is local, and Approve was enabled whatever the connection
+    // was doing. Registering the callback only while connected therefore
+    // left the store's no-op default to answer the dApp with an empty
+    // success during an outage.
+    const signerAddress = toChecksumAddress(`Q${"a".repeat(128)}`);
+    const sign = vi.fn(() => ({ signature: "0xsig" }));
+    let capturedPermissionCallback:
+      | ((hasApproved: boolean, record: ResponseRecorder) => Promise<void>)
+      | null = null;
+    const recorded: Record<string, unknown>[] = [];
+
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          qrlConnection: { isConnected: false, isLoading: false },
+          qrlInstance: {
+            accounts: {
+              seedToAccount: () => ({ address: signerAddress }),
+              sign,
+            },
+          } as never,
+        },
+        dAppRequestStore: {
+          dAppRequestData: {
+            params: [message, signerAddress],
+          },
+          setOnPermissionCallBack: (
+            callback: (
+              hasApproved: boolean,
+              record: ResponseRecorder,
+            ) => Promise<void>,
+          ) => {
+            capturedPermissionCallback = callback;
+          },
+        },
+      }),
+    );
+
+    expect(capturedPermissionCallback).not.toBeNull();
+    await act(async () => {
+      await capturedPermissionCallback!(true, (data) => {
+        recorded.push(data);
+      });
+    });
+
+    // The signing path ran and the approval answered with something. The
+    // fixture seed cannot produce a public key, so the answer here is an
+    // error; what matters is that an answer exists at all.
+    expect(sign).toHaveBeenCalled();
+    expect(recorded).toHaveLength(1);
+    expect(Object.keys(recorded[0] ?? {})).not.toHaveLength(0);
+  });
+
   it("should copy the message to clipboard", async () => {
     renderComponent(
       mockedStore({

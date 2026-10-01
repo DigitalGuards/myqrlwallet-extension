@@ -4,8 +4,8 @@ import {
   QrlWalletInpageProvider,
   type BaseProvider,
 } from "@theqrl/qrl-wallet-provider/providers";
-import log from "loglevel";
 import { v4 as uuid } from "uuid";
+import { providerLogger } from "./utils/providerLogger";
 import {
   QRL_POST_MESSAGE_STREAM,
   QRL_WALLET_PROVIDER_NAME,
@@ -26,7 +26,7 @@ const initializeInPageScript = () => {
     // did is these three lines.
     const provider = new QrlWalletInpageProvider(qrlStream, {
       jsonRpcStreamName: QRL_WALLET_PROVIDER_NAME,
-      logger: log,
+      logger: providerLogger,
       maxEventListeners: 100,
     });
 

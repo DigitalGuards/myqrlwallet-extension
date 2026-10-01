@@ -13,6 +13,7 @@ import { Pencil } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import RetryConnection from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/RetryConnection/RetryConnection";
 import ChainIcon from "../ChainIcon/ChainIcon";
 
 const connectivityStatusClasses = cva("h-3 w-3 rounded-full", {
@@ -68,6 +69,13 @@ const ActiveChain = observer(() => {
               <span className="text-xm text-destructive">
                 {t("chain.balancesStale")}
               </span>
+            )}
+            {/* Stale balances count as unreachable here. A balance read
+                that times out while net_listening still answers leaves a
+                green dot over "Balances may be out of date", which is
+                exactly the state someone would want to retry out of. */}
+            {!isLoading && (!isConnected || areBalancesStale) && (
+              <RetryConnection className="mt-2" />
             )}
           </div>
         </div>
