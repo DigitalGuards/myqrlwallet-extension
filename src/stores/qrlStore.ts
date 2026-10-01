@@ -83,7 +83,7 @@ export const MAX_POLL_BACKOFF_MS = 300000;
 
 /** Ceiling on the backoff while a surface is visible. A wallet the user is
  *  looking at should never be more than a minute behind reality, so the
- *  doubling stops here instead of settling at the five-minute cap. */
+ *  doubling stops here, short of the five-minute cap. */
 export const VISIBLE_MAX_POLL_BACKOFF_MS = 60000;
 
 /** Minimum gap between two manual probes. Tracked apart from the automatic
@@ -98,7 +98,7 @@ export const MANUAL_PROBE_COOLDOWN_MS = 5000;
 export const BALANCE_READ_TIMEOUT_MS = 10000;
 
 /** Rejects when `work` outlives `timeoutMs`. The underlying request is not
- *  cancellable here, so it is abandoned rather than aborted; the caller
+ *  cancellable here, so it is abandoned in place; the caller
  *  treats the rejection as an unreachable node. */
 const withTimeout = <T>(work: Promise<T>, timeoutMs: number): Promise<T> =>
   new Promise<T>((resolve, reject) => {

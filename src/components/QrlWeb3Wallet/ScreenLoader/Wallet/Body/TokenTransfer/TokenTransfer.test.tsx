@@ -1361,7 +1361,7 @@ describe("TokenTransfer", () => {
       });
     });
 
-    it("uses the balance as it is now, not as it was on first paint", async () => {
+    it("uses the balance as it is at the moment Max is pressed", async () => {
       const balances = new ObservableBalances({ [ACCOUNT_A]: "10.0 Quanta" });
       renderComponent(
         mockedStore({

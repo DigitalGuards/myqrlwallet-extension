@@ -72,7 +72,7 @@ describe("RetryConnection", () => {
     const button = screen.getByRole("button", { name: /retry/i });
     await userEvent.click(button);
 
-    // Disabled rather than hidden, so the control does not flicker out
+    // Disabled and still mounted, so the control does not flicker out
     // from under the pointer.
     expect(button).toBeInTheDocument();
     expect(button).toBeDisabled();

@@ -4,8 +4,8 @@ import { makeAutoObservable, runInAction } from "mobx";
  * Stand-in for the store's balance reader in component tests.
  *
  * It mirrors the real one on the two points that matter: the account list
- * is observable, and the reader is a bound plain function rather than a
- * MobX action, so a read during render is tracked. A component that mirrors
+ * is observable, and the reader is a bound plain function outside MobX's
+ * action wrapper, so a read during render is tracked. A component that mirrors
  * the value into state, or that reads it only from an effect or a memo
  * whose dependency list leaves it out, keeps the old number here and fails.
  *

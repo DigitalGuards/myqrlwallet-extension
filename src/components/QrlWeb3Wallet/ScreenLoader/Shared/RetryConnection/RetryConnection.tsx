@@ -86,17 +86,15 @@ const RetryConnection = observer(({ className }: RetryConnectionProps) => {
         )}
         {t("chain.retryConnection")}
       </Button>
-      {/* Always mounted so the announcement is a text change inside a live
-          region rather than a region appearing, which some screen readers
-          miss. */}
+      {/* Always mounted, so the announcement is a text change inside a
+          live region. A region that only appears on settle is missed by
+          some screen readers. */}
       <span
         role="status"
         aria-live="polite"
         className={cn(
           "text-xm",
-          outcome === "unreachable" && !busy
-            ? "text-destructive"
-            : "sr-only",
+          outcome === "unreachable" && !busy ? "text-destructive" : "sr-only",
         )}
       >
         {message}

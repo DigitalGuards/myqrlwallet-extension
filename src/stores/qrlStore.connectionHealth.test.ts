@@ -260,8 +260,8 @@ describe("QrlStore connection health", () => {
     await flush();
     const callsDuringFirst = mockGetBalance.mock.calls.length;
 
-    // A second tick landing on top of the first must join it rather than
-    // start its own round of reads.
+    // A second tick landing on top of the first joins it, and starts no
+    // reads of its own.
     const second = store.pollBalancesAndConnection();
     await flush();
     expect(mockGetBalance.mock.calls.length).toBe(callsDuringFirst);
