@@ -1,0 +1,91 @@
+name: Chrome Web Store upload
+
+# Uploads the zip attached to a published GitHub release to the Chrome Web
+# Store as a new draft of the existing listing. The upload is the exact file
+# on the release, so the store gets byte for byte what GitHub shows.
+#
+# Credentials live in the protected `chrome-web-store` environment, which
+# requires the owner's approval for every run and is limited to `v*` tags.
+# A release run only uploads; submitting for review stays a manual click in
+# the developer dashboard unless a manual run sets `publish`.
+#
+# GitHub reads this file from the tagged commit, so it takes effect for
+# releases cut from a `main` that contains it.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag whose zip to upload (run this workflow from that tag)
+        required: true
+      publish:
+        description: Also submit the uploaded draft for review
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chrome-web-store
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    environment: chrome-web-store
+    env:
+      ITEM_ID: cafpjgccpmfjefdfeldlhgmgbmpibdgg
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      PUBLISH: ${{ inputs.publish || false }}
+    steps:
+      - name: Download the release zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in v*) ;; *) echo "::error::refusing non-release tag $TAG"; exit 1 ;; esac
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --pattern 'myqrlwallet-extension-*.zip' --dir dist
+          count=$(find dist -name '*.zip' | wc -l)
+          [ "$count" -eq 1 ] || { echo "::error::expected one extension zip on $TAG, found $count"; exit 1; }
+          zip=$(find dist -name '*.zip')
+          version=$(unzip -p "$zip" manifest.json | jq -r .version)
+          [ "v$version" = "$TAG" ] || { echo "::error::zip manifest version $version does not match $TAG"; exit 1; }
+          echo "ZIP=$zip" >> "$GITHUB_ENV"
+          echo "uploading $(basename "$zip") (version $version, sha256 $(sha256sum "$zip" | cut -c1-16))"
+
+      - name: Get an access token
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          token=$(curl -sS --fail-with-body https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=$CWS_CLIENT_ID" \
+            --data-urlencode "client_secret=$CWS_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$CWS_REFRESH_TOKEN" \
+            --data-urlencode "grant_type=refresh_token" | jq -r .access_token)
+          [ -n "$token" ] && [ "$token" != "null" ] || { echo "::error::token exchange failed"; exit 1; }
+          echo "::add-mask::$token"
+          echo "CWS_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Upload the draft
+        run: |
+          set -euo pipefail
+          response=$(curl -sS -X PUT "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$ITEM_ID" \
+            -H "Authorization: Bearer $CWS_TOKEN" -H "x-goog-api-version: 2" -T "$ZIP")
+          echo "$response" | jq '{uploadState, itemError}'
+          state=$(echo "$response" | jq -r .uploadState)
+          [ "$state" = "SUCCESS" ] || [ "$state" = "IN_PROGRESS" ] || { echo "::error::upload state $state"; exit 1; }
+
+      - name: Submit for review
+        if: env.PUBLISH == 'true'
+        run: |
+          set -euo pipefail
+          response=$(curl -sS -X POST "https://www.googleapis.com/chromewebstore/v1.1/items/$ITEM_ID/publish" \
+            -H "Authorization: Bearer $CWS_TOKEN" -H "x-goog-api-version: 2" -H "Content-Length: 0")
+          echo "$response" | jq '{status, statusDetail}'
+          echo "$response" | jq -e '.status | index("OK")' >/dev/null || { echo "::error::publish was not accepted"; exit 1; }

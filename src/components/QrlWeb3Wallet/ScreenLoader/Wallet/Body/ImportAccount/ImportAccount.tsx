@@ -125,6 +125,15 @@ const ImportAccount = observer(() => {
       );
       return;
     }
+    // Name it before the pointer moves, so the first render that shows this
+    // account already has a name for the header chip. Naming after
+    // activation left the chip nameless for two storage round trips.
+    // Never strand a persisted import on a naming failure: the header falls
+    // back to the account's position and syncLabels backstops the stored
+    // label later.
+    await accountLabelsStore
+      .ensureLabel(importedAccount.address)
+      .catch(() => {});
     // Pointer after the keystore: an account the wallet points at always has
     // a key behind it. Safe here because the wallet already has at least one
     // account, so the service worker never sees the keystores-without-
@@ -139,13 +148,6 @@ const ImportAccount = observer(() => {
       );
       return;
     }
-    // Name it now so the header reads "Account N" immediately rather than
-    // the raw address until some other screen happens to run syncLabels.
-    // Never strand a persisted import on a naming failure: syncLabels
-    // backstops the label later.
-    await accountLabelsStore
-      .ensureLabel(importedAccount.address)
-      .catch(() => {});
     pendingAccountRef.current = undefined;
     setNeedsReArm(false);
     setNeedsRetry(false);
