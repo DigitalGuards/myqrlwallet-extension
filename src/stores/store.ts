@@ -77,6 +77,39 @@ export function wireDataLifecycle(store: Store) {
     ),
   );
 
+  // The backoff recovers on its own clock, so a node that came back could
+  // sit unnoticed behind the remaining interval. A side panel stays open
+  // for hours, which is exactly where that was felt. Anything suggesting
+  // the answer just changed re-probes at once; the automatic schedule is
+  // untouched and still the primary path.
+  if (typeof window !== "undefined") {
+    const probeNow = () => {
+      void qrlStore.probeConnectionNow();
+    };
+    const probeIfUnreachable = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      const { isConnected, areBalancesStale } = qrlStore.qrlConnection;
+      // Stale balances count as unreachable. A balance read that gave up
+      // while net_listening still answered leaves the dot green over
+      // numbers nobody has confirmed, and that state recovered only on the
+      // automatic schedule.
+      if (isConnected && !areBalancesStale) return;
+      probeNow();
+    };
+    window.addEventListener("online", probeNow);
+    window.addEventListener("focus", probeIfUnreachable);
+    disposers.push(() => {
+      window.removeEventListener("online", probeNow);
+      window.removeEventListener("focus", probeIfUnreachable);
+    });
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", probeIfUnreachable);
+      disposers.push(() => {
+        document.removeEventListener("visibilitychange", probeIfUnreachable);
+      });
+    }
+  }
+
   // The price reaction waits on storage, so it is armed asynchronously. A
   // failed settings load must not take the wiring down with it: the load
   // resolves with defaults and this still runs.

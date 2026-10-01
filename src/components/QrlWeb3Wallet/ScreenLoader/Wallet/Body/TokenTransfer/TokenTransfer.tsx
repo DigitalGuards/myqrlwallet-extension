@@ -553,6 +553,12 @@ const TokenTransfer = observer(() => {
     tokenSymbol,
   ]);
 
+  // Read during render so the observer tracks it. Read inside the effect
+  // and the memo below instead, the balance guard and Max kept working off
+  // whatever the balance was when their dependencies last changed, which a
+  // poll or a confirmed send then left behind.
+  const nativeAccountBalance = getAccountBalance(accountAddress);
+
   const watchedAmount = watch("amount");
   useEffect(() => {
     if (!watchedAmount || !amountForDisplay(watchedAmount).gt(0)) {
@@ -561,7 +567,7 @@ const TokenTransfer = observer(() => {
     }
 
     const sendAmount = amountForDisplay(watchedAmount);
-    const nativeBalance = parseBalanceValue(getAccountBalance(accountAddress));
+    const nativeBalance = parseBalanceValue(nativeAccountBalance);
 
     if (isZrc20Token) {
       // Compared in base units: the display balance is rounded to four
@@ -618,6 +624,7 @@ const TokenTransfer = observer(() => {
     tokenDecimals,
     isZrc20Token,
     accountAddress,
+    nativeAccountBalance,
   ]);
 
   // Worst-case gas reserve for native transfers so the slider's Max can
@@ -658,7 +665,7 @@ const TokenTransfer = observer(() => {
       }
       return parseBalanceValue(tokenBalance);
     }
-    const balance = parseBalanceValue(getAccountBalance(accountAddress));
+    const balance = parseBalanceValue(nativeAccountBalance);
     const reserve = new BigNumber(nativeGasReserve || "0");
     const sendable = balance.minus(reserve);
     return sendable.gt(0) ? sendable : new BigNumber(0);
@@ -669,7 +676,7 @@ const TokenTransfer = observer(() => {
     tokenDecimals,
     accountAddress,
     nativeGasReserve,
-    getAccountBalance,
+    nativeAccountBalance,
   ]);
 
   const applyPercentage = (percentage: number) => {

@@ -16,6 +16,8 @@ const makeStores = (options?: {
   showBalanceAndPrice?: boolean;
   settingsLoad?: Promise<void>;
   isCacheStale?: boolean;
+  isConnected?: boolean;
+  areBalancesStale?: boolean;
 }) => {
   const lockStore = observable({ isLocked: options?.isLocked ?? true });
   const settingsStore = observable(
@@ -25,11 +27,23 @@ const makeStores = (options?: {
     },
     { whenSettingsLoaded: false },
   );
-  const qrlStore = {
-    qrlInstance: {} as unknown,
-    setPollingAllowed: vi.fn(),
-    pollBalancesAndConnection: vi.fn().mockResolvedValue(undefined),
-  };
+  const qrlStore = observable(
+    {
+      qrlInstance: {} as unknown,
+      qrlConnection: {
+        isConnected: options?.isConnected ?? false,
+        areBalancesStale: options?.areBalancesStale ?? false,
+      },
+      setPollingAllowed: vi.fn(),
+      pollBalancesAndConnection: vi.fn().mockResolvedValue(undefined),
+      probeConnectionNow: vi.fn().mockResolvedValue(true),
+    },
+    {
+      setPollingAllowed: false,
+      pollBalancesAndConnection: false,
+      probeConnectionNow: false,
+    },
+  );
   const priceStore = {
     isCacheStale: options?.isCacheStale ?? false,
     setRefreshEnabled: vi.fn(),
@@ -223,5 +237,75 @@ describe("data lifecycle wiring", () => {
 
     expect(qrlStore.setPollingAllowed).not.toHaveBeenCalled();
     expect(priceStore.setRefreshEnabled).not.toHaveBeenCalled();
+  });
+
+  describe("connection recovery", () => {
+    it("re-probes as soon as the browser is back online", async () => {
+      const { wire, qrlStore } = makeStores({ isConnected: false });
+      await wire();
+
+      window.dispatchEvent(new Event("online"));
+
+      expect(qrlStore.probeConnectionNow).toHaveBeenCalledTimes(1);
+    });
+
+    it("re-probes when a surface comes back to the front", async () => {
+      const { wire, qrlStore } = makeStores({ isConnected: false });
+      await wire();
+
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+
+      expect(qrlStore.probeConnectionNow).toHaveBeenCalledTimes(2);
+    });
+
+    it("re-probes a connection that is up but serving stale balances", async () => {
+      // A balance read that gave up while net_listening still answered
+      // leaves a green dot over numbers nobody has confirmed. That state
+      // recovered only on the automatic schedule.
+      const { wire, qrlStore } = makeStores({
+        isConnected: true,
+        areBalancesStale: true,
+      });
+      await wire();
+
+      window.dispatchEvent(new Event("focus"));
+
+      expect(qrlStore.probeConnectionNow).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves a hidden surface alone", async () => {
+      const { wire, qrlStore } = makeStores({ isConnected: false });
+      await wire();
+      const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+
+      expect(qrlStore.probeConnectionNow).not.toHaveBeenCalled();
+      hidden.mockRestore();
+    });
+
+    it("leaves a healthy connection alone when a surface is focused", async () => {
+      const { wire, qrlStore } = makeStores({ isConnected: true });
+      await wire();
+
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+
+      expect(qrlStore.probeConnectionNow).not.toHaveBeenCalled();
+    });
+
+    it("stops listening once disposed", async () => {
+      const { wire, qrlStore } = makeStores({ isConnected: false });
+      const dispose = await wire();
+      dispose();
+
+      window.dispatchEvent(new Event("online"));
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+
+      expect(qrlStore.probeConnectionNow).not.toHaveBeenCalled();
+    });
   });
 });

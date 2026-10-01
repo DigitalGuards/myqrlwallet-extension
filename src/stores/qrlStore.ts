@@ -55,6 +55,15 @@ export type OwnedNftTokensResult = {
   failed: boolean;
 };
 
+/** What a probe did and what it found. */
+export type ConnectionProbeResult = {
+  /** False when the call was skipped: already probing, inside the manual
+   *  cooldown, or no provider yet. `isConnected` is then the last known
+   *  value, which nothing has just re-checked. */
+  probed: boolean;
+  isConnected: boolean;
+};
+
 export type InitPhaseType = "chain" | "network" | "accounts" | "session";
 
 /** Startup phase reporting so the Home loader can show real progress. */
@@ -76,10 +85,45 @@ export const BALANCE_POLL_INTERVAL_MS = 30000;
  *  probes regardless, so recovery is noticed within one interval. */
 export const CONNECTION_REPROBE_TICKS = 4;
 
-/** Ceiling on the backoff applied while the node is down. A wallet left open
- *  against a dead node settles at one probe every five minutes, which still
- *  notices recovery quickly without hammering an endpoint that is failing. */
+/** Ceiling on the backoff applied while the node is down and no surface is
+ *  on screen. Nobody is reading the numbers, so a dead endpoint is left
+ *  alone for minutes at a time. */
 export const MAX_POLL_BACKOFF_MS = 300000;
+
+/** Ceiling on the backoff while a surface is visible. A wallet the user is
+ *  looking at should never be more than a minute behind reality, so the
+ *  doubling stops here, short of the five-minute cap. */
+export const VISIBLE_MAX_POLL_BACKOFF_MS = 60000;
+
+/** Minimum gap between two manual probes. Tracked apart from the automatic
+ *  backoff, so holding down Retry connection cannot keep the automatic
+ *  schedule pinned at zero. */
+export const MANUAL_PROBE_COOLDOWN_MS = 5000;
+
+/** Ceiling on a single read issued by a poll tick, covering both the
+ *  balance reads and the connection probe.
+ *
+ *  The vendored HTTP provider already bounds a request at 30 s for the
+ *  header phase and 120 s overall (@theqrl/web3-providers-http), so this
+ *  is not the difference between bounded and unbounded. It is the
+ *  difference between 10 s and 30 s, and during that wait the in-flight
+ *  guard holds every later tick and the Retry control stays disabled, so
+ *  the shorter ceiling is what the UI needs. Matches the timeout the
+ *  network assertion already uses. */
+export const RPC_READ_TIMEOUT_MS = 10000;
+
+/** Rejects when `work` outlives `timeoutMs`. The underlying request is not
+ *  cancellable here, so it is abandoned in place; the caller
+ *  treats the rejection as an unreachable node. */
+const withTimeout = <T>(work: Promise<T>, timeoutMs: number): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("The node did not answer in time"));
+    }, timeoutMs);
+    work.then(resolve, reject).finally(() => {
+      clearTimeout(timer);
+    });
+  });
 
 class QrlStore {
   qrlInstance?: Web3QRLInterface;
@@ -90,6 +134,16 @@ class QrlStore {
      *  longer answering. The balances on screen are then the last known
      *  values, and the UI says so. */
     areBalancesStale: false,
+    /** True while an out-of-schedule probe is running, whoever asked for
+     *  it: the Retry control, the online event or a surface coming back to
+     *  the front. Kept apart from isLoading, which the interval's own
+     *  re-probes deliberately leave alone so the status dot does not pulse
+     *  every few minutes. */
+    isProbing: false,
+    /** When the next manual probe is allowed. The store owns this
+     *  deadline so that navigating away and back cannot hand someone a
+     *  button that looks ready and then answers without probing. */
+    nextManualProbeAt: 0,
     blockchain: DEFAULT_BLOCKCHAIN,
   };
   qrlAccounts: QrlAccountsType = { accounts: [], isLoading: false };
@@ -107,6 +161,14 @@ class QrlStore {
   private consecutivePollFailures = 0;
   /** Timestamp before which poll ticks are skipped, set by the backoff. */
   private nextPollAllowedAt = 0;
+  /** The poll currently running, if any. The interval used to be able to
+   *  stack ticks, because the next-allowed timestamp is only written once
+   *  the previous tick settles. */
+  private pollInFlight: Promise<void> | null = null;
+  /** Counts ticks as they start. A caller that joined an existing tick
+   *  sees this unchanged, which is how it knows the answer it got may
+   *  predate its own reason for asking. */
+  private pollTickSequence = 0;
 
   constructor() {
     makeAutoObservable(this, {
@@ -127,11 +189,14 @@ class QrlStore {
       fetchAccounts: action.bound,
       refreshBalancesQuietly: action.bound,
       pollBalancesAndConnection: action.bound,
+      probeConnectionNow: action.bound,
       startBalancePolling: action.bound,
       stopBalancePolling: action.bound,
       setPollingAllowed: action.bound,
       getGasFeeData: action.bound,
-      getAccountBalance: action.bound,
+      // Deliberately unannotated: see the reader itself for why it must
+      // stay outside MobX's action wrapper.
+      getAccountBalance: false,
       getNativeTokenGas: action.bound,
       signNativeToken: action.bound,
       getZrc20TokenDetails: action.bound,
@@ -228,6 +293,26 @@ class QrlStore {
    * doubling each time up to MAX_POLL_BACKOFF_MS. Recovery resets it.
    */
   async pollBalancesAndConnection() {
+    // One tick at a time. A slow node, or one that swallows the request
+    // until the read times out, used to let the interval start a second
+    // tick on top of the first.
+    if (this.pollInFlight) {
+      await this.pollInFlight;
+      return;
+    }
+    this.pollTickSequence += 1;
+    const tick = this.runPollTick();
+    this.pollInFlight = tick;
+    try {
+      await tick;
+    } finally {
+      runInAction(() => {
+        this.pollInFlight = null;
+      });
+    }
+  }
+
+  private async runPollTick() {
     const refreshed = await this.refreshBalancesQuietly();
     this.ticksSinceConnectionProbe += 1;
     const shouldProbe =
@@ -241,6 +326,84 @@ class QrlStore {
     this.applyPollBackoff(refreshed && this.qrlConnection.isConnected);
   }
 
+  /**
+   * Probe the node right now, outside the automatic schedule.
+   *
+   * The backoff recovers on its own, but only on its own clock, so a node
+   * that came back can go unnoticed for a while on a surface that stays
+   * open. This is the single entry point for everything with reason to
+   * believe the answer just changed: the browser regaining its connection,
+   * a surface coming back to the front, and the Retry connection control.
+   *
+   * `probed` is false when the call was skipped, which the Retry control
+   * needs so it never reports a verdict nothing went and checked.
+   */
+  async probeConnectionNow(options?: {
+    manual?: boolean;
+  }): Promise<ConnectionProbeResult> {
+    const skipped = () => ({
+      probed: false,
+      isConnected: this.qrlConnection.isConnected,
+    });
+    if (!this.qrlInstance || !this.isPollingAllowed) return skipped();
+    if (this.qrlConnection.isProbing) return skipped();
+    if (options?.manual === true) {
+      const now = Date.now();
+      if (now < this.qrlConnection.nextManualProbeAt) return skipped();
+      runInAction(() => {
+        this.qrlConnection = {
+          ...this.qrlConnection,
+          nextManualProbeAt: now + MANUAL_PROBE_COOLDOWN_MS,
+        };
+      });
+    }
+    const sequenceBefore = this.pollTickSequence;
+    this.resetPollSchedule();
+    runInAction(() => {
+      this.qrlConnection = { ...this.qrlConnection, isProbing: true };
+    });
+    try {
+      await this.pollBalancesAndConnection();
+      // A tick that was already running when this was asked for may have
+      // issued its reads before whatever prompted the probe. Its answer is
+      // therefore stale, and a stale failure would re-arm the backoff for
+      // another minute. The sequence counter is unchanged exactly when
+      // this call joined such a tick, so run one of our own.
+      if (this.pollTickSequence === sequenceBefore) {
+        this.resetPollSchedule();
+        await this.pollBalancesAndConnection();
+      }
+    } finally {
+      runInAction(() => {
+        this.qrlConnection = { ...this.qrlConnection, isProbing: false };
+      });
+    }
+    return { probed: true, isConnected: this.qrlConnection.isConnected };
+  }
+
+  /** Puts the automatic schedule back to its plain cadence and forces the
+   *  next tick to probe the connection as well as the balances. */
+  private resetPollSchedule() {
+    runInAction(() => {
+      this.consecutivePollFailures = 0;
+      this.nextPollAllowedAt = 0;
+      this.ticksSinceConnectionProbe = CONNECTION_REPROBE_TICKS;
+    });
+  }
+
+  /**
+   * Ceiling on the spacing between poll ticks.
+   *
+   * A surface the user is looking at should never be more than a minute
+   * behind reality, so the doubling stops short while the document is
+   * visible. A hidden document skips its ticks anyway, and a context with
+   * no document at all keeps the long cap.
+   */
+  private maxPollBackoffMs() {
+    if (typeof document === "undefined") return MAX_POLL_BACKOFF_MS;
+    return document.hidden ? MAX_POLL_BACKOFF_MS : VISIBLE_MAX_POLL_BACKOFF_MS;
+  }
+
   /** Spaces out ticks while the node is failing and restores the plain
    *  cadence the moment it answers again. */
   private applyPollBackoff(healthy: boolean) {
@@ -252,7 +415,7 @@ class QrlStore {
     this.consecutivePollFailures += 1;
     const delay = Math.min(
       BALANCE_POLL_INTERVAL_MS * 2 ** this.consecutivePollFailures,
-      MAX_POLL_BACKOFF_MS,
+      this.maxPollBackoffMs(),
     );
     this.nextPollAllowedAt = Date.now() + delay;
   }
@@ -283,7 +446,10 @@ class QrlStore {
         await Promise.all(
           storedAccountsList.map(async (account) => {
             const accountBalance =
-              (await provider.getBalance(account)) ?? BigInt(0);
+              (await withTimeout(
+                Promise.resolve(provider.getBalance(account)),
+                RPC_READ_TIMEOUT_MS,
+              )) ?? BigInt(0);
             return {
               accountAddress: account,
               accountBalance: getOptimalTokenBalance(
@@ -486,7 +652,16 @@ class QrlStore {
     }
     try {
       await this.assertSigningNetwork();
-      const isListening = (await provider?.net.isListening()) ?? false;
+      // Bounded like the balance reads. The network assertion ahead of it
+      // normally fails fast on a dead route, but a route that accepts the
+      // connection and then stalls used to leave this hanging on the
+      // provider's own 30 s ceiling, holding isProbing true and the Retry
+      // control disabled for the whole wait.
+      const isListening =
+        (await withTimeout(
+          Promise.resolve(provider?.net.isListening()),
+          RPC_READ_TIMEOUT_MS,
+        )) ?? false;
       runInAction(() => {
         if (!isCurrent()) return;
         this.qrlConnection = {
@@ -643,13 +818,20 @@ class QrlStore {
     return { baseFeePerGas, maxPriorityFeePerGas, maxFeePerGas };
   }
 
-  getAccountBalance(accountAddress: string) {
-    return (
-      this.qrlAccounts.accounts.find(
-        (account) => account.accountAddress === accountAddress,
-      )?.accountBalance ?? "0.0 Quanta"
-    );
-  }
+  /**
+   * Last known balance of an account, as the display string the UI shows.
+   *
+   * A pure reader, and it has to stay one. Annotated as an action it ran
+   * untracked, so an observer component reading it during render
+   * registered no dependency on `qrlAccounts` and the row kept its first
+   * painted number until something else it reads happened to change. Bound
+   * as a class field because every call site destructures it off the
+   * store, which a plain prototype method would not survive.
+   */
+  getAccountBalance = (accountAddress: string): string =>
+    this.qrlAccounts.accounts.find(
+      (account) => account.accountAddress === accountAddress,
+    )?.accountBalance ?? "0.0 Quanta";
 
   /**
    * Worst-case fee for a native transfer, in Quanta.
