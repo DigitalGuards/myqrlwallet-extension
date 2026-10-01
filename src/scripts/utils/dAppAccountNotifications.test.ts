@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import StorageUtil from "@/utilities/storageUtil";
 import {
   notifyDAppAccountsChanged,
+  notifyDAppChainChanged,
   registerDAppAccountNotificationStream,
   setWalletLockedForDAppNotifications,
 } from "./dAppAccountNotifications";
@@ -279,5 +280,76 @@ describe("dApp account notifications on lock transitions (L-6)", () => {
         expect.objectContaining({ params: [] }),
       );
     });
+  });
+});
+
+describe("dApp chain-change notifications", () => {
+  const cleanups: Array<() => void> = [];
+
+  afterEach(() => {
+    cleanups.splice(0).forEach((cleanup) => cleanup());
+  });
+
+  const register = (origin: string) => {
+    const stream = { write: vi.fn() };
+    cleanups.push(registerDAppAccountNotificationStream({ origin }, stream));
+    return stream;
+  };
+
+  const chainStorage = (activeChainId: unknown) => ({
+    ACTIVE_BLOCKCHAIN: activeChainId,
+    ALL_BLOCKCHAINS: [],
+  });
+
+  it("tells every connected page that the active chain moved", () => {
+    const alpha = register("https://alpha.example/path");
+    const beta = register("https://beta.example/path");
+
+    notifyDAppChainChanged({
+      oldValue: chainStorage("0x539"),
+      newValue: chainStorage("0x301825"),
+    });
+
+    const notification = {
+      jsonrpc: "2.0",
+      method: "qrlWallet_chainChanged",
+      params: { chainId: "0x301825", networkVersion: "3151909" },
+    };
+    expect(alpha.write).toHaveBeenCalledWith(notification);
+    expect(beta.write).toHaveBeenCalledWith(notification);
+  });
+
+  it("says nothing when the active chain is unchanged", () => {
+    const stream = register("https://dapp.example");
+
+    notifyDAppChainChanged({
+      oldValue: chainStorage("0x301825"),
+      newValue: chainStorage("0X301825"),
+    });
+
+    expect(stream.write).not.toHaveBeenCalled();
+  });
+
+  it("says nothing for a write that carries no active chain", () => {
+    const stream = register("https://dapp.example");
+
+    notifyDAppChainChanged({
+      oldValue: chainStorage("0x539"),
+      newValue: { ALL_BLOCKCHAINS: [] },
+    });
+    notifyDAppChainChanged(undefined);
+
+    expect(stream.write).not.toHaveBeenCalled();
+  });
+
+  it("says nothing for a stored chain id that is not a number", () => {
+    const stream = register("https://dapp.example");
+
+    notifyDAppChainChanged({
+      oldValue: chainStorage("0x539"),
+      newValue: chainStorage("not-a-chain-id"),
+    });
+
+    expect(stream.write).not.toHaveBeenCalled();
   });
 });

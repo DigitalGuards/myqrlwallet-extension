@@ -668,13 +668,14 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
         ),
       )
       .toBe(CHECKSUM_ACCOUNT);
-    await expect
-      .poll(
-        () =>
-          fixture.rpcMethods.filter((method) => method === "qrl_chainId")
-            .length,
-      )
-      .toBe(chainIdCallsBeforeReload + 1);
+    // The provider state is served from the stored active chain now, so a
+    // page load asks the node nothing. It used to issue qrl_chainId and
+    // net_version on every load, which is why an unreachable node put an
+    // RPC error and a "please report this bug" line in the console of
+    // every website the user visited.
+    expect(
+      fixture.rpcMethods.filter((method) => method === "qrl_chainId").length,
+    ).toBe(chainIdCallsBeforeReload);
 
     await beginRequest(dAppPage, "qrl_signMessage", [
       CANONICAL_ACCOUNT,
@@ -771,12 +772,16 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
         ),
       )
       .toContainEqual([]);
+    // The authorization checks still read the chain from the node; only
+    // the per-page-load provider state stopped doing so.
     expect(
       fixture.rpcMethods.filter((method) => method === "qrl_chainId").length,
-    ).toBeGreaterThanOrEqual(chainIdCallsBeforeReload + 2);
+    ).toBeGreaterThan(chainIdCallsBeforeReload);
+    // net_version was only ever asked for the provider state, which is now
+    // answered from storage, so nothing asks the node for it at all.
     expect(
       fixture.rpcMethods.filter((method) => method === "net_version"),
-    ).toHaveLength(2);
+    ).toHaveLength(0);
     expect(providerLifecycleErrors).toEqual([]);
     expect(
       await extensionPage.evaluate(

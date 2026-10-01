@@ -1,4 +1,5 @@
 import StorageUtil from "@/utilities/storageUtil";
+import { providerNetworkIdentity } from "@/utilities/providerNetwork";
 
 type StorageChange = {
   oldValue?: unknown;
@@ -20,6 +21,10 @@ type SenderIdentity = {
 
 type DAppsStorage = {
   ALL_DAPPS?: Record<string, ConnectedDApp>;
+};
+
+type BlockchainsStorage = {
+  ACTIVE_BLOCKCHAIN?: unknown;
 };
 
 const streamsByOrigin = new Map<string, Set<NotificationStream>>();
@@ -54,14 +59,9 @@ export const setWalletLockedForDAppNotifications = (isLocked: boolean) => {
   void broadcastLockStateToStreams(isLocked);
 };
 
-const writeToStreams = (origin: string, accounts: string[]) => {
+const writeNotification = (origin: string, notification: unknown) => {
   const streams = streamsByOrigin.get(origin);
   if (!streams) return;
-  const notification = {
-    jsonrpc: "2.0",
-    method: "qrlWallet_accountsChanged",
-    params: accounts,
-  };
   for (const stream of streams) {
     try {
       stream.write(notification);
@@ -70,6 +70,14 @@ const writeToStreams = (origin: string, accounts: string[]) => {
     }
   }
   if (streams.size === 0) streamsByOrigin.delete(origin);
+};
+
+const writeToStreams = (origin: string, accounts: string[]) => {
+  writeNotification(origin, {
+    jsonrpc: "2.0",
+    method: "qrlWallet_accountsChanged",
+    params: accounts,
+  });
 };
 
 /**
@@ -168,5 +176,42 @@ export const notifyDAppAccountsChanged = (change?: StorageChange): void => {
     if (accountsEqual(previousAccounts, nextAccounts)) continue;
 
     writeToStreams(origin, walletLocked ? [] : nextAccounts);
+  }
+};
+
+const activeChainId = (value: unknown): string | undefined => {
+  const stored = (value as BlockchainsStorage | undefined)?.ACTIVE_BLOCKCHAIN;
+  if (typeof stored !== "string") return undefined;
+  const trimmed = stored.trim();
+  return trimmed ? trimmed : undefined;
+};
+
+/**
+ * Tell every connected page that the active chain moved.
+ *
+ * qrlWallet_accountsChanged was the only notification the wallet ever
+ * sent, so a page open across a network switch kept the chain id it was
+ * given at injection until someone reloaded it. The provider already
+ * understands qrlWallet_chainChanged and emits both `chainChanged` and
+ * `networkChanged` from it, so this is the whole repair.
+ */
+export const notifyDAppChainChanged = (change?: StorageChange): void => {
+  if (!change) return;
+
+  const previous = activeChainId(change.oldValue);
+  const next = activeChainId(change.newValue);
+  if (!next) return;
+  if (previous && previous.toLowerCase() === next.toLowerCase()) return;
+
+  const identity = providerNetworkIdentity(next);
+  if (!identity) return;
+
+  const notification = {
+    jsonrpc: "2.0",
+    method: "qrlWallet_chainChanged",
+    params: identity,
+  };
+  for (const origin of [...streamsByOrigin.keys()]) {
+    writeNotification(origin, notification);
   }
 };

@@ -31,6 +31,7 @@ import { isTrustedExtensionSender } from "./utils/trustedSender";
 import { isPrematureClose, setupMultiplex } from "./utils/streamUtils";
 import {
   notifyDAppAccountsChanged,
+  notifyDAppChainChanged,
   registerDAppAccountNotificationStream,
 } from "./utils/dAppAccountNotifications";
 import { initializeContentScriptProviderConnection } from "./utils/providerConnectionLifecycle";
@@ -135,6 +136,7 @@ const prepareListeners = () => {
   browser.storage.onChanged.addListener(async (changes, areaName) => {
     if (areaName === "local") {
       notifyDAppAccountsChanged(changes[profileStorageKey("DAPPS")]);
+      notifyDAppChainChanged(changes[profileStorageKey("BLOCKCHAINS")]);
     }
     const storedDAppRequestData = await StorageUtil.getDAppsRequestData();
     if (storedDAppRequestData) {

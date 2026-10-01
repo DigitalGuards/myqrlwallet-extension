@@ -1,7 +1,7 @@
 import { WindowPostMessageStream } from "@theqrl/qrl-wallet-provider/post-message-stream";
 import { initializeProvider } from "@theqrl/qrl-wallet-provider/providers";
-import log from "loglevel";
 import { v4 as uuid } from "uuid";
+import { providerLogger } from "./utils/providerLogger";
 import {
   QRL_POST_MESSAGE_STREAM,
   QRL_WALLET_PROVIDER_NAME,
@@ -18,7 +18,7 @@ const initializeInPageScript = () => {
     initializeProvider({
       connectionStream: qrlStream,
       jsonRpcStreamName: QRL_WALLET_PROVIDER_NAME,
-      logger: log,
+      logger: providerLogger,
       providerInfo: {
         uuid: uuid(),
         name: QRL_WEB3_WALLET_PROVIDER_INFO.NAME,

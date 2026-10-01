@@ -7,20 +7,25 @@ const {
   getNetworkId,
   requestManagerSend,
   mockIsLocked,
+  getActiveBlockChain,
 } = vi.hoisted(() => ({
   getConnectedAccounts: vi.fn(),
   getChainId: vi.fn(),
   getNetworkId: vi.fn(),
   requestManagerSend: vi.fn(),
   mockIsLocked: vi.fn(),
+  getActiveBlockChain: vi.fn(),
 }));
+
+const ACTIVE_CHAIN = {
+  defaultRpcUrl: "https://rpc.example",
+  defaultWsRpcUrl: "https://ws.example",
+  chainId: "0x539",
+};
 
 vi.mock("@/utilities/storageUtil", () => ({
   default: {
-    getActiveBlockChain: vi.fn().mockResolvedValue({
-      defaultRpcUrl: "https://rpc.example",
-      defaultWsRpcUrl: "https://ws.example",
-    }),
+    getActiveBlockChain,
     getDAppsConnectedAccountsData: getConnectedAccounts,
   },
 }));
@@ -78,6 +83,7 @@ describe("qrlWallet_getProviderState", () => {
       .mockResolvedValue({ isLocked: false, hasPasswordSet: true });
     getChainId.mockReset().mockResolvedValue(1337n);
     getNetworkId.mockReset().mockResolvedValue(1337n);
+    getActiveBlockChain.mockReset().mockResolvedValue(ACTIVE_CHAIN);
     getConnectedAccounts
       .mockReset()
       .mockImplementation(async (origin) =>
@@ -110,15 +116,15 @@ describe("qrlWallet_getProviderState", () => {
     );
   });
 
-  it("reads the latest accounts after deferred network initialization", async () => {
-    let resolveChainId: ((chainId: bigint) => void) | undefined;
+  it("reads the latest accounts after the network identity", async () => {
+    let resolveChain: ((chain: typeof ACTIVE_CHAIN) => void) | undefined;
     let connected = { accounts: ["QConnected"] } as
       | { accounts: string[] }
       | undefined;
-    getChainId.mockImplementationOnce(
+    getActiveBlockChain.mockImplementationOnce(
       () =>
-        new Promise<bigint>((resolve) => {
-          resolveChainId = resolve;
+        new Promise<typeof ACTIVE_CHAIN>((resolve) => {
+          resolveChain = resolve;
         }),
     );
     getConnectedAccounts.mockImplementation(async () => connected);
@@ -127,17 +133,58 @@ describe("qrlWallet_getProviderState", () => {
       request("https://connected.example/swap"),
     );
     await vi.waitFor(() => {
-      expect(resolveChainId).toBeTypeOf("function");
+      expect(resolveChain).toBeTypeOf("function");
     });
     expect(getConnectedAccounts).not.toHaveBeenCalled();
 
     connected = undefined;
-    resolveChainId?.(1337n);
+    resolveChain?.(ACTIVE_CHAIN);
 
     await expect(providerState).resolves.toMatchObject({ accounts: [] });
     expect(getConnectedAccounts).toHaveBeenCalledWith(
       "https://connected.example",
     );
+  });
+
+  it("answers from the stored chain without asking the node", async () => {
+    await expect(
+      executeUnrestrictedMethod(request("https://connected.example/swap")),
+    ).resolves.toMatchObject({ chainId: "0x539", networkVersion: "1337" });
+
+    // The node is asked nothing. A page load used to issue two RPC calls
+    // here, so an unreachable node logged an RPC error and a "please
+    // report this bug" line on every website.
+    expect(getChainId).not.toHaveBeenCalled();
+    expect(getNetworkId).not.toHaveBeenCalled();
+  });
+
+  it("still answers with a correct chain id while the node is down", async () => {
+    getChainId.mockRejectedValue(new Error("Failed to fetch"));
+    getNetworkId.mockRejectedValue(new Error("Failed to fetch"));
+    getActiveBlockChain.mockResolvedValue({
+      ...ACTIVE_CHAIN,
+      chainId: "0x301825",
+    });
+
+    await expect(
+      executeUnrestrictedMethod(request("https://connected.example/swap")),
+    ).resolves.toMatchObject({
+      chainId: "0x301825",
+      networkVersion: "3151909",
+      isUnlocked: true,
+    });
+  });
+
+  it("falls back to the node when the stored chain id is unusable", async () => {
+    getActiveBlockChain.mockResolvedValue({
+      ...ACTIVE_CHAIN,
+      chainId: "not-a-chain-id",
+    });
+
+    await expect(
+      executeUnrestrictedMethod(request("https://connected.example/swap")),
+    ).resolves.toMatchObject({ chainId: "0x539", networkVersion: "1337" });
+    expect(getChainId).toHaveBeenCalled();
   });
 
   it("reports the wallet as unlocked and returns the connected accounts", async () => {
@@ -184,6 +231,7 @@ describe("wallet_getPermissions (F8)", () => {
     getConnectedAccounts.mockReset();
     getChainId.mockReset().mockResolvedValue(1337n);
     getNetworkId.mockReset().mockResolvedValue(1337n);
+    getActiveBlockChain.mockReset().mockResolvedValue(ACTIVE_CHAIN);
   });
 
   it("returns an empty permission list while the wallet is locked", async () => {
@@ -218,6 +266,7 @@ describe("websocket subscription methods are unsupported (L1)", () => {
       .mockResolvedValue({ isLocked: false, hasPasswordSet: true });
     getChainId.mockReset().mockResolvedValue(1337n);
     getNetworkId.mockReset().mockResolvedValue(1337n);
+    getActiveBlockChain.mockReset().mockResolvedValue(ACTIVE_CHAIN);
   });
 
   it.each([
