@@ -29,8 +29,7 @@ const PersonalSign = observer(() => {
   const { t } = useTranslation();
   const { lockStore, qrlStore, dAppRequestStore } = useStore();
   const { getMnemonicPhrases, readLockState } = lockStore;
-  const { qrlInstance, qrlConnection } = qrlStore;
-  const { isConnected } = qrlConnection;
+  const { qrlInstance } = qrlStore;
   const { dAppRequestData, setOnPermissionCallBack, setCanProceed } =
     dAppRequestStore;
   const [isWalletLocked, setIsWalletLocked] = useState(false);
@@ -43,28 +42,30 @@ const PersonalSign = observer(() => {
     sanitizeForDisplay(decodedChallenge);
   const fromAddress = params?.[1] ?? "";
 
+  // Registered whatever the node is doing. Signing is local, and a send
+  // that needs the node fails with a real error; the callback being absent
+  // instead let the store's no-op default answer the page with an empty
+  // success. The effect also no longer re-runs on a connectivity flip.
   useEffect(() => {
-    if (isConnected) {
-      const onPermissionCallBack = async (
-        hasApproved: boolean,
-        record: ResponseRecorder,
-      ) => {
-        if (hasApproved) {
-          const authorization =
-            await revalidateAuthorizedDAppRequest(dAppRequestData);
-          if (!authorization.canProceed) {
-            record({ error: authorization.proceedError });
-            return;
-          }
-          // Must await: onPermission reads responseData the moment this
-          // resolves, so a bare call would send the dApp an empty result
-          // before signing finishes.
-          await personalSign(record);
+    const onPermissionCallBack = async (
+      hasApproved: boolean,
+      record: ResponseRecorder,
+    ) => {
+      if (hasApproved) {
+        const authorization =
+          await revalidateAuthorizedDAppRequest(dAppRequestData);
+        if (!authorization.canProceed) {
+          record({ error: authorization.proceedError });
+          return;
         }
-      };
-      setOnPermissionCallBack(onPermissionCallBack);
-    }
-  }, [isConnected, dAppRequestData]);
+        // Must await: onPermission reads responseData the moment this
+        // resolves, so a bare call would send the dApp an empty result
+        // before signing finishes.
+        await personalSign(record);
+      }
+    };
+    setOnPermissionCallBack(onPermissionCallBack);
+  }, [dAppRequestData]);
 
   const copyMessage = () => {
     navigator.clipboard.writeText(challenge);

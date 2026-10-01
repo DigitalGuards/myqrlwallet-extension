@@ -480,4 +480,51 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
       hasCompleted: true,
     });
   });
+
+  it("never answers a dApp with an empty success (R2)", async () => {
+    const store = buildStore("request-a", "personal_sign");
+    // What the store's no-op default does: a screen whose signing callback
+    // was never registered used to leave the bucket empty, and the
+    // middleware turned the resulting truthy {} into a success carrying no
+    // signature.
+    store.setOnPermissionCallBack(async () => undefined);
+
+    await store.onPermission(true);
+
+    const response = sentResponse()?.response as
+      | { error?: { code?: number; message?: string } }
+      | undefined;
+    expect(response?.error?.code).toBe(-32603);
+    expect(response?.error?.message).toContain("produced no result");
+  });
+
+  it("leaves a result the approval did produce alone", async () => {
+    const store = buildStore("request-a", "personal_sign");
+    store.setOnPermissionCallBack(async (_hasApproved, record) => {
+      record({ signature: "0xsigned" });
+    });
+
+    await store.onPermission(true);
+
+    expect(sentResponse()?.response).toEqual({ signature: "0xsigned" });
+  });
+
+  it("leaves an account approval that answered from responseData alone", async () => {
+    const store = buildStore("request-a", "qrl_requestAccounts");
+    store.addToResponseData({ accounts: ["QChosen"] });
+    store.setOnPermissionCallBack(async () => undefined);
+
+    await store.onPermission(true);
+
+    expect(sentResponse()?.response).toEqual({ accounts: ["QChosen"] });
+  });
+
+  it("adds nothing to a rejection", async () => {
+    const store = buildStore("request-a", "personal_sign");
+    store.setOnPermissionCallBack(async () => undefined);
+
+    await store.onPermission(false);
+
+    expect(sentResponse()?.response).toEqual({});
+  });
 });

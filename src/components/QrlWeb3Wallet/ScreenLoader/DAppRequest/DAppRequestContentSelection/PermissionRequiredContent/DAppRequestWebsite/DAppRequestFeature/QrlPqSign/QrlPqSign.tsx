@@ -42,8 +42,7 @@ const QrlPqSign = observer(() => {
   const { copied, failed: copyFailed, copy } = useCopy();
   const { lockStore, qrlStore, dAppRequestStore } = useStore();
   const { getMnemonicPhrases, readLockState } = lockStore;
-  const { qrlInstance, qrlConnection } = qrlStore;
-  const { isConnected } = qrlConnection;
+  const { qrlInstance } = qrlStore;
   const { dAppRequestData, setOnPermissionCallBack, setCanProceed } =
     dAppRequestStore;
   const [isWalletLocked, setIsWalletLocked] = useState(false);
@@ -92,23 +91,25 @@ const QrlPqSign = observer(() => {
       : "";
   const hasChainId = domainChainId !== "";
 
+  // Registered whatever the node is doing. Signing is local, and a send
+  // that needs the node fails with a real error; the callback being absent
+  // instead let the store's no-op default answer the page with an empty
+  // success. The effect also no longer re-runs on a connectivity flip.
   useEffect(() => {
-    if (isConnected) {
-      setOnPermissionCallBack(
-        async (hasApproved: boolean, record: ResponseRecorder) => {
-          if (hasApproved) {
-            const authorization =
-              await revalidateAuthorizedDAppRequest(dAppRequestData);
-            if (!authorization.canProceed) {
-              record({ error: authorization.proceedError });
-              return;
-            }
-            await pqSign(record);
+    setOnPermissionCallBack(
+      async (hasApproved: boolean, record: ResponseRecorder) => {
+        if (hasApproved) {
+          const authorization =
+            await revalidateAuthorizedDAppRequest(dAppRequestData);
+          if (!authorization.canProceed) {
+            record({ error: authorization.proceedError });
+            return;
           }
-        },
-      );
-    }
-  }, [isConnected, dAppRequestData]);
+          await pqSign(record);
+        }
+      },
+    );
+  }, [dAppRequestData]);
 
   useEffect(() => {
     setCanProceed(true);

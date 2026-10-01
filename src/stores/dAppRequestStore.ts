@@ -1,4 +1,5 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
+import { approvalProducedNothingProviderError } from "@/functions/describeExtensionError";
 import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 import { EXTENSION_MESSAGES } from "@/scripts/constants/streamConstants";
 import {
@@ -190,6 +191,12 @@ class DAppRequestStore {
     });
   }
 
+  /** Whether this run produced anything at all for the dApp. */
+  private hasRecordedResponse(bucketKey: string): boolean {
+    const recorded = this.inFlightResponseData.get(bucketKey);
+    return !!recorded && Object.keys(recorded).length > 0;
+  }
+
   setCanProceed(decision: boolean) {
     this.canProceed = decision;
   }
@@ -254,6 +261,17 @@ class DAppRequestStore {
       }
 
       await this.onPermissionCallBack(hasApproved, record);
+      // An approval that produced nothing is a failure, and the dApp is
+      // told so. The screens register their signing callback from an
+      // effect while Approve is enabled from another, so a screen whose
+      // callback had not arrived ran the store's no-op default and the
+      // page received a truthy empty object, which the middleware turns
+      // into a success carrying no signature and no hash. Every surface
+      // that legitimately answers without one of its own (account
+      // selection) has already filled the bucket from responseData above.
+      if (hasApproved && !this.hasRecordedResponse(bucketKey)) {
+        record({ error: approvalProducedNothingProviderError() });
+      }
       const response: DAppResponseType = {
         method,
         action: EXTENSION_MESSAGES.DAPP_RESPONSE,

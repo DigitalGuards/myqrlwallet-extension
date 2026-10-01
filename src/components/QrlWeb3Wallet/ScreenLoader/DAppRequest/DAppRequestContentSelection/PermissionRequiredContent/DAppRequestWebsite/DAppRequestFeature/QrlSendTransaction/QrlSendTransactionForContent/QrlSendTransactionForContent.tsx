@@ -135,7 +135,7 @@ const QrlSendTransactionForContent = observer(
     } = useStore();
     const { getMnemonicPhrases, readLockState } = lockStore;
     const { qrlInstance, getGasFeeData, qrlConnection } = qrlStore;
-    const { isConnected, blockchain } = qrlConnection;
+    const { blockchain } = qrlConnection;
     const [isWalletLocked, setIsWalletLocked] = useState(false);
     const {
       dAppRequestData,
@@ -151,29 +151,31 @@ const QrlSendTransactionForContent = observer(
     const gasLimit = BigInt(params?.gas ?? 0);
     const data = params?.data;
 
+    // Registered whatever the node is doing. A send that cannot reach the
+    // node fails with a real error; the callback being absent instead let
+    // the store's no-op default answer the page with an empty success. The
+    // effect also no longer re-runs on a connectivity flip.
     useEffect(() => {
-      if (isConnected) {
-        const onPermissionCallBack = async (
-          hasApproved: boolean,
-          record: ResponseRecorder,
-        ) => {
-          if (hasApproved) {
-            const authorization =
-              await revalidateAuthorizedDAppRequest(dAppRequestData);
-            if (!authorization.canProceed) {
-              record({ error: authorization.proceedError });
-              return;
-            }
-            if (transactionType === SEND_TRANSACTION_TYPES.QRL_TRANSFER) {
-              await sendZndTransfer(record);
-            } else {
-              await deployContractOrInteract(record);
-            }
+      const onPermissionCallBack = async (
+        hasApproved: boolean,
+        record: ResponseRecorder,
+      ) => {
+        if (hasApproved) {
+          const authorization =
+            await revalidateAuthorizedDAppRequest(dAppRequestData);
+          if (!authorization.canProceed) {
+            record({ error: authorization.proceedError });
+            return;
           }
-        };
-        setOnPermissionCallBack(onPermissionCallBack);
-      }
-    }, [isConnected, transactionType, dAppRequestData]);
+          if (transactionType === SEND_TRANSACTION_TYPES.QRL_TRANSFER) {
+            await sendZndTransfer(record);
+          } else {
+            await deployContractOrInteract(record);
+          }
+        }
+      };
+      setOnPermissionCallBack(onPermissionCallBack);
+    }, [transactionType, dAppRequestData]);
 
     // What this request is expected to cost and the worst it could cost
     // (security review finding M2). Two numbers, deliberately:
