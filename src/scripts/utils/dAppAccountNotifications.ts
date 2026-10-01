@@ -1,5 +1,9 @@
 import StorageUtil from "@/utilities/storageUtil";
 import { providerNetworkIdentity } from "@/utilities/providerNetwork";
+import {
+  DEFAULT_BLOCKCHAIN,
+  QRL_BLOCKCHAINS,
+} from "@/configuration/qrlBlockchainConfig";
 
 type StorageChange = {
   oldValue?: unknown;
@@ -25,6 +29,7 @@ type DAppsStorage = {
 
 type BlockchainsStorage = {
   ACTIVE_BLOCKCHAIN?: unknown;
+  ALL_BLOCKCHAINS?: unknown;
 };
 
 const streamsByOrigin = new Map<string, Set<NotificationStream>>();
@@ -179,11 +184,33 @@ export const notifyDAppAccountsChanged = (change?: StorageChange): void => {
   }
 };
 
+/**
+ * The active chain id as the provider state would report it.
+ *
+ * StorageUtil.getActiveBlockChain falls back to the built-in default when
+ * the stored id names no chain in the list, so reading the raw string here
+ * would let a broadcast claim one chain while the next page load reported
+ * another. The same storage write carries the chain list, so the same rule
+ * is applied to it without a second read, which keeps this emission in the
+ * listener's own turn.
+ */
 const activeChainId = (value: unknown): string | undefined => {
-  const stored = (value as BlockchainsStorage | undefined)?.ACTIVE_BLOCKCHAIN;
+  const blockchains = value as BlockchainsStorage | undefined;
+  const stored = blockchains?.ACTIVE_BLOCKCHAIN;
   if (typeof stored !== "string") return undefined;
-  const trimmed = stored.trim();
-  return trimmed ? trimmed : undefined;
+  const target = stored.trim().toLowerCase();
+  if (!target) return undefined;
+  const chains = Array.isArray(blockchains?.ALL_BLOCKCHAINS)
+    ? (blockchains.ALL_BLOCKCHAINS as Array<{ chainId?: unknown }>)
+    : QRL_BLOCKCHAINS;
+  const known = chains.find(
+    (chain) =>
+      typeof chain?.chainId === "string" &&
+      chain.chainId.toLowerCase() === target,
+  );
+  return typeof known?.chainId === "string"
+    ? known.chainId
+    : DEFAULT_BLOCKCHAIN.chainId;
 };
 
 /**

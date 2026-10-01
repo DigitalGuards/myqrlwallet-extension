@@ -298,7 +298,7 @@ describe("dApp chain-change notifications", () => {
 
   const chainStorage = (activeChainId: unknown) => ({
     ACTIVE_BLOCKCHAIN: activeChainId,
-    ALL_BLOCKCHAINS: [],
+    ALL_BLOCKCHAINS: [{ chainId: "0x301825" }, { chainId: "0x539" }],
   });
 
   it("tells every connected page that the active chain moved", () => {
@@ -342,14 +342,38 @@ describe("dApp chain-change notifications", () => {
     expect(stream.write).not.toHaveBeenCalled();
   });
 
-  it("says nothing for a stored chain id that is not a number", () => {
+  it("says nothing when two unusable ids resolve to the same chain", () => {
     const stream = register("https://dapp.example");
 
+    // Both name no known chain, so both resolve to the built-in default
+    // and the active chain has not actually moved.
     notifyDAppChainChanged({
-      oldValue: chainStorage("0x539"),
-      newValue: chainStorage("not-a-chain-id"),
+      oldValue: { ...chainStorage("not-a-chain-id") },
+      newValue: { ...chainStorage("0xdeadbe") },
     });
 
     expect(stream.write).not.toHaveBeenCalled();
+  });
+
+  it("resolves the active chain the way a page reload would", () => {
+    const stream = register("https://dapp.example");
+
+    // StorageUtil.getActiveBlockChain falls back to the built-in default
+    // when the stored id names no chain in the list. Broadcasting the raw
+    // string would have claimed one chain while the next page load
+    // reported another.
+    notifyDAppChainChanged({
+      oldValue: chainStorage("0x539"),
+      newValue: {
+        ACTIVE_BLOCKCHAIN: "0xdeadbe",
+        ALL_BLOCKCHAINS: [{ chainId: "0x301825" }, { chainId: "0x539" }],
+      },
+    });
+
+    expect(stream.write).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      method: "qrlWallet_chainChanged",
+      params: { chainId: "0x301825", networkVersion: "3151909" },
+    });
   });
 });

@@ -59,4 +59,15 @@ describe("providerLogger", () => {
 
     expect(log.info).toHaveBeenCalledWith("QrlWallet:", 42, null);
   });
+
+  it("keeps the page-reload notice visible", () => {
+    // A bare /disconnected/ pattern hid this one, and it is exactly the
+    // line a dApp developer needs when the stream really has gone.
+    providerLogger.error(
+      "QrlWallet: Disconnected from MyQRLWallet background. Page reload required.",
+    );
+
+    expect(log.error).toHaveBeenCalled();
+    expect(log.debug).not.toHaveBeenCalled();
+  });
 });

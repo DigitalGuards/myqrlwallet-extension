@@ -176,6 +176,35 @@ describe("QrlSendTransactionForContent", () => {
     });
   };
 
+  it("still registers its approval callback while the node is unreachable", async () => {
+    // Approve was enabled whatever the connection was doing, so a callback
+    // registered only while connected left the store's no-op default to
+    // answer the dApp with an empty success during an outage. A send that
+    // cannot reach the node has to fail with a real error instead.
+    const addToResponseData = vi.fn();
+    const storeValues = createStoreWithCallback({
+      qrlStore: {
+        qrlConnection: { isConnected: false, isLoading: false },
+      },
+      dAppRequestStore: { addToResponseData },
+    });
+    renderComponent(storeValues, {
+      transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+    });
+
+    await waitFor(() => {
+      expect(capturedPermissionCallback).not.toBeNull();
+    });
+    await act(async () => {
+      await capturedPermissionCallback!(true);
+    });
+
+    expect(addToResponseData).toHaveBeenCalled();
+    expect(
+      Object.keys(addToResponseData.mock.calls[0]?.[0] ?? {}),
+    ).not.toHaveLength(0);
+  });
+
   it.each([
     [SEND_TRANSACTION_TYPES.QRL_TRANSFER, zndTransferRequest],
     [SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION, contractInteractionRequest],

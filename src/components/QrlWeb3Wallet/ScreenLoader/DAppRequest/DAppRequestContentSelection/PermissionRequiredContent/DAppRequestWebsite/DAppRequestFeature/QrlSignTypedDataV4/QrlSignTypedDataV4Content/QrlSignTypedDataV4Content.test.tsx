@@ -1,7 +1,8 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "@/components/UI/Tooltip";
@@ -87,6 +88,51 @@ describe("QrlSignTypedDataV4Content", () => {
       </StoreProvider>,
     );
 
+  it("still registers its signing callback while the node is unreachable", async () => {
+    // Signing is local, and Approve was enabled whatever the connection
+    // was doing. Registering the callback only while connected left the
+    // store's no-op default to answer the dApp with an empty success.
+    let capturedPermissionCallback:
+      | ((hasApproved: boolean, record: ResponseRecorder) => Promise<void>)
+      | null = null;
+    const recorded: Record<string, unknown>[] = [];
+
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          qrlConnection: { isConnected: false, isLoading: false },
+          qrlInstance: {
+            accounts: { seedToAccount: () => ({ address: fromAddress }) },
+          } as never,
+        },
+        dAppRequestStore: {
+          dAppRequestData: { params: [fromAddress, msgParams] },
+          setOnPermissionCallBack: (
+            callback: (
+              hasApproved: boolean,
+              record: ResponseRecorder,
+            ) => Promise<void>,
+          ) => {
+            capturedPermissionCallback = callback;
+          },
+        },
+      }),
+    );
+
+    expect(capturedPermissionCallback).not.toBeNull();
+    await act(async () => {
+      await capturedPermissionCallback!(true, (data) => {
+        recorded.push(data);
+      });
+    });
+
+    // The approval answered with something. The fixture seed cannot
+    // produce a signature here, so that answer is an error; what matters
+    // is that an answer exists at all.
+    expect(recorded).toHaveLength(1);
+    expect(Object.keys(recorded[0] ?? {})).not.toHaveLength(0);
+  });
+
   it("should render the qrl sign typed data v4 content component", () => {
     renderComponent(
       mockedStore({
@@ -116,9 +162,7 @@ describe("QrlSignTypedDataV4Content", () => {
     ).toBeInTheDocument();
 
     // Message accordion: structured-data banner + primary type
-    expect(
-      screen.getByText(/Structured-data signature/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Structured-data signature/i)).toBeInTheDocument();
     expect(screen.getByText("Primary Type")).toBeInTheDocument();
     expect(screen.getByText("Mail")).toBeInTheDocument();
 

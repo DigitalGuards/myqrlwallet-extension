@@ -19,14 +19,22 @@ const formatLogArgument = (value: unknown): unknown => {
     : candidate.message;
 };
 
-/** Conditions that mean the node or the wallet is briefly unreachable. */
+/**
+ * Conditions that mean the node is briefly unreachable.
+ *
+ * Deliberately network wording only. A bare /disconnected/ also matched
+ * the provider's "Disconnected from MyQRLWallet. Page reload required.",
+ * which is the one line a dApp developer needs to see when it happens.
+ */
 const TRANSIENT_CONDITIONS = [
   /failed to fetch/i,
+  /fetch failed/i,
   /networkerror/i,
+  /network error/i,
   /load failed/i,
   /did not answer/i,
   /connection reset/i,
-  /disconnected/i,
+  /err_(internet|network|connection|name)/i,
   /failed to get initial state/i,
 ];
 
