@@ -70,7 +70,13 @@ const ActiveChain = observer(() => {
                 {t("chain.balancesStale")}
               </span>
             )}
-            {!isLoading && !isConnected && <RetryConnection className="mt-2" />}
+            {/* Stale balances count as unreachable here. A balance read
+                that times out while net_listening still answers leaves a
+                green dot over "Balances may be out of date", which is
+                exactly the state someone would want to retry out of. */}
+            {!isLoading && (!isConnected || areBalancesStale) && (
+              <RetryConnection className="mt-2" />
+            )}
           </div>
         </div>
         <div>

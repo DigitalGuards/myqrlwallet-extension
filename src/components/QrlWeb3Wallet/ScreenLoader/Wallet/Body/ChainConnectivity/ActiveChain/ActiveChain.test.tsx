@@ -53,7 +53,9 @@ describe("ActiveChain", () => {
   });
 
   it("offers a retry control once the node stops answering", async () => {
-    const probeConnectionNow = vi.fn().mockResolvedValue(false);
+    const probeConnectionNow = vi
+      .fn()
+      .mockResolvedValue({ probed: true, isConnected: false });
     renderComponent(
       mockedStore({
         qrlStore: {
@@ -66,6 +68,37 @@ describe("ActiveChain", () => {
     expect(screen.getByText("The node is not answering")).toBeInTheDocument();
     const retry = screen.getByRole("button", { name: "Retry connection" });
     await userEvent.click(retry);
+
+    expect(probeConnectionNow).toHaveBeenCalledWith({ manual: true });
+  });
+
+  it("offers a retry control when the dot is green over stale balances", async () => {
+    // net_listening answered while the balance reads kept failing, so the
+    // card shows a healthy chain over numbers nobody has confirmed. That
+    // is exactly the state someone would want to retry out of.
+    const probeConnectionNow = vi
+      .fn()
+      .mockResolvedValue({ probed: true, isConnected: true });
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          probeConnectionNow,
+          qrlConnection: {
+            isConnected: true,
+            isLoading: false,
+            areBalancesStale: true,
+          },
+        },
+      }),
+    );
+
+    expect(screen.getByText("Balances may be out of date")).toBeInTheDocument();
+    expect(
+      screen.queryByText("The node is not answering"),
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Retry connection" }),
+    );
 
     expect(probeConnectionNow).toHaveBeenCalledWith({ manual: true });
   });

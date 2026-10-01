@@ -88,7 +88,12 @@ export function wireDataLifecycle(store: Store) {
     };
     const probeIfUnreachable = () => {
       if (typeof document !== "undefined" && document.hidden) return;
-      if (qrlStore.qrlConnection.isConnected) return;
+      const { isConnected, areBalancesStale } = qrlStore.qrlConnection;
+      // Stale balances count as unreachable. A balance read that gave up
+      // while net_listening still answered leaves the dot green over
+      // numbers nobody has confirmed, and that state recovered only on the
+      // automatic schedule.
+      if (isConnected && !areBalancesStale) return;
       probeNow();
     };
     window.addEventListener("online", probeNow);

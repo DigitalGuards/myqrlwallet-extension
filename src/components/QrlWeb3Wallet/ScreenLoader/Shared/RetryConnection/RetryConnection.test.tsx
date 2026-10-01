@@ -1,12 +1,60 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
-import { MANUAL_PROBE_COOLDOWN_MS } from "@/stores/qrlStore";
+import type QrlStore from "@/stores/qrlStore";
+import {
+  MANUAL_PROBE_COOLDOWN_MS,
+  type ConnectionProbeResult,
+} from "@/stores/qrlStore";
 import { StoreProvider } from "@/stores/store";
+import type { StoreType } from "@/stores/store";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { observable, runInAction } from "mobx";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RetryConnection from "./RetryConnection";
 
-const renderComponent = (store = mockedStore()) =>
+/**
+ * A stand-in store that enforces the manual cooldown the way the real one
+ * does, on an observable the control reads. The control's job is to render
+ * that state honestly, so the cooldown has to live outside it.
+ */
+const probeStore = (options?: {
+  isConnected?: boolean;
+  isProbing?: boolean;
+}) => {
+  const qrlConnection = observable({
+    isConnected: options?.isConnected ?? false,
+    isLoading: false,
+    isProbing: options?.isProbing ?? false,
+    areBalancesStale: false,
+    nextManualProbeAt: 0,
+  });
+  const probeConnectionNow = vi.fn(
+    async (probeOptions?: {
+      manual?: boolean;
+    }): Promise<ConnectionProbeResult> => {
+      const now = Date.now();
+      if (
+        probeOptions?.manual === true &&
+        now < qrlConnection.nextManualProbeAt
+      )
+        return { probed: false, isConnected: qrlConnection.isConnected };
+      runInAction(() => {
+        qrlConnection.nextManualProbeAt = now + MANUAL_PROBE_COOLDOWN_MS;
+      });
+      return { probed: true, isConnected: qrlConnection.isConnected };
+    },
+  );
+
+  const base = mockedStore();
+  const qrlStore = Object.create(base.qrlStore) as QrlStore;
+  Object.defineProperties(qrlStore, {
+    qrlConnection: { value: qrlConnection, configurable: true },
+    probeConnectionNow: { value: probeConnectionNow, configurable: true },
+  });
+  return { store: { ...base, qrlStore } as StoreType, probeConnectionNow };
+};
+
+const renderComponent = (store: StoreType) =>
   render(
     <StoreProvider value={store}>
       <RetryConnection />
@@ -17,8 +65,8 @@ describe("RetryConnection", () => {
   afterEach(cleanup);
 
   it("runs the shared probe entry point on click", async () => {
-    const probeConnectionNow = vi.fn().mockResolvedValue(true);
-    renderComponent(mockedStore({ qrlStore: { probeConnectionNow } }));
+    const { store, probeConnectionNow } = probeStore();
+    renderComponent(store);
 
     await userEvent.click(screen.getByRole("button", { name: /retry/i }));
 
@@ -27,8 +75,8 @@ describe("RetryConnection", () => {
   });
 
   it("announces that the node is answering again", async () => {
-    const probeConnectionNow = vi.fn().mockResolvedValue(true);
-    renderComponent(mockedStore({ qrlStore: { probeConnectionNow } }));
+    const { store } = probeStore({ isConnected: true });
+    renderComponent(store);
 
     await userEvent.click(screen.getByRole("button", { name: /retry/i }));
 
@@ -40,8 +88,8 @@ describe("RetryConnection", () => {
   });
 
   it("says so when the node is still silent", async () => {
-    const probeConnectionNow = vi.fn().mockResolvedValue(false);
-    renderComponent(mockedStore({ qrlStore: { probeConnectionNow } }));
+    const { store } = probeStore({ isConnected: false });
+    renderComponent(store);
 
     await userEvent.click(screen.getByRole("button", { name: /retry/i }));
 
@@ -53,9 +101,8 @@ describe("RetryConnection", () => {
   });
 
   it("shows a busy state while the store is probing", () => {
-    renderComponent(
-      mockedStore({ qrlStore: { qrlConnection: { isProbing: true } } }),
-    );
+    const { store } = probeStore({ isProbing: true });
+    renderComponent(store);
 
     const button = screen.getByRole("button", { name: /retry/i });
     expect(button).toBeDisabled();
@@ -66,8 +113,8 @@ describe("RetryConnection", () => {
   });
 
   it("stays mounted and disabled through the manual cooldown", async () => {
-    const probeConnectionNow = vi.fn().mockResolvedValue(false);
-    renderComponent(mockedStore({ qrlStore: { probeConnectionNow } }));
+    const { store, probeConnectionNow } = probeStore();
+    renderComponent(store);
 
     const button = screen.getByRole("button", { name: /retry/i });
     await userEvent.click(button);
@@ -75,12 +122,58 @@ describe("RetryConnection", () => {
     // Disabled and still mounted, so the control does not flicker out
     // from under the pointer.
     expect(button).toBeInTheDocument();
-    expect(button).toBeDisabled();
+    await waitFor(() => {
+      expect(button).toBeDisabled();
+    });
 
-    // A second click inside the window never reaches the store. The store
-    // enforces the same window itself; this is the visible half of it.
     await userEvent.click(button);
     expect(probeConnectionNow).toHaveBeenCalledTimes(1);
-    expect(MANUAL_PROBE_COOLDOWN_MS).toBeGreaterThan(0);
+  });
+
+  it("reports no verdict when the store declined to probe", async () => {
+    // The store also skips when there is no provider yet, or while the
+    // wallet is locked. Neither leaves the button disabled, so the control
+    // has to notice that nothing was checked and stay quiet.
+    const { store } = probeStore();
+    const declining = vi
+      .fn()
+      .mockResolvedValue({ probed: false, isConnected: false });
+    Object.defineProperty(store.qrlStore, "probeConnectionNow", {
+      value: declining,
+      configurable: true,
+    });
+    renderComponent(store);
+
+    await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(declining).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("");
+    });
+    expect(screen.queryByText("Still not answering")).not.toBeInTheDocument();
+  });
+
+  it("keeps the cooldown across a remount and reports no verdict without a probe", async () => {
+    const { store, probeConnectionNow } = probeStore();
+    const first = renderComponent(store);
+
+    await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Still not answering",
+      );
+    });
+
+    // Navigate away and back inside the cooldown window. A control that
+    // kept the deadline in its own state came back looking ready, and its
+    // first click then reported a verdict the store had never gone and
+    // checked.
+    first.unmount();
+    renderComponent(store);
+
+    const button = screen.getByRole("button", { name: /retry/i });
+    expect(button).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("");
+    expect(probeConnectionNow).toHaveBeenCalledTimes(1);
   });
 });

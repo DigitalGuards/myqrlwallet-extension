@@ -47,7 +47,7 @@ vi.mock("@/configuration/releaseProfile", async () => {
 
 import QrlStore, {
   BALANCE_POLL_INTERVAL_MS,
-  BALANCE_READ_TIMEOUT_MS,
+  RPC_READ_TIMEOUT_MS,
   CONNECTION_REPROBE_TICKS,
   MANUAL_PROBE_COOLDOWN_MS,
   MAX_POLL_BACKOFF_MS,
@@ -244,7 +244,7 @@ describe("QrlStore connection health", () => {
     store.stopBalancePolling();
   });
 
-  it("does not let an automatic probe bypass an in-flight poll", async () => {
+  it("joins an in-flight tick and adds no reads of its own", async () => {
     const store = await connectedStore();
     let release: (() => void) | undefined;
     mockGetBalance.mockImplementation(
@@ -272,6 +272,61 @@ describe("QrlStore connection health", () => {
     store.stopBalancePolling();
   });
 
+  it("runs a fresh tick when a probe only joined one already running", async () => {
+    const store = await connectedStore();
+    // The tick in flight is reading against the old, dead route.
+    let releaseStale: (() => void) | undefined;
+    mockGetBalance.mockImplementation(
+      () =>
+        new Promise<bigint>((_resolve, reject) => {
+          releaseStale = () => {
+            reject(new Error("rpc down"));
+          };
+        }),
+    );
+    mockIsListening.mockResolvedValue(false);
+
+    const stale = store.pollBalancesAndConnection();
+    await flush();
+
+    // Connectivity comes back while that tick is still on the wire, and
+    // the online handler probes.
+    mockGetBalance.mockResolvedValue(BigInt(5e18));
+    mockIsListening.mockResolvedValue(true);
+    const probe = store.probeConnectionNow();
+    await flush();
+
+    releaseStale?.();
+    await stale;
+    const result = await probe;
+    await flush();
+
+    // Reporting the joined tick's answer would have left the wallet
+    // disconnected and re-armed the backoff on a reading taken before the
+    // node came back.
+    expect(result).toEqual({ probed: true, isConnected: true });
+    expect(store.qrlConnection.isConnected).toBe(true);
+    expect(store.qrlConnection.areBalancesStale).toBe(false);
+    store.stopBalancePolling();
+  });
+
+  it("gives up on a connection probe that never answers", async () => {
+    const store = await connectedStore();
+    mockGetBalance.mockResolvedValue(BigInt(1e18));
+    // A route that accepts the connection and then says nothing.
+    mockIsListening.mockImplementation(() => new Promise<boolean>(() => {}));
+
+    const probe = store.probeConnectionNow({ manual: true });
+    await vi.advanceTimersByTimeAsync(RPC_READ_TIMEOUT_MS * 2);
+    const result = await probe;
+
+    // Without its own ceiling this waited on the provider's 30s one, and
+    // the Retry control stayed disabled for all of it.
+    expect(result).toEqual({ probed: true, isConnected: false });
+    expect(store.qrlConnection.isProbing).toBe(false);
+    store.stopBalancePolling();
+  });
+
   it("gives up on a balance read that never answers", async () => {
     const store = await connectedStore();
     // A blackholed route: the request neither resolves nor rejects.
@@ -279,7 +334,7 @@ describe("QrlStore connection health", () => {
     mockIsListening.mockResolvedValue(false);
 
     const tick = store.pollBalancesAndConnection();
-    await vi.advanceTimersByTimeAsync(BALANCE_READ_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(RPC_READ_TIMEOUT_MS);
     await tick;
 
     expect(store.qrlConnection.areBalancesStale).toBe(true);

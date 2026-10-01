@@ -1,5 +1,4 @@
 import { Button } from "@/components/UI/Button";
-import { MANUAL_PROBE_COOLDOWN_MS } from "@/stores/qrlStore";
 import { useStore } from "@/stores/store";
 import { cn } from "@/utilities/stylingUtil";
 import { Loader, RefreshCw } from "lucide-react";
@@ -26,19 +25,31 @@ type RetryConnectionProps = {
 const RetryConnection = observer(({ className }: RetryConnectionProps) => {
   const { t } = useTranslation();
   const { qrlStore } = useStore();
-  const { isProbing } = qrlStore.qrlConnection;
-  const [coolingDown, setCoolingDown] = useState(false);
+  const { isProbing, nextManualProbeAt } = qrlStore.qrlConnection;
   const [outcome, setOutcome] = useState<"" | "connected" | "unreachable">("");
-  const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const mounted = useRef(true);
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
-      if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
     };
   }, []);
+
+  // The cooldown deadline lives on the store, so navigating away and back
+  // cannot present a button that looks ready and then answers without
+  // probing. This only re-renders when the deadline passes.
+  const coolingDown = now < nextManualProbeAt;
+  useEffect(() => {
+    if (now >= nextManualProbeAt) return;
+    const timer = setTimeout(() => {
+      if (mounted.current) setNow(Date.now());
+    }, nextManualProbeAt - now);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [now, nextManualProbeAt]);
 
   const retry = async () => {
     // Two guards, stopping different things: the in-flight check stops a
@@ -47,14 +58,15 @@ const RetryConnection = observer(({ className }: RetryConnectionProps) => {
     // button stays mounted and disabled through the cooldown so it does
     // not flicker out from under the pointer.
     if (isProbing || coolingDown) return;
-    setCoolingDown(true);
     setOutcome("");
-    cooldownTimer.current = setTimeout(() => {
-      if (mounted.current) setCoolingDown(false);
-    }, MANUAL_PROBE_COOLDOWN_MS);
+    setNow(Date.now());
 
-    const reachable = await qrlStore.probeConnectionNow({ manual: true });
-    if (mounted.current) setOutcome(reachable ? "connected" : "unreachable");
+    const result = await qrlStore.probeConnectionNow({ manual: true });
+    if (!mounted.current) return;
+    setNow(Date.now());
+    // A skipped call checked nothing, so it has no verdict to report.
+    if (!result.probed) return;
+    setOutcome(result.isConnected ? "connected" : "unreachable");
   };
 
   const busy = isProbing;
@@ -93,7 +105,7 @@ const RetryConnection = observer(({ className }: RetryConnectionProps) => {
         role="status"
         aria-live="polite"
         className={cn(
-          "text-xm",
+          "text-xs",
           outcome === "unreachable" && !busy ? "text-destructive" : "sr-only",
         )}
       >
