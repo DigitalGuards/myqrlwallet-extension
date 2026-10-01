@@ -136,7 +136,6 @@ const QrlSignTypedDataV4Content = observer(() => {
   const { lockStore, qrlStore, dAppRequestStore } = useStore();
   const { getMnemonicPhrases, readLockState } = lockStore;
   const { qrlInstance, qrlConnection } = qrlStore;
-  const { isConnected } = qrlConnection;
   const activeChainId = qrlConnection?.blockchain?.chainId;
   const [isWalletLocked, setIsWalletLocked] = useState(false);
   const { dAppRequestData, setOnPermissionCallBack, setCanProceed } =
@@ -204,28 +203,30 @@ const QrlSignTypedDataV4Content = observer(() => {
     | bigint
     | undefined;
 
+  // Registered whatever the node is doing. Signing is local, and a send
+  // that needs the node fails with a real error; the callback being absent
+  // instead let the store's no-op default answer the page with an empty
+  // success. The effect also no longer re-runs on a connectivity flip.
   useEffect(() => {
-    if (isConnected) {
-      const onPermissionCallBack = async (
-        hasApproved: boolean,
-        record: ResponseRecorder,
-      ) => {
-        if (hasApproved) {
-          const authorization =
-            await revalidateAuthorizedDAppRequest(dAppRequestData);
-          if (!authorization.canProceed) {
-            record({ error: authorization.proceedError });
-            return;
-          }
-          // Must await: onPermission reads responseData the moment this
-          // resolves, so a bare call would send the dApp an empty result
-          // before signing finishes.
-          await signTypedDataV4(record);
+    const onPermissionCallBack = async (
+      hasApproved: boolean,
+      record: ResponseRecorder,
+    ) => {
+      if (hasApproved) {
+        const authorization =
+          await revalidateAuthorizedDAppRequest(dAppRequestData);
+        if (!authorization.canProceed) {
+          record({ error: authorization.proceedError });
+          return;
         }
-      };
-      setOnPermissionCallBack(onPermissionCallBack);
-    }
-  }, [isConnected, dAppRequestData]);
+        // Must await: onPermission reads responseData the moment this
+        // resolves, so a bare call would send the dApp an empty result
+        // before signing finishes.
+        await signTypedDataV4(record);
+      }
+    };
+    setOnPermissionCallBack(onPermissionCallBack);
+  }, [dAppRequestData]);
 
   const copyMessageData = () => {
     void copy(JSON.stringify(typedData));

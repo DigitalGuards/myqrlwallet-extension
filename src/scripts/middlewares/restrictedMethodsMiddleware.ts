@@ -2,6 +2,7 @@ import StorageUtil from "@/utilities/storageUtil";
 import { JsonRpcMiddleware } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
 import { v4 as uuid } from "uuid";
 import {
+  JsonRpcError,
   providerErrors,
   rpcErrors,
 } from "@theqrl/qrl-wallet-provider/rpc-errors";
@@ -32,6 +33,36 @@ import {
   updateAccountsAndBlockchainsForUrlOrigin,
 } from "../utils/restrictedMethodsMiddlewareUtils";
 import { DAppRequestType, DAppResponseType } from "./middlewareTypes";
+
+/**
+ * Turns the error an approval recorded into the one the dApp receives.
+ *
+ * The approval screens record real EIP-1193 and EIP-1474 errors: 4100 for
+ * a locked wallet, -32603 for an approval that produced no result, -32602
+ * for bad params. Flattening all of them onto one code told the page
+ * something untrue, and 4200 in particular claims the wallet does not
+ * support the method at all, which some dApps answer by disabling signing
+ * for the rest of the session.
+ *
+ * An error that carries no code of its own keeps the caller's fallback.
+ */
+const toRecordedApprovalError = (
+  recorded: { code?: unknown; message?: unknown } | undefined,
+  fallback: JsonRpcError<never> = providerErrors.unsupportedMethod({
+    message:
+      typeof recorded?.message === "string" ? recorded.message : undefined,
+    data: recorded,
+  }) as unknown as JsonRpcError<never>,
+  data: unknown = recorded,
+): JsonRpcError<never> => {
+  const code = recorded?.code;
+  if (typeof code !== "number" || !Number.isInteger(code)) return fallback;
+  const message =
+    typeof recorded?.message === "string" && recorded.message
+      ? recorded.message
+      : fallback.message;
+  return new JsonRpcError(code, message, data as never);
+};
 
 const QRL_WALLET_DAPP_CONNECTION_REQUIRED_METHODS: string[] = [
   RESTRICTED_METHODS.WALLET_ADD_QRL_CHAIN,
@@ -658,11 +689,18 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
                 // rejection is handled separately above
                 // (providerErrors.userRejectedRequest, 4001) and is
                 // unaffected.
-                // @ts-expect-error - rpcErrors' JsonRpcError type is not assignable to res.error's narrow type
-                res.error = rpcErrors.transactionRejected({
-                  message: response?.error?.message,
-                  data: buildDAppSendTransactionErrorData(response),
-                });
+                // The recorded code wins where the approval set one, so a
+                // locked wallet still answers 4100 and an approval that
+                // produced nothing still answers -32603. Everything else
+                // keeps -32003.
+                res.error = toRecordedApprovalError(
+                  response?.error,
+                  rpcErrors.transactionRejected({
+                    message: response?.error?.message,
+                    data: buildDAppSendTransactionErrorData(response),
+                  }) as unknown as JsonRpcError<never>,
+                  buildDAppSendTransactionErrorData(response),
+                );
               }
               // Registers the watch either way: on a result, for the hash
               // just answered; on a broadcast-timeout error, for the hash
@@ -688,10 +726,7 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
               // JSON-RPC error, otherwise the dApp resolves successfully with
               // an error-shaped object and never learns the request failed.
               if (signedData?.error) {
-                res.error = providerErrors.unsupportedMethod({
-                  message: signedData.error?.message,
-                  data: signedData.error,
-                });
+                res.error = toRecordedApprovalError(signedData.error);
               } else if (signedData) {
                 res.result = signedData;
               } else {
