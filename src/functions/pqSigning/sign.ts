@@ -15,15 +15,13 @@ import { MLDSA87, ExtendedSeed, toChecksumAddress } from "@theqrl/wallet.js";
 import { parseAndValidateSeed } from "@theqrl/web3-qrl-accounts";
 import {
   SCHEME_TAG_MSG,
-  SCHEME_TAG_TYPED,
-  SCHEME_TAG_TYPED_V2,
   SCHEME_VERSION_MSG,
-  SCHEME_VERSION_TYPED_V2,
   type TypedDataSchemeVersion,
 } from "./ctx";
 import { computeMessageDigest } from "./messageDigest";
 import {
   computeTypedDataDigest,
+  typedDataSchemeTag,
   typedDataSchemeVersion,
   type TypedDataPayload,
 } from "./typedData";
@@ -161,10 +159,7 @@ export function signTypedData(
   const digest = computeTypedDataDigest(payload);
   const { signature, publicKey, descriptor, signer } = signWithScheme({
     digest,
-    ctx:
-      schemeVersion === SCHEME_VERSION_TYPED_V2
-        ? SCHEME_TAG_TYPED_V2
-        : SCHEME_TAG_TYPED,
+    ctx: typedDataSchemeTag(schemeVersion),
     hexSeed,
     randomized: opts?.randomized,
   });
