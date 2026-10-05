@@ -45,6 +45,8 @@ let detachExtensionPortListeners: (() => void) | undefined;
 let extensionConnectionGeneration = 0;
 let lastStreamRebuildAt = 0;
 let restorePending = false;
+let contentScriptRetired = false;
+let keepAliveTimer: ReturnType<typeof setInterval> | undefined;
 
 /**
  * Backstop for a trusted restore signal that arrives with no cache entry
@@ -227,12 +229,37 @@ function notifyInpageOfStreamFailure() {
   );
 }
 
+/**
+ * An extension update or reload leaves this copy of the script running in
+ * every page that was already open, cut off from the extension: its port
+ * disconnects and every later runtime call throws "Extension context
+ * invalidated". The updated content script only reaches pages loaded after
+ * the update, so this copy can never reconnect. Retiring stops the
+ * reconnect timer and the keep-alive instead of letting the reconnect
+ * throw, which Chrome listed as an uncaught error on the extension's
+ * Errors page once for every tab open during an update.
+ */
+const retireContentScript = () => {
+  if (contentScriptRetired) return;
+  contentScriptRetired = true;
+  if (keepAliveTimer !== undefined) clearInterval(keepAliveTimer);
+};
+
 const setupExtensionStreams = () => {
+  if (contentScriptRetired) return;
+  let connectedPort: browser.Runtime.Port;
+  try {
+    connectedPort = browser.runtime.connect({
+      name: QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT,
+    });
+  } catch {
+    // connect throws only once the extension context is gone; a worker
+    // that is merely asleep answers through onDisconnect instead.
+    retireContentScript();
+    return;
+  }
   const generation = ++extensionConnectionGeneration;
-  extensionPort = browser.runtime.connect({
-    name: QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT,
-  });
-  const connectedPort = extensionPort;
+  extensionPort = connectedPort;
   const streamFailureGuard = createProviderStreamFailureGuard(
     generation,
     () => extensionConnectionGeneration,
@@ -330,7 +357,7 @@ const initializeContentScript = () => {
     document.addEventListener("freeze", onPageCacheEntry);
     window.addEventListener("pageshow", onPageRestoreSignal);
     document.addEventListener("resume", onPageRestoreSignal);
-    startContentScriptKeepAlive();
+    keepAliveTimer = startContentScriptKeepAlive();
   } catch (error) {
     console.warn(
       "QrlWeb3Wallet: Failed to initialize the content script\n",
