@@ -12,9 +12,11 @@ const qrlWalletBodyClasses = cva(
   {
     variants: {
       mode: {
-        // mx-auto keeps the fixed-width popup shell centred now that #root
-        // fills the body instead of being centred as a grid item.
-        popup: ["w-[23rem] h-[600px] mx-auto"],
+        // Chrome sizes the popup from the document, and main.tsx pins the
+        // popup body to 23rem, so the shell fills exactly that. A fixed
+        // 23rem here overflowed any popup narrower than the shell. mx-auto
+        // keeps it centred in a wider viewport.
+        popup: ["w-full min-w-0 max-w-[23rem] h-[600px] mx-auto"],
         tab: ["w-full max-w-lg mx-auto h-screen border rounded-lg shadow-2xl"],
         sidepanel: ["w-full max-w-lg mx-auto h-screen"],
       },
