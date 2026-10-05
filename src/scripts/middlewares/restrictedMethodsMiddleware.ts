@@ -30,6 +30,7 @@ import {
   checkWalletWatchAssetParams,
   extractPendingDAppTransactionHash,
   registerDAppTransactionWatchIfApproved,
+  UNSUPPORTED_TYPED_DATA_V4_MESSAGE,
   updateAccountsAndBlockchainsForUrlOrigin,
 } from "../utils/restrictedMethodsMiddlewareUtils";
 import { DAppRequestType, DAppResponseType } from "./middlewareTypes";
@@ -252,16 +253,15 @@ const checkRequestCanProceed = async (req: JsonRpcRequest<JsonRpcRequest>) => {
     case RESTRICTED_METHODS.WALLET_GET_CAPABILITIES:
       return await checkAccountHasBeenAuthorized(req);
     case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4:
-    case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA:
       return {
         canProceed: false,
         proceedError: providerErrors.unsupportedMethod({
-          message:
-            "Typed-data signing is unavailable for QIP-55 until a versioned 64-byte address layout is defined.",
+          message: UNSUPPORTED_TYPED_DATA_V4_MESSAGE,
         }),
       };
     case RESTRICTED_METHODS.QRL_SEND_TRANSACTION:
     case RESTRICTED_METHODS.QRL_SIGN_MESSAGE:
+    case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA:
     case RESTRICTED_METHODS.PERSONAL_SIGN:
       return await checkAccountAndChainHaveBeenAuthorized(req);
     default:

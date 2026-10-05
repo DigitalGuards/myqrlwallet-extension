@@ -7,10 +7,15 @@ import { act, cleanup, render } from "@testing-library/react";
 import { toChecksumAddress } from "@theqrl/wallet.js";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import canonical from "@/functions/pqSigning/__fixtures__/canonical.json";
 import QrlPqSign from "./QrlPqSign";
 
+const { seedRef } = vi.hoisted(() => ({
+  seedRef: { value: `0x${"ab".repeat(51)}` },
+}));
+
 vi.mock("@/functions/getHexSeedFromMnemonic", () => ({
-  getHexSeedFromMnemonic: () => `0x${"ab".repeat(51)}`,
+  getHexSeedFromMnemonic: () => seedRef.value,
 }));
 
 vi.mock("@/scripts/utils/restrictedMethodsMiddlewareUtils", () => ({
@@ -100,4 +105,64 @@ describe("QrlPqSign", () => {
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({ signature: "0xsig" });
   });
+
+  it.each(canonical.schemeSigningVectors)(
+    "signs qrl_signTypedData under the payload's scheme: $label",
+    async (vector) => {
+      seedRef.value = vector.hexSeed;
+      let capturedPermissionCallback:
+        | ((hasApproved: boolean, record: ResponseRecorder) => Promise<void>)
+        | null = null;
+      const recorded: Record<string, unknown>[] = [];
+
+      render(
+        <StoreProvider
+          value={mockedStore({
+            qrlStore: {
+              qrlInstance: {
+                accounts: {
+                  seedToAccount: () => ({ address: vector.signer }),
+                },
+              } as never,
+            },
+            dAppRequestStore: {
+              dAppRequestData: {
+                method: RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA,
+                params: [vector.signer, vector.payload],
+              },
+              setOnPermissionCallBack: (
+                callback: (
+                  hasApproved: boolean,
+                  record: ResponseRecorder,
+                ) => Promise<void>,
+              ) => {
+                capturedPermissionCallback = callback;
+              },
+            },
+          })}
+        >
+          <MemoryRouter>
+            <TooltipProvider>
+              <QrlPqSign />
+            </TooltipProvider>
+          </MemoryRouter>
+        </StoreProvider>,
+      );
+
+      await act(async () => {
+        await capturedPermissionCallback!(true, (data) => {
+          recorded.push(data);
+        });
+      });
+
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0]).toMatchObject({
+        digest: vector.digest,
+        schemeVersion: vector.schemeVersion,
+        signer: vector.signer,
+      });
+      expect(recorded[0]?.error).toBeUndefined();
+      seedRef.value = `0x${"ab".repeat(51)}`;
+    },
+  );
 });
