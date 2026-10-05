@@ -457,12 +457,9 @@ describe("dApp chain authorization for PQ signing methods", () => {
     );
   });
 
-  it.each([
-    RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4,
-    RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA,
-  ])("revalidation rejects an approved %s request", async (method) => {
+  it("revalidation rejects an approved qrl_signTypedData_v4 request", async () => {
     const result = await revalidateAuthorizedDAppRequest({
-      method,
+      method: RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4,
       params: [ACCOUNT, { domain: { chainId: "0x301825" } }],
       requestId: "request-id",
       authorizedChainId: "0x301825",
@@ -472,8 +469,32 @@ describe("dApp chain authorization for PQ signing methods", () => {
     expect(result.canProceed).toBe(false);
     expect(result.proceedError?.code).toBe(4200);
     expect(result.proceedError?.message).toContain(
-      "versioned 64-byte address layout",
+      "cannot encode QIP-55 addresses",
     );
+  });
+
+  it("revalidation lets an approved qrl_signTypedData request proceed", async () => {
+    const result = await revalidateAuthorizedDAppRequest({
+      method: RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA,
+      params: [ACCOUNT, { domain: { chainId: "0x301825" } }],
+      requestId: "request-id",
+      authorizedChainId: "0x301825",
+      requestData: { senderData: { url: `${ORIGIN}/request` } },
+    });
+
+    expect(result.canProceed).toBe(true);
+  });
+
+  it("authorizes qrl_signTypedData for a connected account on the active chain", async () => {
+    const result = await checkAccountAndChainHaveBeenAuthorized(
+      request(RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA, [
+        ACCOUNT,
+        { domain: { chainId: "0x301825" } },
+      ]),
+    );
+
+    expect(result.canProceed).toBe(true);
+    expect(result).toMatchObject({ authorizedChainId: "0x301825" });
   });
 });
 

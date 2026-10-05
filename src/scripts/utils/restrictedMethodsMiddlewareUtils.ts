@@ -23,6 +23,13 @@ import { registerDAppTransactionWatch } from "./dAppTransactionWatcher";
 import LockManager from "../lockManager/lockManager";
 
 /**
+ * `qrl_signTypedData_v4` is the Keccak-256, 32-byte-address EIP-712 layout.
+ * Only `qrl_signTypedData` (QRL-SIGN-TYPED-v1 / v2) carries QIP-55 addresses.
+ */
+export const UNSUPPORTED_TYPED_DATA_V4_MESSAGE =
+  "qrl_signTypedData_v4 cannot encode QIP-55 addresses. Use qrl_signTypedData, which signs the QRL-SIGN-TYPED-v2 layout.";
+
+/**
  * The single answer every authorization precheck gives while the wallet is
  * locked. It carries no address, no chain and no connection state, so it
  * reads the same for an authorized address, an unauthorized one and an
@@ -323,15 +330,11 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
 export const revalidateAuthorizedDAppRequest = async (
   request: DAppRequestType | undefined,
 ) => {
-  if (
-    request?.method === RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4 ||
-    request?.method === RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA
-  ) {
+  if (request?.method === RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4) {
     return {
       canProceed: false,
       proceedError: providerErrors.unsupportedMethod({
-        message:
-          "Typed-data signing is unavailable for QIP-55 until a versioned 64-byte address layout is defined.",
+        message: UNSUPPORTED_TYPED_DATA_V4_MESSAGE,
       }),
     };
   }
