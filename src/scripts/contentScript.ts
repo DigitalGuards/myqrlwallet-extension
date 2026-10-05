@@ -208,7 +208,8 @@ const onDisconnectExtensionStream = (
 };
 
 /**
- * This function must ONLY be called in pipeline destruction/close callbacks.
+ * Call this only when the connection to the extension has failed for good:
+ * from pipeline destruction/close callbacks, or when the script retires.
  * Notifies the inpage context that streams have failed, via window.postMessage.
  * Relies on 'object-multiplex' and 'post-message-stream' implementation details.
  */
@@ -230,19 +231,42 @@ function notifyInpageOfStreamFailure() {
 }
 
 /**
+ * True while this script still belongs to a live extension. An update,
+ * reload or removal invalidates the context, and Chrome then clears
+ * runtime.id.
+ */
+const isExtensionContextAlive = () => {
+  try {
+    return Boolean(browser.runtime.id);
+  } catch {
+    return false;
+  }
+};
+
+/**
  * An extension update or reload leaves this copy of the script running in
  * every page that was already open, cut off from the extension: its port
  * disconnects and every later runtime call throws "Extension context
  * invalidated". The updated content script only reaches pages loaded after
- * the update, so this copy can never reconnect. Retiring stops the
- * reconnect timer and the keep-alive instead of letting the reconnect
- * throw, which Chrome listed as an uncaught error on the extension's
+ * the update, so this copy can never reconnect.
+ *
+ * Retiring ends this copy cleanly. Requests the dApp is still waiting on
+ * are answered with 4900 Disconnected, the in-page provider is told the
+ * connection is gone for good so it emits disconnect, and the keep-alive
+ * and page lifecycle listeners stop. Before this, the reconnect threw from
+ * its timer, and Chrome listed it as an uncaught error on the extension's
  * Errors page once for every tab open during an update.
  */
 const retireContentScript = () => {
   if (contentScriptRetired) return;
   contentScriptRetired = true;
   if (keepAliveTimer !== undefined) clearInterval(keepAliveTimer);
+  window.removeEventListener("pagehide", onPageCacheEntry);
+  document.removeEventListener("freeze", onPageCacheEntry);
+  window.removeEventListener("pageshow", onPageRestoreSignal);
+  document.removeEventListener("resume", onPageRestoreSignal);
+  providerChannelBridge.disconnectPermanently();
+  notifyInpageOfStreamFailure();
 };
 
 const setupExtensionStreams = () => {
@@ -252,9 +276,14 @@ const setupExtensionStreams = () => {
     connectedPort = browser.runtime.connect({
       name: QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT,
     });
-  } catch {
-    // connect throws only once the extension context is gone; a worker
-    // that is merely asleep answers through onDisconnect instead.
+  } catch (error) {
+    // A worker that is merely asleep reports through onDisconnect, so a
+    // throw here normally means the extension context is gone. Anything
+    // else is logged and left for the next disconnect or restore to retry.
+    if (isExtensionContextAlive()) {
+      console.warn("QrlWeb3Wallet: Could not connect to the extension", error);
+      return;
+    }
     retireContentScript();
     return;
   }

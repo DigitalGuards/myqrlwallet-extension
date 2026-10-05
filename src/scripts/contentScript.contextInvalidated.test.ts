@@ -7,23 +7,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * its stream plumbing stubbed out and drive that sequence by hand.
  */
 
-const { mockConnect, mockSendMessage, mockGetURL } = vi.hoisted(() => ({
-  mockConnect: vi.fn(),
-  mockSendMessage: vi.fn(),
-  mockGetURL: vi.fn(),
-}));
+const { mockConnect, mockSendMessage, mockGetURL, runtime, disconnectPermanently } =
+  vi.hoisted(() => {
+    const connect = vi.fn();
+    const sendMessage = vi.fn();
+    const getURL = vi.fn();
+    return {
+      mockConnect: connect,
+      mockSendMessage: sendMessage,
+      mockGetURL: getURL,
+      disconnectPermanently: vi.fn(),
+      // Chrome clears runtime.id once the extension context is invalidated.
+      runtime: {
+        id: undefined as string | undefined,
+        connect,
+        sendMessage,
+        getURL,
+        onMessage: { addListener: vi.fn() },
+        lastError: undefined,
+      },
+    };
+  });
 
 vi.mock("webextension-polyfill", () => ({
   __esModule: true,
-  default: {
-    runtime: {
-      connect: mockConnect,
-      sendMessage: mockSendMessage,
-      getURL: mockGetURL,
-      onMessage: { addListener: vi.fn() },
-      lastError: undefined,
-    },
-  },
+  default: { runtime },
 }));
 
 vi.mock("@theqrl/qrl-wallet-provider/object-multiplex", () => ({
@@ -46,6 +54,7 @@ vi.mock("./utils/providerConnectionLifecycle", () => ({
   createProviderChannelBridge: () => ({
     attachExtensionChannel: vi.fn(() => vi.fn()),
     markConnectionReady: vi.fn(),
+    disconnectPermanently,
   }),
   createProviderStreamFailureGuard: () => ({
     markPortDisconnected: vi.fn(),
@@ -57,6 +66,13 @@ vi.mock("./utils/sidePanelContentBridge", () => ({
 }));
 
 import { QRL_POST_MESSAGE_STREAM } from "./constants/streamConstants";
+
+const streamFailureNotices = (postMessage: { mock: { calls: unknown[][] } }) =>
+  postMessage.mock.calls.filter(
+    ([message]: unknown[]) =>
+      (message as { data?: { data?: { method?: string } } })?.data?.data
+        ?.method === "QRL_WALLET_STREAM_FAILURE",
+  ).length;
 
 type PortStub = {
   onMessage: { addListener: ReturnType<typeof vi.fn>; removeListener: ReturnType<typeof vi.fn> };
@@ -80,6 +96,9 @@ describe("contentScript after the extension context is invalidated", () => {
     vi.resetModules();
     vi.useFakeTimers();
     openedPorts.length = 0;
+    runtime.id = "mock-id";
+    disconnectPermanently.mockReset();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     mockConnect.mockReset().mockImplementation(() => {
       const port: PortStub = {
         onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
@@ -98,23 +117,35 @@ describe("contentScript after the extension context is invalidated", () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  it("stops reconnecting and stops the keep-alive instead of throwing from the retry timer", async () => {
-    await import("./contentScript");
-    expect(mockConnect).toHaveBeenCalledTimes(1);
-
-    // The update invalidates the context: the port drops and connect throws.
+  const invalidateContext = (port: PortStub) => {
+    runtime.id = undefined;
     mockConnect.mockImplementation(() => {
       throw new Error("Extension context invalidated.");
     });
-    const port = openedPorts[0];
     port.error = { message: "Extension context invalidated." };
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+  };
+
+  it("retires after an update: no throw, no reconnects, keep-alive and lifecycle listeners stop, waiting requests and the page are told", async () => {
+    const removeWindowListener = vi.spyOn(window, "removeEventListener");
+    const postMessage = vi.spyOn(window, "postMessage");
+    await import("./contentScript");
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+
+    const port = openedPorts[0];
+    invalidateContext(port);
     disconnectOf(port)();
 
-    await expect(vi.advanceTimersByTimeAsync(1_000)).resolves.not.toThrow();
+    // The reconnect timer used to throw "Extension context invalidated." here.
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(mockConnect).toHaveBeenCalledTimes(2);
+    expect(disconnectPermanently).toHaveBeenCalledTimes(1);
+    expect(streamFailureNotices(postMessage)).toBe(1);
+    expect(removeWindowListener.mock.calls.map(([type]) => type)).toEqual(
+      expect.arrayContaining(["pagehide", "pageshow"]),
+    );
 
     const keepAlivesAtRetirement = keepAliveCalls();
     await vi.advanceTimersByTimeAsync(30_000);
@@ -122,9 +153,28 @@ describe("contentScript after the extension context is invalidated", () => {
     expect(keepAliveCalls()).toBe(keepAlivesAtRetirement);
   });
 
+  it("keeps running when connect throws while the extension context is still alive", async () => {
+    await import("./contentScript");
+    mockConnect.mockImplementation(() => {
+      throw new Error("Unexpected connect failure");
+    });
+    disconnectOf(openedPorts[0])();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(mockConnect).toHaveBeenCalledTimes(2);
+    expect(disconnectPermanently).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledWith(
+      "QrlWeb3Wallet: Could not connect to the extension",
+      expect.any(Error),
+    );
+
+    const keepAlives = keepAliveCalls();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(keepAliveCalls()).toBeGreaterThan(keepAlives);
+  });
+
   it("keeps reconnecting after an ordinary disconnect while the context is valid", async () => {
     await import("./contentScript");
-    vi.spyOn(console, "warn").mockImplementation(() => {});
     disconnectOf(openedPorts[0])();
 
     await vi.advanceTimersByTimeAsync(1_000);
