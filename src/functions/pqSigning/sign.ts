@@ -16,11 +16,17 @@ import { parseAndValidateSeed } from "@theqrl/web3-qrl-accounts";
 import {
   SCHEME_TAG_MSG,
   SCHEME_TAG_TYPED,
+  SCHEME_TAG_TYPED_V2,
   SCHEME_VERSION_MSG,
-  SCHEME_VERSION_TYPED,
+  SCHEME_VERSION_TYPED_V2,
+  type TypedDataSchemeVersion,
 } from "./ctx";
 import { computeMessageDigest } from "./messageDigest";
-import { computeTypedDataDigest, type TypedDataPayload } from "./typedData";
+import {
+  computeTypedDataDigest,
+  typedDataSchemeVersion,
+  type TypedDataPayload,
+} from "./typedData";
 import { bytesToHex, hexToBytes } from "./bytes";
 
 export interface SignWithSchemeParams {
@@ -140,7 +146,7 @@ export interface SignTypedDataResult {
   descriptor: string;
   signer: string;
   digest: string;
-  schemeVersion: typeof SCHEME_VERSION_TYPED;
+  schemeVersion: TypedDataSchemeVersion;
   domain: TypedDataPayload["domain"];
 }
 
@@ -149,10 +155,16 @@ export function signTypedData(
   hexSeed: string,
   opts?: { randomized?: boolean },
 ): SignTypedDataResult {
+  // The payload's types pick the scheme: v2 when an address field is
+  // reachable, v1 otherwise. Its tag goes into both the digest and the ctx.
+  const schemeVersion = typedDataSchemeVersion(payload);
   const digest = computeTypedDataDigest(payload);
   const { signature, publicKey, descriptor, signer } = signWithScheme({
     digest,
-    ctx: SCHEME_TAG_TYPED,
+    ctx:
+      schemeVersion === SCHEME_VERSION_TYPED_V2
+        ? SCHEME_TAG_TYPED_V2
+        : SCHEME_TAG_TYPED,
     hexSeed,
     randomized: opts?.randomized,
   });
@@ -162,7 +174,7 @@ export function signTypedData(
     descriptor: bytesToHex(descriptor),
     signer,
     digest: bytesToHex(digest),
-    schemeVersion: SCHEME_VERSION_TYPED,
+    schemeVersion,
     domain: payload.domain,
   };
 }

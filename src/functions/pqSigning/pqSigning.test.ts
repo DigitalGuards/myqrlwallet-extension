@@ -13,12 +13,19 @@ import { shake256 } from "@noble/hashes/sha3.js";
 import { toChecksumAddress } from "@theqrl/wallet.js";
 import canonical from "./__fixtures__/canonical.json";
 import { bytesToHex, concatBytes, hexToBytes } from "./bytes";
-import { SCHEME_VERSION_MSG, SCHEME_VERSION_TYPED } from "./ctx";
+import {
+  SCHEME_VERSION_MSG,
+  SCHEME_VERSION_TYPED,
+  SCHEME_VERSION_TYPED_V2,
+  type TypedDataSchemeVersion,
+} from "./ctx";
 import { computeMessageDigest } from "./messageDigest";
 import {
-  computeLegacyTypedDataDigest,
   computeTypedDataDigest,
-  QIP55_TYPED_DATA_ERROR,
+  encodeType,
+  hashStruct,
+  typedDataSchemeVersion,
+  typeHash,
   type TypedDataPayload,
 } from "./typedData";
 import { signMessage, signTypedData } from "./sign";
@@ -55,6 +62,29 @@ interface SignTypedVector {
   digest: string;
 }
 
+interface SchemeVector {
+  label: string;
+  schemeVersion: TypedDataSchemeVersion;
+  payload: TypedDataPayload;
+  encodeTypeString: string;
+  typeHashHex: string;
+  domainHashHex: string;
+  messageHashHex: string;
+  digestHex: string;
+}
+
+interface SchemeSigningVector {
+  label: string;
+  hexSeed: string;
+  payload: TypedDataPayload;
+  schemeVersion: TypedDataSchemeVersion;
+  signature: string;
+  publicKey: string;
+  descriptor: string;
+  signer: string;
+  digest: string;
+}
+
 function signerFromDescriptorAndPublicKey(
   descriptor: string,
   publicKey: string,
@@ -70,6 +100,7 @@ describe("pqSigning parity with canonical fixtures", () => {
   it("pins the scheme versions", () => {
     expect(SCHEME_VERSION_MSG).toBe(canonical.schemeVersionMsg);
     expect(SCHEME_VERSION_TYPED).toBe(canonical.schemeVersionTyped);
+    expect(SCHEME_VERSION_TYPED_V2).toBe(canonical.schemeVersionTypedV2);
   });
 
   it.each(canonical.messageVectors as MessageVector[])(
@@ -82,11 +113,68 @@ describe("pqSigning parity with canonical fixtures", () => {
   );
 
   it.each(canonical.typedVectors as unknown as TypedVector[])(
-    "retains the legacy typed-data digest for verification: $label",
-    ({ payload, digestHex }) => {
-      expect(bytesToHex(computeLegacyTypedDataDigest(payload))).toBe(digestHex);
-      expect(() => computeTypedDataDigest(payload)).toThrow(
-        QIP55_TYPED_DATA_ERROR,
+    "rejects the 20-byte legacy address payload: $label",
+    ({ payload }) => {
+      expect(() => computeTypedDataDigest(payload)).toThrow(/address/i);
+    },
+  );
+
+  it.each(canonical.schemeVectors as unknown as SchemeVector[])(
+    "scheme vector: $label",
+    (v) => {
+      const { payload, schemeVersion } = v;
+      expect(typedDataSchemeVersion(payload)).toBe(schemeVersion);
+      expect(encodeType(payload.primaryType, payload.types)).toBe(
+        v.encodeTypeString,
+      );
+      expect(bytesToHex(typeHash(payload.primaryType, payload.types))).toBe(
+        v.typeHashHex,
+      );
+      expect(
+        bytesToHex(
+          hashStruct("QRLDomain", payload.domain, payload.types, schemeVersion),
+        ),
+      ).toBe(v.domainHashHex);
+      expect(
+        bytesToHex(
+          hashStruct(
+            payload.primaryType,
+            payload.message,
+            payload.types,
+            schemeVersion,
+          ),
+        ),
+      ).toBe(v.messageHashHex);
+      expect(bytesToHex(computeTypedDataDigest(payload))).toBe(v.digestHex);
+    },
+  );
+
+  it("covers both typed-data schemes", () => {
+    const schemes = new Set(
+      (canonical.schemeVectors as unknown as SchemeVector[]).map(
+        (v) => v.schemeVersion,
+      ),
+    );
+    expect(schemes).toEqual(
+      new Set([SCHEME_VERSION_TYPED, SCHEME_VERSION_TYPED_V2]),
+    );
+  });
+
+  it.each(canonical.schemeSigningVectors as unknown as SchemeSigningVector[])(
+    "deterministic typed-data signature reproduces byte for byte: $label",
+    (v) => {
+      const signed = signTypedData(v.payload, v.hexSeed, { randomized: false });
+      expect(signed).toEqual({
+        signature: v.signature,
+        publicKey: v.publicKey,
+        signer: v.signer,
+        descriptor: v.descriptor,
+        digest: v.digest,
+        schemeVersion: v.schemeVersion,
+        domain: v.payload.domain,
+      });
+      expect(signerFromDescriptorAndPublicKey(v.descriptor, v.publicKey)).toBe(
+        v.signer,
       );
     },
   );
@@ -108,16 +196,6 @@ describe("pqSigning parity with canonical fixtures", () => {
     ).toBe(result.signer);
     expect(result.signature).toBe(vector.signature);
     expect(result.schemeVersion).toBe(canonical.schemeVersionMsg);
-  });
-
-  it("rejects deterministic typed-data signing until v2 is defined", () => {
-    const [, vector] = canonical.signingVectors as unknown as [
-      SignMessageVector,
-      SignTypedVector,
-    ];
-    expect(() =>
-      signTypedData(vector.payload, vector.hexSeed, { randomized: false }),
-    ).toThrow(QIP55_TYPED_DATA_ERROR);
   });
 
   it("hedged signing (production default) still verifies structurally", () => {

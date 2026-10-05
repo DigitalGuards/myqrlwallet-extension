@@ -231,11 +231,10 @@ describe("qrl_requestAccounts silent reconnect", () => {
     ).toEqual({ hasCompleted: false });
   });
 
-  it.each(["qrl_signTypedData_v4", "qrl_signTypedData"])(
-    "rejects %s locally before opening an approval surface",
-    async (method) => {
+  it("rejects qrl_signTypedData_v4 locally before opening an approval surface", async () => {
+    {
       setupStorage({ connectedAccounts: [ACCOUNT_A] });
-      const req = buildRequest(method);
+      const req = buildRequest("qrl_signTypedData_v4");
       req.params = [ACCOUNT_A, { domain: { chainId: "0x539" } }] as never;
       const res = {} as {
         result?: unknown;
@@ -246,11 +245,11 @@ describe("qrl_requestAccounts silent reconnect", () => {
       await restrictedMethodsMiddleware(req, res as never, vi.fn(), end);
 
       expect(res.error?.code).toBe(4200);
-      expect(res.error?.message).toContain("versioned 64-byte address layout");
+      expect(res.error?.message).toContain("cannot encode QIP-55 addresses");
       expect(end).toHaveBeenCalledTimes(1);
       expect(browser.action.openPopup).not.toHaveBeenCalled();
       expect(browser.windows.create).not.toHaveBeenCalled();
       expect(browser.storage.session.set).not.toHaveBeenCalled();
-    },
-  );
+    }
+  });
 });
