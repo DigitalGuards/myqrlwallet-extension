@@ -583,6 +583,39 @@ describe("createProviderChannelBridge", () => {
     }
   });
 
+  it("answers every waiting request with 4900 once the extension is gone, and serves nothing after", async () => {
+    const page = new ProbeChannel();
+    const extension = new ProbeChannel();
+    const bridge = createProviderChannelBridge(page);
+    bridge.attachExtensionChannel(extension);
+    page.emitInbound({ jsonrpc: "2.0", id: "waiting", method: "qrl_requestAccounts" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(page.writes).toEqual([]);
+
+    try {
+      bridge.disconnectPermanently();
+      expect(page.writes).toEqual([
+        {
+          jsonrpc: "2.0",
+          id: "waiting",
+          error: {
+            code: 4900,
+            message:
+              "The wallet extension was updated or removed; reload this page to reconnect",
+          },
+        },
+      ]);
+
+      page.emitInbound({ jsonrpc: "2.0", id: "late", method: "qrl_chainId" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(page.writes).toHaveLength(1);
+      expect(extension.writes).toEqual([]);
+    } finally {
+      extension.destroy();
+      page.destroy();
+    }
+  });
+
   it("does not replay an already forwarded request on a fresh connection", async () => {
     const page = new ProbeChannel();
     const extension = new ProbeChannel();
