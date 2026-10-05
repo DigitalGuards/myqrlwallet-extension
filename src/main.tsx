@@ -25,12 +25,12 @@ import './index.css'
 // container is exactly the overflow being hidden. Pin an explicit pixel
 // height on the popup surface only; the side panel and expanded tab
 // (marked ?sidepanel= / ?tab=, same markers as settingsStore) own their
-// viewport and keep the 100% chain. Width stays unpinned: a hard body
-// width squeezes the wallet container's scrollbar gutter into a
-// horizontal scrollbar. The popup's intrinsic width comes from the body
-// min-width instead. index.html keeps 20rem for the side panel, which can
-// be dragged that narrow, but the popup shell is 23rem wide and Chrome
-// would size the popup to 20rem and clip the shell's right edge.
+// viewport and keep the 100% chain. Width is set as a minimum: a hard body
+// width squeezes the wallet container's scrollbar gutter into a horizontal
+// scrollbar, and Chrome sizes the popup from the body's min-width. The
+// popup gets 23rem, the width of the wallet shell; index.html's 20rem
+// floor stays for the side panel, which can be dragged that narrow, and at
+// 20rem Chrome clipped the shell's right edge.
 const surfaceParams = new URLSearchParams(window.location.search);
 if (!surfaceParams.has('sidepanel') && !surfaceParams.has('tab')) {
   document.documentElement.style.setProperty('height', '600px', 'important');
