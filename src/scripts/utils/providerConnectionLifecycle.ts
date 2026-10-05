@@ -123,6 +123,21 @@ const connectionResetResponse = (id: string | number) => ({
   },
 });
 
+/**
+ * EIP-1193 4900 Disconnected: the extension that served this page was
+ * updated or removed, so nothing sent from this page can be answered until
+ * it is reloaded.
+ */
+const extensionGoneResponse = (id: string | number) => ({
+  jsonrpc: "2.0",
+  id,
+  error: {
+    code: 4900,
+    message:
+      "The wallet extension was updated or removed; reload this page to reconnect",
+  },
+});
+
 const parseRequest = (envelope: unknown) => {
   if (!envelope || typeof envelope !== "object" || Array.isArray(envelope))
     return undefined;
@@ -152,14 +167,17 @@ export const createProviderChannelBridge = (pageChannel: Duplex) => {
   let connectionReady = false;
   let detachExtensionChannel: (() => void) | undefined;
 
-  const settleAsReset = (pendingRequest: PendingRequest) => {
+  const answerPage = (response: unknown) => {
     try {
-      pageChannel.write(connectionResetResponse(pendingRequest.id));
+      pageChannel.write(response);
     } catch {
       // The page stream is already gone, so there is nobody left to answer
       // and a write error here would surface as a stream failure.
     }
   };
+
+  const settleAsReset = (pendingRequest: PendingRequest) =>
+    answerPage(connectionResetResponse(pendingRequest.id));
 
   const expireStalePending = (now: number) => {
     for (const [key, pendingRequest] of pendingRequests) {
@@ -308,6 +326,20 @@ export const createProviderChannelBridge = (pageChannel: Duplex) => {
       detachExtensionChannel?.();
       pageChannel.removeListener("data", onPageData);
       pendingRequests.clear();
+    },
+    /**
+     * The extension context is gone for good, after an update or removal.
+     * Every waiting request is answered with 4900 Disconnected so no dApp
+     * call waits forever, and the page is no longer served.
+     */
+    disconnectPermanently() {
+      const waiting = [...pendingRequests.values()];
+      detachExtensionChannel?.();
+      pageChannel.removeListener("data", onPageData);
+      pendingRequests.clear();
+      for (const pendingRequest of waiting) {
+        answerPage(extensionGoneResponse(pendingRequest.id));
+      }
     },
   };
 };
