@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 import { concatBytes, hexToBytes } from "../src/functions/pqSigning/bytes";
 import { SCHEME_TAG_TYPED } from "../src/functions/pqSigning/ctx";
 import {
-  computeLegacyTypedDataDigest,
+  computeTypedDataDigest,
   type TypedDataPayload,
 } from "../src/functions/pqSigning/typedData";
 
@@ -269,7 +269,8 @@ const makePortableOrder = (): PortableOrder => {
   const signature = new Uint8Array(CryptoBytes);
   cryptoSignSignature(
     signature,
-    computeLegacyTypedDataDigest(payload),
+    // OrderV1 has no address-typed field, so this is the v1 digest.
+    computeTypedDataDigest(payload),
     secretKey,
     false,
     SCHEME_TAG_TYPED,
