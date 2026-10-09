@@ -422,12 +422,22 @@ class StorageUtil {
       await walletLocalStorage.get(BLOCKCHAINS_IDENTIFIER)
     )?.[BLOCKCHAINS_IDENTIFIER];
     const blockchains = await this.getAllBlockChains();
-    const existingChain = blockchains.find(
-      (chain) =>
-        chain.chainId.toLowerCase() ===
-        storedBlockchains?.[ACTIVE_BLOCKCHAIN_IDENTIFIER]?.toLowerCase(),
+    const storedActiveChainId: unknown =
+      storedBlockchains?.[ACTIVE_BLOCKCHAIN_IDENTIFIER];
+    const activeChainId = (
+      typeof storedActiveChainId === "string"
+        ? storedActiveChainId
+        : DEFAULT_BLOCKCHAIN.chainId
+    ).toLowerCase();
+    const findChain = (chainId: string) =>
+      blockchains.find((chain) => chain.chainId.toLowerCase() === chainId);
+    // Resolve the default chain against the stored list too, so edits to it
+    // apply before the user has ever switched chain.
+    return (
+      findChain(activeChainId) ??
+      findChain(DEFAULT_BLOCKCHAIN.chainId.toLowerCase()) ??
+      DEFAULT_BLOCKCHAIN
     );
-    return existingChain ?? DEFAULT_BLOCKCHAIN;
   }
 
   /**
