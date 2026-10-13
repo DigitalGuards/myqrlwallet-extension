@@ -17,9 +17,7 @@ describe("QrlRequestAccountBlockchainSelection", () => {
 
   const renderComponent = (
     mockedStoreValues = mockedStore(),
-    mockedProps: ComponentProps<
-      typeof QrlRequestAccountBlockchainSelection
-    > = {
+    mockedProps: ComponentProps<typeof QrlRequestAccountBlockchainSelection> = {
       isLoading: false,
       allBlockchains: [],
       onBlockchainSelection: () => {},
@@ -34,7 +32,7 @@ describe("QrlRequestAccountBlockchainSelection", () => {
       </StoreProvider>,
     );
 
-  it("should render the qrl request account blockchain selection component", async () => {
+  it("should render the qrl request account blockchain selection component", () => {
     renderComponent(mockedStore(), {
       isLoading: false,
       onBlockchainSelection: () => {},
@@ -75,7 +73,7 @@ describe("QrlRequestAccountBlockchainSelection", () => {
     expect(screen.getByText("http://testDefaultRpcUrl")).toBeInTheDocument();
   });
 
-  it("should display the message is no blockchains are available", async () => {
+  it("should display the message is no blockchains are available", () => {
     renderComponent();
 
     expect(screen.getByText("No blockchains available")).toBeInTheDocument();

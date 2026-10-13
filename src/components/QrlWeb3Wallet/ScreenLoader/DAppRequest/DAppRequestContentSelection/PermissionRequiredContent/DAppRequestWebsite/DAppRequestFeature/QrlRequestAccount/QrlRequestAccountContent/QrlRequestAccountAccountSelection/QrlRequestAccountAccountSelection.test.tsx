@@ -42,7 +42,7 @@ describe("QrlRequestAccountAccountSelection", () => {
       </StoreProvider>,
     );
 
-  it("should render the qrl request account account selection component", async () => {
+  it("should render the qrl request account account selection component", () => {
     renderComponent(
       mockedStore({
         qrlStore: {
@@ -75,7 +75,7 @@ describe("QrlRequestAccountAccountSelection", () => {
     );
   });
 
-  it("should display the message is no accounts are available", async () => {
+  it("should display the message is no accounts are available", () => {
     renderComponent(
       mockedStore({
         qrlStore: {

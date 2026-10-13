@@ -83,7 +83,7 @@ describe("PermissionRequiredContent", () => {
     expect(mockedOnPermission).toHaveBeenCalledWith(true);
   });
 
-  it("should display the transaction running component while processing the request", async () => {
+  it("should display the transaction running component while processing the request", () => {
     renderComponent(
       mockedStore({
         dAppRequestStore: {

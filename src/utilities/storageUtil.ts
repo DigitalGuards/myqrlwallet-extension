@@ -1,3 +1,4 @@
+import type { AddedBlockchainData } from "@/utilities/approvalGuards";
 import {
   BlockchainDataType,
   DEFAULT_BLOCKCHAIN,
@@ -84,11 +85,11 @@ const ALL_CONTACTS_IDENTIFIER = "ALL_CONTACTS";
 const ACCOUNT_LABELS_IDENTIFIER = "ACCOUNT_LABELS";
 const HIDDEN_ACCOUNTS_IDENTIFIER = "HIDDEN_ACCOUNTS";
 
-const sanitizeQrnsRegistry = (
-  chain: BlockchainDataType,
+const sanitizeQrnsRegistry = <T extends { qrnsRegistryAddress?: string }>(
+  chain: T,
   rejectInvalid: boolean,
-): BlockchainDataType => {
-  const registryAddress = chain.qrnsRegistryAddress as unknown;
+): T => {
+  const registryAddress: unknown = chain.qrnsRegistryAddress;
   if (
     registryAddress === undefined ||
     registryAddress === null ||
@@ -372,7 +373,9 @@ class StorageUtil {
    * A function for storing all the available blockchains.
    * Call the getAllBlockChains function to retrieve all the stored blockchains.
    */
-  static async setAllBlockChains(blockchains: BlockchainDataType[]) {
+  static async setAllBlockChains(
+    blockchains: (BlockchainDataType | AddedBlockchainData)[],
+  ) {
     const canonicalBlockchains = blockchains.map((chain) =>
       sanitizeQrnsRegistry(chain, true),
     );
