@@ -1943,45 +1943,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/scripts/contentScript.contextInvalidated.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-extraneous-class": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-    },
-  },
-  {
-    files: ["src/scripts/contentScript.keepAlive.test.ts"],
-    rules: {
-      "@typescript-eslint/no-extraneous-class": "off",
-    },
-  },
-  {
-    files: ["src/scripts/contentScript.restore.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-extraneous-class": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
-    files: ["src/scripts/contentScript.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
-    files: ["src/scripts/inPageScript.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
     files: ["src/scripts/lockManager/keystoreParams.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
@@ -2114,65 +2075,6 @@ export const lintRatchet = [
     files: ["src/scripts/phishing/qrlPhishingConfig.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
-    },
-  },
-  {
-    files: ["src/scripts/serviceWorker.alarmListener.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
-    files: ["src/scripts/serviceWorker.earlyListeners.test.ts"],
-    rules: {
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-    },
-  },
-  {
-    files: ["src/scripts/serviceWorker.startupResilience.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-    },
-  },
-  {
-    files: ["src/scripts/serviceWorker.transactionNotificationSender.test.ts"],
-    rules: {
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-    },
-  },
-  {
-    files: ["src/scripts/serviceWorker.ts"],
-    rules: {
-      "@typescript-eslint/ban-ts-comment": "off",
-      "@typescript-eslint/no-deprecated": "off",
-      "@typescript-eslint/no-floating-promises": "off",
-      "@typescript-eslint/no-misused-promises": "off",
-      "@typescript-eslint/no-redundant-type-constituents": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/require-await": "off",
-      "@typescript-eslint/unbound-method": "off",
     },
   },
   {
@@ -2576,22 +2478,6 @@ export const lintRatchet = [
       "@typescript-eslint/no-non-null-assertion": "off",
       "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
-    },
-  },
-  {
-    files: ["src/stores/lockStore.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-extraneous-class": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-      "@typescript-eslint/unbound-method": "off",
     },
   },
   {

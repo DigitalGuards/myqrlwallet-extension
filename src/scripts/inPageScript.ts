@@ -2,7 +2,6 @@ import { WindowPostMessageStream } from "@theqrl/qrl-wallet-provider/post-messag
 import {
   eip6963AnnounceProvider,
   QrlWalletInpageProvider,
-  type BaseProvider,
 } from "@theqrl/qrl-wallet-provider/providers";
 import { v4 as uuid } from "uuid";
 import { providerLogger } from "./utils/providerLogger";
@@ -37,7 +36,7 @@ const initializeInPageScript = () => {
         icon: QRL_WEB3_WALLET_PROVIDER_INFO.ICON,
         rdns: QRL_WEB3_WALLET_PROVIDER_INFO.RDNS,
       },
-      provider: withBoundMethods(provider) as unknown as BaseProvider,
+      provider: withBoundMethods(provider),
     });
   } catch (error) {
     console.warn(
