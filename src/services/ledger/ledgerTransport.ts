@@ -33,7 +33,18 @@
 import TransportWebHID from "@ledgerhq/hw-transport-webhid";
 import type Transport from "@ledgerhq/hw-transport";
 import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
-import { speculosTransport, SpeculosTransportService } from "./speculosTransport";
+import {
+  speculosTransport,
+  SpeculosTransportService,
+} from "./speculosTransport";
+
+function isErrorWithMessage(error: unknown): error is Error {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message: unknown = error.message;
+  return typeof message === "string";
+}
 
 /**
  * Check if Speculos mode is enabled via environment variable.
@@ -43,7 +54,7 @@ const USE_SPECULOS = import.meta.env.VITE_USE_SPECULOS === "true";
 
 if (USE_SPECULOS) {
   console.log(
-    "[LedgerTransport] SPECULOS MODE ENABLED - Using emulator instead of real device"
+    "[LedgerTransport] SPECULOS MODE ENABLED - Using emulator instead of real device",
   );
 }
 
@@ -60,7 +71,7 @@ export interface ILedgerTransport {
     ins: number,
     p1: number,
     p2: number,
-    data?: Buffer | Uint8Array
+    data?: Buffer | Uint8Array,
   ): Promise<Buffer>;
   onDisconnect(callback: () => void): void;
 }
@@ -125,7 +136,7 @@ export class LedgerTransportService implements ILedgerTransport {
       // TransportWebHID.create() will open device selection dialog
       // Dialog is controlled by browser (we cannot customize it)
       this.transport = await TransportWebHID.create(
-        LEDGER_CONFIG.CONNECTION_TIMEOUT
+        LEDGER_CONFIG.CONNECTION_TIMEOUT,
       );
 
       // Listen for device disconnection
@@ -146,12 +157,12 @@ export class LedgerTransportService implements ILedgerTransport {
       console.error("[LedgerTransport] Connection error:", error);
 
       // Map errors to readable messages
-      if (error instanceof Error) {
-        if (error.message?.includes("No device selected")) {
+      if (isErrorWithMessage(error)) {
+        if (error.message.includes("No device selected")) {
           // User closed dialog without selecting device
           throw new Error(LEDGER_ERROR_MESSAGES.DEVICE_NOT_FOUND);
         }
-        if (error.message?.includes("Access denied")) {
+        if (error.message.includes("Access denied")) {
           // No permission to access device
           throw new Error(LEDGER_ERROR_MESSAGES.CONNECTION_FAILED);
         }
@@ -231,7 +242,7 @@ export class LedgerTransportService implements ILedgerTransport {
     ins: number,
     p1: number,
     p2: number,
-    data?: Buffer
+    data?: Buffer,
   ): Promise<Buffer> {
     // Ensure we are connected
     const transport = await this.connect();
@@ -246,7 +257,7 @@ export class LedgerTransportService implements ILedgerTransport {
       return response;
     } catch (error: unknown) {
       // Check if device was disconnected
-      if (error instanceof Error && error.message?.includes("disconnected")) {
+      if (isErrorWithMessage(error) && error.message.includes("disconnected")) {
         this.transport = null;
         throw new Error(LEDGER_ERROR_MESSAGES.DEVICE_DISCONNECTED);
       }
@@ -297,7 +308,7 @@ class SpeculosTransportWrapper implements ILedgerTransport {
     ins: number,
     p1: number,
     p2: number,
-    data?: Buffer | Uint8Array
+    data?: Buffer | Uint8Array,
   ): Promise<Buffer> {
     const uint8Data = data ? new Uint8Array(data) : undefined;
     const response = await this.speculos.send(cla, ins, p1, p2, uint8Data);

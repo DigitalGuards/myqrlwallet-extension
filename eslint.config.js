@@ -1057,31 +1057,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/services/ledger/ledgerApdu.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-    },
-  },
-  {
-    files: ["src/services/ledger/ledgerApdu.ts"],
-    rules: {
-      "@typescript-eslint/only-throw-error": "off",
-    },
-  },
-  {
-    files: ["src/services/ledger/ledgerService.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-    },
-  },
-  {
-    files: ["src/services/ledger/ledgerTransport.ts"],
-    rules: {
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
     files: ["src/stores/accountLabelsStore.test.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",

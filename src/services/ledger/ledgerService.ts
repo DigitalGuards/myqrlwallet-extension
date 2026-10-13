@@ -49,6 +49,7 @@ import {
   bufferToHex,
 } from "./ledgerApdu";
 import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
+import { isRecord } from "@/utilities/storageGuards";
 import type {
   LedgerAccount,
   LedgerDeviceInfo,
@@ -56,6 +57,10 @@ import type {
   LedgerServiceConfig,
   LedgerEventCallbacks,
 } from "./ledgerTypes";
+
+function hasStatusCode(error: unknown): error is { statusCode: number } {
+  return isRecord(error) && typeof error.statusCode === "number";
+}
 
 /**
  * Main Ledger Service.
@@ -102,8 +107,7 @@ class LedgerService {
     this._config = {
       connectionTimeout:
         config?.connectionTimeout || LEDGER_CONFIG.CONNECTION_TIMEOUT,
-      signingTimeout:
-        config?.signingTimeout || LEDGER_CONFIG.SIGNING_TIMEOUT,
+      signingTimeout: config?.signingTimeout || LEDGER_CONFIG.SIGNING_TIMEOUT,
     };
     this.callbacks = config?.callbacks || {};
 
@@ -163,7 +167,7 @@ class LedgerService {
         LEDGER_CONFIG.CLA,
         LEDGER_CONFIG.INS.GET_VERSION,
         LEDGER_CONFIG.P1.START,
-        LEDGER_CONFIG.P2.LAST
+        LEDGER_CONFIG.P2.LAST,
       );
 
       // Parse response
@@ -183,8 +187,8 @@ class LedgerService {
       return info;
     } catch (error: unknown) {
       // Check error type
-      if (error && typeof error === "object" && "statusCode" in error) {
-        const statusCode = (error as { statusCode: number }).statusCode;
+      if (hasStatusCode(error)) {
+        const statusCode = error.statusCode;
         if (isWrongApp(statusCode)) {
           throw new Error(LEDGER_ERROR_MESSAGES.APP_NOT_OPEN);
         }
@@ -215,7 +219,7 @@ class LedgerService {
       LEDGER_CONFIG.CLA,
       LEDGER_CONFIG.INS.GET_APP_NAME,
       LEDGER_CONFIG.P1.START,
-      LEDGER_CONFIG.P2.LAST
+      LEDGER_CONFIG.P2.LAST,
     );
 
     return parseAppName(response);
@@ -253,7 +257,7 @@ class LedgerService {
    */
   async getAccounts(
     startIndex: number = 0,
-    count: number = 5
+    count: number = 5,
   ): Promise<LedgerAccount[]> {
     const accounts: LedgerAccount[] = [];
 
@@ -300,7 +304,7 @@ class LedgerService {
    */
   async getAddress(
     derivationPath: string,
-    confirm: boolean = false
+    confirm: boolean = false,
   ): Promise<Omit<LedgerAccount, "index">> {
     // Pack path to APDU format
     const pathBuffer = packDerivationPath(derivationPath);
@@ -311,7 +315,7 @@ class LedgerService {
       LEDGER_CONFIG.INS.GET_PUBLIC_KEY,
       confirm ? LEDGER_CONFIG.P1.CONFIRM : LEDGER_CONFIG.P1.START,
       LEDGER_CONFIG.P2.LAST,
-      pathBuffer
+      pathBuffer,
     );
 
     // Parse address from response
@@ -345,7 +349,7 @@ class LedgerService {
    */
   async getPublicKey(
     derivationPath: string,
-    confirm: boolean = false
+    confirm: boolean = false,
   ): Promise<Omit<LedgerAccount, "index">> {
     // Pack path to APDU format
     const pathBuffer = packDerivationPath(derivationPath);
@@ -356,7 +360,7 @@ class LedgerService {
       LEDGER_CONFIG.INS.GET_PUBLIC_KEY,
       confirm ? LEDGER_CONFIG.P1.CONFIRM : LEDGER_CONFIG.P1.START,
       0x00, // P2=0: derive key and return address
-      pathBuffer
+      pathBuffer,
     );
 
     // Parse address from response
@@ -373,7 +377,7 @@ class LedgerService {
         LEDGER_CONFIG.INS.GET_PUBLIC_KEY,
         0x00, // P1 doesn't matter for chunk fetching
         chunkIndex + 1, // P2=1-11 for chunks 0-10
-        Buffer.alloc(0) // No data needed
+        Buffer.alloc(0), // No data needed
       );
 
       checkStatusWord(chunkResponse);
@@ -466,7 +470,7 @@ class LedgerService {
    */
   async signTransaction(
     derivationPath: string,
-    rlpEncodedTx: string | Buffer
+    rlpEncodedTx: string | Buffer,
   ): Promise<LedgerSignResult> {
     // Convert input to Buffer
     const txBytes =
@@ -486,7 +490,7 @@ class LedgerService {
         LEDGER_CONFIG.INS.SIGN_TX,
         0x00, // P1: first packet (BIP32 path)
         0x00, // P2: last packet of this type
-        pathBuffer
+        pathBuffer,
       );
 
       const txChunks = splitIntoChunks(txBytes, LEDGER_CONFIG.MAX_APDU_SIZE);
@@ -498,7 +502,7 @@ class LedgerService {
           LEDGER_CONFIG.INS.SIGN_TX,
           0x01, // P1: more transaction data
           0x00,
-          txChunks[i]
+          txChunks[i],
         );
       }
 
@@ -514,7 +518,7 @@ class LedgerService {
         LEDGER_CONFIG.INS.SIGN_TX,
         0x02, // P1: last transaction data packet
         0x00,
-        txChunks[txChunks.length - 1]
+        txChunks[txChunks.length - 1],
       );
 
       // Check status of first signature chunk
@@ -529,13 +533,17 @@ class LedgerService {
       }
       const signatureChunks: Buffer[] = [firstChunk];
 
-      for (let chunkIndex = 1; chunkIndex < LEDGER_CONFIG.SIGNATURE_CHUNKS; chunkIndex++) {
+      for (
+        let chunkIndex = 1;
+        chunkIndex < LEDGER_CONFIG.SIGNATURE_CHUNKS;
+        chunkIndex++
+      ) {
         const chunkResponse = await ledgerTransport.send(
           LEDGER_CONFIG.CLA,
           LEDGER_CONFIG.INS.SIGN_TX,
           0x02, // P1: continue fetching signature
           chunkIndex, // P2: chunk number (1-17)
-          Buffer.alloc(0) // No input data
+          Buffer.alloc(0), // No input data
         );
 
         checkStatusWord(chunkResponse);
@@ -570,8 +578,8 @@ class LedgerService {
       };
     } catch (error: unknown) {
       // Check if user rejected
-      if (error && typeof error === "object" && "statusCode" in error) {
-        const statusCode = (error as { statusCode: number }).statusCode;
+      if (hasStatusCode(error)) {
+        const statusCode = error.statusCode;
         if (isUserRejection(statusCode)) {
           if (this.callbacks.onSigningStatusChange) {
             this.callbacks.onSigningStatusChange("rejected");
