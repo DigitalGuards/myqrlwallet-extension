@@ -1,4 +1,3 @@
-import { isStoredPermission } from "@/utilities/storageGuards";
 import StorageUtil from "@/utilities/storageUtil";
 import { JsonRpcMiddleware } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
 import { v4 as uuid } from "uuid";
@@ -37,6 +36,7 @@ import {
   registerDAppTransactionWatchIfApproved,
   UNSUPPORTED_TYPED_DATA_V4_MESSAGE,
   updateAccountsAndBlockchainsForUrlOrigin,
+  updatePermissionsForUrlOrigin,
 } from "../utils/restrictedMethodsMiddlewareUtils";
 import { DAppRequestType, DAppResponseType } from "./middlewareTypes";
 
@@ -672,17 +672,11 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
             }
             case RESTRICTED_METHODS.WALLET_REQUEST_PERMISSIONS: {
               const urlOrigin = new URL(req?.senderData?.url ?? "").origin;
-              await updateAccountsAndBlockchainsForUrlOrigin({
+              res.result = await updatePermissionsForUrlOrigin({
                 urlOrigin,
                 accounts: restrictedMethodResult?.response?.accounts,
                 blockchains: restrictedMethodResult?.response?.blockchains,
               });
-              const dAppConnectedAccountsData =
-                await StorageUtil.getDAppsConnectedAccountsData(urlOrigin);
-              const permissions = dAppConnectedAccountsData?.permissions;
-              res.result = Array.isArray(permissions)
-                ? permissions.filter(isStoredPermission)
-                : [];
               break;
             }
             case RESTRICTED_METHODS.QRL_SEND_TRANSACTION: {

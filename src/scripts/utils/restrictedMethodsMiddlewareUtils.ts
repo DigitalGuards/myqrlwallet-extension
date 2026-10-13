@@ -18,6 +18,7 @@ import {
   areAddressesEquivalent,
   isCanonicalQrlAddress,
   isQrlAddress,
+  toCanonicalQrlAddress,
 } from "@/utilities/addressUtil";
 import {
   CAVEAT_TYPES,
@@ -919,20 +920,28 @@ export const checkWalletRequestPermissionParams = async (paramObject: {
   };
 };
 
-export const updateAccountsAndBlockchainsForUrlOrigin = async ({
-  urlOrigin,
-  accounts,
-  blockchains,
-}: {
+type ApprovedConnection = {
   urlOrigin: string;
   accounts: string[];
   blockchains: StoredBlockchain[];
-}) => {
+};
+
+export const updateAccountsAndBlockchainsForUrlOrigin = async (
+  connection: ApprovedConnection,
+) => {
+  await updatePermissionsForUrlOrigin(connection);
+  return connection.accounts;
+};
+
+export const updatePermissionsForUrlOrigin = async ({
+  urlOrigin,
+  accounts,
+  blockchains,
+}: ApprovedConnection): Promise<Permission[]> => {
   const origin = new URL(urlOrigin ?? "").origin;
-  // Do not silently force-switch the globally-active chain when granting
-  // permissions. The user approved the connect, not a chain change. If the
-  // dApp needs a different chain, it can call wallet_switchQRLChain, which
-  // will surface to the user via the popup (F-3).
+  // A connection approval grants access to the selected chains. Changing the
+  // active chain requires a separate wallet_switchQRLChain approval (F-3).
+  const canonicalAccounts = accounts.map(toCanonicalQrlAddress);
   const blockchainIds = blockchains.map((blockchain) => blockchain.chainId);
   const permissions: Permission[] = [
     {
@@ -941,7 +950,7 @@ export const updateAccountsAndBlockchainsForUrlOrigin = async ({
       caveats: [
         {
           type: CAVEAT_TYPES.RESTRICT_RETURNED_ACCOUNTS,
-          value: [...accounts],
+          value: [...canonicalAccounts],
         },
       ],
     },
@@ -962,7 +971,9 @@ export const updateAccountsAndBlockchainsForUrlOrigin = async ({
     blockchains: [...blockchains],
     permissions,
   });
-  return accounts;
+  // Respond with the approved usable grants after the raw storage merge. Opaque
+  // stored siblings remain available to future readers and subsequent writes.
+  return canonicalAccounts.length > 0 ? permissions : [];
 };
 
 export const includeChainForUrlOrigin = async ({

@@ -22,6 +22,7 @@ import {
   checkAccountAndChainHaveBeenAuthorized,
   includeChainForUrlOrigin,
   excludeChainForUrlOrigin,
+  updatePermissionsForUrlOrigin,
 } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import { restrictedMethodsMiddleware } from "@/scripts/middlewares/restrictedMethodsMiddleware";
 import { EXTENSION_MESSAGES } from "@/scripts/constants/streamConstants";
@@ -194,34 +195,33 @@ const fixture = (junk: unknown, position: number, mixedMetadata = false) => {
     accounts: weave([ACCOUNT, OTHER_ACCOUNT]),
     keystores: weave([keystore, otherKeystore]),
   };
-  const permissions = [
-    { future: junk },
+  const permissions = weave([
     {
       invoker: origin,
       parentCapability: "qrl_accounts",
       future: junk,
-      caveats: [
+      caveats: weave([
         { type: "future", value: junk },
         {
           type: "restrictReturnedAccounts",
           value: lists.accounts,
           future: junk,
         },
-      ],
+      ]),
     },
     {
       invoker: origin,
       parentCapability: "qrl_chains",
-      caveats: [
+      caveats: weave([
         {
           type: "restrictNetworkSwitching",
-          value: [CHAIN.chainId],
+          value: weave([CHAIN.chainId]),
           future: junk,
         },
-      ],
+      ]),
       future: junk,
     },
-  ];
+  ]);
   const grant = {
     ...CONNECTION,
     accounts: lists.accounts,
@@ -348,6 +348,20 @@ type Expected = {
 type WriterCase = {
   run: (f: Fixture) => Promise<unknown>;
   edit: (expected: Expected, f: Fixture) => void;
+};
+const editCaveatValues = (
+  expected: Expected,
+  type: string,
+  edit: (values: unknown[]) => unknown[],
+) => {
+  for (const permission of list(
+    getStoredValue(expected.local, ...grantPath, "permissions"),
+  )) {
+    for (const caveat of list(getStoredValue(permission, "caveats"))) {
+      if (isRecord(caveat) && caveat.type === type)
+        caveat.value = edit(list(caveat.value));
+    }
+  }
 };
 type WriterName = Extract<
   keyof typeof StorageUtil,
@@ -529,7 +543,18 @@ const cases = {
         ...CONNECTION,
         blockchains: [CHAIN, { ...CHAIN, chainId: "0x43" }],
       }),
-    edit: () => {},
+    edit: (e) => {
+      // Nonempty strings are stored chain identities whose membership is
+      // explicitly replaced by this approval. Opaque values retain their slot.
+      editCaveatValues(e, "restrictNetworkSwitching", (values) =>
+        values.filter(
+          (value) =>
+            typeof value !== "string" ||
+            value.trim() === "" ||
+            value === CHAIN.chainId,
+        ),
+      );
+    },
   },
   addDAppChain: {
     run: () => StorageUtil.addDAppChain(origin, { ...CHAIN, chainId: "0x44" }),
@@ -539,24 +564,10 @@ const cases = {
         [...grantPath, "blockchains"],
         [...f.lists.chains, { ...CHAIN, chainId: "0x44" }],
       );
-      set(
-        e.local,
-        [...grantPath, "permissions"],
-        [
-          f.permissions[0],
-          f.permissions[1],
-          {
-            ...f.permissions[2],
-            caveats: [
-              {
-                type: "restrictNetworkSwitching",
-                value: [CHAIN.chainId, "0x44"],
-                future: f.junk,
-              },
-            ],
-          },
-        ],
-      );
+      editCaveatValues(e, "restrictNetworkSwitching", (values) => [
+        ...values,
+        "0x44",
+      ]);
     },
   },
   removeDAppChain: {
@@ -567,19 +578,8 @@ const cases = {
         [...grantPath, "blockchains"],
         f.lists.chains.filter((v) => v !== f.chain),
       );
-      set(
-        e.local,
-        [...grantPath, "permissions"],
-        [
-          f.permissions[0],
-          f.permissions[1],
-          {
-            ...f.permissions[2],
-            caveats: [
-              { type: "restrictNetworkSwitching", value: [], future: f.junk },
-            ],
-          },
-        ],
+      editCaveatValues(e, "restrictNetworkSwitching", (values) =>
+        values.filter((value) => value !== CHAIN.chainId),
       );
     },
   },
@@ -605,24 +605,8 @@ const cases = {
     edit: (e, f) => {
       const accounts = f.lists.accounts.filter((v) => v !== ACCOUNT);
       set(e.local, [...grantPath, "accounts"], accounts);
-      set(
-        e.local,
-        [...grantPath, "permissions"],
-        [
-          f.permissions[0],
-          {
-            ...f.permissions[1],
-            caveats: [
-              { type: "future", value: f.junk },
-              {
-                type: "restrictReturnedAccounts",
-                value: accounts,
-                future: f.junk,
-              },
-            ],
-          },
-          f.permissions[2],
-        ],
+      editCaveatValues(e, "restrictReturnedAccounts", (values) =>
+        values.filter((value) => value !== ACCOUNT),
       );
     },
   },
@@ -903,7 +887,10 @@ const approvedGrants = [
   },
 ];
 
-const checkApprovedPermissions = async (expected: unknown[]) => {
+const checkApprovedPermissions = async (
+  accounts = [ACCOUNT, OTHER_ACCOUNT],
+  expected: unknown[] = approvedGrants,
+) => {
   resetApprovalSlot();
   await StorageUtil.clearDAppsRequestData();
   vi.mocked(openApprovalSurface).mockImplementation(async () => {
@@ -936,7 +923,7 @@ const checkApprovedPermissions = async (expected: unknown[]) => {
             requestId,
             hasApproved: true,
             response: {
-              accounts: [ACCOUNT, OTHER_ACCOUNT],
+              accounts,
               blockchains: approvedChains,
             },
           },
@@ -1159,22 +1146,19 @@ for (const [name, scenario] of Object.entries<WriterCase>(cases)) {
           JSON.stringify(expected),
         );
         await checkReadableSiblings();
-        const expectedGrants = getStoredValue(expected.local, ...grantPath)
-          ? [
-              {
-                ...approvedGrants[1],
-                caveats: [{ ...approvedCaveat, future: junk }],
-                future: junk,
-              },
-            ]
-          : approvedGrants;
-        await checkApprovedPermissions(expectedGrants);
-        const saved = JSON.stringify(h.local);
-        await checkApprovedPermissions(expectedGrants);
-        expect(JSON.stringify(h.local)).toBe(saved);
-        await StorageUtil.removeAccountFromAllDApps(ACCOUNT);
-        expect(await authorized()).toBe(false);
+        await checkApprovedPermissions();
+        expect(await authorized()).toBe(
+          approvedChains.some(
+            (chain) =>
+              chain.chainId ===
+              getStoredValue(h.local, "BLOCKCHAINS", "ACTIVE_BLOCKCHAIN"),
+          ),
+        );
         await checkReadableSiblings();
+        const saved = JSON.stringify(h.local);
+        await checkApprovedPermissions();
+        expect(JSON.stringify(h.local)).toBe(saved);
+        await checkRevocations();
       },
     );
   });
@@ -1194,6 +1178,124 @@ const authorized = async () =>
       true,
     )
   ).canProceed;
+
+const checkRevocations = async () => {
+  const approved = {
+    local: record(h.copy(h.local)),
+    session: record(h.copy(h.session)),
+  };
+  const chainId = (await StorageUtil.getActiveBlockChain()).chainId;
+  for (const kind of ["account", "chain", "connection"] as const) {
+    seed(approved.local, approved.session);
+    const expected = {
+      local: record(h.copy(approved.local)),
+      session: record(h.copy(approved.session)),
+    };
+    if (kind === "connection") remove(expected.local, grantPath);
+    else if (kind === "account") {
+      set(
+        expected.local,
+        [...grantPath, "accounts"],
+        list(getStoredValue(expected.local, ...grantPath, "accounts")).filter(
+          (value) => value !== ACCOUNT,
+        ),
+      );
+      editCaveatValues(expected, "restrictReturnedAccounts", (values) =>
+        values.filter((value) => value !== ACCOUNT),
+      );
+    } else {
+      set(
+        expected.local,
+        [...grantPath, "blockchains"],
+        list(
+          getStoredValue(expected.local, ...grantPath, "blockchains"),
+        ).filter((value) => getStoredValue(value, "chainId") !== chainId),
+      );
+      editCaveatValues(expected, "restrictNetworkSwitching", (values) =>
+        values.filter((value) => value !== chainId),
+      );
+    }
+    const revoke = () =>
+      kind === "account"
+        ? StorageUtil.removeAccountFromAllDApps(ACCOUNT)
+        : kind === "chain"
+          ? StorageUtil.removeDAppChain(origin, chainId)
+          : StorageUtil.clearDAppsConnectedAccountsData(origin);
+    for (let repeat = 0; repeat < 2; repeat++) {
+      await revoke();
+      expect(JSON.stringify({ local: h.local, session: h.session })).toBe(
+        JSON.stringify(expected),
+      );
+      expect(await authorized()).toBe(false);
+      await checkReadableSiblings();
+    }
+  }
+};
+
+describe("nested permission approval preservation", () => {
+  it.each(
+    junkValues.flatMap((junk, id) =>
+      [0, 1, 2].flatMap((position) =>
+        ["permissions", "caveats", "values"].map((level) => ({
+          junk,
+          id,
+          position,
+          level,
+        })),
+      ),
+    ),
+  )(
+    "returns both approved grants and preserves opaque $level entry $id at $position",
+    async ({ junk, position, level }) => {
+      const weave = (values: unknown[]) => [
+        ...values.slice(0, position),
+        junk,
+        ...values.slice(position),
+      ];
+      const grants = approvedGrants.map((permission) => ({
+        ...permission,
+        caveats:
+          level === "caveats"
+            ? weave(permission.caveats)
+            : permission.caveats.map((caveat: unknown) => ({
+                ...record(caveat),
+                value:
+                  level === "values"
+                    ? weave(list(getStoredValue(caveat, "value")))
+                    : getStoredValue(caveat, "value"),
+              })),
+      }));
+      const f = fixture(junk, position);
+      set(f.local, grantPath, {
+        ...CONNECTION,
+        blockchains: approvedChains,
+        permissions: level === "permissions" ? weave(grants) : grants,
+      });
+      seed(f.local, f.session);
+      const expected = {
+        local: record(h.copy(f.local)),
+        session: record(h.copy(f.session)),
+      };
+      editCaveatValues(expected, "restrictNetworkSwitching", (values) =>
+        values.filter(
+          (value) =>
+            typeof value !== "string" ||
+            value.trim() === "" ||
+            value === CHAIN.chainId ||
+            value === "0x43",
+        ),
+      );
+      const saved = JSON.stringify(expected.local);
+      for (let repeat = 0; repeat < 2; repeat++) {
+        await checkApprovedPermissions();
+        expect(await authorized()).toBe(true);
+        expect(JSON.stringify(h.local)).toBe(saved);
+        await checkReadableSiblings();
+      }
+      await checkRevocations();
+    },
+  );
+});
 
 describe("round 3 real grant callers", () => {
   it.each(
@@ -1509,6 +1611,46 @@ const accountAliases = [
   `0x${ACCOUNT.slice(1)}`,
   `0X${ACCOUNT.slice(1)}`,
 ];
+it.each(accountAliases)(
+  "returns canonical approved permissions for account alias %s",
+  async (account) => {
+    const f = fixture(null, 1);
+    seed(f.local, f.session);
+    await checkApprovedPermissions([account, OTHER_ACCOUNT]);
+    expect(await authorized()).toBe(true);
+    await checkReadableSiblings();
+  },
+);
+
+it("returns no permissions after an empty account approval", async () => {
+  const f = fixture(null, 1);
+  seed(f.local, f.session);
+  await checkApprovedPermissions([], []);
+  expect(await authorized()).toBe(false);
+  expect(
+    await StorageUtil.getDAppsConnectedAccountsData(origin),
+  ).toBeUndefined();
+  expect(getStoredValue(h.local, ...grantPath, "accounts")).toEqual([null]);
+  await checkReadableSiblings();
+});
+
+it("rejects permission approval when persisting the grant fails", async () => {
+  const f = fixture(null, 1);
+  seed(f.local, f.session);
+  const saved = JSON.stringify(h.local);
+  vi.spyOn(h.localArea, "set").mockRejectedValueOnce(
+    new Error("Storage failed"),
+  );
+  await expect(
+    updatePermissionsForUrlOrigin({
+      urlOrigin: origin,
+      accounts: [ACCOUNT, OTHER_ACCOUNT],
+      blockchains: approvedChains,
+    }),
+  ).rejects.toThrow("Storage failed");
+  expect(JSON.stringify(h.local)).toBe(saved);
+});
+
 const chainAliases = [CHAIN.chainId, "0X2A", "0x002a", "42"];
 for (const kind of ["account", "chain", "connection"] as const) {
   it.each(
