@@ -34,7 +34,7 @@ const Home = observer(() => {
     accounts: t("loader.phaseAccounts"),
     session: t("loader.phaseSession"),
   } as const;
-  const showStartup = initProgress?.active || isLoading;
+  const showStartup = initProgress.active || isLoading;
 
   return (
     <>
@@ -43,9 +43,9 @@ const Home = observer(() => {
         {showStartup ? (
           <div className="flex w-full justify-center pt-24">
             <BrandedLoader
-              progress={initProgress?.active ? initProgress.fraction : undefined}
+              progress={initProgress.active ? initProgress.fraction : undefined}
               label={
-                initProgress?.active
+                initProgress.active
                   ? phaseLabels[initProgress.phase]
                   : t("home.connecting")
               }

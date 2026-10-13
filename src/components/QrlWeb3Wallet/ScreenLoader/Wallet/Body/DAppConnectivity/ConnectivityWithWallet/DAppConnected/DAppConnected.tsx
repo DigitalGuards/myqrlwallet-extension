@@ -6,10 +6,11 @@ import { useEffect } from "react";
 
 const DAppConnected = observer(() => {
   const { dAppRequestStore } = useStore();
-  const { fetchCurrentTabData } = dAppRequestStore;
 
   useEffect(() => {
-    fetchCurrentTabData();
+    dAppRequestStore.fetchCurrentTabData().catch((error: unknown) => {
+      console.error("Failed to load current tab:", error);
+    });
   }, []);
 
   return (

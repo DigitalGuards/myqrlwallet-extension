@@ -40,7 +40,9 @@ const NFTCollections = observer(
           await StorageUtil.getNFTCollectionsList(accountAddress);
         setCollections(stored);
         onCountChange?.(stored.length);
-      })();
+      })().catch((error: unknown) => {
+        console.error("Failed to load NFT collections:", error);
+      });
     }, [blockchain, accountAddress, reRender]);
 
     const triggerReRender = () => {

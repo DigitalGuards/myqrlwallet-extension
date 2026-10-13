@@ -68,7 +68,9 @@ const UrlSelections = ({
                       size="icon"
                       type="button"
                       aria-label="Default URL"
-                      onClick={() => setDefaultUrl(urlItem)}
+                      onClick={() => {
+                        setDefaultUrl(urlItem);
+                      }}
                     >
                       <Star
                         size="16"

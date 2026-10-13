@@ -16,7 +16,7 @@ type MnemonicWordListingProps = {
   mnemonic: string;
 };
 
-const MnemonicWordListing = ({ mnemonic = "" }: MnemonicWordListingProps) => {
+const MnemonicWordListing = ({ mnemonic }: MnemonicWordListingProps) => {
   const { t } = useTranslation();
   const trimmedMnemonic = mnemonic.trim();
   const words = groupWords(trimmedMnemonic);

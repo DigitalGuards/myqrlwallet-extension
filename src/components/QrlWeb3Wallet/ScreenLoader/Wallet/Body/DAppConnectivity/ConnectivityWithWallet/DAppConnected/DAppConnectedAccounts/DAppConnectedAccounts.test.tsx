@@ -31,7 +31,7 @@ describe("DAppConnectedAccounts", () => {
       </StoreProvider>,
     );
 
-  it("should render the dapp connected accounts component", async () => {
+  it("should render the dapp connected accounts component", () => {
     renderComponent();
 
     expect(

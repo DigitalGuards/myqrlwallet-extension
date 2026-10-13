@@ -1,8 +1,10 @@
+import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
+import StorageUtil from "@/utilities/storageUtil";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
@@ -14,37 +16,43 @@ vi.mock("@/utilities/storageUtil", async () => {
   >("@/utilities/storageUtil");
   return {
     ...originalModule,
-    default: {
-      ...originalModule.default,
-      getAllBlockChains: vi.fn(async () => []),
-      setAllBlockChains: vi.fn(async () => {}),
-      getActiveBlockChain: vi.fn(async () => ({
-        chainId: "0x5",
-        chainName: "Test chain name",
-        rpcUrls: [],
-        blockExplorerUrls: [],
-        iconUrls: [],
-        nativeCurrency: {
-          name: "Test native currency",
-          symbol: "Test symbol",
-          decimals: 18,
-        },
-        defaultRpcUrl: "http://testDefaultRpcUrl",
-        defaultBlockExplorerUrl: "http://testDefaultExplorerUrl",
-        defaultIconUrl: "http://testDefaultIconUrl",
-        isTestnet: false,
-        defaultWsRpcUrl: "http://testDefaultRpcUrl",
-        isCustomChain: true,
-      })),
-      setActiveBlockChain: vi.fn(async () => {}),
-      getDAppsConnectedAccountsData: vi.fn(async () => {}),
-      setDAppsConnectedAccountsData: vi.fn(async () => {}),
+    default: class extends originalModule.default {
+      static override getAllBlockChains = vi.fn(() => Promise.resolve([]));
+      static override setAllBlockChains = vi.fn(async () => {});
+      static override getActiveBlockChain = vi.fn(() =>
+        Promise.resolve({
+          chainId: "0x5",
+          chainName: "Test chain name",
+          rpcUrls: [],
+          blockExplorerUrls: [],
+          iconUrls: [],
+          nativeCurrency: {
+            name: "Test native currency",
+            symbol: "Test symbol",
+            decimals: 18,
+          },
+          defaultRpcUrl: "http://testDefaultRpcUrl",
+          defaultBlockExplorerUrl: "http://testDefaultExplorerUrl",
+          defaultIconUrl: "http://testDefaultIconUrl",
+          isTestnet: false,
+          defaultWsRpcUrl: "http://testDefaultRpcUrl",
+          isCustomChain: true,
+        }),
+      );
+      static override setActiveBlockChain = vi.fn(async () => {});
+      static override getDAppsConnectedAccountsData = vi.fn(() =>
+        Promise.resolve(undefined),
+      );
+      static override setDAppsConnectedAccountsData = vi.fn(async () => {});
     },
   };
 });
 
 describe("OtherChains", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (
     mockedStoreValues = mockedStore(),
@@ -238,5 +246,104 @@ describe("OtherChains", () => {
     expect(deleteConfirmationButton).toBeInTheDocument();
     await userEvent.click(deleteConfirmationButton);
     expect(mockedTriggerReRender).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a rejected chain selection", async () => {
+    const error = new Error("Chain selection failed");
+    const selectBlockchain = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValue(error);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComponent(
+      mockedStore({
+        qrlStore: { selectBlockchain },
+        dAppRequestStore: {
+          currentTabData: { urlOrigin: "https://dapp.example" },
+        },
+      }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Connect chain" }),
+    );
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith("Failed to connect chain:", error);
+    });
+  });
+
+  it("reports a rejected chain deletion without refreshing the list", async () => {
+    const error = new Error("Chain deletion failed");
+    vi.spyOn(StorageUtil, "setAllBlockChains").mockRejectedValueOnce(error);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const triggerReRender = vi.fn();
+    renderComponent(undefined, {
+      blockchain: {
+        chainId: "0x5",
+        chainName: "Custom",
+        rpcUrls: [],
+        blockExplorerUrls: [],
+        iconUrls: [],
+        nativeCurrency: { name: "Test", symbol: "TST", decimals: 18 },
+        defaultRpcUrl: "",
+        defaultBlockExplorerUrl: "",
+        defaultIconUrl: "",
+        defaultWsRpcUrl: "",
+        isTestnet: false,
+        isCustomChain: true,
+      },
+      triggerReRender,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete chain" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Confirm Delete" }),
+    );
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith("Failed to delete chain:", error);
+    });
+    expect(triggerReRender).not.toHaveBeenCalled();
+  });
+
+  it("deletes only the selected chain and preserves other records and their order", async () => {
+    const first = {
+      ...DEFAULT_BLOCKCHAIN,
+      chainId: "0x10",
+      savedMetadata: { label: "First", entries: ["a", "b"] },
+    };
+    const target = {
+      ...DEFAULT_BLOCKCHAIN,
+      chainId: "0x20",
+      isCustomChain: true,
+    };
+    const last = {
+      ...DEFAULT_BLOCKCHAIN,
+      chainId: "0x30",
+      savedMetadata: { label: "Last", entries: ["c"] },
+    };
+    vi.spyOn(StorageUtil, "getAllBlockChains").mockResolvedValueOnce([
+      first,
+      target,
+      last,
+    ]);
+    const write = vi
+      .spyOn(StorageUtil, "setAllBlockChains")
+      .mockResolvedValue(undefined);
+    const triggerReRender = vi.fn();
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          currentTabData: { urlOrigin: "https://dapp.example" },
+        },
+      }),
+      { blockchain: target, triggerReRender },
+    );
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete chain" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Confirm Delete" }),
+    );
+    await waitFor(() => {
+      expect(triggerReRender).toHaveBeenCalledTimes(1);
+    });
+    expect(write).toHaveBeenCalledExactlyOnceWith([first, last]);
   });
 });

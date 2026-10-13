@@ -97,7 +97,14 @@ const ContactForm = ({
 
   return (
     <Form {...form}>
-      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-3">
+      <form
+        onSubmit={(event) => {
+          handleSubmit(onSubmit)(event).catch((error: unknown) => {
+            console.error("Failed to submit contact:", error);
+          });
+        }}
+        className="flex flex-col gap-3"
+      >
         <FormField
           control={control}
           name="name"

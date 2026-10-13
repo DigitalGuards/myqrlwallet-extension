@@ -46,27 +46,25 @@ const NFTCollectionItem = observer(
     const { t } = useTranslation();
     const navigate = useNavigate();
     const { qrlStore } = useStore();
-    const {
-      qrlConnection,
-      activeAccount,
-      getNftCollectionDetails,
-      getOwnedNftTokens,
-    } = qrlStore;
+    const { qrlConnection, activeAccount } = qrlStore;
     const { blockchain } = qrlConnection;
     const { accountAddress } = activeAccount;
 
     const [collection, setCollection] =
       useState<
-        Awaited<ReturnType<typeof getNftCollectionDetails>>["collection"]
+        Awaited<
+          ReturnType<typeof qrlStore.getNftCollectionDetails>
+        >["collection"]
       >();
     const [ownedCount, setOwnedCount] = useState<number | undefined>();
     const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
 
     useEffect(() => {
       let cancelled = false;
+      const isCancelled = () => cancelled;
       (async () => {
-        const details = await getNftCollectionDetails(contractAddress);
-        if (cancelled) return;
+        const details = await qrlStore.getNftCollectionDetails(contractAddress);
+        if (isCancelled()) return;
         if (details.error || !details.collection) {
           // A failed details read (RPC blip, dead endpoint) must not leave
           // the row as an eternal skeleton: fall back to the stored
@@ -88,15 +86,19 @@ const NFTCollectionItem = observer(
         // explorer, count via the same chain-verified path the gallery
         // uses (explorer candidates re-checked with balanceOf) so the
         // row and the gallery can never disagree. Without an explorer
-        // the count is unknowable; leave it undefined rather than
-        // claiming "0 NFTs".
+        // the count is unknowable; leave the count undefined.
         if (!getExplorerApiBase(blockchain.chainId)) return;
-        const owned = await getOwnedNftTokens(contractAddress, "ZRC1155");
+        const owned = await qrlStore.getOwnedNftTokens(
+          contractAddress,
+          "ZRC1155",
+        );
         // A failed read leaves the count unknown, so the row shows the
         // collection name and no count. Treating it as zero would claim
         // "0 NFTs" for a collection this account may well hold.
-        if (!cancelled && !owned.failed) setOwnedCount(owned.tokens.length);
-      })();
+        if (!isCancelled() && !owned.failed) setOwnedCount(owned.tokens.length);
+      })().catch((error: unknown) => {
+        console.error("Failed to load NFT collection:", error);
+      });
       return () => {
         cancelled = true;
       };
@@ -126,18 +128,21 @@ const NFTCollectionItem = observer(
       <>
         <Card
           className="flex h-16 w-full animate-appear-in cursor-pointer items-center justify-between gap-4 p-4 text-foreground hover:ring-1 hover:ring-secondary"
-          onClick={() =>
-            navigate(ROUTES.NFT_GALLERY, {
-              state: {
-                contractAddress,
-                // displayName, not the raw name: nameless 1155 contracts
-                // otherwise flow "" into the detail/transfer/history
-                // screens and render identity-less entries.
-                collectionName: displayName,
-                standard: collection.standard ?? storedStandard ?? "ZRC721",
-              },
-            })
-          }
+          onClick={() => {
+            Promise.resolve(
+              navigate(ROUTES.NFT_GALLERY, {
+                state: {
+                  contractAddress,
+                  // Carry the display name into detail, transfer and history
+                  // screens for nameless 1155 contracts.
+                  collectionName: displayName,
+                  standard: collection.standard,
+                },
+              }),
+            ).catch((error: unknown) => {
+              console.error("Failed to open NFT gallery:", error);
+            });
+          }}
         >
           <div className="flex items-center gap-4">
             <Image
@@ -159,7 +164,12 @@ const NFTCollectionItem = observer(
             </div>
           </div>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+            <DropdownMenuTrigger
+              asChild
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
+            >
               <Button
                 className="size-7 hover:bg-accent hover:text-secondary"
                 variant="outline"
@@ -175,12 +185,16 @@ const NFTCollectionItem = observer(
                 opens the gallery and unmounts the confirm dialog. */}
             <DropdownMenuContent
               align="start"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
             >
               <DropdownMenuGroup>
                 <DropdownMenuItem
                   className="cursor-pointer data-[highlighted]:text-secondary"
-                  onClick={() => setRemoveDialogOpen(true)}
+                  onClick={() => {
+                    setRemoveDialogOpen(true);
+                  }}
                 >
                   <div className="flex gap-2">
                     <CircleMinus size="16" />
@@ -206,7 +220,15 @@ const NFTCollectionItem = observer(
                   {t("common.no")}
                 </Button>
               </DialogClose>
-              <Button className="w-full" type="button" onClick={onRemove}>
+              <Button
+                className="w-full"
+                type="button"
+                onClick={() => {
+                  onRemove().catch((error: unknown) => {
+                    console.error("Failed to hide NFT collection:", error);
+                  });
+                }}
+              >
                 <Check className="mr-2 h-4 w-4" />
                 {t("common.yes")}
               </Button>

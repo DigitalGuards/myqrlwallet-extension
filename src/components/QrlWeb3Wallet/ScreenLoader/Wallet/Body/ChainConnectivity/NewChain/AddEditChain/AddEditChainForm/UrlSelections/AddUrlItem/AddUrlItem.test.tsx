@@ -2,14 +2,17 @@ import { mockedStore } from "@/__mocks__/mockedStore";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import AddUrlItem from "./AddUrlItem";
 
 describe("AddUrlItem", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (
     mockedStoreValues = mockedStore(),
@@ -66,5 +69,27 @@ describe("AddUrlItem", () => {
     await userEvent.click(addButton);
     expect(mockedAddUrl).toHaveBeenCalledTimes(1);
     expect(mockedAddUrl).toHaveBeenCalledWith("https://testUrl");
+  });
+
+  it("reports a failed URL callback and keeps the entered URL", async () => {
+    const error = new Error("URL update failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComponent(undefined, {
+      addUrl: () => {
+        throw error;
+      },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Add URL" }));
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "url" }),
+      "https://rpc.example",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith("Failed to add URL:", error);
+    });
+    expect(screen.getByRole("textbox", { name: "url" })).toHaveValue(
+      "https://rpc.example",
+    );
   });
 });
