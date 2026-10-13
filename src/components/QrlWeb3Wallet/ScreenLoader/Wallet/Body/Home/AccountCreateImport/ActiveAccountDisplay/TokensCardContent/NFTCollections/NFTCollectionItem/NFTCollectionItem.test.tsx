@@ -1,7 +1,9 @@
+import type StorageUtil from "@/utilities/storageUtil";
+import type QrlStore from "@/stores/qrlStore";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
@@ -11,14 +13,15 @@ const ACTIVE_ACCOUNT = `Q${"a".repeat(128)}`;
 const CONTRACT_ADDRESS = `Q${"c".repeat(128)}`;
 
 const { mockClearFromNFTCollectionsList } = vi.hoisted(() => ({
-  mockClearFromNFTCollectionsList: vi.fn().mockResolvedValue(undefined),
+  mockClearFromNFTCollectionsList: vi
+    .fn<typeof StorageUtil.clearFromNFTCollectionsList>()
+    .mockResolvedValue(undefined),
 }));
 
 vi.mock("@/utilities/storageUtil", () => ({
   __esModule: true,
   default: {
-    clearFromNFTCollectionsList: (...args: any[]) =>
-      mockClearFromNFTCollectionsList(...args),
+    clearFromNFTCollectionsList: mockClearFromNFTCollectionsList,
   },
 }));
 
@@ -30,6 +33,7 @@ describe("NFTCollectionItem", () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     mockClearFromNFTCollectionsList.mockClear();
   });
 
@@ -38,15 +42,16 @@ describe("NFTCollectionItem", () => {
   const storeWithCollection = () =>
     mockedStore({
       qrlStore: {
-        getNftCollectionDetails: (async () => ({
-          collection: {
-            name: "Test Collection",
-            symbol: "TST",
-            standard: "ZRC721",
-            balance: 3,
-          },
-          error: "",
-        })) as any,
+        getNftCollectionDetails: () =>
+          Promise.resolve({
+            collection: {
+              name: "Test Collection",
+              symbol: "TST",
+              standard: "ZRC721" as const,
+              balance: 3,
+            },
+            error: "",
+          }),
       },
     });
 
@@ -93,15 +98,16 @@ describe("NFTCollectionItem", () => {
       <StoreProvider
         value={mockedStore({
           qrlStore: {
-            getNftCollectionDetails: (async () => ({
-              collection: {
-                name: "Test Collection",
-                symbol: "TST",
-                standard: "ZRC721",
-                balance: 1,
-              },
-              error: "",
-            })) as any,
+            getNftCollectionDetails: () =>
+              Promise.resolve({
+                collection: {
+                  name: "Test Collection",
+                  symbol: "TST",
+                  standard: "ZRC721" as const,
+                  balance: 1,
+                },
+                error: "",
+              }),
           },
         })}
       >
@@ -119,15 +125,16 @@ describe("NFTCollectionItem", () => {
       <StoreProvider
         value={mockedStore({
           qrlStore: {
-            getNftCollectionDetails: (async () => ({
-              collection: {
-                name: "",
-                symbol: "",
-                standard: "ZRC721",
-                balance: 1,
-              },
-              error: "",
-            })) as any,
+            getNftCollectionDetails: () =>
+              Promise.resolve({
+                collection: {
+                  name: "",
+                  symbol: "",
+                  standard: "ZRC721" as const,
+                  balance: 1,
+                },
+                error: "",
+              }),
           },
         })}
       >
@@ -179,5 +186,145 @@ describe("NFTCollectionItem", () => {
     );
     expect(triggerReRender).toHaveBeenCalled();
     expect(screen.queryByText("Gallery route")).not.toBeInTheDocument();
+  });
+
+  it("reports a rejected collection hide without refreshing the list", async () => {
+    const error = new Error("Collection storage unavailable");
+    mockClearFromNFTCollectionsList.mockRejectedValueOnce(error);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { triggerReRender } = renderComponent();
+    await screen.findByText("Test Collection");
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    await userEvent.click(
+      screen.getByRole("menuitem", { name: "Hide Collection" }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Yes" }));
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "Failed to hide NFT collection:",
+        error,
+      );
+    });
+    expect(triggerReRender).not.toHaveBeenCalled();
+  });
+
+  it("reports an unexpected collection details rejection", async () => {
+    const error = new Error("Collection lookup failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const getNftCollectionDetails = vi
+      .fn<QrlStore["getNftCollectionDetails"]>()
+      .mockRejectedValue(error);
+    render(
+      <StoreProvider
+        value={mockedStore({ qrlStore: { getNftCollectionDetails } })}
+      >
+        <MemoryRouter>
+          <NFTCollectionItem contractAddress={contractAddress} />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "Failed to load NFT collection:",
+        error,
+      );
+    });
+  });
+
+  it("ignores a previous account's delayed collection details", async () => {
+    type Details = Awaited<ReturnType<QrlStore["getNftCollectionDetails"]>>;
+    let finish: ((details: Details) => void) | undefined;
+    const pending = new Promise<Details>((resolve) => {
+      finish = resolve;
+    });
+    const getNftCollectionDetails = vi
+      .fn<QrlStore["getNftCollectionDetails"]>()
+      .mockReturnValueOnce(pending)
+      .mockResolvedValue({
+        collection: {
+          name: "Current collection",
+          symbol: "CUR",
+          balance: 1,
+          standard: "ZRC721",
+        },
+        error: "",
+      });
+    const viewFor = (address: string) => (
+      <StoreProvider
+        value={mockedStore({
+          qrlStore: {
+            activeAccount: { accountAddress: address },
+            getNftCollectionDetails,
+          },
+        })}
+      >
+        <MemoryRouter>
+          <NFTCollectionItem contractAddress={contractAddress} />
+        </MemoryRouter>
+      </StoreProvider>
+    );
+    const view = render(viewFor(ACTIVE_ACCOUNT));
+    view.rerender(viewFor(`Q${"b".repeat(128)}`));
+    await screen.findByText("Current collection");
+    await act(async () => {
+      finish?.({
+        collection: {
+          name: "Old collection",
+          symbol: "OLD",
+          balance: 9,
+          standard: "ZRC721",
+        },
+        error: "",
+      });
+      await pending;
+    });
+    expect(screen.getByText("Current collection")).toBeInTheDocument();
+    expect(screen.queryByText("Old collection")).not.toBeInTheDocument();
+  });
+
+  it("ignores a previous account's delayed ZRC1155 ownership count", async () => {
+    type Owned = Awaited<ReturnType<QrlStore["getOwnedNftTokens"]>>;
+    let finish: ((owned: Owned) => void) | undefined;
+    const pending = new Promise<Owned>((resolve) => {
+      finish = resolve;
+    });
+    const getNftCollectionDetails = vi
+      .fn<QrlStore["getNftCollectionDetails"]>()
+      .mockResolvedValue({
+        collection: { name: "Collection", symbol: "COL", standard: "ZRC1155" },
+        error: "",
+      });
+    const getOwnedNftTokens = vi
+      .fn<QrlStore["getOwnedNftTokens"]>()
+      .mockReturnValueOnce(pending)
+      .mockResolvedValue({ tokens: [{ tokenId: "1" }], failed: false });
+    const viewFor = (address: string) => (
+      <StoreProvider
+        value={mockedStore({
+          qrlStore: {
+            qrlConnection: { blockchain: { chainId: "0x301825" } },
+            activeAccount: { accountAddress: address },
+            getNftCollectionDetails,
+            getOwnedNftTokens,
+          },
+        })}
+      >
+        <MemoryRouter>
+          <NFTCollectionItem contractAddress={contractAddress} />
+        </MemoryRouter>
+      </StoreProvider>
+    );
+    const view = render(viewFor(ACTIVE_ACCOUNT));
+    await waitFor(() => {
+      expect(getOwnedNftTokens).toHaveBeenCalledTimes(1);
+    });
+    view.rerender(viewFor(`Q${"b".repeat(128)}`));
+    await screen.findByText("1 NFT");
+    await act(async () => {
+      finish?.({ tokens: [{ tokenId: "2" }, { tokenId: "3" }], failed: false });
+      await pending;
+    });
+    expect(screen.getByText("1 NFT")).toBeInTheDocument();
+    expect(screen.queryByText("2 NFTs")).not.toBeInTheDocument();
   });
 });

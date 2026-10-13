@@ -47,7 +47,6 @@ const OtherChainItem = observer(
     const { t } = useTranslation();
     const navigate = useNavigate();
     const { dAppRequestStore, qrlStore } = useStore();
-    const { selectBlockchain } = qrlStore;
     const { defaultRpcUrl, chainName, chainId, defaultIconUrl, isCustomChain } =
       blockchain;
     const { currentTabData } = dAppRequestStore;
@@ -55,12 +54,14 @@ const OtherChainItem = observer(
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
     const connectChain = async (chainId: string) => {
-      navigate(ROUTES.HOME);
+      Promise.resolve(navigate(ROUTES.HOME)).catch((error: unknown) => {
+        console.error("Failed to navigate home:", error);
+      });
       await includeChainForUrlOrigin({
         urlOrigin: currentTabData?.urlOrigin ?? "",
         chainId,
       });
-      selectBlockchain(chainId);
+      await qrlStore.selectBlockchain(chainId);
     };
 
     const deleteChain = async (chainId: string) => {
@@ -100,7 +101,9 @@ const OtherChainItem = observer(
                 size="icon"
                 aria-label={t('chain.connectChain')}
                 onClick={() => {
-                  connectChain(chainId);
+                  connectChain(chainId).catch((error: unknown) => {
+                    console.error("Failed to connect chain:", error);
+                  });
                 }}
               >
                 <Wifi size="16" />
@@ -177,7 +180,9 @@ const OtherChainItem = observer(
                   type="button"
                   aria-label={t('chain.confirmDelete')}
                   onClick={() => {
-                    deleteChain(chainId);
+                    deleteChain(chainId).catch((error: unknown) => {
+                      console.error("Failed to delete chain:", error);
+                    });
                   }}
                 >
                   <Check className="mr-2 h-4 w-4" />

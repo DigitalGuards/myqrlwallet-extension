@@ -64,6 +64,7 @@ const AccountCreateImport = observer(() => {
   // import screens.
   useEffect(() => {
     let cancelled = false;
+    const isCancelled = () => cancelled;
     setDiscoveredTokenCount(0);
     setDiscoveredCollectionCount(0);
     (async () => {
@@ -75,7 +76,7 @@ const AccountCreateImport = observer(() => {
           discoverNftCollections(accountAddress, blockchain.chainId),
           StorageUtil.getNFTCollectionsList(accountAddress),
         ]);
-      if (cancelled) return;
+      if (isCancelled()) return;
       const existingTokens = new Set(
         storedTokens.map((token) => token.address.toLowerCase()),
       );
@@ -93,7 +94,9 @@ const AccountCreateImport = observer(() => {
             !existingCollections.has(collection.address.toLowerCase()),
         ).length,
       );
-    })();
+    })().catch((error: unknown) => {
+      console.error("Failed to discover account assets:", error);
+    });
     return () => {
       cancelled = true;
     };

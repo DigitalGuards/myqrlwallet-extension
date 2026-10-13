@@ -1,7 +1,14 @@
+import StorageUtil from "@/utilities/storageUtil";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import userEvent from "@testing-library/user-event";
@@ -14,19 +21,25 @@ vi.mock("@/utilities/storageUtil", async () => {
   >("@/utilities/storageUtil");
   return {
     ...originalModule,
-    default: {
-      ...originalModule.default,
-      clearFromTokenContractsList: vi.fn(async () => {}),
+    default: class extends originalModule.default {
+      static override clearFromTokenContractsList = vi.fn(async () => {});
     },
   };
 });
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/TokenListItem/TokenListItemIcon/TokenListItemIcon",
-  () => ({ default: () => <div>Mocked Token List Item Icon</div> }),
+  () => ({
+    default: ({ icon }: { icon: string }) => (
+      <div data-icon={icon}>Mocked Token List Item Icon</div>
+    ),
+  }),
 );
 
 describe("TokenListItem", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (
     mockedStoreValues = mockedStore(),
@@ -173,5 +186,39 @@ describe("TokenListItem", () => {
     expect(
       screen.queryByRole("button", { name: "Copy contract address" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("reports a rejected token hide without refreshing the list", async () => {
+    const error = new Error("Token storage unavailable");
+    vi.spyOn(StorageUtil, "clearFromTokenContractsList").mockRejectedValueOnce(
+      error,
+    );
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const triggerReRender = vi.fn();
+    renderComponent(undefined, {
+      isZrc20Token: true,
+      contractAddress: "Q" + "c".repeat(128),
+      image: "",
+      balance: "1",
+      name: "Test",
+      symbol: "TST",
+      triggerReRender,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    await userEvent.click(screen.getByRole("button", { name: "Hide Token" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm Hide" }));
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith("Failed to hide token:", error);
+    });
+    expect(triggerReRender).not.toHaveBeenCalled();
+    expect(screen.queryByText("Token transfer page")).not.toBeInTheDocument();
+  });
+
+  it("keeps the empty icon fallback for a stored token without an image", () => {
+    renderComponent(undefined, { balance: "1", name: "Test", symbol: "TST" });
+    expect(screen.getByText("Mocked Token List Item Icon")).toHaveAttribute(
+      "data-icon",
+      "",
+    );
   });
 });

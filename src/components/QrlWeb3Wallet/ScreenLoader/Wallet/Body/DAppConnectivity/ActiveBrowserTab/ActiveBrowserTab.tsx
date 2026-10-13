@@ -41,15 +41,14 @@ const ActiveBrowserTab = observer(() => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { dAppRequestStore } = useStore();
-  const { hasDAppConnected, currentTabData, disconnectFromCurrentTab } =
-    dAppRequestStore;
+  const { hasDAppConnected, currentTabData } = dAppRequestStore;
 
   const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false);
 
   const disconnect = async () => {
     setDisconnectDialogOpen(false);
-    await disconnectFromCurrentTab();
-    navigate(ROUTES.HOME);
+    await dAppRequestStore.disconnectFromCurrentTab();
+    await navigate(ROUTES.HOME);
   };
 
   return (
@@ -81,8 +80,10 @@ const ActiveBrowserTab = observer(() => {
                   className="size-7"
                   variant="destructive"
                   size="icon"
-                  aria-label={t('dapp.disconnect')}
-                  onClick={() => setDisconnectDialogOpen(true)}
+                  aria-label={t("dapp.disconnect")}
+                  onClick={() => {
+                    setDisconnectDialogOpen(true);
+                  }}
                 >
                   <Unlink size="16" />
                 </Button>
@@ -118,7 +119,11 @@ const ActiveBrowserTab = observer(() => {
                     className="w-full"
                     type="button"
                     aria-label={t('dapp.confirmDisconnect')}
-                    onClick={disconnect}
+                    onClick={() => {
+                      disconnect().catch((error: unknown) => {
+                        console.error("Failed to disconnect dApp:", error);
+                      });
+                    }}
                   >
                     <Check className="mr-2 h-4 w-4" />
                     {t('common.yes')}

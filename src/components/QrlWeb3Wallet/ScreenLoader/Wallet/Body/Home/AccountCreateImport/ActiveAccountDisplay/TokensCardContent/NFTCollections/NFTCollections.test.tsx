@@ -1,3 +1,4 @@
+import type StorageUtil from "@/utilities/storageUtil";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,14 +7,15 @@ import { MemoryRouter } from "react-router-dom";
 import NFTCollections from "./NFTCollections";
 
 const { mockGetNFTCollectionsList } = vi.hoisted(() => ({
-  mockGetNFTCollectionsList: vi.fn().mockResolvedValue([]),
+  mockGetNFTCollectionsList: vi
+    .fn<typeof StorageUtil.getNFTCollectionsList>()
+    .mockResolvedValue([]),
 }));
 
 vi.mock("@/utilities/storageUtil", () => ({
   __esModule: true,
   default: {
-    getNFTCollectionsList: (...args: any[]) =>
-      mockGetNFTCollectionsList(...args),
+    getNFTCollectionsList: mockGetNFTCollectionsList,
   },
 }));
 
@@ -28,6 +30,7 @@ vi.mock("./NFTCollectionItem/NFTCollectionItem", () => {
 describe("NFTCollections", () => {
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     mockGetNFTCollectionsList.mockReset();
   });
 
@@ -132,7 +135,9 @@ describe("NFTCollections", () => {
   });
 
   it("should not show the empty state before the storage read resolves", async () => {
-    let resolveStorage: (value: unknown[]) => void = () => {};
+    let resolveStorage: (
+      value: Awaited<ReturnType<typeof StorageUtil.getNFTCollectionsList>>
+    ) => void = () => {};
     mockGetNFTCollectionsList.mockReturnValue(
       new Promise((resolve) => {
         resolveStorage = resolve;
@@ -168,5 +173,21 @@ describe("NFTCollections", () => {
     await waitFor(() => {
       expect(onCountChange).toHaveBeenCalledWith(6);
     });
+  });
+
+  it("reports a rejected read without reporting an empty collection list", async () => {
+    const error = new Error("Collection storage unavailable");
+    mockGetNFTCollectionsList.mockRejectedValueOnce(error);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onCountChange = vi.fn();
+    renderComponent(true, onCountChange);
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "Failed to load NFT collections:",
+        error,
+      );
+    });
+    expect(onCountChange).not.toHaveBeenCalled();
+    expect(screen.queryByText("There are no NFT collections.")).not.toBeInTheDocument();
   });
 });

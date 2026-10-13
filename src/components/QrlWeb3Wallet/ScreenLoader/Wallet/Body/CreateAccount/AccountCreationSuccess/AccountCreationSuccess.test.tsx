@@ -29,14 +29,15 @@ describe("AccountCreationSuccess", () => {
         sign: (_data: Record<string, unknown> | string) => {
           return { messageHash: "", signature: "", message: "" };
         },
-        signTransaction: async () => ({
-          messageHash: "",
-          rawTransaction: "",
-          signature: "",
-          transactionHash: "",
-        }),
-        encrypt: async () => {
-          throw new Error("Not implemented");
+        signTransaction: () =>
+          Promise.resolve({
+            messageHash: "",
+            rawTransaction: "",
+            signature: "",
+            transactionHash: "",
+          }),
+        encrypt: () => {
+          return Promise.reject(new Error("Not implemented"));
         },
       },
     },
@@ -75,7 +76,9 @@ describe("AccountCreationSuccess", () => {
   it("should copy the account address to clipboard", async () => {
     renderComponent();
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    const clipboardMock = vi.fn().mockResolvedValue(void 0 as never);
+    const clipboardMock = vi
+      .fn<(text: string) => Promise<void>>()
+      .mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       value: {
         writeText: clipboardMock,

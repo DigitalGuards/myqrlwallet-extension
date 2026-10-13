@@ -1,15 +1,9 @@
+import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 import { StoreProvider } from "@/stores/store";
-import {
-  afterEach,
-  describe,
-  expect,
-  it,
-  vi,
-  type MockedFunction,
-} from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ComponentProps } from "react";
@@ -18,16 +12,20 @@ import StorageUtil from "@/utilities/storageUtil";
 import QrlStore from "@/stores/qrlStore";
 import AddEditChainForm from "./AddEditChainForm";
 
+const storageMocks = vi.hoisted(() => ({
+  getAllBlockChains: vi.fn<typeof StorageUtil.getAllBlockChains>(),
+  setAllBlockChains: vi.fn<typeof StorageUtil.setAllBlockChains>(),
+}));
+
 vi.mock("@/utilities/storageUtil", async () => {
   const originalModule = await vi.importActual<
     typeof import("@/utilities/storageUtil")
   >("@/utilities/storageUtil");
   return {
     ...originalModule,
-    default: {
-      ...originalModule.default,
-      getAllBlockChains: vi.fn(),
-      setAllBlockChains: vi.fn(),
+    default: class extends originalModule.default {
+      static override getAllBlockChains = storageMocks.getAllBlockChains;
+      static override setAllBlockChains = storageMocks.setAllBlockChains;
     },
   };
 });
@@ -191,7 +189,7 @@ describe("AddEditChainForm", () => {
       name: "Add/edit chain",
     });
     expect(editChainButton).toBeInTheDocument();
-    await waitFor(async () => {
+    await waitFor(() => {
       expect(editChainButton).toBeEnabled();
     });
   });
@@ -217,20 +215,12 @@ describe("AddEditChainForm", () => {
         isCustomChain: true,
       },
     ];
-    (
-      StorageUtil.getAllBlockChains as MockedFunction<
-        typeof StorageUtil.getAllBlockChains
-      >
-    ).mockResolvedValue(mockChains);
-    (
-      StorageUtil.setAllBlockChains as MockedFunction<
-        typeof StorageUtil.setAllBlockChains
-      >
-    ).mockResolvedValue();
+    storageMocks.getAllBlockChains.mockResolvedValue(mockChains);
+    storageMocks.setAllBlockChains.mockResolvedValue();
     renderComponent(
       mockedStore({
         qrlStore: {
-          addChain: QrlStore.prototype.addChain,
+          addChain: (chain) => QrlStore.prototype.addChain(chain),
         },
       }),
     );
@@ -317,8 +307,8 @@ describe("AddEditChainForm", () => {
         isCustomChain: true,
       },
     ];
-    expect(StorageUtil.setAllBlockChains).toHaveBeenCalledTimes(1);
-    expect(StorageUtil.setAllBlockChains).toHaveBeenCalledWith(
+    expect(storageMocks.setAllBlockChains).toHaveBeenCalledTimes(1);
+    expect(storageMocks.setAllBlockChains).toHaveBeenCalledWith(
       expectedChainArray,
     );
   });
@@ -344,20 +334,12 @@ describe("AddEditChainForm", () => {
         isCustomChain: true,
       },
     ];
-    (
-      StorageUtil.getAllBlockChains as MockedFunction<
-        typeof StorageUtil.getAllBlockChains
-      >
-    ).mockResolvedValue(mockChains);
-    (
-      StorageUtil.setAllBlockChains as MockedFunction<
-        typeof StorageUtil.setAllBlockChains
-      >
-    ).mockResolvedValue();
+    storageMocks.getAllBlockChains.mockResolvedValue(mockChains);
+    storageMocks.setAllBlockChains.mockResolvedValue();
     renderComponent(
       mockedStore({
         qrlStore: {
-          editChain: QrlStore.prototype.editChain,
+          editChain: (chain) => QrlStore.prototype.editChain(chain),
           refreshBlockchainData: vi.fn(async () => {}),
         },
       }),
@@ -420,9 +402,36 @@ describe("AddEditChainForm", () => {
         isCustomChain: true,
       },
     ];
-    expect(StorageUtil.setAllBlockChains).toHaveBeenCalledTimes(1);
-    expect(StorageUtil.setAllBlockChains).toHaveBeenCalledWith(
+    expect(storageMocks.setAllBlockChains).toHaveBeenCalledTimes(1);
+    expect(storageMocks.setAllBlockChains).toHaveBeenCalledWith(
       expectedChainArray,
+    );
+  });
+
+  it("shows a rejected chain write and preserves the form for retry", async () => {
+    const error = new Error("Chain storage unavailable");
+    storageMocks.setAllBlockChains.mockRejectedValueOnce(error);
+    const initializeBlockchain = vi
+      .fn<() => Promise<void>>()
+      .mockResolvedValue(undefined);
+    const editChain = vi
+      .fn<QrlStore["editChain"]>()
+      .mockResolvedValue({ updatedChainList: [DEFAULT_BLOCKCHAIN] });
+    renderComponent(
+      mockedStore({ qrlStore: { editChain, initializeBlockchain } }),
+      {
+        chainToEdit: DEFAULT_BLOCKCHAIN,
+      },
+    );
+    const submit = screen.getByRole("button", { name: "Add/edit chain" });
+    await waitFor(() => {
+      expect(submit).toBeEnabled();
+    });
+    await userEvent.click(submit);
+    expect(await screen.findByText(error.message)).toBeInTheDocument();
+    expect(initializeBlockchain).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "chainName" })).toHaveValue(
+      DEFAULT_BLOCKCHAIN.chainName,
     );
   });
 });
