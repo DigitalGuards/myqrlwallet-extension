@@ -1,6 +1,11 @@
 import { JsonRpcMiddleware } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
 import { providerErrors } from "@theqrl/qrl-wallet-provider/rpc-errors";
-import { Json, JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
+import {
+  Json,
+  JsonRpcRequest,
+  isValidJson,
+} from "@theqrl/qrl-wallet-provider/utils";
+import { isApprovalSender } from "@/utilities/approvalGuards";
 import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
 import { checkUrlOriginHasBeenConnected } from "../utils/restrictedMethodsMiddlewareUtils";
 import { executeUnrestrictedMethod } from "../utils/unrestrictedMethodExecutor";
@@ -28,7 +33,7 @@ const checkRequestCanProceed = async (req: JsonRpcRequest<JsonRpcRequest>) => {
     }
     if (!isLocked) {
       const originConnectResult = await checkUrlOriginHasBeenConnected(
-        req?.senderData?.url ?? "",
+        isApprovalSender(req.senderData) ? (req.senderData.url ?? "") : "",
       );
       if (!originConnectResult.canProceed) {
         return originConnectResult;
@@ -37,7 +42,7 @@ const checkRequestCanProceed = async (req: JsonRpcRequest<JsonRpcRequest>) => {
   }
   return {
     canProceed: true,
-    proceedError: providerErrors.unsupportedMethod(),
+    proceedError: providerErrors.unsupportedMethod<never>(),
   };
 };
 
@@ -51,28 +56,35 @@ const checkRequestCanProceed = async (req: JsonRpcRequest<JsonRpcRequest>) => {
 const getUnrestrictedMethodResult = async (
   req: JsonRpcRequest<JsonRpcRequest>,
 ) => {
-  return (await executeUnrestrictedMethod(req)) as Json;
+  const result: unknown = await executeUnrestrictedMethod(req);
+  if (!isValidJson(result)) {
+    throw new Error("The wallet cannot parse the RPC response.");
+  }
+  return result;
 };
 
-type UnrestrictedMethodValue =
-  (typeof UNRESTRICTED_METHODS)[keyof typeof UNRESTRICTED_METHODS];
+const unrestrictedMethodNames = new Set<string>(
+  Object.values(UNRESTRICTED_METHODS),
+);
 
-export const unrestrictedMethodsMiddleware: JsonRpcMiddleware<
-  JsonRpcRequest,
-  Json
-> = async (req, res, next, end) => {
+type UnrestrictedMethodsMiddleware = (
+  ...args: Parameters<JsonRpcMiddleware<JsonRpcRequest, Json>>
+) => Promise<void>;
+
+const runUnrestrictedMethodsMiddleware: UnrestrictedMethodsMiddleware = async (
+  req,
+  res,
+  next,
+  end,
+) => {
   const requestedMethod = req.method;
-  if (
-    Object.values(UNRESTRICTED_METHODS).includes(
-      requestedMethod as UnrestrictedMethodValue,
-    )
-  ) {
+  if (unrestrictedMethodNames.has(requestedMethod)) {
     // check if the request can proceed
     const { canProceed, proceedError } = await checkRequestCanProceed(req);
     if (!canProceed) {
-      // @ts-expect-error - proceedError type from provider library is not assignable to res.error's narrow type
       res.error = proceedError;
-      return end();
+      end();
+      return;
     }
 
     try {
@@ -82,8 +94,21 @@ export const unrestrictedMethodsMiddleware: JsonRpcMiddleware<
         message: error instanceof Error ? error.message : String(error),
       });
     }
-    return end();
+    end();
+    return;
   } else {
     next();
   }
+};
+
+// The engine completes requests through callbacks and does not await middleware.
+export const unrestrictedMethodsMiddleware: JsonRpcMiddleware<
+  JsonRpcRequest,
+  Json
+> = (req, res, next, end) => {
+  runUnrestrictedMethodsMiddleware(req, res, next, end).catch(
+    (error: unknown) => {
+      end(error instanceof Error ? error : new Error(String(error)));
+    },
+  );
 };

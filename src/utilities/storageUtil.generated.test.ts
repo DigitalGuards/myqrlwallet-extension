@@ -606,13 +606,11 @@ describe("mixed dApp account reader and real authorization", () => {
       const authorize = async () =>
         (
           await checkAccountAndChainHaveBeenAuthorized(
-            malformed({
-              id: "generated-authorization",
-              jsonrpc: "2.0",
+            {
               method: "qrl_sendTransaction",
               params: [{ from: ACCOUNT, to: OTHER_ACCOUNT, value: "0x1" }],
               senderData: { url: CONNECTION.urlOrigin },
-            }),
+            },
             undefined,
             true,
           )

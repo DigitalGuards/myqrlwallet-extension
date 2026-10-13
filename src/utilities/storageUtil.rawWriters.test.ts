@@ -1174,13 +1174,11 @@ for (const [name, scenario] of Object.entries<WriterCase>(cases)) {
 const authorized = async () =>
   (
     await checkAccountAndChainHaveBeenAuthorized(
-      malformed({
-        id: "raw-revocation",
-        jsonrpc: "2.0",
+      {
         method: "qrl_sendTransaction",
         params: [{ from: ACCOUNT, to: OTHER_ACCOUNT, value: "0x1" }],
         senderData: { url: origin },
-      }),
+      },
       undefined,
       true,
     )
