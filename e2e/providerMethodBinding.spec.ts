@@ -1,3 +1,14 @@
+import { isRecord } from "../src/utilities/storageGuards";
+import {
+  beginFixtureRequest,
+  closeFixtureServer,
+  fixtureRequestResult,
+  readProviderProperty,
+  readRpcBody,
+  readWindowValue,
+  reportFixtureError,
+  writeStorage,
+} from "./fixtureHelpers";
 import { expect, test, chromium } from "@playwright/test";
 import {
   createServer,
@@ -17,27 +28,60 @@ const EXTENSION_PATH = path.join(REPO_ROOT, "Extension");
 const PROFILE_PREFIX =
   "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:";
 
-type MethodProbe = {
-  isConnected?: unknown;
-  isConnectedError?: string;
-  destructuredIsConnected?: unknown;
-  destructuredError?: string;
-  chainIdGetter?: unknown;
-  sameFunctionOnEveryRead?: boolean;
-  listenerEvents?: string[];
-  afterRemoveEvents?: string[];
-  listenerError?: string;
-  blockNumber?: unknown;
-  requestError?: string;
-};
-
-type AnnouncedProvider = {
-  isConnected: () => boolean;
-  chainId: string | null;
-};
-
-type ProbeWindow = Window & { probe?: MethodProbe };
-type ProviderWindow = Window & { qrlProvider?: AnnouncedProvider };
+test("fixture requests settle promises from a same-origin iframe once", async () => {
+  const browser = await chromium.launch({
+    channel: "chromium",
+    headless: true,
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`<iframe srcdoc="<script>
+      window.result = Promise.resolve('0x1');
+      window.request = ({ method }) => method === 'qrl_blockNumber'
+        ? window.result
+        : Promise.reject({ code: 4001, message: 'rejected' });
+    </script>"></iframe>`);
+    const sameRealm = await page.evaluate(() => {
+      const frame = document.querySelector("iframe")?.contentWindow;
+      if (!frame) throw new Error("Fixture frame unavailable");
+      const request: unknown = Reflect.get(frame, "request");
+      const result: unknown = Reflect.get(frame, "result");
+      Object.assign(window, {
+        qrlProvider: { request },
+        trackedRequestStates: {},
+        trackedRequestSettlements: {},
+      });
+      return result instanceof Promise;
+    });
+    expect(sameRealm).toBe(false);
+    for (const method of ["qrl_blockNumber", "qrl_requestAccounts"]) {
+      const location = {
+        stateKey: "trackedRequestStates" as const,
+        requestKey: method,
+      };
+      await page.evaluate(beginFixtureRequest, {
+        ...location,
+        settlementsKey: "trackedRequestSettlements" as const,
+        method,
+      });
+      if (method === "qrl_blockNumber") {
+        await expect(fixtureRequestResult(page, location)).resolves.toBe("0x1");
+      } else {
+        await expect(fixtureRequestResult(page, location)).rejects.toThrow(
+          "RPC 4001: rejected",
+        );
+      }
+    }
+    expect(
+      await page.evaluate(readWindowValue, "trackedRequestSettlements"),
+    ).toEqual({
+      qrl_blockNumber: 1,
+      qrl_requestAccounts: 1,
+    });
+  } finally {
+    await browser.close();
+  }
+});
 
 // Exercises the announced provider the way a dApp library does: call the
 // public methods, destructure them, hold on to a listener and take it off
@@ -114,21 +158,11 @@ const rpcResult = (method: string): unknown => {
   }
 };
 
-const readBody = async (request: IncomingMessage): Promise<string> => {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString("utf8");
-};
-
 const handleRpc = async (
   request: IncomingMessage,
   response: ServerResponse,
 ) => {
-  const body = JSON.parse(await readBody(request)) as
-    | { id?: string | number; method: string }
-    | Array<{ id?: string | number; method: string }>;
+  const body = await readRpcBody(request);
   const requests = Array.isArray(body) ? body : [body];
   response.writeHead(200, {
     "Access-Control-Allow-Origin": "*",
@@ -145,7 +179,9 @@ const handleRpc = async (
 const startFixtureServer = async () => {
   const server = createServer((request, response) => {
     if (request.method === "POST" && request.url === "/rpc") {
-      void handleRpc(request, response);
+      handleRpc(request, response).catch((error: unknown) => {
+        reportFixtureError(response, error);
+      });
       return;
     }
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -157,7 +193,7 @@ const startFixtureServer = async () => {
     throw new Error("Fixture server did not bind TCP");
   return {
     origin: `http://127.0.0.1:${address.port}`,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    close: () => closeFixtureServer(server),
   };
 };
 
@@ -179,58 +215,60 @@ test("every public method on the announced provider is callable", async () => {
       context.serviceWorkers()[0] ??
       (await context.waitForEvent("serviceworker"));
 
-    await serviceWorker.evaluate(
-      async ({ rpcUrl, prefix }) => {
-        await chrome.storage.local.set({
-          [`${prefix}SETTINGS`]: {
-            sidePanelPreferred: true,
-            phishingDetectionEnabled: false,
-            autoLockMinutes: 30,
-          },
-          [`${prefix}BLOCKCHAINS`]: {
-            ACTIVE_BLOCKCHAIN: "0x301825",
-            ALL_BLOCKCHAINS: [
-              {
-                chainId: "0x301825",
-                chainName: "QRL E2E Testnet",
-                rpcUrls: [rpcUrl],
-                blockExplorerUrls: ["https://example.invalid"],
-                nativeCurrency: {
-                  name: "Quanta",
-                  symbol: "Quanta",
-                  decimals: 18,
-                },
-                iconUrls: [],
-                defaultRpcUrl: rpcUrl,
-                defaultBlockExplorerUrl: "https://example.invalid",
-                defaultIconUrl: "",
-                isTestnet: true,
-                defaultWsRpcUrl: rpcUrl,
-                isCustomChain: true,
-              },
-            ],
-          },
-        });
+    await writeStorage(serviceWorker, "local", {
+      [`${PROFILE_PREFIX}SETTINGS`]: {
+        sidePanelPreferred: true,
+        phishingDetectionEnabled: false,
+        autoLockMinutes: 30,
       },
-      { rpcUrl: `${fixture.origin}/rpc`, prefix: PROFILE_PREFIX },
-    );
+      [`${PROFILE_PREFIX}BLOCKCHAINS`]: {
+        ACTIVE_BLOCKCHAIN: "0x301825",
+        ALL_BLOCKCHAINS: [
+          {
+            chainId: "0x301825",
+            chainName: "QRL E2E Testnet",
+            rpcUrls: [`${fixture.origin}/rpc`],
+            blockExplorerUrls: ["https://example.invalid"],
+            nativeCurrency: {
+              name: "Quanta",
+              symbol: "Quanta",
+              decimals: 18,
+            },
+            iconUrls: [],
+            defaultRpcUrl: `${fixture.origin}/rpc`,
+            defaultBlockExplorerUrl: "https://example.invalid",
+            defaultIconUrl: "",
+            isTestnet: true,
+            defaultWsRpcUrl: `${fixture.origin}/rpc`,
+            isCustomChain: true,
+          },
+        ],
+      },
+    });
 
     const dAppPage = await context.newPage();
     await dAppPage.goto(fixture.origin);
-    await dAppPage.waitForFunction(
-      () =>
-        (window as ProbeWindow).probe?.sameFunctionOnEveryRead !== undefined,
-    );
     await dAppPage.waitForFunction(() => {
-      const probe = (window as ProbeWindow).probe;
+      const probe: unknown = Reflect.get(window, "probe");
       return (
-        probe?.blockNumber !== undefined || probe?.requestError !== undefined
+        typeof probe === "object" &&
+        probe !== null &&
+        "sameFunctionOnEveryRead" in probe &&
+        probe.sameFunctionOnEveryRead !== undefined
+      );
+    });
+    await dAppPage.waitForFunction(() => {
+      const probe: unknown = Reflect.get(window, "probe");
+      return (
+        typeof probe === "object" &&
+        probe !== null &&
+        (("blockNumber" in probe && probe.blockNumber !== undefined) ||
+          ("requestError" in probe && probe.requestError !== undefined))
       );
     });
 
-    const probe = (await dAppPage.evaluate(
-      () => (window as ProbeWindow).probe,
-    )) as MethodProbe;
+    const probe = await dAppPage.evaluate(readWindowValue, "probe");
+    if (!isRecord(probe)) throw new Error("Provider probe unavailable");
 
     // Called the moment the provider was announced, before its initial
     // state landed, so the answer is false; the point is that it answered
@@ -253,19 +291,38 @@ test("every public method on the announced provider is callable", async () => {
 
     // And the same calls once the provider has its initial state, which is
     // when a dApp would ask.
-    await dAppPage.waitForFunction(
-      () => (window as ProviderWindow).qrlProvider?.chainId !== null,
-    );
+    await expect
+      .poll(() => dAppPage.evaluate(readProviderProperty, "chainId"))
+      .toBe("0x301825");
     const whenReady = await dAppPage.evaluate(() => {
-      const provider = (window as ProviderWindow).qrlProvider;
-      if (!provider) return { error: "no provider" };
+      const provider: unknown = Reflect.get(window, "qrlProvider");
+      const isProvider = (
+        value: unknown,
+      ): value is {
+        isConnected: () => unknown;
+        chainId: unknown;
+      } =>
+        typeof value === "object" &&
+        value !== null &&
+        "isConnected" in value &&
+        typeof value.isConnected === "function" &&
+        "chainId" in value;
+      if (!isProvider(provider)) return { error: "no provider" };
       try {
         return {
           isConnected: provider.isConnected(),
           chainId: provider.chainId,
         };
-      } catch (error) {
-        return { error: String((error as Error)?.message ?? error) };
+      } catch (error: unknown) {
+        return {
+          error:
+            typeof error === "object" &&
+            error !== null &&
+            "message" in error &&
+            typeof error.message === "string"
+              ? error.message
+              : String(error),
+        };
       }
     });
 
