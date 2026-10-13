@@ -57,7 +57,26 @@ describe("v3 storage isolation", () => {
     expect(await StorageUtil.getActiveBlockChain()).toMatchObject({
       chainId: "0x301825",
     });
-    await StorageUtil.setKeystores([{ address: v3Address } as never]);
+    await StorageUtil.setKeystores([
+      {
+        address: v3Address,
+        id: "profile-keystore",
+        version: 1,
+        crypto: {
+          cipher: "aes-256-gcm",
+          ciphertext: "00",
+          cipherparams: { iv: "00".repeat(12) },
+          kdf: "argon2id",
+          kdfparams: {
+            dklen: 32,
+            t: 8,
+            m: 262144,
+            p: 1,
+            salt: "00".repeat(32),
+          },
+        },
+      },
+    ]);
     await StorageUtil.setAllAccounts([v3Address]);
     await StorageUtil.setActiveAccount(v3Address);
     expect(await StorageUtil.getAllAccounts()).toEqual([v3Address]);

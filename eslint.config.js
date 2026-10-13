@@ -2774,7 +2774,6 @@ export const lintRatchet = [
   {
     files: ["src/utilities/profileStorage.test.ts"],
     rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-dynamic-delete": "off",
       "@typescript-eslint/require-await": "off",
       "@typescript-eslint/unbound-method": "off",

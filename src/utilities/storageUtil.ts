@@ -30,6 +30,7 @@ import {
   hasCanonicalRegistry,
   isArrayOf,
   isBoolean,
+  isBooleanRecord,
   isConnectedAccounts,
   isContact,
   isDAppRequest,
@@ -42,12 +43,13 @@ import {
   isRecord,
   isStoredBlockchain,
   isStoredKeystore,
-  isStringArray,
   isString,
+  isStringRecord,
   isTokenContract,
   isTransactionHistoryEntry,
   isTransactionValues,
   isWalletSettings,
+  readStoredSettings,
   mergeStorageArray,
   mergeStorageRecord,
   normalizeStoredPermissions,
@@ -235,6 +237,8 @@ const StorageUtil = {
     ) {
       throw new Error("Cannot persist a keystore with an invalid QRL address");
     }
+    if (!isArrayOf(keystores, isStoredKeystore))
+      throw new Error("Cannot persist an unreadable keystore");
     const storageData = await readLocalStorage(KEYSTORES_IDENTIFIER);
     const stored = storageData[KEYSTORES_IDENTIFIER];
     let raw: unknown = stored;
@@ -300,6 +304,8 @@ const StorageUtil = {
    * Call the getTransactionValues fuction to retieve the stored value.
    */
   async setTransactionValues(transactionValues: TransactionValuesType) {
+    if (!isTransactionValues(transactionValues))
+      throw new Error("Cannot persist an unreadable transaction draft");
     const { chainId } = await this.getActiveBlockChain();
     const transactionValuesIdentifier = `${chainId}_${TRANSACTION_VALUES_IDENTIFIER}`;
     const transactionValuesWithDefaultValues = {
@@ -399,6 +405,8 @@ const StorageUtil = {
    * Call the getActiveAccount function to retrieve the stored value, and clearActiveAccount for clearing the stored value.
    */
   async setActiveAccount(activeAccount?: string) {
+    if (activeAccount !== undefined && !isString(activeAccount))
+      throw new Error("Invalid active account");
     if (activeAccount) {
       const canonicalAddress = toCanonicalQrlAddress(activeAccount);
       const existing = (await readLocalStorage(ACCOUNTS_IDENTIFIER))[
@@ -527,6 +535,8 @@ const StorageUtil = {
    * Call the getActiveBlockChain function to retrieve the stored value.
    */
   async setActiveBlockChain(selectedBlockchainId: string) {
+    if (!isString(selectedBlockchainId))
+      throw new Error("Invalid active chain");
     const existing = (await readLocalStorage(BLOCKCHAINS_IDENTIFIER))[
       BLOCKCHAINS_IDENTIFIER
     ];
@@ -568,6 +578,7 @@ const StorageUtil = {
    * Call the getActivePage function to retrieve the stored value, and clearActivePage for clearing the stored value.
    */
   async setActivePage(activePage: string) {
+    if (!isString(activePage)) throw new Error("Invalid active page");
     if (activePage) {
       await walletLocalStorage.set({ [ACTIVE_PAGE_IDENTIFIER]: activePage });
     } else {
@@ -750,6 +761,8 @@ const StorageUtil = {
    * Call the getDAppsRequestData function to retrieve the stored value, and clearDAppsRequestData for clearing the stored value.
    */
   async setDAppsRequestData(dAppsRequestData: DAppRequestType) {
+    if (!isDAppRequest(dAppsRequestData))
+      throw new Error("Cannot persist an unreadable dApp request");
     const storageData = await readSessionStorage(DAPPS_IDENTIFIER);
     const dApps = ensureStorageRecord(storageData, DAPPS_IDENTIFIER);
     dApps[DAPPS_REQUEST_DATA_IDENTIFIER] = replaceStoredRequest(
@@ -817,6 +830,8 @@ const StorageUtil = {
   ) {
     if (!isConnectedAccounts(data))
       throw new Error("Invalid stored dApp identity");
+    if (!isArrayOf(data.blockchains, isStoredBlockchain))
+      throw new Error("Invalid stored dApp chain identity");
     const urlOrigin = data.urlOrigin;
     const accounts = data.accounts.map(toCanonicalQrlAddress);
     const blockchains = data.blockchains.map((chain) =>
@@ -865,14 +880,9 @@ const StorageUtil = {
     );
     if (!isConnectedAccounts(storedData)) return undefined;
 
-    if (!isStringArray(storedData.accounts)) return undefined;
-    const accounts = storedData.accounts.flatMap((address) => {
-      try {
-        return [toCanonicalQrlAddress(address)];
-      } catch {
-        return [];
-      }
-    });
+    const accounts = getStorageArray(storedData.accounts, "dApp accounts")
+      .filter(isNormalizableQrlAddress)
+      .map(toCanonicalQrlAddress);
     if (accounts.length === 0) return undefined;
 
     const permissions = normalizeStoredPermissions(storedData.permissions);
@@ -1109,6 +1119,8 @@ const StorageUtil = {
    * Account labels - a map from account address to a user-defined label.
    */
   async setAccountLabels(labels: Record<string, string>) {
+    if (!isStringRecord(labels))
+      throw new Error("Cannot persist unreadable account labels");
     const storageData = await readLocalStorage(ACCOUNT_LABELS_IDENTIFIER);
     await walletLocalStorage.set({
       [ACCOUNT_LABELS_IDENTIFIER]: mergeStorageRecord(
@@ -1128,6 +1140,7 @@ const StorageUtil = {
   },
 
   async setAccountLabel(address: string, label: string) {
+    if (!isString(label)) throw new Error("Invalid account label");
     const storageData = await readLocalStorage(ACCOUNT_LABELS_IDENTIFIER);
     const labels = getStorageRecord(storageData, ACCOUNT_LABELS_IDENTIFIER);
     await walletLocalStorage.set({
@@ -1140,6 +1153,8 @@ const StorageUtil = {
   },
 
   async setHiddenAccounts(hidden: Record<string, boolean>) {
+    if (!isBooleanRecord(hidden))
+      throw new Error("Cannot persist unreadable hidden accounts");
     const storageData = await readLocalStorage(HIDDEN_ACCOUNTS_IDENTIFIER);
     await walletLocalStorage.set({
       [HIDDEN_ACCOUNTS_IDENTIFIER]: mergeStorageRecord(
@@ -1162,12 +1177,18 @@ const StorageUtil = {
     await walletLocalStorage.remove(HIDDEN_ACCOUNTS_IDENTIFIER);
   },
 
-  async setSettings(settings: WalletSettings) {
+  async setSettings(
+    settings: WalletSettings,
+    changedFields?: readonly (keyof WalletSettings)[],
+  ) {
+    if (!isWalletSettings(settings))
+      throw new Error("Cannot persist unreadable settings");
     const storageData = await readLocalStorage(SETTINGS_IDENTIFIER);
     await walletLocalStorage.set({
       [SETTINGS_IDENTIFIER]: replaceStoredSettings(
         storageData[SETTINGS_IDENTIFIER],
         settings,
+        changedFields,
       ),
     });
   },
@@ -1175,7 +1196,7 @@ const StorageUtil = {
   async getSettings(): Promise<WalletSettings> {
     const storageData = await readLocalStorage(SETTINGS_IDENTIFIER);
     const settings = storageData[SETTINGS_IDENTIFIER];
-    return isWalletSettings(settings) ? settings : {};
+    return readStoredSettings(settings);
   },
 
   async clearAllData() {
@@ -1417,6 +1438,8 @@ const StorageUtil = {
       )
         return tx;
       const merged = { ...tx, ...updates };
+      if (!isTransactionHistoryEntry(merged))
+        throw new Error("Invalid stored transaction identity");
       const hasReceipt =
         !!updates.receiptStatusVerified &&
         !!updates.blockNumber &&

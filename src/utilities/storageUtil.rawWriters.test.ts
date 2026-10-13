@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KeyStore } from "@theqrl/web3";
+import {
+  DEFAULT_BLOCKCHAIN,
+  QRL_BLOCKCHAINS,
+} from "@/configuration/qrlBlockchainConfig";
 import StorageUtil, { LockState } from "./storageUtil";
-import { getStoredValue, isRecord } from "./storageGuards";
+import { getStoredValue, isRecord, isWalletSettings } from "./storageGuards";
 import { malformed } from "@/test-utils/malformed";
 import {
   ACCOUNT,
@@ -103,7 +107,7 @@ const seed = (local: unknown, session: unknown) => {
 
 // Independent fixtures and expected field edits form the oracle. Every writer
 // runs against each interleaving, including opaque fields at every ancestor.
-const fixture = (junk: unknown, position: number) => {
+const fixture = (junk: unknown, position: number, mixedMetadata = false) => {
   const weave = (values: unknown[]) => [
     ...values.slice(0, position),
     junk,
@@ -111,21 +115,55 @@ const fixture = (junk: unknown, position: number) => {
   ];
   const chain = {
     ...CHAIN,
+    chainName: mixedMetadata ? junk : CHAIN.chainName,
     future: junk,
     nativeCurrency: { ...CHAIN.nativeCurrency, future: junk },
   };
-  const otherChain = { ...CHAIN, chainId: "0x43", future: junk };
-  const token = { ...TOKEN, future: junk };
-  const otherToken = { ...TOKEN, address: "token-b", future: junk };
-  const nft = { ...NFT, future: junk };
-  const otherNFT = { ...NFT, address: "nft-b", future: junk };
-  const history = { ...HISTORY, future: junk };
-  const otherHistory = { ...HISTORY, transactionHash: "hash-b", future: junk };
-  const ledger = { ...LEDGER, future: junk };
-  const otherLedger = { ...LEDGER, address: OTHER_ACCOUNT, future: junk };
-  const contact = { address: ACCOUNT, name: "First", future: junk };
-  const otherContact = { address: OTHER_ACCOUNT, name: "Second", future: junk };
-  const keystore = { address: ACCOUNT, crypto: {}, future: junk };
+  const otherChain = {
+    ...(mixedMetadata ? chain : CHAIN),
+    chainId: "0x43",
+    future: junk,
+  };
+  const token = {
+    ...TOKEN,
+    decimals: mixedMetadata ? junk : TOKEN.decimals,
+    future: junk,
+  };
+  const otherToken = { ...token, address: "token-b" };
+  const nft = {
+    ...NFT,
+    standard: mixedMetadata ? junk : NFT.standard,
+    future: junk,
+  };
+  const otherNFT = { ...nft, address: "nft-b" };
+  const history = {
+    ...HISTORY,
+    timestamp: mixedMetadata ? junk : HISTORY.timestamp,
+    future: junk,
+  };
+  const otherHistory = { ...history, transactionHash: "hash-b" };
+  const ledger = {
+    ...LEDGER,
+    publicKey: mixedMetadata ? junk : LEDGER.publicKey,
+    future: junk,
+  };
+  const otherLedger = { ...ledger, address: OTHER_ACCOUNT };
+  const contact = {
+    address: ACCOUNT,
+    name: mixedMetadata ? junk : "First",
+    future: junk,
+  };
+  const otherContact = {
+    address: OTHER_ACCOUNT,
+    name: mixedMetadata ? junk : "Second",
+    future: junk,
+  };
+  const keystore = {
+    address: ACCOUNT,
+    crypto: {},
+    ...(mixedMetadata ? { version: junk } : {}),
+    future: junk,
+  };
   const otherKeystore = { address: OTHER_ACCOUNT, crypto: {}, future: junk };
   const lists = {
     chains: weave([chain, otherChain]),
@@ -188,7 +226,12 @@ const fixture = (junk: unknown, position: number) => {
     tokenDetails: details,
     future: junk,
   };
-  const request = { method: "qrl_accounts", requestId: "r1", future: junk };
+  const request = {
+    method: "qrl_accounts",
+    requestId: "r1",
+    ...(mixedMetadata ? { params: junk } : {}),
+    future: junk,
+  };
   const nested = (all: string, field: string, items: unknown[]) => ({
     future: junk,
     [all]: {
@@ -237,7 +280,18 @@ const fixture = (junk: unknown, position: number) => {
       [OTHER_ACCOUNT]: false,
       opaque: junk,
     },
-    SETTINGS: { themePreference: "dark", currency: "EUR", future: junk },
+    SETTINGS: {
+      themePreference: "dark",
+      currency: "EUR",
+      ...(mixedMetadata
+        ? {
+            autoLockMinutes: 1,
+            notificationsEnabled: false,
+            sidePanelSurface: junk,
+          }
+        : {}),
+      future: junk,
+    },
     PRICE_CACHE: { prices: { usd: 1, opaque: junk }, future: junk },
     ACTIVE_PAGE: "/home",
     [draftKey]: draft,
@@ -710,6 +764,54 @@ const cases = {
   },
 } satisfies Record<WriterName, WriterCase>;
 
+// Exercise ordinary read-edit-save callers on mixed metadata as well as the
+// direct replacement inputs above. Both use the same independent byte oracle.
+const mixedRuns: Record<string, WriterCase["run"] | undefined> = {
+  setKeystores: (f: Fixture) =>
+    StorageUtil.setKeystores([malformed<KeyStore>(f.keystore)]),
+  setAllBlockChains: async () =>
+    StorageUtil.setAllBlockChains(
+      (await StorageUtil.getAllBlockChains()).map((chain) =>
+        chain.chainId === CHAIN.chainId
+          ? { ...chain, chainName: "Edited" }
+          : chain,
+      ),
+    ),
+  setTokenContractsList: (f: Fixture) =>
+    StorageUtil.setTokenContractsList(ACCOUNT, { ...f.token, symbol: "EDIT" }),
+  setNFTCollectionsList: (f: Fixture) =>
+    StorageUtil.setNFTCollectionsList(ACCOUNT, { ...f.nft, name: "Edited" }),
+  setDAppsRequestData: (f: Fixture) =>
+    StorageUtil.setDAppsRequestData({ ...f.request, requestId: "r2" }),
+  setDAppsConnectedAccountsData: (f: Fixture) =>
+    StorageUtil.setDAppsConnectedAccountsData({
+      ...CONNECTION,
+      blockchains: [f.chain, f.otherChain],
+    }),
+  setContacts: async () =>
+    StorageUtil.setContacts(
+      (await StorageUtil.getContacts()).map((contact) =>
+        contact.address === ACCOUNT ? { ...contact, name: "Edited" } : contact,
+      ),
+    ),
+  setSettings: async () =>
+    StorageUtil.setSettings({
+      ...(await StorageUtil.getSettings()),
+      currency: "USD",
+    }),
+  setLedgerAccounts: async () =>
+    StorageUtil.setLedgerAccounts(
+      (await StorageUtil.getLedgerAccounts()).map((account) =>
+        account.address === ACCOUNT ? { ...account, index: 7 } : account,
+      ),
+    ),
+  setTransactionHistoryEntry: (f: Fixture) =>
+    StorageUtil.setTransactionHistoryEntry(ACCOUNT, {
+      ...f.history,
+      amount: "2",
+    }),
+} satisfies Partial<Record<WriterName, WriterCase["run"]>>;
+
 import { toCanonicalQrlAddress } from "./addressUtil";
 const addedAccount = toCanonicalQrlAddress(`Q${"c".repeat(128)}`);
 const junkValues: unknown[] = [
@@ -724,27 +826,184 @@ const junkValues: unknown[] = [
   { address: null, chainId: {}, transactionHash: false },
 ];
 afterEach(() => vi.restoreAllMocks());
+
+// Every writer is followed by reads of all record types. Each reader must
+// expose usable siblings and leave the stored bytes unchanged.
+const checkReadableSiblings = async () => {
+  const before = JSON.stringify({ local: h.local, session: h.session });
+  const list = (value: unknown): unknown[] =>
+    Array.isArray(value) ? value : [];
+  const identifiable = (value: unknown, key: string) =>
+    list(value).filter((item) => {
+      const identity = getStoredValue(item, key);
+      return typeof identity === "string" && identity.trim().length > 0;
+    });
+  const canonical = (values: unknown[]) =>
+    values.flatMap((value) => {
+      try {
+        return [toCanonicalQrlAddress(value)];
+      } catch {
+        return [];
+      }
+    });
+  const active = await StorageUtil.getActiveBlockChain();
+  const chains = getStoredValue(h.local, "BLOCKCHAINS", "ALL_BLOCKCHAINS");
+  expect(await StorageUtil.getAllBlockChains()).toEqual(
+    Array.isArray(chains) ? identifiable(chains, "chainId") : QRL_BLOCKCHAINS,
+  );
+  expect(active.chainId).toBe(
+    getStoredValue(h.local, "BLOCKCHAINS", "ACTIVE_BLOCKCHAIN") ??
+      DEFAULT_BLOCKCHAIN.chainId,
+  );
+  expect(await StorageUtil.getActivePage()).toBe(h.local.ACTIVE_PAGE ?? "");
+  expect(await StorageUtil.getActiveAccount()).toBe(
+    getStoredValue(h.local, "ACCOUNTS", "ACTIVE_ACCOUNT") ?? "",
+  );
+  for (const state of [LockState.LOCKED, LockState.UNLOCKED])
+    expect(await StorageUtil.getLockStateTimeStamp(state)).toBe(
+      h.local[`LOCK_MANAGER_${state}_TIMESTAMP`] ?? 0,
+    );
+  for (const [root, all, field, key, read] of [
+    [
+      "TOKENS",
+      "ALL_TOKENS",
+      "tokens",
+      "address",
+      () => StorageUtil.getTokenContractsList(ACCOUNT),
+    ],
+    [
+      "NFT_COLLECTIONS",
+      "ALL_NFT_COLLECTIONS",
+      "collections",
+      "address",
+      () => StorageUtil.getNFTCollectionsList(ACCOUNT),
+    ],
+    [
+      "TX_HISTORY",
+      "ALL_TX_HISTORY",
+      "transactions",
+      "transactionHash",
+      () => StorageUtil.getTransactionHistory(ACCOUNT),
+    ],
+  ] as const) {
+    expect(await read()).toEqual(
+      identifiable(
+        getStoredValue(h.local, root, all, ACCOUNT, active.chainId, field),
+        key,
+      ),
+    );
+  }
+  expect(await StorageUtil.getAllAccounts()).toEqual(
+    canonical(list(getStoredValue(h.local, "ACCOUNTS", "ALL_ACCOUNTS"))),
+  );
+  expect(await StorageUtil.getStoredAccounts()).toEqual(
+    list(getStoredValue(h.local, "ACCOUNTS", "ALL_ACCOUNTS")).filter(
+      (value) => typeof value === "string",
+    ),
+  );
+  expect(await StorageUtil.getPendingTransactions(ACCOUNT)).toEqual(
+    identifiable(
+      getStoredValue(
+        h.local,
+        "TX_HISTORY",
+        "ALL_TX_HISTORY",
+        ACCOUNT,
+        active.chainId,
+        "transactions",
+      ),
+      "transactionHash",
+    ).filter((value) => getStoredValue(value, "pendingStatus") === "pending"),
+  );
+  expect(await StorageUtil.getLedgerAccounts()).toEqual(
+    identifiable(
+      getStoredValue(h.local, "LEDGER", "LEDGER_ACCOUNTS"),
+      "address",
+    ),
+  );
+  const contacts = list(
+    getStoredValue(h.local, "CONTACTS", "ALL_CONTACTS"),
+  ).flatMap((value) => {
+    if (!isRecord(value)) return [];
+    const addresses = canonical([value.address]);
+    return addresses.map((address) => ({ ...value, address }));
+  });
+  expect(await StorageUtil.getContacts()).toEqual(contacts);
+  for (const [key, type, read] of [
+    ["ACCOUNT_LABELS", "string", () => StorageUtil.getAccountLabels()],
+    ["HIDDEN_ACCOUNTS", "boolean", () => StorageUtil.getHiddenAccounts()],
+  ] as const) {
+    const stored = h.local[key];
+    expect(await read()).toEqual(
+      Object.fromEntries(
+        Object.entries(isRecord(stored) ? stored : {}).filter(
+          ([, value]) => typeof value === type,
+        ),
+      ),
+    );
+  }
+  const settings = h.local.SETTINGS;
+  expect(await StorageUtil.getSettings()).toEqual(
+    Object.fromEntries(
+      Object.entries(isRecord(settings) ? settings : {}).filter(
+        ([key, value]) => isWalletSettings({ [key]: value }),
+      ),
+    ),
+  );
+  const connection = getStoredValue(h.local, ...grantPath);
+  const accounts = canonical(list(getStoredValue(connection, "accounts")));
+  expect(
+    (await StorageUtil.getDAppsConnectedAccountsData(origin))?.accounts,
+  ).toEqual(accounts.length ? accounts : undefined);
+  expect(await StorageUtil.getPriceCache()).toEqual(
+    h.local.PRICE_CACHE ?? null,
+  );
+  expect(await StorageUtil.getDAppsRequestData()).toEqual(
+    getStoredValue(h.session, "DAPPS", "DAPPS_REQUEST_DATA"),
+  );
+  expect(await StorageUtil.getTransactionValues()).toEqual(
+    h.local[`${active.chainId}_TRANSACTION_VALUES`] ?? {
+      receiverAddress: "",
+      amount: 0,
+    },
+  );
+  if (h.local.KEYSTORES === undefined)
+    expect(await StorageUtil.getKeystores()).toEqual([]);
+  else await expect(StorageUtil.getKeystores()).rejects.toThrow();
+  expect(JSON.stringify({ local: h.local, session: h.session })).toBe(before);
+};
+
 for (const [name, scenario] of Object.entries<WriterCase>(cases)) {
   describe(`${name} raw storage oracle`, () => {
     it.each(
       junkValues.flatMap((junk, id) =>
-        [0, 1, 2].map((position) => ({ junk, position, id })),
+        [0, 1, 2].flatMap((position) =>
+          [false, true].map((mixedMetadata) => ({
+            junk,
+            position,
+            id,
+            mixedMetadata,
+          })),
+        ),
       ),
     )(
-      "preserves junk $id at position $position and every unrelated field",
-      async ({ junk, position }) => {
+      "preserves junk $id at position $position, mixed metadata $mixedMetadata and every unrelated field",
+      async ({ junk, position, mixedMetadata }) => {
         vi.spyOn(Date, "now").mockReturnValue(123);
-        const f = fixture(junk, position);
+        const f = fixture(junk, position, mixedMetadata);
         seed(f.local, f.session);
         const expected = {
           local: record(h.copy(f.local)),
           session: record(h.copy(f.session)),
         };
         scenario.edit(expected, f);
-        await scenario.run(f);
+        const run = mixedMetadata
+          ? (mixedRuns[name] ?? scenario.run)
+          : scenario.run;
+        await run(f);
         expect(JSON.stringify({ local: h.local, session: h.session })).toBe(
           JSON.stringify(expected),
         );
+        await checkReadableSiblings();
       },
     );
   });
@@ -1068,3 +1327,157 @@ it.each(junkValues)(
     });
   },
 );
+
+const accountAliases = [
+  ACCOUNT,
+  ACCOUNT.toLowerCase(),
+  `q${ACCOUNT.slice(1)}`,
+  `0x${ACCOUNT.slice(1)}`,
+  `0X${ACCOUNT.slice(1)}`,
+];
+const chainAliases = [CHAIN.chainId, "0X2A", "0x002a", "42"];
+for (const kind of ["account", "chain", "connection"] as const) {
+  it.each(
+    junkValues.flatMap((junk, id) =>
+      accountAliases.map((account, index) => ({
+        junk,
+        id,
+        account,
+        chain: chainAliases[index % chainAliases.length],
+        index,
+      })),
+    ),
+  )(
+    `${kind} revocation removes every readable match through malformed envelopes: $id / $index`,
+    async ({ junk, account, chain }) => {
+      const f = fixture(junk, 1);
+      const accountCaveat = {
+        type: "restrictReturnedAccounts",
+        value: [account, junk, OTHER_ACCOUNT],
+        future: junk,
+      };
+      const chainCaveat = {
+        type: "restrictNetworkSwitching",
+        value: [chain, junk, "0x43"],
+        future: junk,
+      };
+      const permission = {
+        invoker: junk,
+        parentCapability: junk,
+        caveats: [junk, accountCaveat, chainCaveat],
+        future: junk,
+      };
+      const raw = {
+        urlOrigin: junk,
+        accounts: [account, junk, OTHER_ACCOUNT],
+        blockchains: [
+          { chainId: chain, chainName: junk },
+          junk,
+          { chainId: "0x43" },
+        ],
+        permissions: [junk, permission],
+        future: junk,
+      };
+      set(f.local, grantPath, raw);
+      seed(f.local, f.session);
+      const expected = {
+        local: record(h.copy(f.local)),
+        session: record(h.copy(f.session)),
+      };
+      const revoke = () =>
+        kind === "account"
+          ? StorageUtil.removeAccountFromAllDApps(ACCOUNT)
+          : kind === "chain"
+            ? StorageUtil.removeDAppChain(origin, CHAIN.chainId)
+            : StorageUtil.clearDAppsConnectedAccountsData(origin);
+      if (kind === "connection") remove(expected.local, grantPath);
+      else
+        set(expected.local, grantPath, {
+          ...raw,
+          ...(kind === "account"
+            ? { accounts: [junk, OTHER_ACCOUNT] }
+            : { blockchains: [junk, { chainId: "0x43" }] }),
+          permissions: [
+            junk,
+            {
+              ...permission,
+              caveats: [
+                junk,
+                kind === "account"
+                  ? { ...accountCaveat, value: [junk, OTHER_ACCOUNT] }
+                  : accountCaveat,
+                kind === "chain"
+                  ? { ...chainCaveat, value: [junk, "0x43"] }
+                  : chainCaveat,
+              ],
+            },
+          ],
+        });
+      await revoke();
+      expect(JSON.stringify({ local: h.local, session: h.session })).toBe(
+        JSON.stringify(expected),
+      );
+      expect(await authorized()).toBe(false);
+      await revoke();
+      expect(JSON.stringify({ local: h.local, session: h.session })).toBe(
+        JSON.stringify(expected),
+      );
+    },
+  );
+}
+
+for (const name of [
+  "clearAllAccountData",
+  "removeLedgerAccountFromAllAccounts",
+] as const) {
+  it.each(
+    junkValues.flatMap((junk, id) =>
+      accountAliases.map((account, index) => ({ junk, id, account, index })),
+    ),
+  )(
+    `${name} revokes aliases and preserves opaque siblings: $id / $index`,
+    async ({ junk, account }) => {
+      const f = fixture(junk, 1);
+      for (const [root, all] of [
+        ["TOKENS", "ALL_TOKENS"],
+        ["NFT_COLLECTIONS", "ALL_NFT_COLLECTIONS"],
+        ["TX_HISTORY", "ALL_TX_HISTORY"],
+      ]) {
+        const data = getStoredValue(f.local, root, all, ACCOUNT);
+        remove(f.local, [root, all, ACCOUNT]);
+        set(f.local, [root, all, account], data);
+      }
+      set(
+        f.local,
+        ["ACCOUNTS", "ALL_ACCOUNTS"],
+        [junk, account, OTHER_ACCOUNT, account],
+      );
+      seed(f.local, f.session);
+      const expected = {
+        local: record(h.copy(f.local)),
+        session: record(h.copy(f.session)),
+      };
+      if (name === "clearAllAccountData") {
+        for (const [root, all] of [
+          ["TOKENS", "ALL_TOKENS"],
+          ["NFT_COLLECTIONS", "ALL_NFT_COLLECTIONS"],
+          ["TX_HISTORY", "ALL_TX_HISTORY"],
+        ])
+          remove(expected.local, [root, all, account]);
+      } else
+        set(
+          expected.local,
+          ["ACCOUNTS", "ALL_ACCOUNTS"],
+          [junk, OTHER_ACCOUNT],
+        );
+      await StorageUtil[name](ACCOUNT);
+      expect(JSON.stringify({ local: h.local, session: h.session })).toBe(
+        JSON.stringify(expected),
+      );
+      await StorageUtil[name](ACCOUNT);
+      expect(JSON.stringify({ local: h.local, session: h.session })).toBe(
+        JSON.stringify(expected),
+      );
+    },
+  );
+}

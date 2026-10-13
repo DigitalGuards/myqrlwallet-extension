@@ -118,7 +118,27 @@ export const replaceStorageFields = (
 export const replaceStoredSettings = (
   stored: unknown,
   settings: WalletSettings,
-): unknown => replaceStorageShape(stored, settings, storageShapes.settings);
+  changedFields?: readonly (keyof WalletSettings)[],
+): unknown => {
+  if (changedFields && isRecord(stored) && !isWalletSettings(stored)) {
+    // A settings store saves its complete view, including defaults for fields
+    // it could not read. Only an explicit user edit may replace those fields.
+    const changes = Object.fromEntries(
+      changedFields.map((key) => [key, settings[key]]),
+    );
+    return mergeStorageFields(stored, changes);
+  }
+  return replaceStorageShape(stored, settings, storageShapes.settings);
+};
+
+export const readStoredSettings = (value: unknown): WalletSettings => {
+  const settings = { ...getStorageRecord(value) };
+  for (const [key, field] of Object.entries(storageShapes.settings)) {
+    if (!isKnownStorageField(settings[key], field))
+      Reflect.deleteProperty(settings, key);
+  }
+  return isWalletSettings(settings) ? settings : {};
+};
 
 export const replaceStoredRequest = (
   stored: unknown,
