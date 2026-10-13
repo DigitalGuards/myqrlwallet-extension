@@ -80,6 +80,95 @@ describe("discoverTokens", () => {
     ]);
   });
 
+  it.each([undefined, null])(
+    "keeps metadata defaults for nullish values: %s",
+    async (missing) => {
+      mockFetchJson({
+        tokens: [
+          {
+            contractAddress: `Q${"a".repeat(128)}`,
+            name: missing,
+            symbol: missing,
+            decimals: missing,
+          },
+        ],
+      });
+
+      expect(await discoverTokens(HOLDER, TESTNET_CHAIN_ID)).toEqual([
+        {
+          address: toChecksumAddress(`Q${"a".repeat(128)}`),
+          name: "Unknown Token",
+          symbol: "UNK",
+          decimals: 18,
+        },
+      ]);
+    },
+  );
+
+  it.each([
+    null,
+    42,
+    "invalid",
+    [],
+    {},
+    { tokens: null },
+    { tokens: {} },
+    { tokens: "invalid" },
+  ])(
+    "returns an empty list for malformed token responses: %j",
+    async (body) => {
+      mockFetchJson(body);
+      expect(await discoverTokens(HOLDER, TESTNET_CHAIN_ID)).toEqual([]);
+    },
+  );
+
+  const tokenRow = {
+    contractAddress: `Q${"a".repeat(128)}`,
+    name: "Alpha",
+    symbol: "ALP",
+    decimals: 18,
+  };
+
+  it.each([
+    null,
+    42,
+    "invalid",
+    [],
+    {},
+    { ...tokenRow, contractAddress: 42 },
+    { ...tokenRow, contractAddress: "invalid" },
+    { ...tokenRow, name: {} },
+    { ...tokenRow, symbol: false },
+    { ...tokenRow, decimals: "18" },
+    { ...tokenRow, decimals: -1 },
+    { ...tokenRow, decimals: 1.5 },
+    { ...tokenRow, decimals: 256 },
+    { ...tokenRow, decimals: Number.NaN },
+    { ...tokenRow, decimals: Number.POSITIVE_INFINITY },
+  ])(
+    "skips malformed token rows and keeps valid row order: %j",
+    async (row) => {
+      mockFetchJson({
+        tokens: [tokenRow, row, { ...tokenRow, decimals: 255 }],
+      });
+
+      expect(await discoverTokens(HOLDER, TESTNET_CHAIN_ID)).toEqual([
+        {
+          address: toChecksumAddress(tokenRow.contractAddress),
+          name: "Alpha",
+          symbol: "ALP",
+          decimals: 18,
+        },
+        {
+          address: toChecksumAddress(tokenRow.contractAddress),
+          name: "Alpha",
+          symbol: "ALP",
+          decimals: 255,
+        },
+      ]);
+    },
+  );
+
   it("returns an empty list on a non-2xx response", async () => {
     mockFetchJson({}, false, 404);
     expect(await discoverTokens(HOLDER, TESTNET_CHAIN_ID)).toEqual([]);
@@ -173,6 +262,108 @@ describe("discoverNftCollections", () => {
   it("returns an empty list on malformed responses", async () => {
     mockFetchJson({ unexpected: true });
     expect(await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID)).toEqual([]);
+  });
+});
+
+describe("NFT explorer validation", () => {
+  const contractAddress = toChecksumAddress(`Q${"d".repeat(128)}`);
+  const nftRow = {
+    contractAddress,
+    tokenID: "1",
+    tokenStandard: "ERC-1155",
+    collectionName: "Multi",
+    collectionSymbol: "MUL",
+    balance: "3",
+  };
+  const candidateRow = { ...nftRow, tokenID: "3" };
+
+  it.each([
+    null,
+    42,
+    "invalid",
+    [],
+    {},
+    { ...candidateRow, contractAddress: 42 },
+    { ...candidateRow, contractAddress: "invalid" },
+    { ...candidateRow, tokenID: 1 },
+    { ...candidateRow, tokenID: "" },
+    { ...candidateRow, tokenStandard: {} },
+    { ...candidateRow, tokenStandard: "ERC-20" },
+    { ...candidateRow, collectionName: {} },
+    { ...candidateRow, collectionSymbol: false },
+    { ...candidateRow, balance: 3 },
+    { ...candidateRow, balance: null },
+  ])("skips malformed NFT rows in both discovery paths: %j", async (row) => {
+    mockFetchJson({
+      nfts: [nftRow, row, { ...nftRow, tokenID: "2" }],
+    });
+
+    expect(await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID)).toEqual([
+      {
+        address: contractAddress,
+        name: "Multi",
+        symbol: "MUL",
+        standard: "ZRC1155",
+        tokenCount: 2,
+      },
+    ]);
+    expect(
+      await discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
+    ).toEqual([
+      { tokenId: "1", standard: "ZRC1155", balance: "3" },
+      { tokenId: "2", standard: "ZRC1155", balance: "3" },
+    ]);
+  });
+
+  it.each([undefined, null, ""])(
+    "fills missing collection metadata from later rows: %s",
+    async (missing) => {
+      mockFetchJson({
+        nfts: [
+          { ...nftRow, collectionName: missing, collectionSymbol: missing },
+          { ...nftRow, tokenID: "2" },
+        ],
+      });
+
+      expect(await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID)).toEqual([
+        {
+          address: contractAddress,
+          name: "Multi",
+          symbol: "MUL",
+          standard: "ZRC1155",
+          tokenCount: 2,
+        },
+      ]);
+    },
+  );
+
+  it.each([null, 42, "invalid", [], {}, { nfts: null }, { nfts: {} }])(
+    "returns empty lists for malformed NFT responses: %j",
+    async (body) => {
+      mockFetchJson(body);
+      expect(await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID)).toEqual(
+        [],
+      );
+      expect(
+        await discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
+      ).toEqual([]);
+    },
+  );
+
+  it("returns empty lists when parsing the explorer JSON rejects", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.reject(new SyntaxError("Invalid JSON")),
+      }),
+    );
+
+    expect(await discoverTokens(HOLDER, TESTNET_CHAIN_ID)).toEqual([]);
+    expect(await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID)).toEqual([]);
+    expect(
+      await discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
+    ).toEqual([]);
   });
 });
 
