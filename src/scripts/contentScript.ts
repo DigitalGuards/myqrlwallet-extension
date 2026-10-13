@@ -3,7 +3,6 @@ import {
   Substream,
 } from "@theqrl/qrl-wallet-provider/object-multiplex";
 import { WindowPostMessageStream } from "@theqrl/qrl-wallet-provider/post-message-stream";
-import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { ExtensionPortStream } from "extension-port-stream";
 import { pipeline } from "readable-stream";
 import browser from "webextension-polyfill";
@@ -19,6 +18,7 @@ import {
 import { startContentScriptKeepAlive } from "./utils/contentScriptKeepAlive";
 import { checkForLastError } from "./utils/scriptUtils";
 import { handleSidePanelOpenRequest } from "./utils/sidePanelContentBridge";
+import { isNamedMessage } from "./utils/messageGuards";
 
 // NOTE: this script deliberately performs NO RPC. Content-script fetches
 // run under the hosting page's CORS (Chrome 85+), so any network call
@@ -26,11 +26,6 @@ import { handleSidePanelOpenRequest } from "./utils/sidePanelContentBridge";
 // that don't allowlist it. All provider RPC executes in the service
 // worker (see scripts/utils/unrestrictedMethodExecutor.ts); this file
 // only bridges the inpage <-> extension streams.
-
-type MessageType = {
-  name: string;
-  data?: JsonRpcRequest<JsonRpcRequest>;
-};
 
 let pageMux: ObjectMultiplex;
 let pageChannel: Substream;
@@ -141,7 +136,7 @@ const resetExtensionStreamsAfterPageRestore = () => {
 const isBrowserCacheSignal = (event: Event) =>
   event.isTrusted &&
   // pagehide and pageshow carry persisted; freeze and resume do not.
-  (!("persisted" in event) || (event as PageTransitionEvent).persisted);
+  (!("persisted" in event) || event.persisted === true);
 
 /**
  * Records that this page is going into the back/forward cache, or is being
@@ -181,7 +176,7 @@ const onDisconnectExtensionStream = (
   disconnectedPort: browser.Runtime.Port,
   generation: number,
   listener: () => void,
-  messageListener: (message: MessageType) => void,
+  messageListener: (message: unknown) => void,
   disconnectError: unknown,
 ) => {
   disconnectedPort.onDisconnect.removeListener(listener);
@@ -294,9 +289,10 @@ const setupExtensionStreams = () => {
     () => extensionConnectionGeneration,
     notifyInpageOfStreamFailure,
   );
-  const onPortMessage = (message: MessageType) => {
+  const onPortMessage = (message: unknown) => {
     if (
       generation === extensionConnectionGeneration &&
+      isNamedMessage(message) &&
       message.name === EXTENSION_MESSAGES.CONNECTION_READY
     ) {
       providerChannelBridge.markConnectionReady();
@@ -334,12 +330,12 @@ const setupExtensionStreams = () => {
 
   // forward communication across inpage-background for these channels only
   extensionChannel = extensionMux.createStream(QRL_WALLET_PROVIDER_NAME);
-  extensionChannel.on("error", (error: Error) =>
+  extensionChannel.on("error", (error: unknown) => {
     console.warn(
       `QrlWeb3Wallet: Muxed traffic for channel "${QRL_WALLET_PROVIDER_NAME}" failed.`,
       error,
-    ),
-  );
+    );
+  });
   disconnectProviderChannel =
     providerChannelBridge.attachExtensionChannel(extensionChannel);
 };
@@ -347,19 +343,26 @@ const setupExtensionStreams = () => {
 const prepareListeners = () => {
   // listens to messages coming from the service worker(browser.tabs.sendMessage)
   browser.runtime.onMessage.addListener(
-    async (message: MessageType, sender) => {
-      if (message.name === EXTENSION_MESSAGES.REQUEST_OPEN_SIDE_PANEL) {
-        handleSidePanelOpenRequest(message, sender);
-        return "";
-      }
-      if (message.name === EXTENSION_MESSAGES.READY) {
-        if (!extensionStream) {
-          setupExtensionStreams();
+    (message: unknown, sender) =>
+      new Promise<string>((resolve) => {
+        if (!isNamedMessage(message)) {
+          resolve("");
+          return;
         }
-        return "QrlWeb3Wallet: handled service worker ready message";
-      }
-      return "";
-    },
+        if (message.name === EXTENSION_MESSAGES.REQUEST_OPEN_SIDE_PANEL) {
+          handleSidePanelOpenRequest(message, sender);
+          resolve("");
+          return;
+        }
+        if (message.name === EXTENSION_MESSAGES.READY) {
+          if (!extensionStream) {
+            setupExtensionStreams();
+          }
+          resolve("QrlWeb3Wallet: handled service worker ready message");
+          return;
+        }
+        resolve("");
+      }),
   );
 };
 

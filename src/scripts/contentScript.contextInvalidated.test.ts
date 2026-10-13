@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createPort } from "@/test-utils/runtime";
 
 /**
  * An extension update leaves the old content script running in every open
@@ -7,27 +8,38 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * its stream plumbing stubbed out and drive that sequence by hand.
  */
 
-const { mockConnect, mockSendMessage, mockGetURL, runtime, disconnectPermanently } =
-  vi.hoisted(() => {
-    const connect = vi.fn();
-    const sendMessage = vi.fn();
-    const getURL = vi.fn();
-    return {
-      mockConnect: connect,
-      mockSendMessage: sendMessage,
-      mockGetURL: getURL,
-      disconnectPermanently: vi.fn(),
-      // Chrome clears runtime.id once the extension context is invalidated.
-      runtime: {
-        id: undefined as string | undefined,
-        connect,
-        sendMessage,
-        getURL,
-        onMessage: { addListener: vi.fn() },
-        lastError: undefined,
+const {
+  mockConnect,
+  mockSendMessage,
+  mockGetURL,
+  runtime,
+  disconnectPermanently,
+} = vi.hoisted(() => {
+  const connect = vi.fn();
+  const sendMessage = vi.fn<(message: { name: string }) => Promise<void>>();
+  const getURL = vi.fn();
+  let runtimeId: string | undefined;
+  return {
+    mockConnect: connect,
+    mockSendMessage: sendMessage,
+    mockGetURL: getURL,
+    disconnectPermanently: vi.fn(),
+    // Chrome clears runtime.id once the extension context is invalidated.
+    runtime: {
+      get id() {
+        return runtimeId;
       },
-    };
-  });
+      set id(value: string | undefined) {
+        runtimeId = value;
+      },
+      connect,
+      sendMessage,
+      getURL,
+      onMessage: { addListener: vi.fn() },
+      lastError: undefined,
+    },
+  };
+});
 
 vi.mock("webextension-polyfill", () => ({
   __esModule: true,
@@ -46,9 +58,11 @@ vi.mock("@theqrl/qrl-wallet-provider/object-multiplex", () => ({
   },
 }));
 vi.mock("@theqrl/qrl-wallet-provider/post-message-stream", () => ({
-  WindowPostMessageStream: class {},
+  WindowPostMessageStream: vi.fn(function () {}),
 }));
-vi.mock("extension-port-stream", () => ({ ExtensionPortStream: class {} }));
+vi.mock("extension-port-stream", () => ({
+  ExtensionPortStream: vi.fn(function () {}),
+}));
 vi.mock("readable-stream", () => ({ pipeline: vi.fn() }));
 vi.mock("./utils/providerConnectionLifecycle", () => ({
   createProviderChannelBridge: () => ({
@@ -65,30 +79,23 @@ vi.mock("./utils/sidePanelContentBridge", () => ({
   handleSidePanelOpenRequest: vi.fn(),
 }));
 
-import { QRL_POST_MESSAGE_STREAM } from "./constants/streamConstants";
+import {
+  QRL_POST_MESSAGE_STREAM,
+  QRL_WALLET_PROVIDER_NAME,
+} from "./constants/streamConstants";
 
-const streamFailureNotices = (postMessage: { mock: { calls: unknown[][] } }) =>
-  postMessage.mock.calls.filter(
-    ([message]: unknown[]) =>
-      (message as { data?: { data?: { method?: string } } })?.data?.data
-        ?.method === "QRL_WALLET_STREAM_FAILURE",
-  ).length;
-
-type PortStub = {
-  onMessage: { addListener: ReturnType<typeof vi.fn>; removeListener: ReturnType<typeof vi.fn> };
-  onDisconnect: { addListener: ReturnType<typeof vi.fn>; removeListener: ReturnType<typeof vi.fn> };
-  disconnect: ReturnType<typeof vi.fn>;
-  error?: { message: string };
-};
+type PortStub = ReturnType<typeof createPort>;
 
 const openedPorts: PortStub[] = [];
 
-const disconnectOf = (port: PortStub) =>
-  port.onDisconnect.addListener.mock.calls[0][0] as () => void;
+const disconnectOf = (port: PortStub) => () => {
+  port.onDisconnect.addListener.mock.calls[0][0](port);
+};
 
 const keepAliveCalls = () =>
   mockSendMessage.mock.calls.filter(
-    ([message]) => message?.name === QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT_KEEP_ALIVE,
+    ([message]) =>
+      message.name === QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT_KEEP_ALIVE,
   ).length;
 
 describe("contentScript after the extension context is invalidated", () => {
@@ -100,18 +107,16 @@ describe("contentScript after the extension context is invalidated", () => {
     disconnectPermanently.mockReset();
     vi.spyOn(console, "warn").mockImplementation(() => {});
     mockConnect.mockReset().mockImplementation(() => {
-      const port: PortStub = {
-        onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
-        onDisconnect: { addListener: vi.fn(), removeListener: vi.fn() },
-        disconnect: vi.fn(),
-      };
+      const port = createPort(QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT);
       openedPorts.push(port);
       return port;
     });
     mockSendMessage.mockReset().mockResolvedValue(undefined);
     mockGetURL
       .mockReset()
-      .mockImplementation((path: string) => `chrome-extension://mock-id/${path}`);
+      .mockImplementation(
+        (path: string) => `chrome-extension://mock-id/${path}`,
+      );
   });
 
   afterEach(() => {
@@ -142,7 +147,16 @@ describe("contentScript after the extension context is invalidated", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(mockConnect).toHaveBeenCalledTimes(2);
     expect(disconnectPermanently).toHaveBeenCalledTimes(1);
-    expect(streamFailureNotices(postMessage)).toBe(1);
+    expect(postMessage).toHaveBeenCalledExactlyOnceWith(
+      {
+        target: QRL_POST_MESSAGE_STREAM.INPAGE,
+        data: {
+          name: QRL_WALLET_PROVIDER_NAME,
+          data: { jsonrpc: "2.0", method: "QRL_WALLET_STREAM_FAILURE" },
+        },
+      },
+      window.location.origin,
+    );
     expect(removeWindowListener.mock.calls.map(([type]) => type)).toEqual(
       expect.arrayContaining(["pagehide", "pageshow"]),
     );

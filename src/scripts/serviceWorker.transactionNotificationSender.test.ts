@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RuntimeMessageListener } from "@/test-utils/runtime";
+import type { TransactionNotificationData } from "./utils/transactionNotification";
 
 /**
  * Security review finding L8: the SEND_TX_NOTIFICATION runtime.onMessage
@@ -14,7 +16,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const { mockShowTransactionNotification } = vi.hoisted(() => ({
-  mockShowTransactionNotification: vi.fn(),
+  mockShowTransactionNotification: vi
+    .fn<(data: TransactionNotificationData) => Promise<void>>()
+    .mockResolvedValue(undefined),
 }));
 
 vi.mock("./utils/transactionNotification", () => ({
@@ -27,7 +31,7 @@ const {
   mockLockManagerListener,
   mockInitializeContentScriptProviderConnection,
 } = vi.hoisted(() => ({
-  mockOnMessageAddListener: vi.fn(),
+  mockOnMessageAddListener: vi.fn<(listener: RuntimeMessageListener) => void>(),
   mockOnConnectAddListener: vi.fn(),
   mockLockManagerListener: vi.fn().mockResolvedValue({ success: true }),
   mockInitializeContentScriptProviderConnection: vi
@@ -130,16 +134,17 @@ vi.mock("@/utilities/storageUtil", () => ({
 describe("SEND_TX_NOTIFICATION sender trust", () => {
   const loadNotificationListener = async () => {
     await import("./serviceWorker");
-    const listener = mockOnMessageAddListener.mock.calls
-      .map((call: any) => call[0])
-      .find((candidate: any) => candidate !== mockLockManagerListener);
-    if (!listener) throw new Error("The notification listener is missing");
-    return listener;
+    expect(mockOnMessageAddListener).toHaveBeenCalledTimes(2);
+    return mockOnMessageAddListener.mock.calls[1][0];
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("raises a notification for a message from an extension page", async () => {
@@ -206,5 +211,85 @@ describe("SEND_TX_NOTIFICATION sender trust", () => {
         },
       ),
     ).toBeUndefined();
+  });
+
+  it.each([
+    undefined,
+    null,
+    false,
+    42,
+    "SEND_TX_NOTIFICATION",
+    [],
+    {},
+    { name: 1 },
+    { name: "SEND_TX_NOTIFICATION", data: false },
+    { name: "SEND_TX_NOTIFICATION", data: 42 },
+    { name: "SEND_TX_NOTIFICATION", data: "invalid" },
+    { name: "SEND_TX_NOTIFICATION", data: [] },
+    { name: "SEND_TX_NOTIFICATION", data: { status: 1 } },
+    { name: "SEND_TX_NOTIFICATION", data: { amount: {} } },
+    { name: "SEND_TX_NOTIFICATION", data: { amount: null } },
+    { name: "SEND_TX_NOTIFICATION", data: { tokenSymbol: false } },
+    { name: "SEND_TX_NOTIFICATION", data: { txHash: [] } },
+  ])("ignores malformed notification input %j", async (message) => {
+    const listener = await loadNotificationListener();
+
+    expect(
+      listener(message, {
+        id: "mock-id",
+        url: "chrome-extension://mock-id/index.html",
+      }),
+    ).toBeUndefined();
+
+    expect(mockShowTransactionNotification).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    undefined,
+    null,
+    {},
+    {
+      status: "confirmed",
+      amount: "1",
+      tokenSymbol: "QRL",
+      txHash: "0xabc",
+      extra: "preserved",
+    },
+    { status: "failed", amount: 0 },
+  ])("preserves accepted notification data %j", async (data) => {
+    const listener = await loadNotificationListener();
+
+    expect(
+      listener(
+        { name: "SEND_TX_NOTIFICATION", data },
+        { id: "mock-id", url: "chrome-extension://mock-id/index.html" },
+      ),
+    ).toBeUndefined();
+
+    expect(mockShowTransactionNotification).toHaveBeenCalledExactlyOnceWith(
+      data ?? {},
+    );
+    if (data !== null && data !== undefined)
+      expect(mockShowTransactionNotification.mock.calls[0][0]).toBe(data);
+  });
+
+  it("reports a notification rejection while leaving the message channel available", async () => {
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const error = new Error("settings unavailable");
+    mockShowTransactionNotification.mockRejectedValueOnce(error);
+    const listener = await loadNotificationListener();
+
+    expect(
+      listener(
+        { name: "SEND_TX_NOTIFICATION", data: {} },
+        { id: "mock-id", url: "chrome-extension://mock-id/index.html" },
+      ),
+    ).toBeUndefined();
+    await Promise.resolve();
+
+    expect(report).toHaveBeenCalledWith(
+      "QrlWeb3Wallet: Failed to create notification:",
+      error,
+    );
   });
 });
