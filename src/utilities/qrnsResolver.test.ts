@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toChecksumAddress } from "@theqrl/wallet.js";
 
 const { constructRequestManager, send } = vi.hoisted(() => ({
-  constructRequestManager: vi.fn(),
-  send: vi.fn(),
+  constructRequestManager: vi.fn<(provider: string) => void>(),
+  send: vi.fn<
+    (request: { method: string; params: unknown[] }) => Promise<unknown>
+  >(),
 }));
 
 vi.mock("@theqrl/web3-core", () => ({
@@ -100,6 +102,8 @@ describe("native QNS resolver adapter", () => {
     "álîce.qrl",
     "alice_name.qrl",
     "ab--reserved.qrl",
+    "\u{1f600}.qrl",
+    "\ud800.qrl",
   ])("rejects a name outside the conservative QNS profile (%s)", (name) => {
     expect(isQrnsName(name)).toBe(false);
   });
@@ -114,7 +118,7 @@ describe("native QNS resolver adapter", () => {
       await expect(
         resolveQrnsName("alice.qrl", {
           ...CHAIN,
-          qrnsRegistryAddress: registryAddress as never,
+          qrnsRegistryAddress: registryAddress,
         }),
       ).rejects.toThrow("not configured for this chain");
 
@@ -139,7 +143,7 @@ describe("native QNS resolver adapter", () => {
       await expect(
         resolveQrnsName("alice.qrl", {
           ...CHAIN,
-          qrnsRegistryAddress: registryAddress as never,
+          qrnsRegistryAddress: registryAddress,
         }),
       ).rejects.toThrow("canonical uppercase-Q address");
 

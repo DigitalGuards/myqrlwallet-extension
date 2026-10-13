@@ -1,4 +1,5 @@
 import { walletLocalStorage } from "@/utilities/profileStorage";
+import { isRecord } from "@/services/explorerGuards";
 
 /**
  * Failed-unlock-attempt throttling for the lock screen (F7).
@@ -33,14 +34,15 @@ export type UnlockAttemptState = {
 
 const EMPTY_STATE: UnlockAttemptState = { failedAttempts: 0, waitUntil: 0 };
 
+const isUnlockAttemptState = (value: unknown): value is UnlockAttemptState =>
+  isRecord(value) &&
+  typeof value.failedAttempts === "number" &&
+  typeof value.waitUntil === "number";
+
 export const getUnlockAttemptState = async (): Promise<UnlockAttemptState> => {
   const data = await walletLocalStorage.get(FAILED_ATTEMPTS_KEY);
-  const stored = data?.[FAILED_ATTEMPTS_KEY] as UnlockAttemptState | undefined;
-  if (
-    !stored ||
-    typeof stored.failedAttempts !== "number" ||
-    typeof stored.waitUntil !== "number"
-  ) {
+  const stored: unknown = data[FAILED_ATTEMPTS_KEY];
+  if (!isUnlockAttemptState(stored)) {
     return { ...EMPTY_STATE };
   }
   return stored;
