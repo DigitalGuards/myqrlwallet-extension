@@ -20,7 +20,7 @@ const QrlRequestAccountAccountSelection = observer(
     const { accounts, isLoading } = qrlAccounts;
     const availableAccounts = accounts.map((account) => account.accountAddress);
 
-    const hasAccounts = !!availableAccounts?.length;
+    const hasAccounts = !!availableAccounts.length;
 
     return (
       <div className="flex flex-col gap-4">
@@ -38,9 +38,9 @@ const QrlRequestAccountAccountSelection = observer(
                   name={`dappAccount-${account}`}
                   checked={selectedAccounts.includes(account)}
                   aria-label="accountsCheckbox"
-                  onCheckedChange={(checked) =>
-                    onAccountSelection(account, !!checked)
-                  }
+                  onCheckedChange={(checked) => {
+                    onAccountSelection(account, !!checked);
+                  }}
                 />
                 <label
                   htmlFor={account}

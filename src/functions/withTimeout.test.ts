@@ -24,6 +24,7 @@ describe("withTimeout", () => {
       );
       await vi.advanceTimersByTimeAsync(1000);
       await assertion;
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -34,9 +35,7 @@ describe("withTimeout", () => {
     try {
       const neverSettles = new Promise<string>(() => {});
       const result = withTimeout(neverSettles, 1000, "The call");
-      const assertion = result.catch((error) => {
-        expect(error).toBeInstanceOf(TimeoutError);
-      });
+      const assertion = expect(result).rejects.toBeInstanceOf(TimeoutError);
       await vi.advanceTimersByTimeAsync(1000);
       await assertion;
     } finally {
@@ -48,6 +47,40 @@ describe("withTimeout", () => {
     vi.useFakeTimers();
     try {
       await withTimeout(Promise.resolve("done"), 1000, "The call");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the timer and preserves the original rejection", async () => {
+    vi.useFakeTimers();
+    try {
+      const failure = new Error("RPC failed");
+      await expect(
+        withTimeout(Promise.reject(failure), 1000, "The call"),
+      ).rejects.toBe(failure);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("handles an operation rejection after its deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      let rejectOperation: (error: Error) => void = () => {
+        throw new Error("Operation promise was not initialized");
+      };
+      const operation = new Promise<string>((_resolve, reject) => {
+        rejectOperation = reject;
+      });
+      const result = withTimeout(operation, 1000, "The call");
+      const assertion = expect(result).rejects.toBeInstanceOf(TimeoutError);
+      await vi.advanceTimersByTimeAsync(1000);
+      await assertion;
+      rejectOperation(new Error("Late rejection"));
+      await vi.runAllTimersAsync();
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();

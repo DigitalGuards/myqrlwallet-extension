@@ -25,7 +25,7 @@ describe("DAppRequest", () => {
       </StoreProvider>,
     );
 
-  it("should render the dapp request content component", async () => {
+  it("should render the dapp request content component", () => {
     renderComponent();
 
     expect(screen.getByText("Mocked ChainBadge")).toBeInTheDocument();
