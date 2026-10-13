@@ -3,24 +3,30 @@ import StorageUtil, {
   KeystoreStorageCorruptError,
   LockState,
 } from "@/utilities/storageUtil";
-import type { Bytes, KeyStore } from "@theqrl/web3";
+import type { KeyStore } from "@theqrl/web3";
 import { DEFAULT_AUTO_LOCK_MINUTES } from "@/configuration/autoLockConfig";
 import { encryptKeystore } from "@/crypto/keystoreCrypto";
 import { getMnemonicFromHexSeed } from "@/functions/getMnemonicFromHexSeed";
 import { isQrlAddress } from "@/utilities/addressUtil";
+import { isRecord } from "@/utilities/storageGuards";
+import { isNamedMessage } from "../utils/messageGuards";
 import { EXTENSION_MESSAGES } from "../constants/streamConstants";
 import { setWalletLockedForDAppNotifications } from "../utils/dAppAccountNotifications";
 import { isTrustedExtensionSender } from "../utils/trustedSender";
 import browser from "webextension-polyfill";
 
 type MessageType = {
-  name?: string;
-  // A dApp approval/rejection response uses `action` as its discriminator
-  // - see EXTENSION_MESSAGES.DAPP_RESPONSE in dAppRequestStore.ts.
-  action?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  data?: any;
+  name: string;
+  data?: unknown;
 };
+
+// Browser versions expose synchronous and promise-returning alarm creation.
+const alarms: {
+  create: (
+    name: string,
+    info: browser.Alarms.CreateAlarmInfoType,
+  ) => void | Promise<void>;
+} = browser.alarms;
 
 // ENCRYPT_ACCOUNT payload. `password` is optional and is only ever sent by
 // first-run onboarding, the one caller that has a password the worker does
@@ -28,7 +34,7 @@ type MessageType = {
 // with the password it already holds from the unlock session, so the
 // plaintext stays inside the worker.
 export type EncryptAccountType = {
-  seed: Bytes;
+  seed: string;
   password?: string;
 };
 
@@ -44,6 +50,16 @@ export type SetDecryptedKeysPayload = {
   keys: DecryptedKeyType[];
   walletPassword: string;
 };
+
+const isDecryptedKey = (value: unknown): value is DecryptedKeyType =>
+  isRecord(value) &&
+  typeof value.address === "string" &&
+  typeof value.mnemonicPhrases === "string";
+
+const isEncryptAccount = (value: unknown): value is EncryptAccountType =>
+  isRecord(value) &&
+  typeof value.seed === "string" &&
+  (value.password === undefined || typeof value.password === "string");
 
 export const LOCK_MANAGER_MESSAGES = {
   PORT: "LOCK_MANGER_PORT",
@@ -127,14 +143,14 @@ const AUTO_LOCK_ACTIVITY_MESSAGE_NAMES: ReadonlySet<string> = new Set([
  * stays alive for as long as it can while unlocked instead.
  */
 class LockManager {
-  private static decryptedKeys?: DecryptedKeyType[];
+  private decryptedKeys?: DecryptedKeyType[];
   // Held in memory only. Separating the password from `decryptedKeys`
   // reduces blast radius if either store leaks.
-  private static walletPassword?: string;
-  static readonly AUTO_LOCK_ALARM = "QRL_AUTO_LOCK";
+  private walletPassword?: string;
+  readonly AUTO_LOCK_ALARM = "QRL_AUTO_LOCK";
   // Key an old build may have left behind in storage.session before secrets
   // were removed from it entirely; see scrubLegacySessionSecrets().
-  private static readonly LEGACY_SESSION_KEYS_KEY = "_LM_CACHED_KEYS";
+  private readonly LEGACY_SESSION_KEYS_KEY = "_LM_CACHED_KEYS";
 
   // Chrome shuts an idle MV3 service worker down ~30s after its last
   // extension event; a storage.session write counts as one. Writing a
@@ -150,8 +166,8 @@ class LockManager {
   // risk (only reachable under sustained, severe event-loop starvation)
   // for meaningfully less chatter on a worker that has nothing else
   // keeping it warm.
-  static readonly KEEP_ALIVE_INTERVAL_MS = 10_000;
-  private static keepAliveIntervalId?: ReturnType<typeof setInterval>;
+  readonly KEEP_ALIVE_INTERVAL_MS = 10_000;
+  private keepAliveIntervalId?: ReturnType<typeof setInterval>;
 
   /**
    * Starts the in-worker keep-alive interval if it is not already running.
@@ -159,14 +175,16 @@ class LockManager {
    * (setDecryptedKeys, the single chokepoint below) can call it
    * unconditionally.
    */
-  static startKeepAliveInterval(): void {
+  startKeepAliveInterval(): void {
     if (this.keepAliveIntervalId !== undefined) return;
     this.keepAliveIntervalId = setInterval(() => {
-      this.keepAliveTick();
+      this.keepAliveTick().catch((error: unknown) => {
+        console.warn("QrlWeb3Wallet: Keep-alive tick failed", error);
+      });
     }, this.KEEP_ALIVE_INTERVAL_MS);
   }
 
-  static stopKeepAliveInterval(): void {
+  stopKeepAliveInterval(): void {
     if (this.keepAliveIntervalId !== undefined) {
       clearInterval(this.keepAliveIntervalId);
       this.keepAliveIntervalId = undefined;
@@ -174,8 +192,12 @@ class LockManager {
   }
 
   /** True while the keep-alive interval is running, for tests. */
-  static isKeepAliveIntervalRunning(): boolean {
+  isKeepAliveIntervalRunning(): boolean {
     return this.keepAliveIntervalId !== undefined;
+  }
+
+  private hasDecryptedKeys(): boolean {
+    return this.decryptedKeys !== undefined;
   }
 
   /**
@@ -191,8 +213,8 @@ class LockManager {
    * wallet that is no longer unlocked would be wrong. Detects that itself
    * and stops the interval the moment it finds the wallet locked.
    */
-  private static async keepAliveTick(): Promise<void> {
-    if (this.decryptedKeys === undefined) {
+  private async keepAliveTick(): Promise<void> {
+    if (!this.hasDecryptedKeys()) {
       this.stopKeepAliveInterval();
       return;
     }
@@ -201,7 +223,7 @@ class LockManager {
     // alarm read/create work on every tick and go straight to the
     // keep-alive write.
     const settings = await StorageUtil.getSettings();
-    if (this.decryptedKeys === undefined) {
+    if (!this.hasDecryptedKeys()) {
       this.stopKeepAliveInterval();
       return;
     }
@@ -211,15 +233,15 @@ class LockManager {
       const existingAutoLockAlarm = await browser.alarms.get(
         this.AUTO_LOCK_ALARM,
       );
-      if (this.decryptedKeys === undefined) {
+      if (!this.hasDecryptedKeys()) {
         this.stopKeepAliveInterval();
         return;
       }
       if (!existingAutoLockAlarm) {
-        await browser.alarms.create(this.AUTO_LOCK_ALARM, {
+        await alarms.create(this.AUTO_LOCK_ALARM, {
           delayInMinutes: autoLockMinutes,
         });
-        if (this.decryptedKeys === undefined) {
+        if (!this.hasDecryptedKeys()) {
           this.stopKeepAliveInterval();
           return;
         }
@@ -238,7 +260,7 @@ class LockManager {
    * storage.session already clears on browser close, so this only matters
    * within a single browser session that started before an upgrade.
    */
-  static async scrubLegacySessionSecrets(): Promise<void> {
+  async scrubLegacySessionSecrets(): Promise<void> {
     try {
       await walletSessionStorage.remove(this.LEGACY_SESSION_KEYS_KEY);
     } catch {
@@ -252,7 +274,7 @@ class LockManager {
    * Safe to call on an already-locked wallet: clearing already-undefined
    * keys and an already-cleared alarm are both no-ops.
    */
-  static async lock(): Promise<void> {
+  async lock(): Promise<void> {
     await StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
     this.clearDecryptedKeys();
     this.walletPassword = undefined;
@@ -264,15 +286,13 @@ class LockManager {
    * keep in sync, this is now just an in-memory filter; a locked wallet
    * (nothing in memory) has nothing to scrub.
    */
-  static removeAccountKey(accountAddress: string): { success: true } {
+  removeAccountKey(accountAddress: string): { success: true } {
     const target = accountAddress.toLowerCase();
     if (this.decryptedKeys === undefined) {
       return { success: true };
     }
     this.setDecryptedKeys(
-      this.decryptedKeys.filter(
-        (key) => key?.address?.toLowerCase() !== target,
-      ),
+      this.decryptedKeys.filter((key) => key.address.toLowerCase() !== target),
     );
     return { success: true };
   }
@@ -288,7 +308,7 @@ class LockManager {
    * peer surface reading a blank timestamp would have nothing to compare
    * against.
    */
-  static async resetWallet(): Promise<{ success: true }> {
+  async resetWallet(): Promise<{ success: true }> {
     this.clearDecryptedKeys();
     this.walletPassword = undefined;
     await walletSessionStorage.clear();
@@ -298,11 +318,11 @@ class LockManager {
     return { success: true };
   }
 
-  static async setupAutoLockAlarm(): Promise<void> {
+  async setupAutoLockAlarm(): Promise<void> {
     const settings = await StorageUtil.getSettings();
     const minutes = settings.autoLockMinutes ?? DEFAULT_AUTO_LOCK_MINUTES;
     if (minutes > 0) {
-      await browser.alarms.create(this.AUTO_LOCK_ALARM, {
+      await alarms.create(this.AUTO_LOCK_ALARM, {
         delayInMinutes: minutes,
       });
     } else {
@@ -310,11 +330,11 @@ class LockManager {
     }
   }
 
-  static async clearAutoLockAlarm(): Promise<void> {
+  async clearAutoLockAlarm(): Promise<void> {
     await browser.alarms.clear(this.AUTO_LOCK_ALARM);
   }
 
-  static async handleAutoLockAlarm(): Promise<void> {
+  async handleAutoLockAlarm(): Promise<void> {
     // lock() writes the LOCKED timestamp itself, first, before anything
     // else - no need to duplicate the write here.
     await this.lock();
@@ -326,7 +346,7 @@ class LockManager {
    * locked without any restore step: nothing outside this class's own
    * memory can answer otherwise any more.
    */
-  static async isLocked(): Promise<{
+  async isLocked(): Promise<{
     isLocked: boolean;
     hasPasswordSet: boolean;
   }> {
@@ -392,12 +412,19 @@ class LockManager {
    * no recovery path that sends keys alone - see the F1/N8 history in
    * SessionPasswordPrompt.tsx for why that used to exist).
    */
-  static setDecryptedKeysFromPopup(payload: SetDecryptedKeysPayload): void {
-    const { keys, walletPassword } = payload;
-    if (keys.some((key) => !isQrlAddress(key?.address))) {
+  setDecryptedKeysFromPopup(payload: unknown): void {
+    if (!isRecord(payload) || !Array.isArray(payload.keys)) {
+      throw new Error("Invalid decrypted keys payload");
+    }
+    const keys: unknown[] = Array.from(payload.keys);
+    const { walletPassword } = payload;
+    if (keys.some((key) => !isRecord(key) || !isQrlAddress(key.address))) {
       throw new Error("Refusing to cache a key with an invalid QIP-55 address");
     }
-    if (!walletPassword) {
+    if (!keys.every(isDecryptedKey)) {
+      throw new Error("Refusing to cache a key with invalid mnemonic phrases");
+    }
+    if (typeof walletPassword !== "string" || !walletPassword) {
       throw new Error(
         "Refusing to cache decrypted keys without a wallet password",
       );
@@ -421,7 +448,10 @@ class LockManager {
    * already put in this class's memory is used in place, so the plaintext
    * stays here.
    */
-  static async encryptAccount(accountData: EncryptAccountType): Promise<void> {
+  async encryptAccount(accountData: unknown): Promise<void> {
+    if (!isEncryptAccount(accountData)) {
+      throw new Error("Invalid account encryption payload");
+    }
     const { password: rawPassword, seed } = accountData;
     const explicitPassword = rawPassword
       ? rawPassword.normalize("NFC")
@@ -445,11 +475,11 @@ class LockManager {
         ).values(),
       ),
     );
-    // Add the new account key directly to in-memory keys
-    // instead of re-decrypting everything (which would block the SW).
+    // Add the new account key directly to in-memory keys. This keeps the
+    // worker responsive while preserving the existing decrypted keys.
     const newKey: DecryptedKeyType = {
       address: encryptedKeyStore.address,
-      mnemonicPhrases: getMnemonicFromHexSeed(seed as string),
+      mnemonicPhrases: getMnemonicFromHexSeed(seed),
     };
     this.walletPassword = password;
     const existingKeys = this.decryptedKeys ?? [];
@@ -472,7 +502,7 @@ class LockManager {
    * mid-flow re-arm, or the first account created during onboarding -
    * keeps the worker alive the same way.
    */
-  private static setDecryptedKeys(decryptedKeys: DecryptedKeyType[]): void {
+  private setDecryptedKeys(decryptedKeys: DecryptedKeyType[]): void {
     this.decryptedKeys = decryptedKeys;
     // The dApp account-notification stream mirrors the lock state so it can
     // answer synchronously from its storage listener. Both chokepoints push
@@ -488,11 +518,11 @@ class LockManager {
    * the user have to unlock again first?" gets a plain answer and the
    * password itself stays in this class.
    */
-  static hasWalletPassword(): boolean {
+  hasWalletPassword(): boolean {
     return this.decryptedKeys !== undefined && Boolean(this.walletPassword);
   }
 
-  static getDecryptedKeys(): DecryptedKeyType[] {
+  getDecryptedKeys(): DecryptedKeyType[] {
     if (!this.decryptedKeys) {
       this.clearDecryptedKeys();
       throw new Error("MyQRLWallet is locked");
@@ -506,10 +536,10 @@ class LockManager {
    * surface for now, but no longer needs every other account's mnemonic to
    * do it).
    */
-  static getDecryptedKeyForAddress(address: string): DecryptedKeyType {
+  getDecryptedKeyForAddress(address: string): DecryptedKeyType {
     const keys = this.getDecryptedKeys();
-    const target = address?.toLowerCase();
-    const match = keys.find((key) => key?.address?.toLowerCase() === target);
+    const target = address.toLowerCase();
+    const match = keys.find((key) => key.address.toLowerCase() === target);
     if (!match) {
       throw new Error("No decrypted key found for this account");
     }
@@ -523,7 +553,7 @@ class LockManager {
    * or getDecryptedKeys() finding nothing - leaves nothing keeping the
    * worker warm for a wallet with nothing left to protect.
    */
-  private static clearDecryptedKeys(): void {
+  private clearDecryptedKeys(): void {
     this.decryptedKeys = undefined;
     setWalletLockedForDAppNotifications(true);
     this.stopKeepAliveInterval();
@@ -533,15 +563,15 @@ class LockManager {
    * Synchronous by design. See the comment on the early return below: an
    * async listener answers every message it overhears.
    */
-  static lockManagerListener(
-    message: MessageType,
+  lockManagerListener = (
+    message: unknown,
     sender?: browser.Runtime.MessageSender,
-  ): Promise<unknown> | undefined {
+  ): Promise<unknown> | undefined => {
     // Fail closed: only this extension's own UI may reach decrypted keys or
     // the wallet password. isTrustedExtensionSender rejects an undefined
     // sender, another extension, and a content script running with the
     // page's origin.
-    if (!isTrustedExtensionSender(sender)) {
+    if (!isTrustedExtensionSender(sender) || !isRecord(message)) {
       return undefined;
     }
 
@@ -552,61 +582,64 @@ class LockManager {
     // browser and steal the reply from the listener the sender is actually
     // waiting on (the dApp approval middleware's in-progress acknowledgement
     // is exactly such a message).
-    const messageName =
-      typeof message?.name === "string" ? message.name : undefined;
     const isHandledName =
-      messageName !== undefined && HANDLED_MESSAGE_NAMES.has(messageName);
+      isNamedMessage(message) && HANDLED_MESSAGE_NAMES.has(message.name);
     const isApprovalActivity =
-      message?.action === EXTENSION_MESSAGES.DAPP_RESPONSE;
+      message.action === EXTENSION_MESSAGES.DAPP_RESPONSE;
     if (!isHandledName) {
       if (isApprovalActivity) {
         // A deliberate user action, so it postpones the auto-lock. The reply
         // belongs to whoever owns this message.
-        void LockManager.postponeAutoLockForUserActivity();
+        this.postponeAutoLockForUserActivity().catch((error: unknown) => {
+          console.warn(
+            "QrlWeb3Wallet: Auto-lock activity update failed",
+            error,
+          );
+        });
       }
       return undefined;
     }
-    return LockManager.handleOwnMessage(message);
-  }
+    return this.handleOwnMessage(message);
+  };
 
   /**
    * The body of lockManagerListener for messages this class owns. Split out
    * so the listener itself can stay synchronous for everything else.
    */
-  private static async handleOwnMessage(message: MessageType) {
-    let result;
+  private async handleOwnMessage(message: MessageType): Promise<unknown> {
+    let result: unknown;
     if (message.name === LOCK_MANAGER_MESSAGES.IS_LOCKED) {
-      result = await LockManager.isLocked();
+      result = await this.isLocked();
     } else if (message.name === LOCK_MANAGER_MESSAGES.SET_DECRYPTED_KEYS) {
       // The popup decrypted the keystores locally and is sending us the results.
-      LockManager.setDecryptedKeysFromPopup(
-        message?.data ?? { keys: [], walletPassword: "" },
+      this.setDecryptedKeysFromPopup(
+        message.data ?? { keys: [], walletPassword: "" },
       );
-      await LockManager.setupAutoLockAlarm();
+      await this.setupAutoLockAlarm();
       result = { success: true };
     } else if (message.name === LOCK_MANAGER_MESSAGES.REMOVE_ACCOUNT_KEY) {
-      result = LockManager.removeAccountKey(
-        typeof message?.data === "string" ? message.data : "",
+      result = this.removeAccountKey(
+        typeof message.data === "string" ? message.data : "",
       );
     } else if (message.name === LOCK_MANAGER_MESSAGES.RESET_WALLET) {
-      result = await LockManager.resetWallet();
+      result = await this.resetWallet();
     } else if (message.name === LOCK_MANAGER_MESSAGES.LOCK) {
-      result = await LockManager.lock();
+      await this.lock();
     } else if (message.name === LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK) {
-      await LockManager.setupAutoLockAlarm();
+      await this.setupAutoLockAlarm();
       result = { success: true };
     } else if (
       message.name === LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEY_FOR_ADDRESS
     ) {
-      result = LockManager.getDecryptedKeyForAddress(
-        typeof message?.data === "string" ? message.data : "",
+      result = this.getDecryptedKeyForAddress(
+        typeof message.data === "string" ? message.data : "",
       );
     } else if (message.name === LOCK_MANAGER_MESSAGES.HAS_WALLET_PASSWORD) {
       // A boolean, and only a boolean. No message carries the wallet
       // password out of this worker.
-      result = { hasPassword: LockManager.hasWalletPassword() };
+      result = { hasPassword: this.hasWalletPassword() };
     } else if (message.name === LOCK_MANAGER_MESSAGES.ENCRYPT_ACCOUNT) {
-      result = await LockManager.encryptAccount(message?.data ?? {});
+      await this.encryptAccount(message.data ?? {});
     } else if (message.name === LOCK_MANAGER_MESSAGES.USER_ACTIVITY) {
       result = { success: true };
     }
@@ -618,21 +651,18 @@ class LockManager {
     // approval/rejection response postpones it too, from the early return
     // in lockManagerListener, since it carries an `action` field in place of
     // a name.
-    if (
-      typeof message.name === "string" &&
-      AUTO_LOCK_ACTIVITY_MESSAGE_NAMES.has(message.name)
-    ) {
-      await LockManager.postponeAutoLockForUserActivity();
+    if (AUTO_LOCK_ACTIVITY_MESSAGE_NAMES.has(message.name)) {
+      await this.postponeAutoLockForUserActivity();
     }
 
     return result;
   }
 
   /** Postpone the inactivity auto-lock, when there is a session to hold. */
-  private static async postponeAutoLockForUserActivity(): Promise<void> {
-    if (LockManager.decryptedKeys === undefined) return;
-    await LockManager.setupAutoLockAlarm();
+  private async postponeAutoLockForUserActivity(): Promise<void> {
+    if (this.decryptedKeys === undefined) return;
+    await this.setupAutoLockAlarm();
   }
 }
 
-export default LockManager;
+export default new LockManager();
