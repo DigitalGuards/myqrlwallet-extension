@@ -1,5 +1,6 @@
 import browser from "webextension-polyfill";
 import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
+import { isRecord } from "@/services/explorerGuards";
 
 export const profileStorageKey = (key: string): string =>
   `${V3_STORAGE_PREFIX}${key}`;
@@ -8,7 +9,8 @@ export const createProfileStorage = (area: browser.Storage.StorageArea) => ({
   async get(
     key: string,
   ): Promise<Awaited<ReturnType<browser.Storage.StorageArea["get"]>>> {
-    const result = await area.get(profileStorageKey(key));
+    const result: unknown = await area.get(profileStorageKey(key));
+    if (!isRecord(result)) throw new Error("Invalid browser storage response");
     return Object.prototype.hasOwnProperty.call(result, profileStorageKey(key))
       ? { [key]: result[profileStorageKey(key)] }
       : {};
@@ -27,7 +29,8 @@ export const createProfileStorage = (area: browser.Storage.StorageArea) => ({
     await area.remove(profileStorageKey(key));
   },
   async clear(): Promise<void> {
-    const values = await area.get(null);
+    const values: unknown = await area.get(null);
+    if (!isRecord(values)) throw new Error("Invalid browser storage response");
     const keys = Object.keys(values).filter((key) =>
       key.startsWith(V3_STORAGE_PREFIX),
     );

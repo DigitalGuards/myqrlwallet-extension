@@ -2319,66 +2319,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/utilities/ipfsUtil.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-    },
-  },
-  {
-    files: ["src/utilities/ipfsUtil.ts"],
-    rules: {
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-    },
-  },
-  {
-    files: ["src/utilities/legacyWalletData.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/require-await": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: ["src/utilities/legacyWalletData.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
-    files: ["src/utilities/profileStorage.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/require-await": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: ["src/utilities/profileStorage.ts"],
-    rules: {
-      "@typescript-eslint/no-unsafe-assignment": "off",
-    },
-  },
-  {
-    files: ["src/utilities/qrnsResolver.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-    },
-  },
-  {
-    files: ["src/utilities/qrnsResolver.ts"],
-    rules: {
-      "@typescript-eslint/no-non-null-assertion": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
     files: ["src/utilities/storageUtil.test.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
@@ -2401,28 +2341,6 @@ export const lintRatchet = [
       "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
-    },
-  },
-  {
-    files: ["src/utilities/stringUtil.ts"],
-    rules: {
-      "@typescript-eslint/no-extraneous-class": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
-    files: ["src/utilities/unlockAttemptLimiter.test.ts"],
-    rules: {
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-    },
-  },
-  {
-    files: ["src/utilities/unlockAttemptLimiter.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
     },
   },
   {
