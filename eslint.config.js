@@ -2345,17 +2345,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/services/ledger/ledgerService.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
     files: ["src/services/ledger/ledgerService.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
