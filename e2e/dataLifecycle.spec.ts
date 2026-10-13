@@ -1,11 +1,20 @@
 import {
+  closeFixtureServer,
+  fixtureSettings,
+  removeStoredValue,
+  readRpcBody,
+  readStoredValue,
+  reportFixtureError,
+  writeStorage,
+} from "./fixtureHelpers";
+import {
   expect,
   test,
   chromium,
   type BrowserContext,
   type Worker,
 } from "@playwright/test";
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -60,14 +69,6 @@ const rpcResult = (method: string): unknown => {
   }
 };
 
-const readBody = async (request: IncomingMessage): Promise<string> => {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString("utf8");
-};
-
 const startFixtureNode = async () => {
   const rpcMethods: string[] = [];
   let answering = true;
@@ -76,10 +77,8 @@ const startFixtureNode = async () => {
       response.writeHead(404).end();
       return;
     }
-    void (async () => {
-      const body = JSON.parse(await readBody(request)) as
-        | { id?: string | number; method: string }
-        | Array<{ id?: string | number; method: string }>;
+    (async () => {
+      const body = await readRpcBody(request);
       const requests = Array.isArray(body) ? body : [body];
       rpcMethods.push(...requests.map(({ method }) => method));
       if (!answering) {
@@ -98,7 +97,9 @@ const startFixtureNode = async () => {
         result: rpcResult(method),
       }));
       response.end(JSON.stringify(Array.isArray(body) ? results : results[0]));
-    })();
+    })().catch((error: unknown) => {
+      reportFixtureError(response, error);
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -111,7 +112,7 @@ const startFixtureNode = async () => {
     stopAnswering: () => {
       answering = false;
     },
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    close: () => closeFixtureServer(server),
   };
 };
 
@@ -127,40 +128,35 @@ const seedWalletStorage = async (
   serviceWorker: Worker,
   rpcUrl: string,
 ): Promise<void> => {
-  await serviceWorker.evaluate(
-    async ({ rpcUrl: url, prefix }) => {
-      await chrome.storage.local.set({
-        [`${prefix}:SETTINGS`]: {
-          phishingDetectionEnabled: false,
-          autoLockMinutes: 30,
-        },
-        [`${prefix}:BLOCKCHAINS`]: {
-          ACTIVE_BLOCKCHAIN: "0x301825",
-          ALL_BLOCKCHAINS: [
-            {
-              chainId: "0x301825",
-              chainName: "QRL E2E Testnet",
-              rpcUrls: [url],
-              blockExplorerUrls: ["https://example.invalid"],
-              nativeCurrency: {
-                name: "Quanta",
-                symbol: "Quanta",
-                decimals: 18,
-              },
-              iconUrls: [],
-              defaultRpcUrl: url,
-              defaultBlockExplorerUrl: "https://example.invalid",
-              defaultIconUrl: "",
-              isTestnet: true,
-              defaultWsRpcUrl: url,
-              isCustomChain: true,
-            },
-          ],
-        },
-      });
+  await writeStorage(serviceWorker, "local", {
+    [`${STORAGE_PREFIX}:SETTINGS`]: {
+      phishingDetectionEnabled: false,
+      autoLockMinutes: 30,
     },
-    { rpcUrl, prefix: STORAGE_PREFIX },
-  );
+    [`${STORAGE_PREFIX}:BLOCKCHAINS`]: {
+      ACTIVE_BLOCKCHAIN: "0x301825",
+      ALL_BLOCKCHAINS: [
+        {
+          chainId: "0x301825",
+          chainName: "QRL E2E Testnet",
+          rpcUrls: [rpcUrl],
+          blockExplorerUrls: ["https://example.invalid"],
+          nativeCurrency: {
+            name: "Quanta",
+            symbol: "Quanta",
+            decimals: 18,
+          },
+          iconUrls: [],
+          defaultRpcUrl: rpcUrl,
+          defaultBlockExplorerUrl: "https://example.invalid",
+          defaultIconUrl: "",
+          isTestnet: true,
+          defaultWsRpcUrl: rpcUrl,
+          isCustomChain: true,
+        },
+      ],
+    },
+  });
 };
 
 const completeOnboarding = async (
@@ -296,14 +292,18 @@ test("the Home card shows a fiat estimate, with the explorer standing in for a b
     // first, which the explorer does not quote: the estimate has to fall
     // back to dollars, symbol included, and the estimate stays on screen.
     coinGeckoBlocked = true;
-    await serviceWorker.evaluate(async (prefix) => {
-      await chrome.storage.local.remove(`${prefix}:PRICE_CACHE`);
-      const key = `${prefix}:SETTINGS`;
-      const stored = await chrome.storage.local.get(key);
-      await chrome.storage.local.set({
-        [key]: { ...stored[key], currency: "EUR" },
-      });
-    }, STORAGE_PREFIX);
+    await removeStoredValue(
+      serviceWorker,
+      "local",
+      `${STORAGE_PREFIX}:PRICE_CACHE`,
+    );
+    const settingsKey = `${STORAGE_PREFIX}:SETTINGS`;
+    const settings = fixtureSettings(
+      await readStoredValue(serviceWorker, "local", settingsKey),
+    );
+    await writeStorage(serviceWorker, "local", {
+      [settingsKey]: { ...settings, currency: "EUR" },
+    });
 
     const blocked = await context.newPage();
     await blocked.setViewportSize({ width: 360, height: 760 });
@@ -341,40 +341,35 @@ test("balance polling follows lock state and a dead node marks balances stale", 
       context.serviceWorkers()[0] ??
       (await context.waitForEvent("serviceworker"));
     const extensionId = new URL(serviceWorker.url()).host;
-    await serviceWorker.evaluate(
-      async ({ rpcUrl, prefix }) => {
-        await chrome.storage.local.set({
-          [`${prefix}:SETTINGS`]: {
-            phishingDetectionEnabled: false,
-            autoLockMinutes: 30,
-          },
-          [`${prefix}:BLOCKCHAINS`]: {
-            ACTIVE_BLOCKCHAIN: "0x301825",
-            ALL_BLOCKCHAINS: [
-              {
-                chainId: "0x301825",
-                chainName: "QRL E2E Testnet",
-                rpcUrls: [rpcUrl],
-                blockExplorerUrls: ["https://example.invalid"],
-                nativeCurrency: {
-                  name: "Quanta",
-                  symbol: "Quanta",
-                  decimals: 18,
-                },
-                iconUrls: [],
-                defaultRpcUrl: rpcUrl,
-                defaultBlockExplorerUrl: "https://example.invalid",
-                defaultIconUrl: "",
-                isTestnet: true,
-                defaultWsRpcUrl: rpcUrl,
-                isCustomChain: true,
-              },
-            ],
-          },
-        });
+    await writeStorage(serviceWorker, "local", {
+      [`${STORAGE_PREFIX}:SETTINGS`]: {
+        phishingDetectionEnabled: false,
+        autoLockMinutes: 30,
       },
-      { rpcUrl: `${node.origin}/rpc`, prefix: STORAGE_PREFIX },
-    );
+      [`${STORAGE_PREFIX}:BLOCKCHAINS`]: {
+        ACTIVE_BLOCKCHAIN: "0x301825",
+        ALL_BLOCKCHAINS: [
+          {
+            chainId: "0x301825",
+            chainName: "QRL E2E Testnet",
+            rpcUrls: [`${node.origin}/rpc`],
+            blockExplorerUrls: ["https://example.invalid"],
+            nativeCurrency: {
+              name: "Quanta",
+              symbol: "Quanta",
+              decimals: 18,
+            },
+            iconUrls: [],
+            defaultRpcUrl: `${node.origin}/rpc`,
+            defaultBlockExplorerUrl: "https://example.invalid",
+            defaultIconUrl: "",
+            isTestnet: true,
+            defaultWsRpcUrl: `${node.origin}/rpc`,
+            isCustomChain: true,
+          },
+        ],
+      },
+    });
 
     const onboarding = await context.newPage();
     await onboarding.goto(
