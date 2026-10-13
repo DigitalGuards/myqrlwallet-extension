@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Existing production debt is a set of exact file/rule pairs. Regeneration
-// removes resolved pairs and refuses additions. New violations fail lint.
+// Existing lint debt, including tests, is a set of exact file/rule pairs.
+// Regeneration removes resolved pairs and refuses additions.
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
-import { baseConfig, lintRatchet, testFiles } from "../eslint.config.js";
+import { baseConfig, lintRatchet, strictFiles } from "../eslint.config.js";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const configPath = path.join(root, "eslint.config.js");
@@ -30,9 +30,9 @@ if (
 const eslint = new ESLint({
   cwd: root,
   overrideConfigFile: true,
-  overrideConfig: [...baseConfig, { ignores: testFiles }],
+  overrideConfig: baseConfig,
 });
-const results = await eslint.lintFiles(["src/**/*.{ts,tsx}"]);
+const results = await eslint.lintFiles(strictFiles);
 const current = new Map();
 let reports = 0;
 for (const result of results) {
@@ -58,8 +58,19 @@ for (const entry of lintRatchet) {
     );
   }
   const [file] = entry.files;
-  if (!file.startsWith("src/") || /[*?{}[\]!]/u.test(file)) {
-    throw new Error(`Ratchet file must be an exact src path: ${file}`);
+  if (
+    !(
+      file.startsWith("src/") ||
+      file.startsWith("e2e/") ||
+      file === "vitest.setup.ts"
+    ) ||
+    /[*?{}[\]!]/u.test(file) ||
+    file.includes("\\") ||
+    path.posix.normalize(file) !== file
+  ) {
+    throw new Error(
+      `Ratchet file must be an exact src/ or e2e/ path, or vitest.setup.ts: ${file}`,
+    );
   }
   for (const [rule, severity] of Object.entries(entry.rules)) {
     const pair = `${file}: ${rule}`;
