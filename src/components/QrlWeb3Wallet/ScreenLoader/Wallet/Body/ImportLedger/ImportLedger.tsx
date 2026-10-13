@@ -22,7 +22,7 @@ import {
 import BackButton from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/BackButton/BackButton";
 import { LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
 import { ROUTES } from "@/router/router";
-import { LedgerAccount } from "@/services/ledger/ledgerTypes";
+import type { StoredLedgerAccount as LedgerAccount } from "@/utilities/storageGuards";
 import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import { useStore } from "@/stores/store";
 import StorageUtil from "@/utilities/storageUtil";
@@ -312,7 +312,10 @@ const ImportLedger = observer(() => {
                         />
                         <span className="text-xs text-muted-foreground">
                           {t("ledger.accountIndex", {
-                            index: account.index + 1,
+                            index:
+                              typeof account.index === "number"
+                                ? account.index + 1
+                                : "?",
                           })}
                           {imported && (
                             <span className="ml-2 text-xs font-medium text-green-600">

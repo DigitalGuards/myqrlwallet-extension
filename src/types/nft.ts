@@ -4,7 +4,7 @@ export type NFTCollectionType = {
   address: string;
   name: string;
   symbol: string;
-  standard: NFTStandard;
+  standard: NFTStandard | undefined;
   image: string;
 };
 

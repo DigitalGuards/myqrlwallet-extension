@@ -16,7 +16,7 @@ export type TransactionHistoryEntry = {
   tokenName: string;
   isZrc20Token: boolean;
   tokenContractAddress: string;
-  tokenDecimals: number;
+  tokenDecimals: number | null;
   transactionHash: string;
   blockNumber: string;
   gasUsed: string;

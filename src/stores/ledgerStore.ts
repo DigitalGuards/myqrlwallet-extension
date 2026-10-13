@@ -1,3 +1,4 @@
+import type { StoredLedgerAccount as LedgerAccount } from "@/utilities/storageGuards";
 /**
  * Ledger Store - MobX state management for Ledger Hardware Wallet.
  *
@@ -35,10 +36,7 @@ import {
 } from "mobx";
 import { ledgerService } from "@/services/ledger/ledgerService";
 import { ledgerTransport } from "@/services/ledger/ledgerTransport";
-import type {
-  LedgerAccount,
-  LedgerDeviceInfo,
-} from "@/services/ledger/ledgerTypes";
+import type { LedgerDeviceInfo } from "@/services/ledger/ledgerTypes";
 import StorageUtil from "@/utilities/storageUtil";
 import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
 import { getDerivationPath } from "@/services/ledger/ledgerApdu";
@@ -81,6 +79,12 @@ export interface StoreSignResult {
   rawTransaction?: string;
   error?: string;
 }
+
+const requireLedgerPath = (path: unknown): string => {
+  if (typeof path !== "string" || !path)
+    throw new Error("Ledger account has no usable derivation path");
+  return path;
+};
 
 /**
  * LedgerStore - Central state management for Ledger integration.
@@ -250,7 +254,16 @@ class LedgerStore {
       runInAction(() => {
         this.accounts = storedAccounts;
         if (storedAccounts.length > 0) {
-          const maxIndex = Math.max(...storedAccounts.map((a) => a.index));
+          const maxIndex = Math.max(
+            -1,
+            ...storedAccounts.flatMap((a) =>
+              typeof a.index === "number" &&
+              Number.isSafeInteger(a.index) &&
+              a.index >= 0
+                ? [a.index]
+                : [],
+            ),
+          );
           this.nextAccountIndex = maxIndex + 1;
         }
       });
@@ -412,7 +425,9 @@ class LedgerStore {
     }
 
     try {
-      await ledgerService.verifyAddress(account.derivationPath);
+      await ledgerService.verifyAddress(
+        requireLedgerPath(account.derivationPath),
+      );
       return true;
     } catch (error) {
       console.error("[LedgerStore] Address verification failed:", error);
@@ -446,7 +461,7 @@ class LedgerStore {
     }
 
     const { publicKey } = await ledgerService.getPublicKey(
-      account.derivationPath,
+      requireLedgerPath(account.derivationPath),
     );
 
     // Update account with public key
@@ -553,7 +568,7 @@ class LedgerStore {
       });
 
       const signedResult = await ledgerService.signTransaction(
-        account.derivationPath,
+        requireLedgerPath(account.derivationPath),
         rlpEncodedTx,
       );
 
@@ -635,7 +650,8 @@ class LedgerStore {
       throw new Error("Ledger account not found");
     }
 
-    let publicKey = account.publicKey;
+    let publicKey =
+      typeof account.publicKey === "string" ? account.publicKey : "";
     if (!publicKey) {
       const { publicKey: fetchedPublicKey } =
         await this.fetchPublicKey(fromAddress);
