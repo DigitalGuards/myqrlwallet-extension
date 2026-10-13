@@ -67,7 +67,7 @@ const LockPasswordSetup = ({
   } = form;
 
   function onSubmit(formData: z.infer<typeof FormSchema>) {
-    setNewPassword(formData?.reEnteredPassword);
+    setNewPassword(formData.reEnteredPassword);
     selectStep(ONBOARDING_STEPS.ADD_OR_IMPORT_ACCOUNT);
   }
 
@@ -76,7 +76,11 @@ const LockPasswordSetup = ({
       <form
         name="accountPasswordSetup"
         className="w-full"
-        onSubmit={handleSubmit(onSubmit)}
+        onSubmit={(event) => {
+          handleSubmit(onSubmit)(event).catch((error: unknown) => {
+            console.error("Failed to set up the wallet password:", error);
+          });
+        }}
       >
         <Card className="animate-appear-in shadow-xl">
           <CardHeader>
@@ -102,7 +106,9 @@ const LockPasswordSetup = ({
                       type="password"
                     />
                   </FormControl>
-                  <FormDescription>{t("onboarding.password.inputDescription")}</FormDescription>
+                  <FormDescription>
+                    {t("onboarding.password.inputDescription")}
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -123,7 +129,9 @@ const LockPasswordSetup = ({
                       type="password"
                     />
                   </FormControl>
-                  <FormDescription>{t("onboarding.password.confirmDescription")}</FormDescription>
+                  <FormDescription>
+                    {t("onboarding.password.confirmDescription")}
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}

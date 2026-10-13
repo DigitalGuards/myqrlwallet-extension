@@ -21,7 +21,11 @@ vi.mock(
     default: ({ selectStep }: { selectStep: (step: string) => void }) => (
       <div>
         Mocked Welcome
-        <button onClick={() => selectStep("ADD_OR_IMPORT_ACCOUNT")}>
+        <button
+          onClick={() => {
+            selectStep("ADD_OR_IMPORT_ACCOUNT");
+          }}
+        >
           skip to accounts
         </button>
       </div>
@@ -40,11 +44,11 @@ vi.mock(
       }) => Promise<void>;
     }) => (
       <button
-        onClick={() =>
+        onClick={() => {
           addAnAccountToWallet({ address: "QNew", seed: "0xseed" }).catch(
             () => {},
-          )
-        }
+          );
+        }}
       >
         add account
       </button>
@@ -68,7 +72,7 @@ describe("Onboarding", () => {
       </StoreProvider>,
     );
 
-  it("should render the welcome screen as the first step", async () => {
+  it("should render the welcome screen as the first step", () => {
     renderComponent(
       mockedStore({
         lockStore: { encryptAccount: async () => {} },
@@ -83,11 +87,13 @@ describe("Onboarding", () => {
 
   it("points the active account before the keystore write, so the service worker never sees keystores without an account", async () => {
     const calls: string[] = [];
-    const encryptAccount = vi.fn(async () => {
+    const encryptAccount = vi.fn(() => {
       calls.push("encrypt");
+      return Promise.resolve();
     });
-    const setActiveAccount = vi.fn(async () => {
+    const setActiveAccount = vi.fn(() => {
       calls.push("activate");
+      return Promise.resolve();
     });
     renderComponent(
       mockedStore({
@@ -100,7 +106,9 @@ describe("Onboarding", () => {
     await userEvent.click(screen.getByText("skip to accounts"));
     await userEvent.click(screen.getByText("add account"));
 
-    await waitFor(() => expect(setActiveAccount).toHaveBeenCalledWith("QNew"));
+    await waitFor(() => {
+      expect(setActiveAccount).toHaveBeenCalledWith("QNew");
+    });
     expect(calls).toEqual(["activate", "encrypt"]);
   });
 
@@ -110,9 +118,8 @@ describe("Onboarding", () => {
     renderComponent(
       mockedStore({
         lockStore: {
-          encryptAccount: async () => {
-            throw new Error("service worker unreachable");
-          },
+          encryptAccount: () =>
+            Promise.reject(new Error("service worker unreachable")),
         },
         qrlStore: { setActiveAccount, clearAccountState },
       }),
@@ -121,9 +128,13 @@ describe("Onboarding", () => {
     await userEvent.click(screen.getByText("skip to accounts"));
     await userEvent.click(screen.getByText("add account"));
 
-    await waitFor(() => expect(clearAccountState).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(clearAccountState).toHaveBeenCalled();
+    });
     expect(setActiveAccount).toHaveBeenCalledWith("QNew");
-    expect(StorageUtil.setAllAccounts).toHaveBeenCalledWith(["QExisting"]);
-    expect(StorageUtil.clearActiveAccount).toHaveBeenCalled();
+    expect(vi.mocked(StorageUtil).setAllAccounts).toHaveBeenCalledWith([
+      "QExisting",
+    ]);
+    expect(vi.mocked(StorageUtil).clearActiveAccount).toHaveBeenCalled();
   });
 });

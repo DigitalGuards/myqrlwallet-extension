@@ -1,4 +1,6 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
+import type { StoreType } from "@/stores/store";
+import type { PartialDeep } from "type-fest";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -6,6 +8,15 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import OtherAccounts from "./OtherAccounts";
+import StorageUtil from "@/utilities/storageUtil";
+
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock("react-router-dom", async () => ({
+  ...(await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom",
+  )),
+  useNavigate: () => navigate,
+}));
 
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AccountList/AccountId/AccountId",
@@ -13,7 +24,10 @@ vi.mock(
 );
 
 describe("OtherAccounts", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -26,7 +40,9 @@ describe("OtherAccounts", () => {
       </StoreProvider>,
     );
 
-  const twoAccountStore = (overrides: Record<string, any> = {}) =>
+  const twoAccountStore = (
+    overrides: PartialDeep<StoreType["qrlStore"]> = {},
+  ) =>
     mockedStore({
       qrlStore: {
         activeAccount: {
@@ -92,7 +108,7 @@ describe("OtherAccounts", () => {
     await act(async () => {
       await userEvent.click(screen.getByRole("menuitem", { name: "Switch" }));
     });
-    expect(mockedSetActiveAccount).toBeCalledTimes(1);
+    expect(mockedSetActiveAccount).toHaveBeenCalledTimes(1);
   });
 
   it("should call the copyAccount function on clicking the copy item", async () => {
@@ -110,13 +126,15 @@ describe("OtherAccounts", () => {
     await userEvent.click(
       screen.getByRole("menuitem", { name: "Copy Address" }),
     );
-    expect(mockedWriteText).toBeCalledTimes(1);
-    expect(mockedWriteText).toBeCalledWith(
+    expect(mockedWriteText).toHaveBeenCalledTimes(1);
+    expect(mockedWriteText).toHaveBeenCalledWith(
       "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
     );
   });
 
-  const storeWithLabel = (overrides: Record<string, any> = {}) => {
+  const storeWithLabel = (
+    overrides: PartialDeep<StoreType["accountLabelsStore"]> = {},
+  ) => {
     const labels: Record<string, string> = {
       Q20fB08fF1f1376A14C055E9F56df80563E16722b: "Account 2",
     };
@@ -146,6 +164,80 @@ describe("OtherAccounts", () => {
       },
     });
   };
+
+  it.each(["button", "Enter"])(
+    "retains the edited label when saving by %s fails",
+    async (action) => {
+      const error = new Error("label storage failed");
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      const setLabel = vi.fn().mockRejectedValue(error);
+      renderComponent(storeWithLabel({ setLabel }));
+      await openMenu();
+      await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+      const input = screen.getByRole("textbox", { name: "Edit account label" });
+      await userEvent.clear(input);
+      await userEvent.type(input, "Savings");
+      if (action === "Enter") await userEvent.keyboard("{Enter}");
+      else
+        await userEvent.click(
+          screen.getByRole("button", { name: "Save label" }),
+        );
+
+      await waitFor(() => {
+        expect(report).toHaveBeenCalledWith(
+          "Failed to save the account label:",
+          error,
+        );
+      });
+      expect(setLabel).toHaveBeenCalledTimes(1);
+      expect(input).toHaveValue("Savings");
+    },
+  );
+
+  it.each(["clear", "activate"])(
+    "reports a failed %s while switching accounts",
+    async (step) => {
+      const error = new Error("account storage failed");
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      const clear = vi
+        .spyOn(StorageUtil, "clearTransactionValues")
+        .mockResolvedValue(undefined);
+      const setActiveAccount = vi.fn().mockResolvedValue(undefined);
+      if (step === "clear") clear.mockRejectedValue(error);
+      else setActiveAccount.mockRejectedValue(error);
+      renderComponent(twoAccountStore({ setActiveAccount }));
+      await openMenu();
+      await userEvent.click(screen.getByRole("menuitem", { name: "Switch" }));
+
+      await waitFor(() => {
+        expect(report).toHaveBeenCalledWith(
+          "Failed to switch the active account:",
+          error,
+        );
+      });
+      if (step === "clear") expect(setActiveAccount).not.toHaveBeenCalled();
+      else expect(setActiveAccount).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("reports a failed hide and retains the account", async () => {
+    const error = new Error("account storage failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const store = twoAccountStore();
+    const hideAccount = vi.fn().mockRejectedValue(error);
+    store.hiddenAccountsStore.hideAccount = hideAccount;
+    renderComponent(store);
+    await openMenu();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Hide" }));
+
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith("Failed to hide the account:", error);
+    });
+    expect(hideAccount).toHaveBeenCalledWith(
+      "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+    );
+    expect(screen.getByText("Mocked Account Id")).toBeInTheDocument();
+  });
 
   it("should show rename item in dropdown menu", async () => {
     renderComponent(storeWithLabel());
@@ -361,7 +453,7 @@ describe("OtherAccounts", () => {
   });
 
   it("should not show hidden accounts in the list", () => {
-    const hidden: Record<string, boolean> = {
+    const hidden: Partial<Record<string, boolean>> = {
       Q20fB08fF1f1376A14C055E9F56df80563E16722b: true,
     };
     renderComponent(
@@ -390,7 +482,7 @@ describe("OtherAccounts", () => {
           loadHiddenAccounts: async () => {},
           hideAccount: async () => {},
           unhideAccount: async () => {},
-          isHidden: (addr: string) => !!hidden[addr],
+          isHidden: (addr: string) => hidden[addr] ?? false,
         },
       }),
     );
@@ -398,5 +490,48 @@ describe("OtherAccounts", () => {
     expect(
       screen.queryByText("Other accounts in the wallet"),
     ).not.toBeInTheDocument();
+  });
+  it("reports a rejected receive navigation", async () => {
+    const error = new Error("navigation failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    navigate.mockRejectedValueOnce(error);
+    renderComponent(twoAccountStore());
+    await openMenu();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Receive" }));
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "Failed to open account receive:",
+        error,
+      );
+    });
+  });
+
+  it("reports a rejected home navigation while preserving the account switch order", async () => {
+    const error = new Error("navigation failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const calls: string[] = [];
+    vi.spyOn(StorageUtil, "clearTransactionValues").mockImplementation(() => {
+      calls.push("clear");
+      return Promise.resolve();
+    });
+    navigate.mockImplementationOnce(() => {
+      calls.push("navigate");
+      return Promise.reject(error);
+    });
+    const setActiveAccount = vi.fn(() => {
+      calls.push("activate");
+      return Promise.resolve();
+    });
+    renderComponent(twoAccountStore({ setActiveAccount }));
+    await openMenu();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Switch" }));
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "Failed to open the home page:",
+        error,
+      );
+    });
+    expect(calls).toEqual(["clear", "navigate", "activate"]);
+    expect(setActiveAccount).toHaveBeenCalledTimes(1);
   });
 });

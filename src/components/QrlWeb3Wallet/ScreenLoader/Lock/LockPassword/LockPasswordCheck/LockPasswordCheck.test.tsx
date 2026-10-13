@@ -70,9 +70,7 @@ describe("LockPasswordCheck", () => {
     renderComponent(
       mockedStore({
         lockStore: {
-          unlock: async (_password: string) => {
-            return "wrong-password" as const;
-          },
+          unlock: () => Promise.resolve("wrong-password" as const),
         },
       }),
     );
@@ -101,9 +99,7 @@ describe("LockPasswordCheck", () => {
     renderComponent(
       mockedStore({
         lockStore: {
-          unlock: async () => {
-            throw new KeystoreStorageCorruptError();
-          },
+          unlock: () => Promise.reject(new KeystoreStorageCorruptError()),
           resetWallet,
         },
       }),
@@ -157,7 +153,25 @@ describe("LockPasswordCheck", () => {
     });
   });
 
-  it("should render the unlock button disabled if the password field is empty", async () => {
+  it("reports a failed attempt-gate refresh and leaves unlock uncalled", async () => {
+    const unlock = vi.fn().mockResolvedValue("success");
+    renderComponent(mockedStore({ lockStore: { unlock } }));
+    await userEvent.type(screen.getByLabelText("Enter password"), "password");
+    mockGetUnlockAttemptState.mockRejectedValueOnce(
+      new Error("Attempt state unavailable"),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Unlock" }));
+
+    expect(
+      await screen.findByText("Attempt state unavailable"),
+    ).toBeInTheDocument();
+    expect(unlock).not.toHaveBeenCalled();
+    expect(mockRecordFailedUnlockAttempt).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Enter password")).toBeEnabled();
+  });
+
+  it("should render the unlock button disabled if the password field is empty", () => {
     renderComponent(
       mockedStore({
         qrlStore: {
@@ -242,7 +256,7 @@ describe("LockPasswordCheck", () => {
       renderComponent(
         mockedStore({
           lockStore: {
-            unlock: async () => "wrong-password" as const,
+            unlock: () => Promise.resolve("wrong-password" as const),
           },
         }),
       );
@@ -270,7 +284,7 @@ describe("LockPasswordCheck", () => {
       renderComponent(
         mockedStore({
           lockStore: {
-            unlock: async () => "wrong-password" as const,
+            unlock: () => Promise.resolve("wrong-password" as const),
           },
         }),
       );
@@ -304,7 +318,7 @@ describe("LockPasswordCheck", () => {
     });
 
     it("disables the unlock button once a wait is imposed, so a second click cannot retry early", async () => {
-      const unlock = vi.fn(async () => "wrong-password" as const);
+      const unlock = vi.fn(() => Promise.resolve("wrong-password" as const));
       mockRecordFailedUnlockAttempt.mockResolvedValue({
         failedAttempts: 6,
         waitUntil: Date.now() + 10_000,
@@ -330,7 +344,7 @@ describe("LockPasswordCheck", () => {
       renderComponent(
         mockedStore({
           lockStore: {
-            unlock: async () => "success" as const,
+            unlock: () => Promise.resolve("success" as const),
           },
         }),
       );
@@ -355,7 +369,7 @@ describe("LockPasswordCheck", () => {
       renderComponent(
         mockedStore({
           lockStore: {
-            unlock: async () => "failed" as const,
+            unlock: () => Promise.resolve("failed" as const),
           },
         }),
       );

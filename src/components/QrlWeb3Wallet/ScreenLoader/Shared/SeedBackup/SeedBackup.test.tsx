@@ -1,14 +1,27 @@
 import { getMnemonicFromHexSeed } from "@/functions/getMnemonicFromHexSeed";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Web3BaseWalletAccount } from "@theqrl/web3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SeedBackup, { pickConfirmPositions } from "./SeedBackup";
 
-const ACCOUNT = {
+const ACCOUNT: Web3BaseWalletAccount = {
   address: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
   seed: "0x7819dc0205e6a5c286796886ce16e637b99e1838701cc6988c5886ddc890a7f328771d9197fd17f36faa759d9b8c4c42",
-} as unknown as Web3BaseWalletAccount;
+  signTransaction: () =>
+    Promise.reject(new Error("Signing is unavailable in this fixture")),
+  sign: () => {
+    throw new Error("Signing is unavailable in this fixture");
+  },
+  encrypt: () =>
+    Promise.reject(new Error("Encryption is unavailable in this fixture")),
+};
 const WORDS = getMnemonicFromHexSeed(ACCOUNT.seed).split(" ");
 
 const renderComponent = (
@@ -37,7 +50,7 @@ const goToConfirm = async () => {
 const requestedPositions = () =>
   screen
     .getAllByText(/^Word \d+$/)
-    .map((label) => Number(label.textContent!.replace("Word ", "")));
+    .map((label) => Number(label.textContent.replace("Word ", "")));
 
 const fillWords = async (getWord: (position: number) => string) => {
   for (const position of requestedPositions()) {
@@ -49,7 +62,10 @@ const fillWords = async (getWord: (position: number) => string) => {
 };
 
 describe("SeedBackup", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it("has 32 words to back up", () => {
     expect(WORDS).toHaveLength(32);
@@ -91,6 +107,7 @@ describe("SeedBackup", () => {
     await reveal();
     const createObjectURL = vi.fn();
     const revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     Object.defineProperty(URL, "createObjectURL", {
       value: createObjectURL,
       writable: true,
@@ -193,6 +210,44 @@ describe("SeedBackup", () => {
       screen.queryByRole("button", { name: "Back" }),
     ).not.toBeInTheDocument();
   });
+
+  it.each(["confirm", "skip"])(
+    "reports a rejected %s persist and clears the busy state",
+    async (action) => {
+      const error = new Error("save failed");
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      const onConfirmed = vi.fn().mockRejectedValue(error);
+      renderComponent({ onConfirmed });
+      await goToConfirm();
+      if (action === "confirm") {
+        await fillWords((position) => WORDS[position - 1]);
+        await userEvent.click(
+          screen.getByRole("button", { name: "Confirm backup" }),
+        );
+      } else {
+        await userEvent.click(
+          screen.getByRole("button", { name: "Skip confirmation" }),
+        );
+        await userEvent.click(
+          screen.getByRole("button", { name: "Skip anyway" }),
+        );
+      }
+
+      await waitFor(() => {
+        expect(report).toHaveBeenCalledWith(
+          "Failed to save the backed-up account:",
+          error,
+        );
+      });
+      expect(onConfirmed).toHaveBeenCalledTimes(1);
+      expect(
+        screen.getByRole("button", { name: "Show the phrase again" }),
+      ).toBeEnabled();
+      expect(
+        screen.getByRole("form", { name: "confirmRecoveryPhrase" }),
+      ).toBeInTheDocument();
+    },
+  );
 });
 
 describe("pickConfirmPositions", () => {
