@@ -1,140 +1,37 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
-import type Transport from "@ledgerhq/hw-transport";
+import Transport from "@ledgerhq/hw-transport";
+import type TransportWebHID from "@ledgerhq/hw-transport-webhid";
+import { LedgerTransportService } from "./ledgerTransport";
+import { SpeculosTransportService } from "./speculosTransport";
 
-// Mock transport instance
-const mockOn = vi.fn();
-const mockClose = vi.fn();
-const mockSend = vi.fn();
-const mockExchange = vi.fn();
+const mockOn = vi.fn<(event: string, callback: () => void) => void>();
+const mockClose = vi.fn<Transport["close"]>();
+const mockSend = vi.fn<Transport["send"]>();
+const mockExchange = vi.fn<Transport["exchange"]>();
 
-const mockTransportInstance = {
+const mockTransportInstance = Object.assign(new Transport(), {
   on: mockOn,
   close: mockClose,
   send: mockSend,
   exchange: mockExchange,
-};
+});
 
-// Mock the WebHID transport module
+const mockCreate = vi.hoisted(() => vi.fn<typeof TransportWebHID.create>());
+
 vi.mock("@ledgerhq/hw-transport-webhid", () => ({
-  __esModule: true,
-  default: {
-    create: vi.fn(),
-  },
+  default: { create: mockCreate },
 }));
 
-// Get the mocked module
-import TransportWebHID from "@ledgerhq/hw-transport-webhid";
-const mockedTransportWebHID = TransportWebHID as any;
-
-/**
- * LedgerTransportService implementation for testing.
- * This is a copy of the real implementation without import.meta.env.
- */
-class LedgerTransportService {
-  private transport: Transport | null = null;
-  private onDisconnectCallback?: () => void;
-
-  isSupported(): boolean {
-    return typeof navigator !== "undefined" && "hid" in navigator;
+function simulateDisconnect(): void {
+  const disconnectHandler = mockOn.mock.calls.find(
+    ([event]) => event === "disconnect",
+  )?.[1];
+  if (!disconnectHandler) {
+    throw new Error("Disconnect handler was not registered");
   }
-
-  async connect(): Promise<Transport> {
-    if (this.transport) {
-      return this.transport;
-    }
-
-    if (!this.isSupported()) {
-      throw new Error(LEDGER_ERROR_MESSAGES.WEBHID_NOT_SUPPORTED);
-    }
-
-    try {
-      this.transport = await mockedTransportWebHID.create(
-        LEDGER_CONFIG.CONNECTION_TIMEOUT,
-      );
-
-      this.transport!.on("disconnect", () => {
-        this.transport = null;
-        if (this.onDisconnectCallback) {
-          this.onDisconnectCallback();
-        }
-      });
-
-      return this.transport!;
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        if (error.message?.includes("No device selected")) {
-          throw new Error(LEDGER_ERROR_MESSAGES.DEVICE_NOT_FOUND);
-        }
-        if (error.message?.includes("Access denied")) {
-          throw new Error(LEDGER_ERROR_MESSAGES.CONNECTION_FAILED);
-        }
-      }
-      throw new Error(LEDGER_ERROR_MESSAGES.CONNECTION_FAILED);
-    }
-  }
-
-  async disconnect(): Promise<void> {
-    if (this.transport) {
-      try {
-        await this.transport.close();
-      } catch {
-        // Ignore close errors
-      } finally {
-        this.transport = null;
-      }
-    }
-  }
-
-  isConnected(): boolean {
-    return this.transport !== null;
-  }
-
-  onDisconnect(callback: () => void): void {
-    this.onDisconnectCallback = callback;
-  }
-
-  async send(
-    cla: number,
-    ins: number,
-    p1: number,
-    p2: number,
-    data?: Buffer,
-  ): Promise<Buffer> {
-    const transport = await this.connect();
-
-    try {
-      const response = await transport.send(cla, ins, p1, p2, data);
-      return response;
-    } catch (error: unknown) {
-      if (error instanceof Error && error.message?.includes("disconnected")) {
-        this.transport = null;
-        throw new Error(LEDGER_ERROR_MESSAGES.DEVICE_DISCONNECTED);
-      }
-      throw error;
-    }
-  }
-
-  async exchange(apdu: Buffer): Promise<Buffer> {
-    const transport = await this.connect();
-    return transport.exchange(apdu);
-  }
+  disconnectHandler();
 }
-
-// Mock the entire ledgerTransport module to avoid import.meta.env parsing
-// Note: We can't reference external variables in vi.mock factory, so we use inline definitions
-vi.mock("./ledgerTransport", () => ({
-  __esModule: true,
-  LedgerTransportService: class MockedLedgerTransportService {},
-  ledgerTransport: {
-    isSupported: vi.fn(),
-    isConnected: vi.fn(),
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-    send: vi.fn(),
-    onDisconnect: vi.fn(),
-  },
-}));
 
 describe("LedgerTransportService", () => {
   let service: LedgerTransportService;
@@ -143,8 +40,12 @@ describe("LedgerTransportService", () => {
   beforeEach(() => {
     // Reset all mocks
     vi.clearAllMocks();
+    mockCreate.mockReset();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     mockOn.mockReset();
-    mockClose.mockReset();
+    mockClose.mockReset().mockResolvedValue(undefined);
     mockSend.mockReset();
     mockExchange.mockReset();
 
@@ -156,6 +57,7 @@ describe("LedgerTransportService", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     // Restore navigator
     if (originalNavigator) {
       Object.defineProperty(global, "navigator", originalNavigator);
@@ -205,30 +107,24 @@ describe("LedgerTransportService", () => {
     });
 
     it("should create transport and return it on success", async () => {
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
 
       const transport = await service.connect();
 
-      expect(mockedTransportWebHID.create).toHaveBeenCalledWith(
-        LEDGER_CONFIG.CONNECTION_TIMEOUT,
-      );
+      expect(mockCreate).toHaveBeenCalledWith(LEDGER_CONFIG.CONNECTION_TIMEOUT);
       expect(transport).toBe(mockTransportInstance);
       expect(mockOn).toHaveBeenCalledWith("disconnect", expect.any(Function));
     });
 
     it("should return existing transport if already connected", async () => {
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
 
       // First connection
       const transport1 = await service.connect();
       // Second connection should return same instance
       const transport2 = await service.connect();
 
-      expect(mockedTransportWebHID.create).toHaveBeenCalledTimes(1);
+      expect(mockCreate).toHaveBeenCalledTimes(1);
       expect(transport1).toBe(transport2);
     });
 
@@ -245,9 +141,7 @@ describe("LedgerTransportService", () => {
     });
 
     it("should throw DEVICE_NOT_FOUND when user closes dialog", async () => {
-      (mockedTransportWebHID.create as any).mockRejectedValue(
-        new Error("No device selected"),
-      );
+      mockCreate.mockRejectedValue(new Error("No device selected"));
 
       await expect(service.connect()).rejects.toThrow(
         LEDGER_ERROR_MESSAGES.DEVICE_NOT_FOUND,
@@ -255,9 +149,7 @@ describe("LedgerTransportService", () => {
     });
 
     it("should throw CONNECTION_FAILED when access is denied", async () => {
-      (mockedTransportWebHID.create as any).mockRejectedValue(
-        new Error("Access denied to device"),
-      );
+      mockCreate.mockRejectedValue(new Error("Access denied to device"));
 
       await expect(service.connect()).rejects.toThrow(
         LEDGER_ERROR_MESSAGES.CONNECTION_FAILED,
@@ -265,9 +157,7 @@ describe("LedgerTransportService", () => {
     });
 
     it("should throw CONNECTION_FAILED for other errors", async () => {
-      (mockedTransportWebHID.create as any).mockRejectedValue(
-        new Error("Unknown error"),
-      );
+      mockCreate.mockRejectedValue(new Error("Unknown error"));
 
       await expect(service.connect()).rejects.toThrow(
         LEDGER_ERROR_MESSAGES.CONNECTION_FAILED,
@@ -275,9 +165,7 @@ describe("LedgerTransportService", () => {
     });
 
     it("should register disconnect handler", async () => {
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
 
       await service.connect();
 
@@ -285,39 +173,27 @@ describe("LedgerTransportService", () => {
     });
 
     it("should call onDisconnect callback when device disconnects", async () => {
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
       const onDisconnect = vi.fn();
 
       service.onDisconnect(onDisconnect);
       await service.connect();
 
       // Get the disconnect handler and call it
-      const disconnectHandler = mockOn.mock.calls.find(
-        (call) => call[0] === "disconnect",
-      )?.[1] as () => void;
-
-      disconnectHandler();
+      simulateDisconnect();
 
       expect(onDisconnect).toHaveBeenCalled();
       expect(service.isConnected()).toBe(false);
     });
 
     it("should clear transport when device disconnects", async () => {
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
 
       await service.connect();
       expect(service.isConnected()).toBe(true);
 
       // Simulate disconnect
-      const disconnectHandler = mockOn.mock.calls.find(
-        (call) => call[0] === "disconnect",
-      )?.[1] as () => void;
-
-      disconnectHandler();
+      simulateDisconnect();
 
       expect(service.isConnected()).toBe(false);
     });
@@ -333,9 +209,7 @@ describe("LedgerTransportService", () => {
     });
 
     it("should close transport and clear state", async () => {
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
       mockClose.mockResolvedValue(undefined);
 
       await service.connect();
@@ -354,9 +228,7 @@ describe("LedgerTransportService", () => {
     });
 
     it("should clear state even if close throws error", async () => {
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
       mockClose.mockRejectedValue(new Error("Close error"));
 
       await service.connect();
@@ -380,9 +252,7 @@ describe("LedgerTransportService", () => {
     });
 
     it("should return true when connected", async () => {
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
 
       await service.connect();
 
@@ -390,9 +260,7 @@ describe("LedgerTransportService", () => {
     });
 
     it("should return false after disconnect", async () => {
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
       mockClose.mockResolvedValue(undefined);
 
       await service.connect();
@@ -424,9 +292,7 @@ describe("LedgerTransportService", () => {
 
     it("should send APDU command and return response", async () => {
       const mockResponse = Buffer.from([0x01, 0x02, 0x90, 0x00]);
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
       mockSend.mockResolvedValue(mockResponse);
 
       const response = await service.send(0xe0, 0x03, 0x00, 0x00);
@@ -438,9 +304,7 @@ describe("LedgerTransportService", () => {
     it("should send APDU command with data", async () => {
       const mockResponse = Buffer.from([0x90, 0x00]);
       const inputData = Buffer.from([0xaa, 0xbb, 0xcc]);
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
       mockSend.mockResolvedValue(mockResponse);
 
       await service.send(0xe0, 0x05, 0x00, 0x00, inputData);
@@ -450,23 +314,19 @@ describe("LedgerTransportService", () => {
 
     it("should auto-connect if not connected", async () => {
       const mockResponse = Buffer.from([0x90, 0x00]);
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
       mockSend.mockResolvedValue(mockResponse);
 
       expect(service.isConnected()).toBe(false);
 
       await service.send(0xe0, 0x03, 0x00, 0x00);
 
-      expect(mockedTransportWebHID.create).toHaveBeenCalled();
+      expect(mockCreate).toHaveBeenCalled();
       expect(service.isConnected()).toBe(true);
     });
 
     it("should throw DEVICE_DISCONNECTED when device was unplugged", async () => {
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
       mockSend.mockRejectedValue(new Error("Device was disconnected"));
 
       await expect(service.send(0xe0, 0x03, 0x00, 0x00)).rejects.toThrow(
@@ -476,9 +336,7 @@ describe("LedgerTransportService", () => {
     });
 
     it("should pass through other errors", async () => {
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
       mockSend.mockRejectedValue(new Error("Some APDU error"));
 
       await expect(service.send(0xe0, 0x03, 0x00, 0x00)).rejects.toThrow(
@@ -487,9 +345,7 @@ describe("LedgerTransportService", () => {
     });
 
     it("should pass through non-Error rejections", async () => {
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
       mockSend.mockRejectedValue({ statusCode: 0x6985 });
 
       await expect(service.send(0xe0, 0x03, 0x00, 0x00)).rejects.toEqual({
@@ -510,9 +366,7 @@ describe("LedgerTransportService", () => {
     it("should exchange raw APDU data", async () => {
       const mockResponse = Buffer.from([0x01, 0x02, 0x90, 0x00]);
       const apduData = Buffer.from([0xe0, 0x03, 0x00, 0x00, 0x00]);
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
       mockExchange.mockResolvedValue(mockResponse);
 
       const response = await service.exchange(apduData);
@@ -523,16 +377,14 @@ describe("LedgerTransportService", () => {
 
     it("should auto-connect if not connected", async () => {
       const mockResponse = Buffer.from([0x90, 0x00]);
-      (mockedTransportWebHID.create as any).mockResolvedValue(
-        mockTransportInstance,
-      );
+      mockCreate.mockResolvedValue(mockTransportInstance);
       mockExchange.mockResolvedValue(mockResponse);
 
       expect(service.isConnected()).toBe(false);
 
       await service.exchange(Buffer.from([0xe0, 0x03, 0x00, 0x00, 0x00]));
 
-      expect(mockedTransportWebHID.create).toHaveBeenCalled();
+      expect(mockCreate).toHaveBeenCalled();
     });
   });
 });
@@ -548,5 +400,259 @@ describe("ledgerTransport singleton", () => {
     expect(typeof ledgerTransport.send).toBe("function");
     expect(typeof ledgerTransport.isSupported).toBe("function");
     expect(typeof ledgerTransport.isConnected).toBe("function");
+  });
+});
+
+describe("SpeculosTransportService", () => {
+  const mockFetch = vi.fn<typeof fetch>();
+  const mockError = vi.fn<(message: string, error: unknown) => void>();
+  let service: SpeculosTransportService;
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockError.mockReset();
+    vi.stubGlobal("fetch", mockFetch);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(mockError);
+    service = new SpeculosTransportService();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  async function connectSpeculos(): Promise<void> {
+    mockFetch.mockResolvedValueOnce(new Response());
+    await service.connect();
+    mockFetch.mockClear();
+  }
+
+  it("clears connection state immediately and resolves disconnect", async () => {
+    await connectSpeculos();
+    const onDisconnect = vi.fn<() => void>();
+    service.onDisconnect(onDisconnect);
+    expect(service.isConnected()).toBe(true);
+
+    const disconnected = service.disconnect();
+
+    expect(service.isConnected()).toBe(false);
+    expect(disconnected).toBeInstanceOf(Promise);
+    await expect(disconnected).resolves.toBeUndefined();
+    expect(onDisconnect).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { data: undefined, hex: "e005010200" },
+    { data: new Uint8Array(), hex: "e005010200" },
+    { data: new Uint8Array([0xaa, 0xbb, 0xcc]), hex: "e005010203aabbcc" },
+  ])("preserves APDU request bytes for $hex", async ({ data, hex }) => {
+    await connectSpeculos();
+    mockFetch.mockResolvedValueOnce(Response.json({ data: "0123aB9000" }));
+
+    const response = await service.send(0xe0, 0x05, 0x01, 0x02, data);
+
+    expect(mockFetch).toHaveBeenCalledExactlyOnceWith(
+      "http://localhost:5000/apdu",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: hex }),
+      },
+    );
+    expect(response).toEqual(new Uint8Array([0x01, 0x23, 0xab, 0x90, 0x00]));
+    expect(service.isConnected()).toBe(true);
+  });
+
+  it.each([
+    { hex: "", bytes: [] },
+    { hex: "0x", bytes: [] },
+    { hex: "9000", bytes: [0x90, 0x00] },
+    { hex: "0x9000", bytes: [0x90, 0x00] },
+    { hex: "0xAbcD9000", bytes: [0xab, 0xcd, 0x90, 0x00] },
+  ])("decodes valid response hex '$hex'", async ({ hex, bytes }) => {
+    await connectSpeculos();
+    mockFetch.mockResolvedValueOnce(Response.json({ data: hex }));
+
+    await expect(service.send(0xe0, 0x03, 0, 0)).resolves.toEqual(
+      new Uint8Array(bytes),
+    );
+    expect(mockError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "null envelope", body: null },
+    { label: "array envelope", body: [] },
+    { label: "primitive envelope", body: "9000" },
+    { label: "missing data", body: {} },
+    { label: "null data", body: { data: null } },
+    { label: "numeric data", body: { data: 9000 } },
+    { label: "array data", body: { data: [0x90, 0x00] } },
+    { label: "object data", body: { data: {} } },
+    { label: "odd hex length", body: { data: "900" } },
+    { label: "odd prefixed hex length", body: { data: "0x900" } },
+    { label: "invalid hex byte", body: { data: "90gg" } },
+    { label: "partially valid hex byte", body: { data: "9g00" } },
+    { label: "whitespace", body: { data: " 9000" } },
+  ])("rejects malformed APDU responses: $label", async ({ body }) => {
+    await connectSpeculos();
+    mockFetch.mockResolvedValueOnce(Response.json(body));
+    const onDisconnect = vi.fn<() => void>();
+    service.onDisconnect(onDisconnect);
+
+    await expect(service.send(0xe0, 0x03, 0, 0)).rejects.toThrow(
+      "Invalid Speculos APDU response",
+    );
+    expect(mockError).toHaveBeenCalledExactlyOnceWith(
+      "[SpeculosTransport] Send failed:",
+      new Error("Invalid Speculos APDU response"),
+    );
+    expect(service.isConnected()).toBe(true);
+    expect(onDisconnect).not.toHaveBeenCalled();
+  });
+
+  it("preserves APDU JSON parse errors", async () => {
+    await connectSpeculos();
+    mockFetch.mockResolvedValueOnce(new Response("{"));
+
+    await expect(service.send(0xe0, 0x03, 0, 0)).rejects.toBeInstanceOf(
+      SyntaxError,
+    );
+    expect(mockError).toHaveBeenCalledExactlyOnceWith(
+      "[SpeculosTransport] Send failed:",
+      expect.any(SyntaxError),
+    );
+    expect(service.isConnected()).toBe(true);
+  });
+
+  it("preserves APDU HTTP status errors", async () => {
+    await connectSpeculos();
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 503 }));
+
+    await expect(service.send(0xe0, 0x03, 0, 0)).rejects.toThrow(
+      "Speculos API error: 503",
+    );
+    expect(service.isConnected()).toBe(true);
+  });
+
+  it("clears connection state before notifying a fetch disconnect", async () => {
+    await connectSpeculos();
+    const onDisconnect = vi.fn(() => {
+      expect(service.isConnected()).toBe(false);
+    });
+    service.onDisconnect(onDisconnect);
+    const error = new TypeError("Failed to fetch");
+    mockFetch.mockRejectedValueOnce(error);
+
+    await expect(service.send(0xe0, 0x03, 0, 0)).rejects.toThrow(
+      LEDGER_ERROR_MESSAGES.DEVICE_DISCONNECTED,
+    );
+    expect(onDisconnect).toHaveBeenCalledExactlyOnceWith();
+    expect(mockError).toHaveBeenCalledExactlyOnceWith(
+      "[SpeculosTransport] Send failed:",
+      error,
+    );
+  });
+
+  it("requires a connection before sending an APDU", async () => {
+    await expect(service.send(0xe0, 0x03, 0, 0)).rejects.toThrow(
+      LEDGER_ERROR_MESSAGES.NOT_CONNECTED,
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("preserves screen text order and duplicates while skipping absent text", async () => {
+    mockFetch.mockResolvedValueOnce(
+      Response.json({
+        events: [
+          { text: "Review", x: 10, y: 20 },
+          { text: "" },
+          {},
+          { text: null },
+          { text: "Amount" },
+          { text: "Review" },
+          { text: " " },
+        ],
+      }),
+    );
+
+    await expect(service.getScreenText()).resolves.toEqual([
+      "Review",
+      "Amount",
+      "Review",
+      " ",
+    ]);
+    expect(mockFetch).toHaveBeenCalledExactlyOnceWith(
+      "http://localhost:5000/events?stream=false",
+    );
+    expect(mockError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "missing events", body: {} },
+    { label: "null events", body: { events: null } },
+    { label: "empty events", body: { events: [] } },
+  ])("preserves empty screen text for $label", async ({ body }) => {
+    mockFetch.mockResolvedValueOnce(Response.json(body));
+
+    await expect(service.getScreenText()).resolves.toEqual([]);
+    expect(mockError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "null envelope", body: null },
+    { label: "array envelope", body: [] },
+    { label: "primitive envelope", body: "events" },
+    { label: "object events", body: { events: {} } },
+    { label: "string events", body: { events: "Review" } },
+    { label: "null event", body: { events: [{ text: "Review" }, null] } },
+    { label: "array event", body: { events: [{ text: "Review" }, []] } },
+    { label: "primitive event", body: { events: [{ text: "Review" }, 42] } },
+    {
+      label: "numeric text",
+      body: { events: [{ text: "Review" }, { text: 42 }] },
+    },
+    {
+      label: "boolean text",
+      body: { events: [{ text: "Review" }, { text: false }] },
+    },
+    {
+      label: "object text",
+      body: { events: [{ text: "Review" }, { text: {} }] },
+    },
+    {
+      label: "array text",
+      body: { events: [{ text: "Review" }, { text: ["Amount"] }] },
+    },
+  ])("fails closed for malformed screen events: $label", async ({ body }) => {
+    mockFetch.mockResolvedValueOnce(Response.json(body));
+
+    await expect(service.getScreenText()).resolves.toEqual([]);
+    expect(mockError).toHaveBeenCalledExactlyOnceWith(
+      "[SpeculosTransport] Failed to get screen text:",
+      new Error("Invalid Speculos events response"),
+    );
+  });
+
+  it("preserves the empty screen fallback for JSON parse errors", async () => {
+    mockFetch.mockResolvedValueOnce(new Response("{"));
+
+    await expect(service.getScreenText()).resolves.toEqual([]);
+    expect(mockError).toHaveBeenCalledExactlyOnceWith(
+      "[SpeculosTransport] Failed to get screen text:",
+      expect.any(SyntaxError),
+    );
+  });
+
+  it("preserves the empty screen fallback for network failures", async () => {
+    const error = new TypeError("Failed to fetch");
+    mockFetch.mockRejectedValueOnce(error);
+
+    await expect(service.getScreenText()).resolves.toEqual([]);
+    expect(mockError).toHaveBeenCalledExactlyOnceWith(
+      "[SpeculosTransport] Failed to get screen text:",
+      error,
+    );
   });
 });
