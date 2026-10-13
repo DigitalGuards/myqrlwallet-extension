@@ -98,7 +98,9 @@ const ResetWalletDialog = observer(
               id="resetWalletConfirmation"
               name="resetWalletConfirmation"
               value={confirmText}
-              onChange={(e) => setConfirmText(e.target.value)}
+              onChange={(e) => {
+                setConfirmText(e.target.value);
+              }}
               placeholder={confirmWord}
               disabled={isResetting}
               autoComplete="off"
@@ -132,7 +134,10 @@ const ResetWalletDialog = observer(
               type="button"
               variant="destructive"
               disabled={!isConfirmed || isResetting}
-              onClick={onReset}
+              onClick={() => {
+                // onReset reports failures in the dialog and clears its busy state.
+                void onReset();
+              }}
             >
               {isResetting ? (
                 <Loader className="mr-2 h-4 w-4 shrink-0 animate-spin" />

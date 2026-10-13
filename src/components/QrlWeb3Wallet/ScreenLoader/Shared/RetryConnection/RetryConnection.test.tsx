@@ -1,5 +1,4 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
-import type QrlStore from "@/stores/qrlStore";
 import {
   MANUAL_PROBE_COOLDOWN_MS,
   type ConnectionProbeResult,
@@ -21,7 +20,9 @@ const probeStore = (options?: {
   isConnected?: boolean;
   isProbing?: boolean;
 }) => {
+  const store = mockedStore();
   const qrlConnection = observable({
+    ...store.qrlStore.qrlConnection,
     isConnected: options?.isConnected ?? false,
     isLoading: false,
     isProbing: options?.isProbing ?? false,
@@ -29,29 +30,30 @@ const probeStore = (options?: {
     nextManualProbeAt: 0,
   });
   const probeConnectionNow = vi.fn(
-    async (probeOptions?: {
-      manual?: boolean;
-    }): Promise<ConnectionProbeResult> => {
+    (probeOptions?: { manual?: boolean }): Promise<ConnectionProbeResult> => {
       const now = Date.now();
       if (
         probeOptions?.manual === true &&
         now < qrlConnection.nextManualProbeAt
       )
-        return { probed: false, isConnected: qrlConnection.isConnected };
+        return Promise.resolve({
+          probed: false,
+          isConnected: qrlConnection.isConnected,
+        });
       runInAction(() => {
         qrlConnection.nextManualProbeAt = now + MANUAL_PROBE_COOLDOWN_MS;
       });
-      return { probed: true, isConnected: qrlConnection.isConnected };
+      return Promise.resolve({
+        probed: true,
+        isConnected: qrlConnection.isConnected,
+      });
     },
   );
 
-  const base = mockedStore();
-  const qrlStore = Object.create(base.qrlStore) as QrlStore;
-  Object.defineProperties(qrlStore, {
-    qrlConnection: { value: qrlConnection, configurable: true },
-    probeConnectionNow: { value: probeConnectionNow, configurable: true },
-  });
-  return { store: { ...base, qrlStore } as StoreType, probeConnectionNow };
+  // Keep the observable object shared with the probe callback.
+  store.qrlStore.qrlConnection = qrlConnection;
+  store.qrlStore.probeConnectionNow = probeConnectionNow;
+  return { store, probeConnectionNow };
 };
 
 const renderComponent = (store: StoreType) =>

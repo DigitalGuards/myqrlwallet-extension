@@ -16,9 +16,13 @@ const BackButton = ({ navigationRoute }: BackButtonProps) => {
       data-testid="backButtonTestId"
       aria-label={t("common.back")}
       className="flex w-min items-center gap-2 rounded-md pb-4 transition-all hover:-ml-1 hover:text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-      onClick={() =>
-        navigationRoute ? navigate(navigationRoute) : navigate(-1)
-      }
+      onClick={() => {
+        Promise.resolve(
+          navigationRoute ? navigate(navigationRoute) : navigate(-1),
+        ).catch((error: unknown) => {
+          console.error("Failed to navigate back:", error);
+        });
+      }}
     >
       <MoveLeft />
       <span className="text-lg font-medium leading-none text-foreground">

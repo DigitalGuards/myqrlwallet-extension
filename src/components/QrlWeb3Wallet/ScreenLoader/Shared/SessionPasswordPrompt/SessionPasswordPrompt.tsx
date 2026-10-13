@@ -82,6 +82,12 @@ const SessionPasswordPrompt = observer(
       reset,
     } = form;
 
+    const reportSubmitError = (error: unknown) => {
+      const message =
+        error instanceof Error ? error.message : t("lock.unlock.errorFailed");
+      setError("password", { message });
+    };
+
     const onSubmit = async (formData: z.infer<typeof FormSchema>) => {
       // R2: re-read the persisted counter first - see LockPasswordCheck's
       // identical guard.
@@ -108,9 +114,7 @@ const SessionPasswordPrompt = observer(
         // Surfaces the specific error unlock() throws (e.g. the
         // legacy-address migration guard, or the out-of-memory retry
         // message), each with its own distinct copy (N7).
-        const message =
-          error instanceof Error ? error.message : t("lock.unlock.errorFailed");
-        setError("password", { message });
+        reportSubmitError(error);
         return;
       }
       reset();
@@ -123,7 +127,9 @@ const SessionPasswordPrompt = observer(
           name="sessionPasswordPrompt"
           aria-label="sessionPasswordPrompt"
           className="mt-4 flex w-full flex-col gap-3"
-          onSubmit={handleSubmit(onSubmit)}
+          onSubmit={(event) => {
+            handleSubmit(onSubmit)(event).catch(reportSubmitError);
+          }}
         >
           <p className="text-sm text-muted-foreground">
             {t("account.reArmPrompt")}
@@ -152,7 +158,9 @@ const SessionPasswordPrompt = observer(
                     aria-label={t("lock.unlock.togglePasswordVisibility")}
                     disabled={isSubmitting || isWaiting}
                     className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-2.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                    onClick={() => setShowPassword((show) => !show)}
+                    onClick={() => {
+                      setShowPassword((show) => !show);
+                    }}
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4" />
