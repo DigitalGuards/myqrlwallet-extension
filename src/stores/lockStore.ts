@@ -20,6 +20,10 @@ import {
   runWorkerJob,
   splitIntoChunks,
 } from "@/scripts/workers/keystoreWorkerPool";
+import {
+  isChangePasswordWorkerResponse,
+  isUnlockWorkerResponse,
+} from "@/scripts/workers/keystoreWorkerGuards";
 import StorageUtil, {
   LockState,
   PRICE_CACHE_IDENTIFIER,
@@ -452,6 +456,8 @@ class LockStore {
               ),
             { keystores: chunk, oldPassword, newPassword },
             { success: false, wrongPassword: false },
+            (value): value is ChangePasswordWorkerResponse =>
+              isChangePasswordWorkerResponse(value, chunk),
           ),
         ),
       );
@@ -642,6 +648,8 @@ class LockStore {
               ),
             { keystores: chunk, password },
             { success: false, wrongPassword: false },
+            (value): value is UnlockWorkerResponse =>
+              isUnlockWorkerResponse(value, chunk),
           ),
         ),
       );

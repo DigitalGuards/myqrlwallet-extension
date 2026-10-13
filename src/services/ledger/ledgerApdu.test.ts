@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LEDGER_CONFIG } from "@/constants/ledger";
+import { LEDGER_CONFIG, LEDGER_ERRORS } from "@/constants/ledger";
 import {
   packDerivationPath,
   getDerivationPath,
@@ -181,38 +181,59 @@ describe("ledgerApdu", () => {
     it("should not throw for success status (0x9000)", () => {
       const response = Buffer.from([0x01, 0x02, 0x90, 0x00]);
 
-      expect(() => checkStatusWord(response)).not.toThrow();
+      expect(() => {
+        checkStatusWord(response);
+      }).not.toThrow();
     });
 
     it("should throw for user rejection (0x6985)", () => {
       const response = Buffer.from([0x69, 0x85]);
 
-      expect(() => checkStatusWord(response)).toThrow();
+      expect(() => {
+        checkStatusWord(response);
+      }).toThrow();
     });
 
     it("should throw for wrong app (0x6E00)", () => {
       const response = Buffer.from([0x6e, 0x00]);
 
-      expect(() => checkStatusWord(response)).toThrow();
+      expect(() => {
+        checkStatusWord(response);
+      }).toThrow();
     });
 
     it("should throw for response too short", () => {
       const response = Buffer.from([0x90]);
 
-      expect(() => checkStatusWord(response)).toThrow(
-        "Invalid APDU response - too short"
-      );
+      expect(() => {
+        checkStatusWord(response);
+      }).toThrow("Invalid APDU response - too short");
     });
 
     it("should throw with correct error message for known status codes", () => {
       const response = Buffer.from([0xb0, 0x05]); // TX_PARSING_FAIL
 
-      try {
+      expect(() => {
         checkStatusWord(response);
-        expect(true).toBe(false); // Should not reach here
-      } catch (error) {
-        expect((error as { statusCode: number }).statusCode).toBe(0xb005);
-      }
+      }).toThrow(
+        expect.objectContaining({
+          statusCode: 0xb005,
+          message: LEDGER_ERRORS[0xb005],
+          retryable: false,
+        }),
+      );
+    });
+
+    it("preserves unknown status codes and their fallback message", () => {
+      expect(() => {
+        checkStatusWord(Buffer.from([0x12, 0x34]));
+      }).toThrow(
+        expect.objectContaining({
+          statusCode: 0x1234,
+          message: "Unknown Ledger error: 0x1234",
+          retryable: true,
+        }),
+      );
     });
   });
 
@@ -243,6 +264,7 @@ describe("ledgerApdu", () => {
     it("should create error with all properties", () => {
       const error = createLedgerError(0x6985, "User rejected");
 
+      expect(error).toBeInstanceOf(Error);
       expect(error.statusCode).toBe(0x6985);
       expect(error.message).toBe("User rejected");
       expect(error.retryable).toBe(false); // User rejection is not retryable

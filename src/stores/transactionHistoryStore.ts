@@ -1,3 +1,4 @@
+import { historyEntryView } from "@/utilities/storageViews";
 import { LOCK_MANAGER_MESSAGES } from "@/scripts/lockManager/lockManager";
 import {
   fetchOnChainHistory,
@@ -202,7 +203,9 @@ class TransactionHistoryStore {
     }
     if (!background) this.isLoading = true;
     try {
-      const history = await StorageUtil.getTransactionHistory(accountAddress);
+      const history = (
+        await StorageUtil.getTransactionHistory(accountAddress)
+      ).map(historyEntryView);
       if (requestId !== this.localRequestId) return;
       runInAction(() => {
         this.transactions = history;

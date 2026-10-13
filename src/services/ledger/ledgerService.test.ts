@@ -1,5 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
+import {
+  LEDGER_CONFIG,
+  LEDGER_ERRORS,
+  LEDGER_ERROR_MESSAGES,
+} from "@/constants/ledger";
 import type { ILedgerTransport } from "./ledgerTransport";
 
 // Mock ledgerTransport
@@ -160,6 +164,115 @@ describe("LedgerService", () => {
       await expect(ledgerService.connect()).rejects.toThrow(
         LEDGER_ERROR_MESSAGES.CONNECTION_FAILED,
       );
+    });
+
+    it.each([
+      null,
+      undefined,
+      0x6e00,
+      {},
+      { statusCode: undefined },
+      { statusCode: null },
+      { statusCode: "28160" },
+      { statusCode: [0x6e00] },
+      Object.assign([], { statusCode: 0x6e00 }),
+    ])(
+      "uses the connection fallback for malformed errors: %j",
+      async (error) => {
+        transport.send.mockRejectedValue(error);
+
+        await expect(ledgerService.connect()).rejects.toThrow(
+          LEDGER_ERROR_MESSAGES.CONNECTION_FAILED,
+        );
+      },
+    );
+
+    it("preserves Error identity when its status code is malformed", async () => {
+      const error = Object.assign(new Error("Connection failed"), {
+        statusCode: "28160",
+      });
+      transport.send.mockRejectedValue(error);
+
+      await expect(ledgerService.connect()).rejects.toBe(error);
+    });
+  });
+
+  describe("APDU error propagation", () => {
+    beforeEach(async () => {
+      vi.doUnmock("./ledgerApdu");
+      vi.resetModules();
+      ledgerService = (await import("./ledgerService")).ledgerService;
+    });
+
+    it("preserves version response errors and their metadata", async () => {
+      transport.send.mockResolvedValue(Buffer.from([0x01, 0x02, 0x90, 0x00]));
+      const onConnect = vi.fn();
+      ledgerService.setCallbacks({ onConnect });
+
+      const connected = ledgerService.connect();
+
+      await expect(connected).rejects.toBeInstanceOf(Error);
+      await expect(connected).rejects.toMatchObject({
+        message: "Invalid version response length: expected min. 3 bytes",
+        statusCode: 0,
+        retryable: true,
+      });
+      expect(onConnect).not.toHaveBeenCalled();
+    });
+
+    it("preserves the wrong-app message from a failed APDU response", async () => {
+      transport.send.mockResolvedValue(Buffer.from([0x6e, 0x00]));
+
+      await expect(ledgerService.connect()).rejects.toThrow(
+        LEDGER_ERROR_MESSAGES.APP_NOT_OPEN,
+      );
+    });
+
+    it("preserves signing response errors and status callback order", async () => {
+      transport.send
+        .mockResolvedValueOnce(Buffer.from([0x90, 0x00]))
+        .mockResolvedValueOnce(Buffer.from([0xb0, 0x05]));
+      const onSigningStatusChange = vi.fn();
+      ledgerService.setCallbacks({ onSigningStatusChange });
+
+      const signed = ledgerService.signTransaction(
+        LEDGER_CONFIG.DEFAULT_DERIVATION_PATH,
+        "0xaabb",
+      );
+
+      await expect(signed).rejects.toBeInstanceOf(Error);
+      await expect(signed).rejects.toMatchObject({
+        message: LEDGER_ERRORS[0xb005],
+        statusCode: 0xb005,
+        retryable: false,
+      });
+      expect(onSigningStatusChange.mock.calls).toEqual([
+        ["connecting"],
+        ["awaiting_confirmation"],
+        ["error"],
+      ]);
+      expect(transport.send).toHaveBeenCalledTimes(2);
+    });
+
+    it("preserves rejection mapping and status callback order for APDU errors", async () => {
+      transport.send
+        .mockResolvedValueOnce(Buffer.from([0x90, 0x00]))
+        .mockResolvedValueOnce(Buffer.from([0x69, 0x85]));
+      const onSigningStatusChange = vi.fn();
+      ledgerService.setCallbacks({ onSigningStatusChange });
+
+      await expect(
+        ledgerService.signTransaction(
+          LEDGER_CONFIG.DEFAULT_DERIVATION_PATH,
+          "0xaabb",
+        ),
+      ).rejects.toThrow(LEDGER_ERROR_MESSAGES.USER_REJECTED);
+      expect(onSigningStatusChange.mock.calls).toEqual([
+        ["connecting"],
+        ["awaiting_confirmation"],
+        ["rejected"],
+      ]);
+      expect(transport.send).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -567,6 +680,41 @@ describe("LedgerService", () => {
       await expect(
         ledgerService.signTransaction(mockDerivationPath, mockTxHex),
       ).rejects.toThrow(LEDGER_ERROR_MESSAGES.SIGNING_FAILED);
+    });
+
+    it.each([
+      null,
+      undefined,
+      0x6985,
+      {},
+      { statusCode: undefined },
+      { statusCode: null },
+      { statusCode: "27013" },
+      { statusCode: [0x6985] },
+      Object.assign([], { statusCode: 0x6985 }),
+    ])("uses the signing fallback for malformed errors: %j", async (error) => {
+      transport.send.mockRejectedValue(error);
+      const onSigningStatusChange = vi.fn();
+      ledgerService.setCallbacks({ onSigningStatusChange });
+
+      await expect(
+        ledgerService.signTransaction(mockDerivationPath, mockTxHex),
+      ).rejects.toThrow(LEDGER_ERROR_MESSAGES.SIGNING_FAILED);
+      expect(onSigningStatusChange.mock.calls).toEqual([
+        ["connecting"],
+        ["error"],
+      ]);
+    });
+
+    it("preserves Error identity when its rejection status is malformed", async () => {
+      const error = Object.assign(new Error("Signing failed"), {
+        statusCode: "27013",
+      });
+      transport.send.mockRejectedValue(error);
+
+      await expect(
+        ledgerService.signTransaction(mockDerivationPath, mockTxHex),
+      ).rejects.toBe(error);
     });
   });
 

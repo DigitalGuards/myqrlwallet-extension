@@ -2,10 +2,13 @@ import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { WalletFileDecryptError } from "@/functions/walletFileImport";
 import { decryptBackupKeystore } from "@/functions/walletBackupImport";
+import * as WalletBackupImport from "@/functions/walletBackupImport";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
+import type { Web3BaseWalletAccount } from "@theqrl/web3";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import ImportEncryptedWallet from "./ImportEncryptedWallet";
 
 // Stub ONLY the KDF-heavy decrypt: parse/detection stays real (pure JS,
@@ -69,11 +72,24 @@ async function makeEncryptedWalletFile(password: string): Promise<string> {
 
 const PASSWORD = "Str0ng!Pass";
 
+beforeAll(() => {
+  // Radix Select uses pointer capture and scrolling APIs that jsdom lacks.
+  Element.prototype.hasPointerCapture = vi.fn(() => false);
+  Element.prototype.setPointerCapture = vi.fn();
+  Element.prototype.releasePointerCapture = vi.fn();
+  Element.prototype.scrollIntoView = vi.fn();
+});
+
 describe("ImportEncryptedWallet", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (
-    onImported = vi.fn().mockResolvedValue(undefined),
+    onImported = vi
+      .fn<(account: Web3BaseWalletAccount) => Promise<void>>()
+      .mockResolvedValue(undefined),
   ) => {
     render(
       <StoreProvider
@@ -85,15 +101,14 @@ describe("ImportEncryptedWallet", () => {
                   address: "Q2090E9F38771876FB6Fc51a6b464121d3cC093A1",
                   seed: typeof _seed === "string" ? _seed : "",
                   sign: () => ({ messageHash: "", signature: "" }),
-                  signTransaction: async () => ({
-                    messageHash: "",
-                    rawTransaction: "",
-                    signature: "",
-                    transactionHash: "",
-                  }),
-                  encrypt: async () => {
-                    throw new Error("Not implemented");
-                  },
+                  signTransaction: () =>
+                    Promise.resolve({
+                      messageHash: "",
+                      rawTransaction: "",
+                      signature: "",
+                      transactionHash: "",
+                    }),
+                  encrypt: () => Promise.reject(new Error("Not implemented")),
                 }),
               },
             },
@@ -116,7 +131,9 @@ describe("ImportEncryptedWallet", () => {
     });
     // jsdom's File.text() does not return the blob content, so shim it with the
     // known text. Real browsers implement File.text() natively.
-    Object.defineProperty(file, "text", { value: async () => fileText });
+    Object.defineProperty(file, "text", {
+      value: () => Promise.resolve(fileText),
+    });
 
     await userEvent.upload(screen.getByLabelText("walletFile"), file);
     await userEvent.type(screen.getByLabelText("walletFilePassword"), PASSWORD);
@@ -141,7 +158,9 @@ describe("ImportEncryptedWallet", () => {
     });
     // jsdom's File.text() does not return the blob content, so shim it with the
     // known text. Real browsers implement File.text() natively.
-    Object.defineProperty(file, "text", { value: async () => fileText });
+    Object.defineProperty(file, "text", {
+      value: () => Promise.resolve(fileText),
+    });
 
     await userEvent.upload(screen.getByLabelText("walletFile"), file);
     await userEvent.type(
@@ -162,7 +181,7 @@ describe("ImportEncryptedWallet", () => {
     expect(onImported).not.toHaveBeenCalled();
   });
 
-  it("shows the chosen filename instead of the native file control", async () => {
+  it("shows the chosen filename in the themed file control", async () => {
     // The native "Choose File / No file chosen" chrome cannot be themed, so
     // the real input is visually hidden and driven by our own button.
     renderComponent();
@@ -211,14 +230,54 @@ describe("ImportEncryptedWallet", () => {
   });
 
   it("keeps the hidden input out of the tab order", () => {
-    // sr-only clips instead of hiding, so without this the input is a
-    // focusable stop with no visible focus ring.
+    // sr-only clips the input, which needs an explicit tabIndex to keep
+    // keyboard focus on the visible button.
     renderComponent();
 
     expect(screen.getByLabelText("walletFile")).toHaveAttribute(
       "tabindex",
       "-1",
     );
+  });
+
+  it("reports a rejected file read and allows a new selection", async () => {
+    const error = new Error("file read failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onImported = renderComponent();
+    const file = new File(["{}"], "unreadable.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(file, "text", {
+      value: vi.fn<() => Promise<string>>().mockRejectedValue(error),
+    });
+
+    await userEvent.upload(screen.getByLabelText("walletFile"), file);
+
+    expect(
+      await screen.findByText("The wallet file could not be read"),
+    ).toBeInTheDocument();
+    expect(report).toHaveBeenCalledWith(
+      "[ImportEncryptedWallet] Wallet file could not be read:",
+      error,
+    );
+    expect(onImported).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /Choose file/i })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Import account" }),
+    ).toBeDisabled();
+
+    await userEvent.upload(
+      screen.getByLabelText("walletFile"),
+      makeUploadFile(makeBackupFileText([KEYSTORE_A])),
+    );
+    expect(
+      await screen.findByText(
+        "Extension backups are encrypted with the unlock password of the wallet that exported them.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("The wallet file could not be read"),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -263,15 +322,20 @@ function makeUploadFile(text: string, name = "qrl-wallet-backup.json"): File {
   const file = new File([text], name, { type: "application/json" });
   // jsdom's File.text() does not return the blob content, so shim it with the
   // known text. Real browsers implement File.text() natively.
-  Object.defineProperty(file, "text", { value: async () => text });
+  Object.defineProperty(file, "text", { value: () => Promise.resolve(text) });
   return file;
 }
 
 describe("ImportEncryptedWallet backup envelope", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (
-    onImported = vi.fn().mockResolvedValue(undefined),
+    onImported = vi
+      .fn<(account: Web3BaseWalletAccount) => Promise<void>>()
+      .mockResolvedValue(undefined),
   ) => {
     render(
       <StoreProvider
@@ -283,15 +347,14 @@ describe("ImportEncryptedWallet backup envelope", () => {
                   address: "Qcfec0cbee560cbd6ed89580204af71448f1fb8c5",
                   seed: typeof _seed === "string" ? _seed : "",
                   sign: () => ({ messageHash: "", signature: "" }),
-                  signTransaction: async () => ({
-                    messageHash: "",
-                    rawTransaction: "",
-                    signature: "",
-                    transactionHash: "",
-                  }),
-                  encrypt: async () => {
-                    throw new Error("Not implemented");
-                  },
+                  signTransaction: () =>
+                    Promise.resolve({
+                      messageHash: "",
+                      rawTransaction: "",
+                      signature: "",
+                      transactionHash: "",
+                    }),
+                  encrypt: () => Promise.reject(new Error("Not implemented")),
                 }),
               },
             },
@@ -360,6 +423,88 @@ describe("ImportEncryptedWallet backup envelope", () => {
       "hunter22",
     );
     expect(onImported.mock.calls[0][0]).toMatchObject({ seed: SEED_HEX });
+  });
+
+  it("decrypts only the chosen second keystore from a multi-account backup", async () => {
+    vi.mocked(decryptBackupKeystore).mockResolvedValue(SEED_HEX);
+    const onImported = renderComponent();
+    const fileText = makeBackupFileText([KEYSTORE_A, KEYSTORE_B]);
+    const file = makeUploadFile(fileText);
+    await userEvent.upload(screen.getByLabelText("walletFile"), file);
+    await userEvent.click(
+      await screen.findByRole("combobox", { name: "walletFileAccount" }),
+    );
+    await userEvent.click(
+      screen.getByRole("option", {
+        name: formatQrlAddressFingerprint(KEYSTORE_B.address),
+      }),
+    );
+    await userEvent.type(screen.getByLabelText("walletFilePassword"), PASSWORD);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Import account" }),
+    );
+
+    await waitFor(() => {
+      expect(onImported).toHaveBeenCalledTimes(1);
+    });
+    expect(vi.mocked(decryptBackupKeystore)).toHaveBeenCalledExactlyOnceWith(
+      KEYSTORE_B,
+      PASSWORD,
+    );
+    expect(await file.text()).toBe(fileText);
+  });
+
+  it("keeps the missing-keystore guard when a parsed backup has no entries", async () => {
+    vi.spyOn(WalletBackupImport, "parseWalletImportFile").mockReturnValueOnce({
+      kind: "backup",
+      keystores: [],
+    });
+    const onImported = renderComponent();
+    await userEvent.upload(
+      screen.getByLabelText("walletFile"),
+      makeUploadFile(makeBackupFileText([])),
+    );
+    await userEvent.type(screen.getByLabelText("walletFilePassword"), PASSWORD);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Import account" }),
+    );
+
+    expect(
+      await screen.findByText("No accounts were found in the wallet file"),
+    ).toBeInTheDocument();
+    expect(vi.mocked(decryptBackupKeystore)).not.toHaveBeenCalled();
+    expect(onImported).not.toHaveBeenCalled();
+  });
+
+  it("reports a rejected import through the existing password-field error", async () => {
+    const error = new Error("persistence failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(decryptBackupKeystore).mockResolvedValue(SEED_HEX);
+    const onImported = vi
+      .fn<(account: Web3BaseWalletAccount) => Promise<void>>()
+      .mockRejectedValue(error);
+    renderComponent(onImported);
+    await userEvent.upload(
+      screen.getByLabelText("walletFile"),
+      makeUploadFile(makeBackupFileText([KEYSTORE_A])),
+    );
+    await userEvent.type(screen.getByLabelText("walletFilePassword"), PASSWORD);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Import account" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "The account could not be imported from this wallet file",
+      ),
+    ).toBeInTheDocument();
+    expect(report).toHaveBeenCalledWith(
+      "[ImportEncryptedWallet] Wallet file import failed:",
+      error,
+    );
+    expect(onImported).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Choose file/i })).toBeEnabled();
+    expect(screen.getByLabelText("walletFilePassword")).toHaveValue(PASSWORD);
   });
 
   it("shows the backup-specific message when decryption fails", async () => {

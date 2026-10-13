@@ -1,4 +1,5 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
+import { LEDGER } from "@/utilities/__mocks__/storageFixtures";
 import {
   Json,
   JsonRpcRequest,
@@ -95,7 +96,10 @@ const setupStorage = ({
     },
     [profileStorageKey("ACCOUNTS")]: { ALL_ACCOUNTS: walletAccounts },
     [profileStorageKey("LEDGER")]: {
-      LEDGER_ACCOUNTS: ledgerAccounts.map((address) => ({ address })),
+      LEDGER_ACCOUNTS: ledgerAccounts.map((address) => ({
+        ...LEDGER,
+        address,
+      })),
     },
     [profileStorageKey("SETTINGS")]: settings,
   };
@@ -504,9 +508,22 @@ describe("restricted request boundaries", () => {
     expect(mockedBrowser.storage.local.set.mock.calls).toHaveLength(0);
   });
 
-  it.each([[{ chainId: 42 }], [null], "chains"])(
+  it.each([
+    { connectedBlockchains: { chainId: 42 } },
+    { connectedBlockchains: null },
+    { connectedBlockchains: "chains" },
+    { connectedBlockchains: [{ chainId: 42 }] },
+    {
+      connectedBlockchains: [{ chainId: DEFAULT_BLOCKCHAIN.chainId }, null],
+    },
+    {
+      connectedBlockchains: [
+        { chainId: DEFAULT_BLOCKCHAIN.chainId, qrnsRegistryAddress: 42 },
+      ],
+    },
+  ])(
     "keeps malformed stored grants out of silent pruning (%j)",
-    async (connectedBlockchains) => {
+    async ({ connectedBlockchains }) => {
       const records = setupStorage({
         connectedAccounts: [ACCOUNT_A, ACCOUNT_B],
         walletAccounts: [ACCOUNT_A],

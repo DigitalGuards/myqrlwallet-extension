@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
+import { malformed } from "@/test-utils/malformed";
 import Transport from "@ledgerhq/hw-transport";
 import type TransportWebHID from "@ledgerhq/hw-transport-webhid";
 import { LedgerTransportService } from "./ledgerTransport";
@@ -163,6 +164,22 @@ describe("LedgerTransportService", () => {
         LEDGER_ERROR_MESSAGES.CONNECTION_FAILED,
       );
     });
+
+    it.each([undefined, null, 42, false, {}, ["No device selected"]])(
+      "uses the connection fallback for malformed Error messages: %j",
+      async (message) => {
+        const error = Object.assign(
+          new Error(),
+          malformed<Pick<Error, "message">>({ message }),
+        );
+        mockCreate.mockRejectedValue(error);
+
+        await expect(service.connect()).rejects.toThrow(
+          LEDGER_ERROR_MESSAGES.CONNECTION_FAILED,
+        );
+        expect(service.isConnected()).toBe(false);
+      },
+    );
 
     it("should register disconnect handler", async () => {
       mockCreate.mockResolvedValue(mockTransportInstance);
@@ -352,6 +369,21 @@ describe("LedgerTransportService", () => {
         statusCode: 0x6985,
       });
     });
+
+    it.each([undefined, null, 42, false, {}, ["disconnected"]])(
+      "preserves send errors with malformed messages: %j",
+      async (message) => {
+        const error = Object.assign(
+          new Error(),
+          malformed<Pick<Error, "message">>({ message }),
+        );
+        mockCreate.mockResolvedValue(mockTransportInstance);
+        mockSend.mockRejectedValue(error);
+
+        await expect(service.send(0xe0, 0x03, 0x00, 0x00)).rejects.toBe(error);
+        expect(service.isConnected()).toBe(true);
+      },
+    );
   });
 
   describe("exchange", () => {

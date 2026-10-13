@@ -28,18 +28,17 @@ describe("AccountImportSuccess", () => {
         address: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
         seed: "",
         sign: (data: string | Record<string, unknown>) => ({
-          messageHash: data.toString(),
-          signature: data.toString(),
+          messageHash: typeof data === "string" ? data : JSON.stringify(data),
+          signature: typeof data === "string" ? data : JSON.stringify(data),
         }),
-        signTransaction: async (tx: Transaction) => ({
-          messageHash: "",
-          signature: "",
-          rawTransaction: tx.value?.toString() ?? "",
-          transactionHash: "",
-        }),
-        encrypt: async () => {
-          throw new Error("Not implemented");
-        },
+        signTransaction: (tx: Transaction) =>
+          Promise.resolve({
+            messageHash: "",
+            signature: "",
+            rawTransaction: tx.value?.toString() ?? "",
+            transactionHash: "",
+          }),
+        encrypt: () => Promise.reject(new Error("Not implemented")),
       },
     },
   ) =>
@@ -80,7 +79,9 @@ describe("AccountImportSuccess", () => {
   it("should copy the account address on clicking the copy button", async () => {
     renderComponent();
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    const clipboardMock = vi.fn().mockResolvedValue(void 0 as never);
+    const clipboardMock = vi
+      .fn<(text: string) => Promise<void>>()
+      .mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       value: {
         writeText: clipboardMock,

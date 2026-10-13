@@ -16,10 +16,11 @@ vi.mock("@/utilities/storageUtil", async () => {
   >("@/utilities/storageUtil");
   return {
     ...originalModule,
-    default: class extends originalModule.default {
-      static override getAllBlockChains = vi.fn(() => Promise.resolve([]));
-      static override setAllBlockChains = vi.fn(async () => {});
-      static override getActiveBlockChain = vi.fn(() =>
+    default: {
+      ...originalModule.default,
+      getAllBlockChains: vi.fn(() => Promise.resolve([])),
+      setAllBlockChains: vi.fn(async () => {}),
+      getActiveBlockChain: vi.fn(() =>
         Promise.resolve({
           chainId: "0x5",
           chainName: "Test chain name",
@@ -38,12 +39,16 @@ vi.mock("@/utilities/storageUtil", async () => {
           defaultWsRpcUrl: "http://testDefaultRpcUrl",
           isCustomChain: true,
         }),
-      );
-      static override setActiveBlockChain = vi.fn(async () => {});
-      static override getDAppsConnectedAccountsData = vi.fn(() =>
-        Promise.resolve(undefined),
-      );
-      static override setDAppsConnectedAccountsData = vi.fn(async () => {});
+      ),
+      setActiveBlockChain: vi.fn(async () => {}),
+      getDAppsConnectedAccountsData: vi.fn(() => Promise.resolve(undefined)),
+      setDAppsConnectedAccountsData: vi.fn(async () => {}),
+      addDAppChain: vi
+        .fn<typeof StorageUtil.addDAppChain>()
+        .mockResolvedValue(undefined),
+      removeDAppChain: vi
+        .fn<typeof StorageUtil.removeDAppChain>()
+        .mockResolvedValue(undefined),
     },
   };
 });

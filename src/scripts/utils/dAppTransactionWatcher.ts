@@ -1,3 +1,4 @@
+import { historyEntryView } from "@/utilities/storageViews";
 import StorageUtil from "@/utilities/storageUtil";
 import { walletSessionStorage } from "@/utilities/profileStorage";
 import { transactionFailureUpdate } from "@/functions/transactionOutcome";
@@ -198,7 +199,7 @@ export async function handleDAppTransactionWatchAlarm(): Promise<void> {
         if (!alreadyTerminal) {
           await notifyWatchOutcome(
             watch,
-            entry,
+            entry ? historyEntryView(entry) : undefined,
             update.pendingStatus === "confirmed" ? "confirmed" : "failed",
           );
         }

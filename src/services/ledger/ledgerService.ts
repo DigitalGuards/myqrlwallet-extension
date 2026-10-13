@@ -49,6 +49,7 @@ import {
   bufferToHex,
 } from "./ledgerApdu";
 import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
+import { isRecord } from "@/utilities/storageGuards";
 import type {
   LedgerAccount,
   LedgerDeviceInfo,
@@ -56,6 +57,10 @@ import type {
   LedgerServiceConfig,
   LedgerEventCallbacks,
 } from "./ledgerTypes";
+
+function hasStatusCode(error: unknown): error is { statusCode: number } {
+  return isRecord(error) && typeof error.statusCode === "number";
+}
 
 /**
  * Main Ledger Service.
@@ -183,8 +188,8 @@ class LedgerService {
       return info;
     } catch (error: unknown) {
       // Check error type
-      if (error && typeof error === "object" && "statusCode" in error) {
-        const statusCode = (error as { statusCode: number }).statusCode;
+      if (hasStatusCode(error)) {
+        const statusCode = error.statusCode;
         if (isWrongApp(statusCode)) {
           throw new Error(LEDGER_ERROR_MESSAGES.APP_NOT_OPEN);
         }
@@ -570,8 +575,8 @@ class LedgerService {
       };
     } catch (error: unknown) {
       // Check if user rejected
-      if (error && typeof error === "object" && "statusCode" in error) {
-        const statusCode = (error as { statusCode: number }).statusCode;
+      if (hasStatusCode(error)) {
+        const statusCode = error.statusCode;
         if (isUserRejection(statusCode)) {
           if (this.callbacks.onSigningStatusChange) {
             this.callbacks.onSigningStatusChange("rejected");

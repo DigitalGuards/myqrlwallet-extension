@@ -1,5 +1,6 @@
 import PhishingDetector from "eth-phishing-detect/src/detector";
 import browser from "webextension-polyfill";
+import { isRecord } from "@/utilities/storageGuards";
 // Snapshot of MetaMask's eth-phishing-detect config taken at build time.
 // Acts as a cold-start fallback when the network fetch and the persistent
 // cache are both unavailable, so the wallet always has a baseline blocklist
@@ -53,7 +54,8 @@ async function fetchRemoteConfig(): Promise<PhishingConfig | null> {
   try {
     const response = await fetch(PHISHING_CONFIG_URL);
     if (!response.ok) return null;
-    return await response.json();
+    const config: unknown = await response.json();
+    return isValidPhishingConfig(config) ? config : null;
   } catch (error) {
     console.warn("QrlWeb3Wallet: Failed to fetch phishing blocklist", error);
     return null;
@@ -65,31 +67,34 @@ async function fetchRemoteConfig(): Promise<PhishingConfig | null> {
 // ever reaches createDetector, whose own failure mode (H1) used to leave
 // initializePhishingDetector() throwing and skipped the bundled fallback.
 function isValidPhishingConfig(value: unknown): value is PhishingConfig {
-  if (typeof value !== "object" || value === null) return false;
-  const config = value as Record<string, unknown>;
+  if (!isRecord(value)) return false;
   const isStringArrayOrUndefined = (field: unknown) =>
     field === undefined ||
-    (Array.isArray(field) && field.every((item) => typeof item === "string"));
+    (Array.isArray(field) &&
+      Array.from<unknown>(field).every((item) => typeof item === "string"));
   return (
-    isStringArrayOrUndefined(config.whitelist) &&
-    isStringArrayOrUndefined(config.blacklist) &&
-    isStringArrayOrUndefined(config.fuzzylist) &&
-    (config.tolerance === undefined || typeof config.tolerance === "number")
+    isStringArrayOrUndefined(value.whitelist) &&
+    isStringArrayOrUndefined(value.blacklist) &&
+    isStringArrayOrUndefined(value.fuzzylist) &&
+    (value.tolerance === undefined ||
+      (typeof value.tolerance === "number" && Number.isFinite(value.tolerance)))
   );
 }
 
 async function getCachedConfig(): Promise<CachedConfig | null> {
   try {
-    const data = await browser.storage.local.get(PHISHING_CACHE_KEY);
-    const cached = data?.[PHISHING_CACHE_KEY] as CachedConfig | undefined;
+    const data: unknown = await browser.storage.local.get(PHISHING_CACHE_KEY);
+    if (!isRecord(data)) return null;
+    const cached = data[PHISHING_CACHE_KEY];
     if (
-      !cached ||
+      !isRecord(cached) ||
       typeof cached.timestamp !== "number" ||
+      !Number.isFinite(cached.timestamp) ||
       !isValidPhishingConfig(cached.config)
     ) {
       return null;
     }
-    return cached;
+    return { config: cached.config, timestamp: cached.timestamp };
   } catch (error) {
     console.warn(
       "QrlWeb3Wallet: Failed to read the cached phishing blocklist",
@@ -140,9 +145,10 @@ function createDetector(config: PhishingConfig) {
 // serviceWorker.ts unresolved and every dApp connection waiting on it
 // hanging forever.
 function createDetectorSafely(
-  config: PhishingConfig,
+  config: unknown,
 ): InstanceType<typeof PhishingDetector> | null {
   try {
+    if (!isValidPhishingConfig(config)) return null;
     return createDetector(config);
   } catch (error) {
     console.warn(
@@ -195,7 +201,7 @@ export async function initializePhishingDetector(): Promise<void> {
 
   if (isCacheStale) {
     const remoteConfig = await fetchRemoteConfig();
-    if (remoteConfig && isValidPhishingConfig(remoteConfig)) {
+    if (remoteConfig) {
       const detector = createDetectorSafely(remoteConfig);
       if (detector) {
         await setCachedConfig(remoteConfig);
@@ -221,9 +227,7 @@ export async function initializePhishingDetector(): Promise<void> {
   // failed to build a detector. Fall back to the bundled snapshot so a
   // baseline blocklist is available whenever possible, then schedule a
   // retry to refresh against the live upstream.
-  const fallbackDetector = createDetectorSafely(
-    bundledPhishingConfig as PhishingConfig,
-  );
+  const fallbackDetector = createDetectorSafely(bundledPhishingConfig);
   if (fallbackDetector) {
     detectorInstance = fallbackDetector;
     detectorStatus = "ready";
@@ -312,7 +316,14 @@ export function checkDomain(url: string): PhishingCheckResult {
 }
 
 export async function setupPhishingRefreshAlarm(): Promise<void> {
-  await browser.alarms.create(PHISHING_ALARM_NAME, {
+  // Browser implementations can return a promise despite the older void typing.
+  const alarms: {
+    create: (
+      name: string,
+      alarmInfo: browser.Alarms.CreateAlarmInfoType,
+    ) => void | Promise<void>;
+  } = browser.alarms;
+  await alarms.create(PHISHING_ALARM_NAME, {
     periodInMinutes: 24 * 60,
   });
 }

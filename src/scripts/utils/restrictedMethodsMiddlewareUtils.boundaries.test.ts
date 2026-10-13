@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toChecksumAddress } from "@theqrl/wallet.js";
+import browser from "webextension-polyfill";
+import { profileStorageKey } from "@/utilities/profileStorage";
+import { getStoredValue, isRecord } from "@/utilities/storageGuards";
 import {
   buildDAppSendTransactionErrorData,
   checkAccountAndChainHaveBeenAuthorized,
@@ -27,8 +30,10 @@ const { readGrants, readChains, readActiveChain, writeGrants, assertNetwork } =
     assertNetwork: vi.fn<(url: string) => Promise<void>>(),
   }));
 
-vi.mock("@/utilities/storageUtil", () => ({
+vi.mock("@/utilities/storageUtil", async (importOriginal) => ({
   default: {
+    ...(await importOriginal<typeof import("@/utilities/storageUtil")>())
+      .default,
     getDAppsConnectedAccountsData: readGrants,
     getAllBlockChains: readChains,
     getActiveBlockChain: readActiveChain,
@@ -71,6 +76,56 @@ beforeEach(() => {
 });
 
 describe("authorization input boundaries", () => {
+  it.each([
+    { accounts: "unreadable", blockchains: [{ chainId: "0x1" }, CHAIN] },
+    { accounts: [ACCOUNT], blockchains: [{ chainId: "0x1" }, null, CHAIN] },
+    {
+      accounts: [ACCOUNT],
+      blockchains: [{ chainId: "0x1" }, { chainId: 17 }, CHAIN],
+    },
+    { accounts: [ACCOUNT], blockchains: { chainId: CHAIN.chainId } },
+  ])(
+    "refuses authorization when the grant view is unreadable (%j)",
+    async (grants) => {
+      readGrants.mockResolvedValue(grants);
+      const before = structuredClone(grants);
+      await expect(
+        checkAccountAndChainHaveBeenAuthorized(
+          request("qrl_signMessage", [ACCOUNT, "0x1234"]),
+        ),
+      ).rejects.toThrow("stored dApp connection");
+      expect(writeGrants).not.toHaveBeenCalled();
+      expect(grants).toEqual(before);
+    },
+  );
+
+  it.each([null, 17, {}, []])(
+    "keeps chain identity readable with unfamiliar optional metadata (%j)",
+    async (metadata) => {
+      const chain = {
+        ...CHAIN,
+        chainName: metadata,
+        qrnsRegistryAddress: metadata,
+      };
+      readGrants.mockResolvedValue({
+        accounts: [ACCOUNT],
+        blockchains: [chain],
+      });
+      readChains.mockResolvedValue([chain]);
+      expect(
+        await checkAccountAndChainHaveBeenAuthorized(
+          request("qrl_signMessage", [ACCOUNT, "0x1234"]),
+        ),
+      ).toMatchObject({ canProceed: true, authorizedChainId: CHAIN.chainId });
+      expect(
+        await checkWalletSwitchQrlChainParams({ chainId: CHAIN.chainId }),
+      ).toEqual({
+        canProceed: true,
+        proceedError: undefined,
+      });
+    },
+  );
+
   it.each<[string, unknown]>([
     ["qrl_sendTransaction", [{ from: ACCOUNT }]],
     ["qrl_sendTransaction", { 0: { from: ACCOUNT } }],
@@ -231,9 +286,44 @@ describe("authorization input boundaries", () => {
 describe("stored grants survive chain changes", () => {
   const first = { chainId: "0x1", futureField: { retained: ["first"] } };
   const second = { chainId: "0x2", futureField: { retained: ["second"] } };
+  const dappsKey = profileStorageKey("DAPPS");
+  const readLocal = vi.spyOn(browser.storage.local, "get");
+  const writeLocal = vi.spyOn(browser.storage.local, "set");
+  let local: Record<string, unknown>;
+  const seedGrants = (grants: unknown) => {
+    local = {
+      [dappsKey]: { ALL_DAPPS: { [ORIGIN]: structuredClone(grants) } },
+    };
+  };
+  const storedGrants = () =>
+    getStoredValue(local, dappsKey, "ALL_DAPPS", ORIGIN);
+
+  beforeEach(() => {
+    local = {};
+    readLocal
+      .mockReset()
+      .mockImplementation((key: unknown) =>
+        Promise.resolve(
+          typeof key === "string"
+            ? { [key]: structuredClone(local[key]) }
+            : structuredClone(local),
+        ),
+      );
+    writeLocal.mockReset().mockImplementation((values: unknown) => {
+      if (!isRecord(values))
+        return Promise.reject(new Error("Invalid local storage write"));
+      Object.assign(local, structuredClone(values));
+      return Promise.resolve();
+    });
+  });
+
+  afterEach(() => {
+    expect(writeGrants).not.toHaveBeenCalled();
+    expect(readGrants).not.toHaveBeenCalled();
+  });
 
   it("appends one chain and preserves existing records and order", async () => {
-    readGrants.mockResolvedValue({
+    seedGrants({
       accounts: [ACCOUNT],
       blockchains: [first, second],
     });
@@ -241,7 +331,7 @@ describe("stored grants survive chain changes", () => {
       urlOrigin: `${ORIGIN}/path`,
       chainId: CHAIN.chainId,
     });
-    expect(writeGrants).toHaveBeenCalledExactlyOnceWith({
+    expect(storedGrants()).toEqual({
       urlOrigin: ORIGIN,
       accounts: [ACCOUNT],
       blockchains: [first, second, CHAIN],
@@ -267,7 +357,7 @@ describe("stored grants survive chain changes", () => {
 
   it("preserves the stored record when the chain is already granted", async () => {
     const existing = { ...CHAIN, futureField: "retained" };
-    readGrants.mockResolvedValue({
+    seedGrants({
       accounts: [ACCOUNT],
       blockchains: [first, existing, second],
     });
@@ -275,13 +365,13 @@ describe("stored grants survive chain changes", () => {
       urlOrigin: ORIGIN,
       chainId: CHAIN.chainId.toUpperCase(),
     });
-    expect(writeGrants).toHaveBeenCalledWith(
+    expect(storedGrants()).toEqual(
       expect.objectContaining({ blockchains: [first, existing, second] }),
     );
   });
 
   it("removes only the selected chain and preserves the remaining order", async () => {
-    readGrants.mockResolvedValue({
+    seedGrants({
       accounts: [ACCOUNT],
       blockchains: [first, CHAIN, second],
     });
@@ -289,7 +379,7 @@ describe("stored grants survive chain changes", () => {
       urlOrigin: ORIGIN,
       chainId: CHAIN.chainId.toUpperCase(),
     });
-    expect(writeGrants).toHaveBeenCalledWith(
+    expect(storedGrants()).toEqual(
       expect.objectContaining({
         accounts: [ACCOUNT],
         blockchains: [first, second],
@@ -300,52 +390,93 @@ describe("stored grants survive chain changes", () => {
   it.each([undefined, null])(
     "preserves grants when the requested chain ID is missing (%s)",
     async (chainId) => {
-      readGrants.mockResolvedValue({
+      const grants = {
         accounts: [ACCOUNT],
         blockchains: [first, second],
-      });
+      };
+      seedGrants(grants);
       await includeChainForUrlOrigin({ urlOrigin: ORIGIN, chainId });
-      expect(writeGrants).toHaveBeenCalledWith(
-        expect.objectContaining({
-          accounts: [ACCOUNT],
-          blockchains: [first, second],
-        }),
-      );
+      expect(storedGrants()).toEqual(grants);
+      expect(writeLocal).not.toHaveBeenCalled();
     },
   );
 
-  it.each([undefined, null, {}, { accounts: null, blockchains: null }])(
+  it.each([undefined, null, {}])(
     "keeps empty defaults for missing legacy grants (%s)",
     async (grants) => {
-      readGrants.mockResolvedValue(grants);
+      seedGrants(grants);
       await includeChainForUrlOrigin({
         urlOrigin: ORIGIN,
         chainId: CHAIN.chainId,
       });
-      expect(writeGrants).toHaveBeenCalledWith(
+      expect(storedGrants()).toEqual(
         expect.objectContaining({ accounts: [], blockchains: [CHAIN] }),
       );
     },
   );
 
-  it.each([
-    { accounts: "unreadable", blockchains: [first, CHAIN] },
-    { accounts: [ACCOUNT], blockchains: [first, null, CHAIN] },
-    { accounts: [ACCOUNT], blockchains: [first, { chainId: 17 }, CHAIN] },
-    { accounts: [ACCOUNT], blockchains: { chainId: CHAIN.chainId } },
-  ])(
-    "refuses a write when existing grants are unreadable (%j)",
-    async (grants) => {
-      readGrants.mockResolvedValue(grants);
-      const before = structuredClone(grants);
-      await expect(
-        includeChainForUrlOrigin({ urlOrigin: ORIGIN, chainId: CHAIN.chainId }),
-      ).rejects.toThrow("stored dApp connection");
-      await expect(
-        excludeChainForUrlOrigin({ urlOrigin: ORIGIN, chainId: CHAIN.chainId }),
-      ).rejects.toThrow("stored dApp connection");
-      expect(writeGrants).not.toHaveBeenCalled();
-      expect(grants).toEqual(before);
+  it("preserves explicitly stored null accounts when adding a chain", async () => {
+    seedGrants({ accounts: null, blockchains: null });
+    await includeChainForUrlOrigin({
+      urlOrigin: ORIGIN,
+      chainId: CHAIN.chainId,
+    });
+    expect(storedGrants()).toEqual(
+      expect.objectContaining({ accounts: null, blockchains: [CHAIN] }),
+    );
+  });
+
+  it.each([null, "unreadable", [ACCOUNT, null]])(
+    "keeps opaque metadata and revokes only the selected chain (%j)",
+    async (accounts) => {
+      const permission = {
+        futureField: { retained: true },
+        caveats: [
+          {
+            type: "restrictNetworkSwitching",
+            value: [first.chainId, null, CHAIN.chainId],
+          },
+        ],
+      };
+      const grants = {
+        urlOrigin: ORIGIN,
+        accounts,
+        blockchains: [first, null, { chainId: 17 }],
+        futureField: { retained: true },
+      };
+      seedGrants({ ...grants, permissions: [null, permission] });
+      await includeChainForUrlOrigin({
+        urlOrigin: ORIGIN,
+        chainId: CHAIN.chainId,
+      });
+      expect(storedGrants()).toEqual(
+        expect.objectContaining({
+          ...grants,
+          blockchains: [...grants.blockchains, CHAIN],
+        }),
+      );
+      expect(getStoredValue(storedGrants(), "permissions")).toEqual(
+        expect.arrayContaining([null, permission]),
+      );
+      await excludeChainForUrlOrigin({
+        urlOrigin: ORIGIN,
+        chainId: CHAIN.chainId,
+      });
+      expect(storedGrants()).toEqual(expect.objectContaining(grants));
+      expect(getStoredValue(storedGrants(), "permissions")).toEqual(
+        expect.arrayContaining([
+          null,
+          {
+            ...permission,
+            caveats: [
+              {
+                type: "restrictNetworkSwitching",
+                value: [first.chainId, null],
+              },
+            ],
+          },
+        ]),
+      );
     },
   );
 
@@ -356,7 +487,7 @@ describe("stored grants survive chain changes", () => {
     await expect(
       includeChainForUrlOrigin({ urlOrigin: ORIGIN, chainId: CHAIN.chainId }),
     ).rejects.toThrow("stored networks");
-    expect(writeGrants).not.toHaveBeenCalled();
+    expect(writeLocal).not.toHaveBeenCalled();
   });
 
   it("refuses a write when the network list contains an unreadable record", async () => {
@@ -364,7 +495,7 @@ describe("stored grants survive chain changes", () => {
     await expect(
       includeChainForUrlOrigin({ urlOrigin: ORIGIN, chainId: CHAIN.chainId }),
     ).rejects.toThrow("stored networks");
-    expect(writeGrants).not.toHaveBeenCalled();
+    expect(writeLocal).not.toHaveBeenCalled();
   });
 });
 

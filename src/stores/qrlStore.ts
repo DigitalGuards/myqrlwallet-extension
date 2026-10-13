@@ -1,3 +1,4 @@
+import { blockchainView } from "@/utilities/storageViews";
 import {
   BlockchainDataType,
   DEFAULT_BLOCKCHAIN,
@@ -534,7 +535,7 @@ class QrlStore {
     this.initProgress = progress;
   }
 
-  async addChain<T extends AddedBlockchainData>(chainData: T) {
+  async addChain(chainData: BlockchainDataType | AddedBlockchainData) {
     if (!isAddQrlChainParameters(chainData)) {
       throw new Error("Invalid blockchain data");
     }
@@ -560,7 +561,7 @@ class QrlStore {
       chainName: chainData.chainName.trim().substring(0, 100),
     };
     const blockchains = await StorageUtil.getAllBlockChains();
-    const updatedChainList: BlockchainDataType[] = blockchains.map((chain) =>
+    const updatedChainList = blockchains.map((chain) =>
       chain.chainId.toLowerCase() === editedChain.chainId.toLowerCase()
         ? { ...chain, ...editedChain }
         : chain,
@@ -569,7 +570,7 @@ class QrlStore {
   }
 
   async refreshBlockchainData() {
-    const blockchain = await StorageUtil.getActiveBlockChain();
+    const blockchain = blockchainView(await StorageUtil.getActiveBlockChain());
     this.qrlConnection = { ...this.qrlConnection, blockchain };
   }
 

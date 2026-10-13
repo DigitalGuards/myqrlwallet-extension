@@ -64,8 +64,7 @@ const ImportAccount = observer(() => {
   // button belongs on it.
   const [duplicateNotice, setDuplicateNotice] = useState("");
   const { lockStore, qrlStore, accountLabelsStore } = useStore();
-  const { encryptAccount, ensureWalletPassword } = lockStore;
-  const { setActiveAccount, qrlAccounts } = qrlStore;
+  const { qrlAccounts } = qrlStore;
 
   // Shared finalize step for every import path (mnemonic, hex seed, wallet
   // file). Each path only has to produce the account; secret persistence stays
@@ -101,7 +100,7 @@ const ImportAccount = observer(() => {
     // function runs again with the same account, so the import completes
     // in place.
     try {
-      await ensureWalletPassword();
+      await lockStore.ensureWalletPassword();
     } catch {
       setNeedsReArm(true);
       setNeedsRetry(false);
@@ -112,7 +111,7 @@ const ImportAccount = observer(() => {
     try {
       // No password on the wire: the service worker encrypts with the one
       // its unlock session already holds.
-      await encryptAccount(importedAccount);
+      await lockStore.encryptAccount(importedAccount);
     } catch (error) {
       // ensureWalletPassword() already confirmed a usable password moments
       // ago (N11): a failure here has some other cause, so this shows the
@@ -139,7 +138,7 @@ const ImportAccount = observer(() => {
     // account, so the service worker never sees the keystores-without-
     // accounts state that onboarding has to order around.
     try {
-      await setActiveAccount(importedAccount.address);
+      await qrlStore.setActiveAccount(importedAccount.address);
     } catch (error) {
       setNeedsReArm(false);
       setNeedsRetry(true);
@@ -192,7 +191,17 @@ const ImportAccount = observer(() => {
                       variant="outline"
                       size="sm"
                       className="mt-3 w-full"
-                      onClick={retryPendingImport}
+                      onClick={() => {
+                        retryPendingImport().catch((error: unknown) => {
+                          setFinalizeError(
+                            describeExtensionError(
+                              error,
+                              t,
+                              t("onboarding.account.persistError"),
+                            ),
+                          );
+                        });
+                      }}
                     >
                       {t("account.retryButton")}
                     </Button>

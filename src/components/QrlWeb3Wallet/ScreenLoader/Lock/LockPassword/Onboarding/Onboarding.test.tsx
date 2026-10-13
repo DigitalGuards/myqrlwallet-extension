@@ -115,6 +115,8 @@ describe("Onboarding", () => {
   it("rolls the account pointer back when the keystore write fails", async () => {
     const setActiveAccount = vi.fn(async () => {});
     const clearAccountState = vi.fn();
+    const setAllAccounts = vi.spyOn(StorageUtil, "setAllAccounts");
+    const clearActiveAccount = vi.spyOn(StorageUtil, "clearActiveAccount");
     renderComponent(
       mockedStore({
         lockStore: {
@@ -132,9 +134,7 @@ describe("Onboarding", () => {
       expect(clearAccountState).toHaveBeenCalled();
     });
     expect(setActiveAccount).toHaveBeenCalledWith("QNew");
-    expect(vi.mocked(StorageUtil).setAllAccounts).toHaveBeenCalledWith([
-      "QExisting",
-    ]);
-    expect(vi.mocked(StorageUtil).clearActiveAccount).toHaveBeenCalled();
+    expect(setAllAccounts).toHaveBeenCalledWith(["QExisting"]);
+    expect(clearActiveAccount).toHaveBeenCalled();
   });
 });
