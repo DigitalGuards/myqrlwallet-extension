@@ -11,7 +11,7 @@ import {
   encodeFunctionSignature,
   encodeParameters,
 } from "@theqrl/web3-qrl-abi";
-import { BlockTags, type TransactionCall } from "@theqrl/web3-types";
+import { BlockTags } from "@theqrl/web3-types";
 import { useStore } from "@/stores/store";
 import type { TokenContractType } from "@/scripts/middlewares/middlewareTypes";
 import type { NFTCollectionType } from "@/types/nft";
@@ -119,7 +119,7 @@ const CalldataSummary = observer(
     // account is only a fallback for a request that omitted `from`.
     useEffect(() => {
       let isCurrent = true;
-      const owner = fromAddress || qrlStore.activeAccount?.accountAddress || "";
+      const owner = fromAddress || qrlStore.activeAccount.accountAddress || "";
       const resolveAsset = async () => {
         if (!owner || !contractAddress) return;
         try {
@@ -150,7 +150,7 @@ const CalldataSummary = observer(
       return () => {
         isCurrent = false;
       };
-    }, [contractAddress, fromAddress, qrlStore.activeAccount?.accountAddress]);
+    }, [contractAddress, fromAddress, qrlStore.activeAccount.accountAddress]);
 
     // Asks the contract itself what it is and how much of it exists, for
     // the two questions the wallet's own lists cannot always answer: is
@@ -178,7 +178,7 @@ const CalldataSummary = observer(
                 {
                   to: contractAddress,
                   data: callData,
-                } as unknown as TransactionCall,
+                },
                 BlockTags.LATEST,
               ),
               CONTRACT_PROBE_TIMEOUT_MS,
@@ -250,7 +250,9 @@ const CalldataSummary = observer(
           variant="outline"
           size="sm"
           className="self-start"
-          onClick={() => setIsRawVisible((visible) => !visible)}
+          onClick={() => {
+            setIsRawVisible((visible) => !visible);
+          }}
           aria-expanded={isRawVisible}
         >
           {isRawVisible

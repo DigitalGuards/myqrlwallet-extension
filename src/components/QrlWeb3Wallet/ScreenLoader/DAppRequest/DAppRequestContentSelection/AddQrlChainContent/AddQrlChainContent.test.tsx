@@ -1,11 +1,15 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import AddQrlChainContent from "./AddQrlChainContent";
 import StorageUtil from "@/utilities/storageUtil";
+import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
+import QrlStore from "@/stores/qrlStore";
+import type DAppRequestStore from "@/stores/dAppRequestStore";
+import AddQrlChainDetails from "./AddQrlChainInfo/AddQrlChainDetails/AddQrlChainDetails";
 import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 
 vi.mock(
@@ -14,7 +18,10 @@ vi.mock(
 );
 
 describe("AddQrlChainContent", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -81,10 +88,10 @@ describe("AddQrlChainContent", () => {
     expect(mockedOnPermission).toHaveBeenCalledWith(true);
   });
   it("adopts a validated rpc url and leaves the request slot alone (M1, L5)", async () => {
-    const addChain = vi.fn(async () => ({
+    const addChain = vi.fn().mockResolvedValue({
       chainFound: false,
       updatedChainList: [],
-    }));
+    });
     const selectBlockchain = vi.fn(async () => {});
     const setAllBlockChains = vi
       .spyOn(StorageUtil, "setAllBlockChains")
@@ -152,5 +159,153 @@ describe("AddQrlChainContent", () => {
     expect(clearRequest).not.toHaveBeenCalled();
     // The result lands in this run's own bucket.
     expect(recorded).toContainEqual({ result: true });
+  });
+
+  const chainParameters = {
+    chainId: "0x55",
+    chainName: "Additional chain",
+    rpcUrls: ["https://rpc.example"],
+    nativeCurrency: { name: "Quanta", symbol: "QRL", decimals: 18 },
+  };
+
+  const approveParameters = async (params: unknown) => {
+    const record = vi.fn<ResponseRecorder>();
+    let callback: DAppRequestStore["onPermissionCallBack"] | undefined;
+    const selectBlockchain = vi
+      .fn<QrlStore["selectBlockchain"]>()
+      .mockResolvedValue(undefined);
+    const store = mockedStore({
+      qrlStore: {
+        addChain: QrlStore.prototype.addChain.bind(QrlStore.prototype),
+        selectBlockchain,
+      },
+      dAppRequestStore: {
+        dAppRequestData: { method: "wallet_addQRLChain", params },
+        setOnPermissionCallBack: (handler) => {
+          callback = handler;
+        },
+        onPermission: async (approved) => {
+          if (!callback) throw new Error("Missing approval callback");
+          await callback(approved, record);
+        },
+      },
+    });
+    const addChain = vi.spyOn(store.qrlStore, "addChain");
+    renderComponent(store);
+    await userEvent.click(screen.getByRole("button", { name: "Yes" }));
+    await waitFor(() => {
+      expect(record).toHaveBeenCalledTimes(1);
+    });
+    return { record, addChain, selectBlockchain };
+  };
+
+  it.each(
+    [
+      chainParameters,
+      { ...chainParameters, nativeCurrency: null },
+      { ...chainParameters, nativeCurrency: { symbol: "QRL", decimals: 18 } },
+      { ...chainParameters, blockExplorerUrls: [], iconUrls: [] },
+    ].flatMap((chain) => [
+      { chain, format: "array", params: [chain] },
+      { chain, format: "indexed object", params: { 0: chain } },
+    ]),
+  )(
+    "preserves optional chain fields and every existing record with $format parameters",
+    async ({ chain, params }) => {
+      const retained = {
+        ...DEFAULT_BLOCKCHAIN,
+        customMetadata: { retained: true },
+      };
+      vi.spyOn(StorageUtil, "getAllBlockChains").mockResolvedValue([retained]);
+      const save = vi
+        .spyOn(StorageUtil, "setAllBlockChains")
+        .mockResolvedValue(undefined);
+      const { record, selectBlockchain } = await approveParameters(params);
+      expect(save).toHaveBeenCalledExactlyOnceWith([
+        retained,
+        {
+          blockExplorerUrls: undefined,
+          iconUrls: undefined,
+          ...chain,
+          defaultRpcUrl: "https://rpc.example",
+          defaultBlockExplorerUrl: "",
+          defaultIconUrl: "",
+          isTestnet: false,
+          defaultWsRpcUrl: "",
+          isCustomChain: true,
+        },
+      ]);
+      expect(selectBlockchain).toHaveBeenCalledExactlyOnceWith("0x55");
+      expect(record).toHaveBeenCalledExactlyOnceWith({ result: true });
+      expect(save.mock.invocationCallOrder[0]).toBeLessThan(
+        selectBlockchain.mock.invocationCallOrder[0],
+      );
+      expect(selectBlockchain.mock.invocationCallOrder[0]).toBeLessThan(
+        record.mock.invocationCallOrder[0],
+      );
+    },
+  );
+
+  it.each([
+    undefined,
+    null,
+    {},
+    [null],
+    ["invalid"],
+    [{ ...chainParameters, chainId: 5 }],
+    [{ ...chainParameters, rpcUrls: [42] }],
+    [{ ...chainParameters, nativeCurrency: undefined }],
+    [{ ...chainParameters, nativeCurrency: { symbol: {}, decimals: 18 } }],
+    [{ ...chainParameters, iconUrls: [null] }],
+  ])(
+    "rejects malformed chain parameters without writing records: %j",
+    async (params) => {
+      const save = vi
+        .spyOn(StorageUtil, "setAllBlockChains")
+        .mockResolvedValue(undefined);
+      const { record, addChain, selectBlockchain } =
+        await approveParameters(params);
+      expect(record.mock.calls[0]?.[0].error).toMatchObject({ code: -32602 });
+      expect(addChain).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+      expect(selectBlockchain).not.toHaveBeenCalled();
+    },
+  );
+
+  it("renders malformed chain details safely", () => {
+    render(
+      <StoreProvider
+        value={mockedStore({
+          dAppRequestStore: {
+            dAppRequestData: {
+              params: [{ nativeCurrency: "invalid", iconUrls: [null] }],
+            },
+          },
+        })}
+      >
+        <AddQrlChainDetails />
+      </StoreProvider>,
+    );
+    expect(screen.getByText("Chain name")).toBeInTheDocument();
+    expect(screen.queryByText("NaN")).not.toBeInTheDocument();
+  });
+
+  it("reports a failure to register the approval callback", async () => {
+    const error = new Error("Callback registration failed");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          setOnPermissionCallBack: () => {
+            throw error;
+          },
+        },
+      }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Yes" }));
+    expect(warn).toHaveBeenCalledWith(
+      "QrlWeb3Wallet: Error while resolving the permission request\n",
+      error,
+    );
   });
 });
