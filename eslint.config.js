@@ -1942,22 +1942,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/stores/qrlStore.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-floating-promises": "off",
-      "@typescript-eslint/no-non-null-assertion": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unnecessary-type-assertion": "off",
-      "@typescript-eslint/no-unnecessary-type-conversion": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/restrict-template-expressions": "off",
-    },
-  },
-  {
     files: ["src/stores/settingsStore.test.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
