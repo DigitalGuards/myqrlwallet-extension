@@ -1,3 +1,4 @@
+import { malformed } from "@/test-utils/malformed";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -37,7 +38,7 @@ describe("DAppRequestWebsite", () => {
             requestData: { senderData },
           },
         },
-      } as Parameters<typeof mockedStore>[0]),
+      }),
     );
 
   it("should render the dapp request website component", () => {
@@ -122,5 +123,24 @@ describe("DAppRequestWebsite", () => {
 
     expect(screen.getAllByText("not-a-url").length).toBeGreaterThan(0);
     expect(screen.getByText("Mocked DApp Request Feature")).toBeInTheDocument();
+  });
+
+  it.each([
+    null,
+    42,
+    { url: {} },
+    { title: {} },
+    { mainFrameOrigin: [] },
+    { favIconUrl: 7 },
+  ])("renders malformed sender metadata safely: %j", (sender) => {
+    const store = mockedStore();
+    store.dAppRequestStore.dAppRequestData = {
+      method: "qrl_requestAccounts",
+      requestData: { senderData: malformed(sender) },
+    };
+    renderComponent(store);
+    expect(screen.getByText("Mocked DApp Request Feature")).toBeInTheDocument();
+    expect(screen.queryByText("Embedded request:")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("page-supplied icon")).not.toBeInTheDocument();
   });
 });

@@ -134,7 +134,7 @@ function isTypeMap(value: unknown): value is TypeMap {
   return true;
 }
 
-function parsePayload(payload: unknown): TypedDataPayload {
+export function parsePayload(payload: unknown): TypedDataPayload {
   if (!isMessageObject(payload)) throw new Error("invalid typed data payload");
   if (
     !hasExactOwnKeys(payload, ["types", "primaryType", "domain", "message"])

@@ -1,30 +1,27 @@
 import { Checkbox } from "@/components/UI/Checkbox";
 import ChainIcon from "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/ChainIcon/ChainIcon";
-import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
+import type { ApprovalBlockchain } from "@/utilities/approvalGuards";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 
-type QrlRequestAccountBlockchainSelectionProps = {
+type QrlRequestAccountBlockchainSelectionProps<T extends ApprovalBlockchain> = {
   isLoading: boolean;
-  allBlockchains: BlockchainDataType[];
-  selectedBlockchains: BlockchainDataType[];
-  onBlockchainSelection: (
-    selectedAccount: BlockchainDataType,
-    checked: boolean,
-  ) => void;
+  allBlockchains: T[];
+  selectedBlockchains: T[];
+  onBlockchainSelection: (selectedAccount: T, checked: boolean) => void;
 };
 
 const QrlRequestAccountBlockchainSelection = observer(
-  ({
+  <T extends ApprovalBlockchain>({
     isLoading,
     allBlockchains,
     selectedBlockchains,
     onBlockchainSelection,
-  }: QrlRequestAccountBlockchainSelectionProps) => {
+  }: QrlRequestAccountBlockchainSelectionProps<T>) => {
     const { t } = useTranslation();
-    const hasBlockchains = !!allBlockchains?.length;
+    const hasBlockchains = !!allBlockchains.length;
     const selectedBlockchainIds = selectedBlockchains.map(
-      (blockchain) => blockchain?.chainId,
+      (blockchain) => blockchain.chainId,
     );
 
     return (
@@ -43,9 +40,9 @@ const QrlRequestAccountBlockchainSelection = observer(
                   name={`dappBlockchain-${blockchain.chainId}`}
                   checked={selectedBlockchainIds.includes(blockchain.chainId)}
                   aria-label="blockchainCheckbox"
-                  onCheckedChange={(checked) =>
-                    onBlockchainSelection(blockchain, !!checked)
-                  }
+                  onCheckedChange={(checked) => {
+                    onBlockchainSelection(blockchain, !!checked);
+                  }}
                 />
                 <label
                   htmlFor={blockchain.chainId}
