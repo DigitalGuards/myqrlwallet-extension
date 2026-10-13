@@ -840,33 +840,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/scripts/phishing/phishingDetector.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-extraneous-class": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-    },
-  },
-  {
-    files: ["src/scripts/phishing/phishingDetector.ts"],
-    rules: {
-      "@typescript-eslint/await-thenable": "off",
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-    },
-  },
-  {
-    files: ["src/scripts/phishing/qrlPhishingConfig.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-    },
-  },
-  {
     files: ["src/scripts/utils/approvalSlot.test.ts"],
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
@@ -1081,20 +1054,6 @@ export const lintRatchet = [
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
-    },
-  },
-  {
-    files: ["src/scripts/workers/keystoreWorkerPool.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
-    files: ["src/scripts/workers/keystoreWorkerPool.ts"],
-    rules: {
-      "@typescript-eslint/no-unnecessary-type-parameters": "off",
     },
   },
   {
