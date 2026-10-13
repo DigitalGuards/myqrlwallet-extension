@@ -4,15 +4,46 @@ vi.mock("@/configuration/releaseProfile", async (importOriginal) => ({
 }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import QrlStore from "./qrlStore";
+import Web3 from "@theqrl/web3";
 import { SIGNING_NONCE_BLOCK_TAG } from "@/constants/transactionNonce";
 
 vi.mock("@/functions/getHexSeedFromMnemonic", () => ({
   getHexSeedFromMnemonic: () => "test-seed",
 }));
 
-const signed = {
-  transactionHash: "0xhash",
-  rawTransaction: "0xraw",
+const { getTransactionCount, signTransaction } = vi.hoisted(() => ({
+  getTransactionCount:
+    vi.fn<(address: string, block: string) => Promise<bigint>>(),
+  signTransaction:
+    vi.fn<() => Promise<{ transactionHash: string; rawTransaction: string }>>(),
+}));
+
+vi.mock("@theqrl/web3", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@theqrl/web3")>();
+  class Contract {
+    methods = {
+      transfer: () => ({
+        estimateGas: () => Promise.resolve(45000n),
+        encodeABI: () => "0xencoded",
+      }),
+      safeTransferFrom: () => ({
+        estimateGas: () => Promise.resolve(90000n),
+        encodeABI: () => "0xencoded",
+      }),
+    };
+  }
+  return {
+    ...actual,
+    default: class {
+      qrl = { Contract, getTransactionCount, accounts: { signTransaction } };
+    },
+  };
+});
+
+const createStore = () => {
+  const store = new QrlStore();
+  store.qrlInstance = new Web3().qrl;
+  return store;
 };
 
 /**
@@ -22,6 +53,11 @@ const signed = {
  */
 describe("nonce reads at the signing boundary", () => {
   beforeEach(() => {
+    getTransactionCount.mockReset().mockResolvedValue(7n);
+    signTransaction.mockReset().mockResolvedValue({
+      transactionHash: "0xhash",
+      rawTransaction: "0xraw",
+    });
     vi.spyOn(QrlStore.prototype, "initializeBlockchain").mockResolvedValue(
       undefined,
     );
@@ -31,19 +67,16 @@ describe("nonce reads at the signing boundary", () => {
       maxPriorityFeePerGas: 2n,
     });
   });
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("pins every signing path to the pending block tag", () => {
     expect(SIGNING_NONCE_BLOCK_TAG).toBe("pending");
   });
 
   it("reads the native transfer nonce at the pending block", async () => {
-    const store = new QrlStore();
-    const getTransactionCount = vi.fn(async () => 7n);
-    store.qrlInstance = {
-      getTransactionCount,
-      accounts: { signTransaction: async () => signed },
-    } as never;
+    const store = createStore();
 
     const result = await store.signNativeToken("from", "to", "1", "mnemonic");
 
@@ -53,21 +86,7 @@ describe("nonce reads at the signing boundary", () => {
   });
 
   it("reads the ZRC-20 transfer nonce at the pending block", async () => {
-    const store = new QrlStore();
-    const getTransactionCount = vi.fn(async () => 7n);
-    class Contract {
-      methods = {
-        transfer: () => ({
-          estimateGas: async () => 45000n,
-          encodeABI: () => "0xencoded",
-        }),
-      };
-    }
-    store.qrlInstance = {
-      Contract,
-      getTransactionCount,
-      accounts: { signTransaction: async () => signed },
-    } as never;
+    const store = createStore();
 
     const result = await store.signZrc20Token(
       "from",
@@ -83,21 +102,7 @@ describe("nonce reads at the signing boundary", () => {
   });
 
   it("reads the NFT transfer nonce at the pending block", async () => {
-    const store = new QrlStore();
-    const getTransactionCount = vi.fn(async () => 7n);
-    class Contract {
-      methods = {
-        safeTransferFrom: () => ({
-          estimateGas: async () => 90000n,
-          encodeABI: () => "0xencoded",
-        }),
-      };
-    }
-    store.qrlInstance = {
-      Contract,
-      getTransactionCount,
-      accounts: { signTransaction: async () => signed },
-    } as never;
+    const store = createStore();
 
     const result = await store.signNftTransfer(
       "from",
@@ -113,15 +118,9 @@ describe("nonce reads at the signing boundary", () => {
   });
 
   it("advances the nonce between two sends inside one block", async () => {
-    const store = new QrlStore();
-    // What a node reports at "pending" once the first send is in its
-    // mempool: "latest" would still answer 4 for both.
-    const pendingCounts = [4n, 5n];
-    const getTransactionCount = vi.fn(async () => pendingCounts.shift() ?? 5n);
-    store.qrlInstance = {
-      getTransactionCount,
-      accounts: { signTransaction: async () => signed },
-    } as never;
+    const store = createStore();
+    // The pending count includes the first send once it reaches the mempool.
+    getTransactionCount.mockResolvedValueOnce(4n).mockResolvedValueOnce(5n);
 
     const first = await store.signNativeToken("from", "to", "1", "mnemonic");
     const second = await store.signNativeToken("from", "to", "1", "mnemonic");

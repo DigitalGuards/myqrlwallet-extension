@@ -64,17 +64,17 @@ describe("ledgerApdu", () => {
 
     it("should throw error for invalid path with wrong number of components", () => {
       expect(() => packDerivationPath("m/44'/238'/0'/0")).toThrow(
-        "Invalid derivation path: expected 5 components"
+        "Invalid derivation path: expected 5 components",
       );
 
       expect(() => packDerivationPath("m/44'/238'/0'/0/0/1")).toThrow(
-        "Invalid derivation path: expected 5 components"
+        "Invalid derivation path: expected 5 components",
       );
     });
 
     it("should throw error for invalid path component", () => {
       expect(() => packDerivationPath("m/44'/238'/abc/0/0")).toThrow(
-        "Invalid path component"
+        "Invalid path component",
       );
     });
 
@@ -160,7 +160,7 @@ describe("ledgerApdu", () => {
       const result = combineSignatureChunks([chunk1, chunk2, chunk3]);
 
       expect(result).toEqual(
-        Buffer.from([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])
+        Buffer.from([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]),
       );
     });
 
@@ -291,23 +291,25 @@ describe("ledgerApdu", () => {
 
     it("should return false for wrong app", () => {
       expect(isRetryableError(LEDGER_CONFIG.STATUS.CLA_NOT_SUPPORTED)).toBe(
-        false
+        false,
       );
     });
 
     it("should return false for unsupported instruction", () => {
       expect(isRetryableError(LEDGER_CONFIG.STATUS.INS_NOT_SUPPORTED)).toBe(
-        false
+        false,
       );
     });
 
     it("should return false for TX parsing failure", () => {
-      expect(isRetryableError(LEDGER_CONFIG.STATUS.TX_PARSING_FAIL)).toBe(false);
+      expect(isRetryableError(LEDGER_CONFIG.STATUS.TX_PARSING_FAIL)).toBe(
+        false,
+      );
     });
 
     it("should return true for other errors", () => {
       expect(isRetryableError(LEDGER_CONFIG.STATUS.WRONG_RESPONSE_LENGTH)).toBe(
-        true
+        true,
       );
       expect(isRetryableError(LEDGER_CONFIG.STATUS.SIGNATURE_FAIL)).toBe(true);
       expect(isRetryableError(0)).toBe(true);
@@ -322,7 +324,7 @@ describe("ledgerApdu", () => {
     it("should return false for other statuses", () => {
       expect(isUserRejection(LEDGER_CONFIG.STATUS.OK)).toBe(false);
       expect(isUserRejection(LEDGER_CONFIG.STATUS.CLA_NOT_SUPPORTED)).toBe(
-        false
+        false,
       );
       expect(isUserRejection(0)).toBe(false);
     });
@@ -363,16 +365,14 @@ describe("ledgerApdu", () => {
         Buffer.from([0x90, 0x00]),
       ]);
 
-      expect(() => parseQrlAddress(response)).toThrow(
-        "Invalid address prefix"
-      );
+      expect(() => parseQrlAddress(response)).toThrow("Invalid address prefix");
     });
 
     it("should throw for response too short", () => {
       const response = Buffer.from([0x51, 0x01, 0x02, 0x90, 0x00]);
 
       expect(() => parseQrlAddress(response)).toThrow(
-        "Invalid response length"
+        "Invalid response length",
       );
     });
 
@@ -450,7 +450,7 @@ describe("ledgerApdu", () => {
       ]);
 
       expect(() => parsePublicKeyResponse(response)).toThrow(
-        "Invalid address prefix"
+        "Invalid address prefix",
       );
     });
 
@@ -458,7 +458,7 @@ describe("ledgerApdu", () => {
       const response = Buffer.from([0x51, 0x01, 0x02, 0x90, 0x00]);
 
       expect(() => parsePublicKeyResponse(response)).toThrow(
-        "Invalid response length"
+        "Invalid response length",
       );
     });
 
@@ -499,7 +499,7 @@ describe("ledgerApdu", () => {
       const response = Buffer.from([0x01, 0x02, 0x90, 0x00]);
 
       expect(() => parseAppVersion(response)).toThrow(
-        "Invalid version response length"
+        "Invalid version response length",
       );
     });
 
