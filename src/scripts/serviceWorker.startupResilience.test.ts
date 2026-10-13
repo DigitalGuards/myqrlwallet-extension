@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createPort } from "@/test-utils/runtime";
+import type { Runtime } from "webextension-polyfill";
 
 /**
  * Covers H1 (PR #71 audit): serviceWorkerReady used to only resolve on
@@ -13,16 +15,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * processed.
  */
 
-const localStore: Record<string, unknown> = {};
+let localStore: Record<string, unknown> = {};
 
 const {
   mockScrubLegacySessionSecrets,
   mockInitializeContentScriptProviderConnection,
+  mockOnConnectAddListener,
+  mockGetRegisteredContentScripts,
+  mockRegisterContentScripts,
 } = vi.hoisted(() => ({
   mockScrubLegacySessionSecrets: vi.fn().mockResolvedValue(undefined),
   mockInitializeContentScriptProviderConnection: vi
-    .fn()
+    .fn<
+      (
+        port: Runtime.Port,
+        setupConnection: (port: Runtime.Port) => Promise<void>,
+        announceReady: () => Promise<void>,
+      ) => Promise<void>
+    >()
     .mockResolvedValue(undefined),
+  mockOnConnectAddListener:
+    vi.fn<(listener: (port: Runtime.Port) => void) => void>(),
+  mockGetRegisteredContentScripts: vi.fn().mockResolvedValue([]),
+  mockRegisterContentScripts: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("webextension-polyfill", () => ({
@@ -47,14 +62,14 @@ vi.mock("webextension-polyfill", () => ({
     },
     runtime: {
       onMessage: { addListener: vi.fn() },
-      onConnect: { addListener: vi.fn() },
+      onConnect: { addListener: mockOnConnectAddListener },
       onInstalled: { addListener: vi.fn() },
       getURL: vi.fn((path: string) => `chrome-extension://mock-id/${path}`),
       id: "mock-id",
     },
     scripting: {
-      getRegisteredContentScripts: vi.fn().mockResolvedValue([]),
-      registerContentScripts: vi.fn().mockResolvedValue(undefined),
+      getRegisteredContentScripts: mockGetRegisteredContentScripts,
+      registerContentScripts: mockRegisterContentScripts,
     },
     sidePanel: {
       setOptions: vi.fn().mockResolvedValue(undefined),
@@ -66,6 +81,10 @@ vi.mock("webextension-polyfill", () => ({
     },
     notifications: {
       create: vi.fn().mockResolvedValue(undefined),
+    },
+    tabs: {
+      query: vi.fn().mockResolvedValue([]),
+      sendMessage: vi.fn().mockResolvedValue(undefined),
     },
   },
 }));
@@ -122,26 +141,23 @@ vi.mock("@/utilities/storageUtil", () => ({
 /** Drives a content-script connection through the real onConnect listener
  * and waits long enough for a resolved serviceWorkerReady to unblock it. */
 async function connectContentScriptAndWait() {
-  const browserModule = await import("webextension-polyfill");
-  const onConnectAddListener = (browserModule.default as any).runtime.onConnect
-    .addListener as ReturnType<typeof vi.fn>;
-  const connectListeners = onConnectAddListener.mock.calls.map(
-    (call: any) => call[0],
-  );
-  const mockPort = {
-    name: "myqrlwallet-content-script",
-    onDisconnect: { addListener: vi.fn() },
-  };
-  for (const listener of connectListeners) {
-    await listener(mockPort);
+  const port = createPort("myqrlwallet-content-script", {
+    url: "https://dapp.example",
+  });
+  for (const [listener] of mockOnConnectAddListener.mock.calls) {
+    listener(port);
   }
+  await vi.waitFor(() => {
+    expect(mockInitializeContentScriptProviderConnection).toHaveBeenCalled();
+  });
+  return port;
 }
 
 describe("serviceWorker startup resilience (H1)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    for (const key of Object.keys(localStore)) delete localStore[key];
+    localStore = {};
     vi.stubGlobal(
       "fetch",
       vi.fn().mockRejectedValue(new Error("network unavailable")),
@@ -150,6 +166,7 @@ describe("serviceWorker startup resilience (H1)", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("a throwing storage call in one startup step still resolves readiness and a provider connection gets answered", async () => {
@@ -165,23 +182,17 @@ describe("serviceWorker startup resilience (H1)", () => {
 
   it("a content-script port that disconnects while waiting for readiness is not wired up", async () => {
     await import("./serviceWorker");
-    const browserModule = await import("webextension-polyfill");
-    const connectListeners = (
-      (browserModule.default as any).runtime.onConnect
-        .addListener as ReturnType<typeof vi.fn>
-    ).mock.calls.map((call: any) => call[0]);
-    const disconnectListeners: Array<() => void> = [];
-    const mockPort = {
-      name: "myqrlwallet-content-script",
-      onDisconnect: {
-        addListener: (cb: () => void) => disconnectListeners.push(cb),
-      },
-    };
+    const mockPort = createPort("myqrlwallet-content-script");
 
-    const handled = connectListeners.map((listener: any) => listener(mockPort));
+    for (const [listener] of mockOnConnectAddListener.mock.calls)
+      listener(mockPort);
     // The tab closes before the worker finishes starting up.
-    for (const cb of disconnectListeners) cb();
-    await Promise.all(handled);
+    for (const [listener] of mockPort.onDisconnect.addListener.mock.calls)
+      listener(mockPort);
+    await vi.waitFor(() => {
+      expect(mockRegisterContentScripts).toHaveBeenCalled();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(
       mockInitializeContentScriptProviderConnection,
@@ -201,5 +212,136 @@ describe("serviceWorker startup resilience (H1)", () => {
     await connectContentScriptAndWait();
 
     expect(mockInitializeContentScriptProviderConnection).toHaveBeenCalled();
+  });
+
+  it("reports a rejected provider connection", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = new Error("connection failed");
+    mockInitializeContentScriptProviderConnection.mockRejectedValueOnce(error);
+    await import("./serviceWorker");
+
+    await connectContentScriptAndWait();
+
+    expect(warn).toHaveBeenCalledWith(
+      "QrlWeb3Wallet: Failed to initialize the provider connection",
+      error,
+    );
+  });
+
+  it("rejects a content-script port with no sender before setting up its streams", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockInitializeContentScriptProviderConnection.mockImplementationOnce(
+      async (port, setup) => {
+        await setup(port);
+      },
+    );
+    await import("./serviceWorker");
+    const port = createPort("myqrlwallet-content-script");
+
+    for (const [listener] of mockOnConnectAddListener.mock.calls)
+      listener(port);
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(
+        "QrlWeb3Wallet: Failed to initialize the provider connection",
+        new Error("Content-script port is missing its sender"),
+      );
+    });
+
+    expect(port.postMessage).not.toHaveBeenCalled();
+    expect(port.onMessage.addListener).not.toHaveBeenCalled();
+  });
+
+  it("cleans up middleware when a connected port closes", async () => {
+    await import("./serviceWorker");
+    const middlewareModule =
+      await import("./middlewares/appendSenderDataMiddleware");
+    const appendSenderData = middlewareModule.appendSenderDataMiddleware;
+    const cleanup = vi.fn<() => void>();
+    vi.spyOn(
+      middlewareModule,
+      "appendSenderDataMiddleware",
+    ).mockImplementationOnce((params) => {
+      const middleware = appendSenderData(params);
+      middleware.destroy = cleanup;
+      return middleware;
+    });
+    mockInitializeContentScriptProviderConnection.mockImplementationOnce(
+      async (port, setup, announce) => {
+        await setup(port);
+        await announce();
+      },
+    );
+
+    const port = await connectContentScriptAndWait();
+    expect(port.postMessage).toHaveBeenCalledWith({
+      name: "QRL_WALLET_CONNECTION_READY",
+    });
+    for (const [listener] of port.onDisconnect.addListener.mock.calls)
+      listener(port);
+
+    await vi.waitFor(() => {
+      expect(cleanup).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("pins native session storage access before the legacy scrub", async () => {
+    const setAccessLevel = vi.fn().mockResolvedValue(undefined);
+    const session = { setAccessLevel };
+    vi.stubGlobal("chrome", { storage: { session } });
+
+    await import("./serviceWorker");
+    await vi.waitFor(() => {
+      expect(mockScrubLegacySessionSecrets).toHaveBeenCalled();
+    });
+
+    expect(setAccessLevel).toHaveBeenCalledExactlyOnceWith({
+      accessLevel: "TRUSTED_CONTEXTS",
+    });
+    expect(setAccessLevel.mock.contexts[0]).toBe(session);
+    expect(setAccessLevel.mock.invocationCallOrder[0]).toBeLessThan(
+      mockScrubLegacySessionSecrets.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("continues startup if the native session access setter rejects", async () => {
+    const setAccessLevel = vi
+      .fn()
+      .mockRejectedValue(new Error("access level unavailable"));
+    vi.stubGlobal("chrome", { storage: { session: { setAccessLevel } } });
+
+    await import("./serviceWorker");
+    await connectContentScriptAndWait();
+
+    expect(setAccessLevel).toHaveBeenCalledExactlyOnceWith({
+      accessLevel: "TRUSTED_CONTEXTS",
+    });
+    expect(mockScrubLegacySessionSecrets).toHaveBeenCalled();
+  });
+
+  it("registers the in-page script in MAIN with its original options", async () => {
+    await import("./serviceWorker");
+    await vi.waitFor(() => {
+      expect(mockRegisterContentScripts).toHaveBeenCalledExactlyOnceWith([
+        {
+          id: "qrlInPageScript",
+          matches: ["<all_urls>"],
+          js: ["src/scripts/inPageScript.js"],
+          runAt: "document_start",
+          allFrames: true,
+          world: "MAIN",
+        },
+      ]);
+    });
+  });
+
+  it("keeps existing content scripts registered", async () => {
+    mockGetRegisteredContentScripts.mockResolvedValueOnce([
+      { id: "qrlInPageScript" },
+      { id: "other" },
+    ]);
+    await import("./serviceWorker");
+    await vi.waitFor(() => {
+      expect(mockRegisterContentScripts).toHaveBeenCalledExactlyOnceWith([]);
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Covers the synchronous top-level `browser.alarms.onAlarm` listener in
@@ -16,9 +16,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * worker's boot sequence.
  */
 
-const { mockAddAlarmListener, mockHandleAutoLockAlarm } = vi.hoisted(() => ({
-  mockAddAlarmListener: vi.fn(),
+const {
+  mockAddAlarmListener,
+  mockHandleAutoLockAlarm,
+  mockHandlePhishingRefreshAlarm,
+  mockHandleDAppTransactionWatchAlarm,
+  mockScrubLegacySessionSecrets,
+  mockClearAlarm,
+} = vi.hoisted(() => ({
+  mockAddAlarmListener:
+    vi.fn<(listener: (alarm: { name: string }) => void) => void>(),
   mockHandleAutoLockAlarm: vi.fn().mockResolvedValue(undefined),
+  mockHandlePhishingRefreshAlarm: vi.fn().mockResolvedValue(undefined),
+  mockHandleDAppTransactionWatchAlarm: vi.fn().mockResolvedValue(undefined),
+  mockScrubLegacySessionSecrets: vi.fn().mockResolvedValue(undefined),
+  mockClearAlarm: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("webextension-polyfill", () => ({
@@ -27,7 +39,7 @@ vi.mock("webextension-polyfill", () => ({
     alarms: {
       onAlarm: { addListener: mockAddAlarmListener },
       create: vi.fn().mockResolvedValue(undefined),
-      clear: vi.fn().mockResolvedValue(true),
+      clear: mockClearAlarm,
     },
     storage: {
       onChanged: { addListener: vi.fn() },
@@ -61,7 +73,7 @@ vi.mock("./lockManager/lockManager", () => ({
     AUTO_LOCK_ALARM: "QRL_AUTO_LOCK",
     handleAutoLockAlarm: mockHandleAutoLockAlarm,
     lockManagerListener: vi.fn(),
-    scrubLegacySessionSecrets: vi.fn().mockResolvedValue(undefined),
+    scrubLegacySessionSecrets: mockScrubLegacySessionSecrets,
   },
   LOCK_MANAGER_MESSAGES: {
     PORT: "LOCK_MANGER_PORT",
@@ -71,14 +83,14 @@ vi.mock("./lockManager/lockManager", () => ({
 
 vi.mock("./phishing/phishingDetector", () => ({
   PHISHING_ALARM_NAME: "QRL_PHISHING_REFRESH",
-  handlePhishingRefreshAlarm: vi.fn().mockResolvedValue(undefined),
+  handlePhishingRefreshAlarm: mockHandlePhishingRefreshAlarm,
   initializePhishingDetector: vi.fn().mockResolvedValue(undefined),
   setupPhishingRefreshAlarm: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("./utils/dAppTransactionWatcher", () => ({
   DAPP_TX_WATCH_ALARM_NAME: "QRL_DAPP_TX_WATCH",
-  handleDAppTransactionWatchAlarm: vi.fn().mockResolvedValue(undefined),
+  handleDAppTransactionWatchAlarm: mockHandleDAppTransactionWatchAlarm,
 }));
 
 vi.mock("./utils/sidePanelSurface", () => ({
@@ -114,12 +126,14 @@ describe("serviceWorker alarm dispatch (F3)", () => {
     vi.resetModules();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   const loadModuleAndGetListener = async () => {
     await import("./serviceWorker");
     expect(mockAddAlarmListener).toHaveBeenCalledTimes(1);
-    return mockAddAlarmListener.mock.calls[0][0] as (alarm: {
-      name: string;
-    }) => void;
+    return mockAddAlarmListener.mock.calls[0][0];
   };
 
   it("registers exactly one alarm listener for the module, at the top level (not inside prepareListeners)", async () => {
@@ -143,7 +157,9 @@ describe("serviceWorker alarm dispatch (F3)", () => {
     const listener = await loadModuleAndGetListener();
 
     // Should be a plain no-op: nothing throws, nothing dispatches.
-    expect(() => listener({ name: "QRL_KEEP_ALIVE" })).not.toThrow();
+    expect(() => {
+      listener({ name: "QRL_KEEP_ALIVE" });
+    }).not.toThrow();
     expect(mockHandleAutoLockAlarm).not.toHaveBeenCalled();
   });
 
@@ -156,19 +172,37 @@ describe("serviceWorker alarm dispatch (F3)", () => {
   });
 
   it("scrubs any legacy session-storage key backup and clears a leftover QRL_KEEP_ALIVE alarm on startup", async () => {
-    const module = await import("./lockManager/lockManager");
-    const lockManagerMock = module.default as unknown as {
-      scrubLegacySessionSecrets: ReturnType<typeof vi.fn>;
-    };
-    const browserModule = await import("webextension-polyfill");
-    const alarmsClear = (browserModule.default as any).alarms.clear;
-
     await import("./serviceWorker");
     // initializeServiceWorker() runs unawaited at module scope; give its
     // microtask chain a turn to reach the startup-hygiene step.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(lockManagerMock.scrubLegacySessionSecrets).toHaveBeenCalled();
-    expect(alarmsClear).toHaveBeenCalledWith("QRL_KEEP_ALIVE");
+    expect(mockScrubLegacySessionSecrets).toHaveBeenCalled();
+    expect(mockClearAlarm).toHaveBeenCalledWith("QRL_KEEP_ALIVE");
+  });
+
+  it.each([
+    ["QRL_AUTO_LOCK", mockHandleAutoLockAlarm, "Auto-lock alarm"],
+    [
+      "QRL_PHISHING_REFRESH",
+      mockHandlePhishingRefreshAlarm,
+      "Phishing refresh alarm",
+    ],
+    [
+      "QRL_DAPP_TX_WATCH",
+      mockHandleDAppTransactionWatchAlarm,
+      "Transaction watch alarm",
+    ],
+  ])("reports a rejected %s handler", async (name, handler, label) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = new Error("alarm failed");
+    handler.mockRejectedValueOnce(error);
+    const listener = await loadModuleAndGetListener();
+
+    listener({ name });
+    expect(handler).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+
+    expect(warn).toHaveBeenCalledWith(`QrlWeb3Wallet: ${label} failed`, error);
   });
 });
