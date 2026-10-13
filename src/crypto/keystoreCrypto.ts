@@ -1,7 +1,7 @@
 /**
  * Keystore encrypt/decrypt with the argon2id KDF executed via hash-wasm
- * (WebAssembly) instead of the pure-JS @noble/hashes implementation that
- * @theqrl/web3-qrl-accounts uses internally.
+ * (WebAssembly), with byte compatibility with the pure-JS @noble/hashes
+ * implementation that @theqrl/web3-qrl-accounts uses internally.
  *
  * At the production KDF parameters (m=262144 KiB, t=8, p=1) the pure-JS
  * derivation takes ~20 s per keystore; the WASM one takes ~2 s and produces
@@ -23,6 +23,7 @@ import { argon2id as argon2idWasm } from "hash-wasm";
 import { argon2id as argon2idJs } from "@theqrl/qrl-cryptography/argon2id.js";
 import { parseAndValidateSeed, seedToAccount } from "@theqrl/web3-qrl-accounts";
 import type { Bytes, KeyStore } from "@theqrl/web3";
+import { isRecord } from "@/utilities/storageGuards";
 import { RECOMMENDED_KEYSTORE_KDF_PARAMS } from "@/scripts/lockManager/keystoreParams";
 import {
   areAddressesEquivalent,
@@ -60,6 +61,27 @@ const KDF_PARAM_BOUNDS: Record<keyof KeystoreKdfParams, [number, number]> = {
   dklen: [16, 64],
 };
 
+type StoredKdfParams = KeystoreKdfParams & { salt: Uint8Array | string };
+
+const isUint8Array = (value: unknown): value is Uint8Array => {
+  if (!ArrayBuffer.isView(value)) return false;
+  // The intrinsic getter reports the receiver's type across realms.
+  const tag: unknown = Reflect.get(
+    Uint8Array.prototype,
+    Symbol.toStringTag,
+    value,
+  );
+  return tag === "Uint8Array";
+};
+
+const isStoredKdfParams = (value: unknown): value is StoredKdfParams =>
+  isRecord(value) &&
+  typeof value.m === "number" &&
+  typeof value.t === "number" &&
+  typeof value.p === "number" &&
+  typeof value.dklen === "number" &&
+  (typeof value.salt === "string" || isUint8Array(value.salt));
+
 const hexToBytes = (hex: string): Uint8Array<ArrayBuffer> => {
   const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
   if (clean.length % 2 !== 0 || /[^0-9a-fA-F]/.test(clean)) {
@@ -79,9 +101,7 @@ const toBytes = (value: Uint8Array | string): Uint8Array<ArrayBuffer> =>
   typeof value === "string" ? hexToBytes(value) : new Uint8Array(value);
 
 export function validateKdfParams(params: KeystoreKdfParams): void {
-  for (const key of Object.keys(KDF_PARAM_BOUNDS) as Array<
-    keyof KeystoreKdfParams
-  >) {
+  for (const key of ["m", "t", "p", "dklen"] as const) {
     const value = params[key];
     const [min, max] = KDF_PARAM_BOUNDS[key];
     if (!Number.isInteger(value) || value < min || value > max) {
@@ -160,11 +180,17 @@ const assertIvLength = (iv: Uint8Array): void => {
  * (the AES-GCM auth-tag check rejects, same as the upstream decrypt()).
  */
 export async function decryptKeystore(
-  keystore: KeyStore,
+  keystore: unknown,
   password: string,
 ): Promise<DecryptedKeystore> {
+  if (!isRecord(keystore)) {
+    throw new Error("keystoreCrypto: invalid keystore");
+  }
   if (keystore.version !== 1) {
     throw new Error("keystoreCrypto: unsupported keystore version");
+  }
+  if (!isRecord(keystore.crypto)) {
+    throw new Error("keystoreCrypto: invalid crypto section");
   }
   if (keystore.crypto.cipher !== "aes-256-gcm") {
     throw new Error("keystoreCrypto: unsupported cipher");
@@ -173,7 +199,19 @@ export async function decryptKeystore(
     throw new Error("keystoreCrypto: unsupported kdf");
   }
   const { kdfparams } = keystore.crypto;
+  if (!isStoredKdfParams(kdfparams)) {
+    throw new Error("keystoreCrypto: invalid kdf parameters");
+  }
   validateKdfParams(kdfparams);
+  if (
+    !isRecord(keystore.crypto.cipherparams) ||
+    typeof keystore.crypto.cipherparams.iv !== "string"
+  ) {
+    throw new Error("keystoreCrypto: invalid cipher parameters");
+  }
+  if (typeof keystore.crypto.ciphertext !== "string") {
+    throw new Error("keystoreCrypto: invalid ciphertext");
+  }
 
   const passwordBytes = new TextEncoder().encode(password);
   const saltBytes = toBytes(kdfparams.salt);

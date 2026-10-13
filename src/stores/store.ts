@@ -144,8 +144,15 @@ export function wireDataLifecycle(store: Store) {
   return dispose;
 }
 
-export type StoreType = InstanceType<typeof Store>;
+export type StoreType =
+  | Store
+  | ({
+      [Key in Exclude<keyof Store, "disposeDataLifecycle">]: Pick<
+        Store[Key],
+        keyof Store[Key]
+      >;
+    } & Pick<Store, "disposeDataLifecycle">);
 export const store = new Store();
-const StoreContext = createContext(store);
+const StoreContext = createContext<StoreType>(store);
 export const useStore = () => useContext(StoreContext);
 export const StoreProvider = StoreContext.Provider;
