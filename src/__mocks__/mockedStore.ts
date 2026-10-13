@@ -1,13 +1,5 @@
-import {
-  type BlockchainDataType,
-  DEFAULT_BLOCKCHAIN,
-} from "@/configuration/qrlBlockchainConfig";
-import type DAppRequestStore from "@/stores/dAppRequestStore";
-import type LockStore from "@/stores/lockStore";
-import type SettingsStore from "@/stores/settingsStore";
+import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
 import type { StoreType } from "@/stores/store";
-import type QrlStore from "@/stores/qrlStore";
-import type { Web3BaseWalletAccount } from "@theqrl/web3";
 import deepmerge from "deepmerge";
 import { createContext, useContext } from "react";
 import type { PartialDeep } from "type-fest";
@@ -22,17 +14,26 @@ const mockedStoreValues: StoreType = {
     autoLockMinutes: 15,
     currency: "USD",
     language: "en",
-    defaultGasTier: "market" as const,
+    defaultGasTier: "market",
     showBalanceAndPrice: true,
     sidePanelPreferred: false,
-    setThemePreference: async () => {},
-    setAutoLockMinutes: async () => {},
-    setCurrency: async () => {},
-    setLanguage: async () => {},
-    setDefaultGasTier: async () => {},
-    setShowBalanceAndPrice: async () => {},
-    setSidePanelPreferred: async () => {},
-  } as unknown as SettingsStore,
+    sidePanelSurface: undefined,
+    sidePanelNoticePending: false,
+    sidePanelNoticeSeen: false,
+    notificationsEnabled: true,
+    phishingDetectionEnabled: true,
+    whenSettingsLoaded: () => Promise.resolve(),
+    setThemePreference: () => Promise.resolve(),
+    setAutoLockMinutes: () => Promise.resolve(),
+    setCurrency: () => Promise.resolve(),
+    setLanguage: () => Promise.resolve(),
+    setDefaultGasTier: () => Promise.resolve(),
+    setShowBalanceAndPrice: () => Promise.resolve(),
+    setSidePanelPreferred: () => Promise.resolve(),
+    dismissSidePanelNotice: () => Promise.resolve(),
+    setNotificationsEnabled: () => Promise.resolve(),
+    setPhishingDetectionEnabled: () => Promise.resolve(),
+  },
   qrlStore: {
     activeAccount: {
       accountAddress: `Q${"a".repeat(128)}`,
@@ -55,98 +56,71 @@ const mockedStoreValues: StoreType = {
       phase: "session",
     },
     qrlInstance: undefined,
-    fetchAccounts: async () => {},
-    fetchQrlConnection: async () => {},
-    probeConnectionNow: async () => ({ probed: true, isConnected: true }),
-    getAccountBalance: (_accountAddress: string) => {
-      return "0.0 Quanta";
-    },
-    initializeBlockchain: async () => {},
-    selectBlockchain: async (_chainId: string) => {},
-    setActiveAccount: async () => {},
-    assertAccountRemovable: async (_accountAddress: string) => ({
-      remainingKeystores: [],
-      remainingAccounts: [],
-    }),
-    removeAccount: async (_accountAddress: string) => {},
+    fetchAccounts: () => Promise.resolve(),
+    fetchQrlConnection: () => Promise.resolve(),
+    probeConnectionNow: () =>
+      Promise.resolve({ probed: true, isConnected: true }),
+    getAccountBalance: () => "0.0 Quanta",
+    initializeBlockchain: () => Promise.resolve(),
+    setPollingAllowed: () => {},
+    startBalancePolling: () => {},
+    pollBalancesAndConnection: () => Promise.resolve(),
+    stopBalancePolling: () => {},
+    refreshBalancesQuietly: () => Promise.resolve(true),
+    setInitProgress: () => {},
+    selectBlockchain: () => Promise.resolve(),
+    setActiveAccount: () => Promise.resolve(),
+    assertAccountRemovable: () =>
+      Promise.resolve({ remainingKeystores: [], remainingAccounts: [] }),
+    removeAccount: () => Promise.resolve(),
     clearAccountState: () => {},
-    getNativeTokenGas: async () => {
-      return "";
-    },
-    signNativeToken: async (
-      _from: string,
-      _to: string,
-      _value: number,
-      _mnemonicPhrases: string,
-    ) => {
-      return {
+    getNativeTokenGas: () => Promise.resolve(""),
+    signNativeToken: () =>
+      Promise.resolve({
         transactionHash: undefined,
         rawTransaction: undefined,
         error: "",
-      };
-    },
-    validateActiveAccount: async () => {},
-    getGasFeeData: async () => {
-      return {
+      }),
+    validateActiveAccount: () => Promise.resolve(),
+    getGasFeeData: () =>
+      Promise.resolve({
         baseFeePerGas: BigInt(0),
         maxFeePerGas: BigInt(0),
         maxPriorityFeePerGas: BigInt(0),
-      };
-    },
-    getZrc20TokenDetails: async () => ({
-      token: undefined,
-      error: "",
-    }),
-    getNftCollectionDetails: async () => ({
-      collection: undefined,
-      error: "",
-    }),
-    getOwnedNftTokens: async () => ({ tokens: [], failed: false }),
-    getErc1155TokenBalance: async () => undefined,
-    getNftTokenUri: async () => "",
-    signNftTransfer: async () => ({
-      transactionHash: undefined,
-      rawTransaction: undefined,
-      error: "",
-    }),
-    getZrc20TokenGas: async (
-      _from: string,
-      _to: string,
-      _value: number,
-      _contractAddress: string,
-      _decimals: number,
-    ) => {
-      return "";
-    },
-    signZrc20Token: async (
-      _from: string,
-      _to: string,
-      _value: number,
-      _mnemonicPhrases: string,
-      _contractAddress: string,
-      _decimals: number,
-    ) => {
-      return {
+      }),
+    getZrc20TokenDetails: () =>
+      Promise.resolve({ token: undefined, error: "" }),
+    getNftCollectionDetails: () =>
+      Promise.resolve({ collection: undefined, error: "" }),
+    getOwnedNftTokens: () => Promise.resolve({ tokens: [], failed: false }),
+    getErc1155TokenBalance: () => Promise.resolve(undefined),
+    getNftTokenUri: () => Promise.resolve(""),
+    signNftTransfer: () =>
+      Promise.resolve({
         transactionHash: undefined,
         rawTransaction: undefined,
         error: "",
-      };
-    },
-    signAndSendReplacementTransaction: async () => ({
-      transactionHash: undefined,
-      rawTransaction: undefined,
-      error: "",
-    }),
-    getTransactionReceipt: async () => null,
-    sendRawTransaction: async () => undefined,
-    refreshBlockchainData: async () => {},
-    addChain: async (_chainData: BlockchainDataType) => {
-      return { chainFound: false, updatedChainList: [] };
-    },
-    editChain: async (_chainData: BlockchainDataType) => {
-      return { updatedChainList: [] };
-    },
-  } as unknown as QrlStore,
+      }),
+    getZrc20TokenGas: () => Promise.resolve(""),
+    signZrc20Token: () =>
+      Promise.resolve({
+        transactionHash: undefined,
+        rawTransaction: undefined,
+        error: "",
+      }),
+    signAndSendReplacementTransaction: () =>
+      Promise.resolve({
+        transactionHash: undefined,
+        rawTransaction: undefined,
+        error: "",
+      }),
+    getTransactionReceipt: () => Promise.resolve(undefined),
+    sendRawTransaction: () => Promise.resolve(undefined),
+    refreshBlockchainData: () => Promise.resolve(),
+    addChain: () =>
+      Promise.resolve({ chainFound: false, updatedChainList: [] }),
+    editChain: () => Promise.resolve({ updatedChainList: [] }),
+  },
   dAppRequestStore: {
     dAppRequestData: {
       method: "qrl_requestAccounts",
@@ -166,59 +140,39 @@ const mockedStoreValues: StoreType = {
     hasDAppRequest: true,
     responseData: {},
     canProceed: false,
-    onPermissionCallBack: async (
-      _hasApproved: boolean,
-      _record: (data: Record<string, unknown>) => void,
-    ) => {},
+    onPermissionCallBack: () => Promise.resolve(),
     approvalProcessingStatus: {
       hasApproved: false,
       isProcessing: false,
       hasCompleted: false,
     },
-    readDAppRequestData: async () => {},
-    addToResponseData: (_data: any) => {},
-    setCanProceed: (_decision: boolean) => {},
-    setOnPermissionCallBack: (
-      _callBack: (
-        hasApproved: boolean,
-        record: (data: Record<string, unknown>) => void,
-      ) => Promise<void>,
-    ) => {},
-    setApprovalProcessingStatus: async (_status: {
-      isProcessing?: boolean;
-      hasApproved?: boolean;
-      hasCompleted?: boolean;
-    }) => {},
-    onPermission: async (_hasApproved: boolean) => {},
-    reportPendingTransactionHash: async (_transactionHash: string) => {},
-    fetchCurrentTabData: async () => {},
-    disconnectFromCurrentTab: async () => {},
-  } as unknown as DAppRequestStore,
+    readDAppRequestData: () => Promise.resolve(),
+    addToResponseData: () => {},
+    setCanProceed: () => {},
+    setOnPermissionCallBack: () => {},
+    setApprovalProcessingStatus: () => Promise.resolve(),
+    onPermission: () => Promise.resolve(),
+    reportPendingTransactionHash: () => Promise.resolve(),
+    fetchCurrentTabData: () => Promise.resolve(),
+    disconnectFromCurrentTab: () => Promise.resolve(),
+  },
   lockStore: {
     hasPasswordSet: false,
     isLoading: false,
     isLocked: false,
-    readLockState: async () => {},
-    unlock: async (password: string) => {
-      return password ? "success" : "wrong-password";
-    },
-    encryptAccount: async (
-      _account: Web3BaseWalletAccount,
-      _password?: string,
-    ) => {},
-    initialize: () => {},
-    lock: async () => {},
+    bootAttempt: 1,
+    readLockState: () => Promise.resolve(),
+    unlock: (password) =>
+      Promise.resolve(password ? "success" : "wrong-password"),
+    encryptAccount: () => Promise.resolve(),
+    lock: () => Promise.resolve(),
     initializeStorageListener: () => {},
-    ensureWalletPassword: async () => {},
-    getMnemonicPhrases: async (accountAddress: string) => {
-      return accountAddress;
-    },
-    changePassword: async () => {
-      return "success";
-    },
-    removeAccountKey: async (_accountAddress: string) => {},
-    resetWallet: async () => {},
-  } as unknown as LockStore,
+    ensureWalletPassword: () => Promise.resolve(),
+    getMnemonicPhrases: (accountAddress) => Promise.resolve(accountAddress),
+    changePassword: () => Promise.resolve("success"),
+    removeAccountKey: () => Promise.resolve(),
+    resetWallet: () => Promise.resolve(),
+  },
   ledgerStore: {
     connectionState: "disconnected",
     deviceInfo: null,
@@ -234,26 +188,27 @@ const mockedStoreValues: StoreType = {
     hasAccounts: false,
     isSigning: false,
     isAwaitingConfirmation: false,
-    connect: async () => {},
-    disconnect: async () => {},
-    loadAccounts: async () => {},
-    fetchPageAccounts: async () => {},
-    addAccount: async () => ({
-      address: "",
-      derivationPath: "",
-      publicKey: "",
-      index: 0,
-    }),
-    removeAccount: async () => {},
-    verifyAddress: async () => true,
-    signTransaction: async () => ({ success: false }),
-    signAndSerializeTransaction: async () => "0x",
-    fetchPublicKey: async () => ({ publicKey: "" }),
+    connect: () => Promise.resolve(),
+    disconnect: () => Promise.resolve(),
+    loadAccounts: () => Promise.resolve(),
+    fetchPageAccounts: () => Promise.resolve(),
+    addAccount: () =>
+      Promise.resolve({
+        address: "",
+        derivationPath: "",
+        publicKey: "",
+        index: 0,
+      }),
+    removeAccount: () => Promise.resolve(),
+    verifyAddress: () => Promise.resolve(true),
+    signTransaction: () => Promise.resolve({ success: false }),
+    signAndSerializeTransaction: () => Promise.resolve("0x"),
+    fetchPublicKey: () => Promise.resolve({ publicKey: "" }),
     clearSigningState: () => {},
     clearError: () => {},
     isLedgerAccount: () => false,
     getAccountByAddress: () => undefined,
-  } as any,
+  },
   transactionHistoryStore: {
     transactions: [],
     onChainTransactions: [],
@@ -261,54 +216,52 @@ const mockedStoreValues: StoreType = {
     onChainPage: 0,
     isLoading: false,
     isLoadingOnChain: false,
-    filter: "all" as const,
+    onChainFailed: false,
+    filter: "all",
     filteredTransactions: [],
     mergedTransactions: [],
     pendingTransactions: [],
     hasMoreOnChain: false,
-    loadHistory: async (_accountAddress: string, _qrlInstance?: any) => {},
-    loadOnChainHistory: async (_accountAddress: string, _chainId: string) => {},
-    loadMoreOnChain: async (_accountAddress: string, _chainId: string) => {},
-    addTransaction: async (_accountAddress: string, _entry: any) => {},
-    updateTransaction: async (
-      _accountAddress: string,
-      _transactionHash: string,
-      _updates: any,
-    ) => {},
-    setFilter: (_filter: string) => {},
-    clearHistory: async (_accountAddress: string) => {},
-    startPolling: (_accountAddress: string, _qrlInstance: any) => {},
+    loadHistory: () => Promise.resolve(),
+    loadOnChainHistory: () => Promise.resolve(),
+    loadMoreOnChain: () => Promise.resolve(),
+    addTransaction: () => Promise.resolve(),
+    updateTransaction: () => Promise.resolve(),
+    setFilter: () => {},
+    clearHistory: () => Promise.resolve(),
+    startPolling: () => {},
     stopPolling: () => {},
-  } as any,
+    reconcileReplacedTransactions: () => Promise.resolve(),
+  },
   contactsStore: {
     contacts: [],
     isLoading: false,
-    loadContacts: async () => {},
-    addContact: async () => {},
-    removeContact: async () => {},
-    updateContact: async () => {},
+    loadContacts: () => Promise.resolve(),
+    addContact: () => Promise.resolve(),
+    removeContact: () => Promise.resolve(),
+    updateContact: () => Promise.resolve(),
     getContactByAddress: () => undefined,
   },
   accountLabelsStore: {
     labels: {},
     isLoading: false,
-    loadLabels: async () => {},
-    syncLabels: async () => {},
-    ensureLabel: async () => {},
-    setLabel: async () => {},
+    loadLabels: () => Promise.resolve(),
+    syncLabels: () => Promise.resolve(),
+    ensureLabel: () => Promise.resolve(),
+    setLabel: () => Promise.resolve(),
     getLabel: () => "",
     displayLabel: () => "",
-    removeLabel: async () => {},
-    clearLabels: async () => {},
+    removeLabel: () => Promise.resolve(),
+    clearLabels: () => Promise.resolve(),
   },
   hiddenAccountsStore: {
     hiddenAccounts: {},
     hiddenAddresses: [],
-    loadHiddenAccounts: async () => {},
-    hideAccount: async () => {},
-    unhideAccount: async () => {},
+    loadHiddenAccounts: () => Promise.resolve(),
+    hideAccount: () => Promise.resolve(),
+    unhideAccount: () => Promise.resolve(),
     isHidden: () => false,
-  } as any,
+  },
   priceStore: {
     prices: {},
     change24h: {},
@@ -316,16 +269,17 @@ const mockedStoreValues: StoreType = {
     isLoading: false,
     hasError: false,
     getPrice: () => 0,
-    quoteFor: (currency: string) => ({ price: 0, currency, change24h: 0 }),
+    quoteFor: (currency) => ({ price: 0, currency, change24h: 0 }),
     updatedAt: {},
     isCacheStale: false,
-    initialize: async () => {},
-    fetchPrices: async () => {},
+    isRefreshing: false,
+    initialize: () => Promise.resolve(),
+    fetchPrices: () => Promise.resolve(),
     setRefreshEnabled: () => {},
     startAutoRefresh: () => {},
     stopAutoRefresh: () => {},
     getChange24h: () => 0,
-  } as any,
+  },
   // The real store wires its polling reactions in the constructor and keeps
   // the disposer; nothing is wired here, so tearing down is a no-op.
   disposeDataLifecycle: () => {},
@@ -333,9 +287,12 @@ const mockedStoreValues: StoreType = {
 
 export const mockedStore = (
   overrideStoreValues: PartialDeep<StoreType> = {},
-) => {
-  return deepmerge(mockedStoreValues, overrideStoreValues) as StoreType;
+): StoreType => {
+  return deepmerge<StoreType, PartialDeep<StoreType>>(
+    mockedStoreValues,
+    overrideStoreValues,
+  );
 };
-const StoreContext = createContext(mockedStore);
+const StoreContext = createContext<StoreType>(mockedStoreValues);
 export const useStore = () => useContext(StoreContext);
 export const StoreProvider = StoreContext.Provider;

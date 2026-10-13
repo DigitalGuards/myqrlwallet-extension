@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Buffer } from "buffer";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.resetModules();
+});
 
 /**
  * The Buffer global has to exist before any @ledgerhq module is evaluated:
@@ -37,5 +43,22 @@ describe("Buffer polyfill ordering", () => {
 
     expect(polyfill).toMatch(/import \{ Buffer \} from "buffer"/);
     expect(polyfill).toMatch(/globalThis\.Buffer\s*=/);
+  });
+
+  it.each([undefined, null])(
+    "installs Buffer when the browser global is %j",
+    async (value) => {
+      vi.resetModules();
+      vi.stubGlobal("Buffer", value);
+      await import("./bufferPolyfill");
+      expect(globalThis.Buffer).toBe(Buffer);
+    },
+  );
+
+  it("preserves an existing Buffer implementation", async () => {
+    const existing = globalThis.Buffer;
+    vi.resetModules();
+    await import("./bufferPolyfill");
+    expect(globalThis.Buffer).toBe(existing);
   });
 });
