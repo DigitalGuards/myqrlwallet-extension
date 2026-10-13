@@ -2,7 +2,7 @@ import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
 const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const localStore: Record<string, any> = {};
+const localStore: Record<string, unknown> = {};
 
 vi.mock("webextension-polyfill", () => ({
   __esModule: true,
@@ -18,13 +18,13 @@ vi.mock("webextension-polyfill", () => ({
                 : {},
           ),
         ),
-        set: vi.fn((data: Record<string, any>) => {
+        set: vi.fn((data: Record<string, unknown>) => {
           Object.assign(localStore, data);
           return Promise.resolve();
         }),
         remove: vi.fn((key: string | string[]) => {
           for (const item of Array.isArray(key) ? key : [key])
-            delete localStore[item];
+            Reflect.deleteProperty(localStore, item);
           return Promise.resolve();
         }),
       },
@@ -41,7 +41,8 @@ import {
 const KEY = profileStorageKey("UNLOCK_FAILED_ATTEMPTS");
 
 const clearStore = () => {
-  for (const k of Object.keys(localStore)) delete localStore[k];
+  for (const k of Object.keys(localStore))
+    Reflect.deleteProperty(localStore, k);
 };
 
 describe("unlockAttemptLimiter (F7)", () => {
@@ -54,6 +55,44 @@ describe("unlockAttemptLimiter (F7)", () => {
     const state = await getUnlockAttemptState();
 
     expect(state).toEqual({ failedAttempts: 0, waitUntil: 0 });
+  });
+
+  it.each([
+    null,
+    false,
+    "invalid",
+    [],
+    {},
+    { failedAttempts: "6", waitUntil: 123 },
+    { failedAttempts: 6, waitUntil: "123" },
+    { failedAttempts: 6 },
+    Object.assign([], { failedAttempts: 6, waitUntil: 123 }),
+  ])(
+    "reads malformed state as empty without rewriting it (%j)",
+    async (stored) => {
+      localStore[KEY] = stored;
+
+      expect(await getUnlockAttemptState()).toEqual({
+        failedAttempts: 0,
+        waitUntil: 0,
+      });
+      expect(localStore[KEY]).toBe(stored);
+    },
+  );
+
+  it("keeps extra fields on a stored state and preserves unrelated records", async () => {
+    const stored = { failedAttempts: 6, waitUntil: 123, extra: ["preserved"] };
+    localStore[KEY] = stored;
+    const unrelated = { accounts: ["second", "first"] };
+    localStore.OTHER = unrelated;
+
+    expect(await getUnlockAttemptState()).toBe(stored);
+    const next = await recordFailedUnlockAttempt();
+    expect(next.failedAttempts).toBe(7);
+    expect(localStore[KEY]).toEqual(next);
+    expect(localStore.OTHER).toBe(unrelated);
+    await clearUnlockAttempts();
+    expect(localStore).toEqual({ OTHER: unrelated });
   });
 
   it("does not introduce a wait for the first five failures", async () => {

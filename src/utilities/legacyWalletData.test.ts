@@ -1,21 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
 import { hasLegacyWalletData } from "./legacyWalletData";
+import { malformed } from "@/test-utils/malformed";
+import { isRecord, isUnknownArray } from "@/services/explorerGuards";
 
 const local: Record<string, unknown> = {};
 const legacyAddress = `Q${"a".repeat(40)}`;
 
 beforeEach(() => {
-  for (const key of Object.keys(local)) delete local[key];
-  vi.mocked(browser.storage.local.get).mockImplementation(async (keys) => {
+  for (const key of Object.keys(local)) Reflect.deleteProperty(local, key);
+  vi.spyOn(browser.storage.local, "get").mockImplementation((keys: unknown) => {
     const wanted =
-      keys === null
+      keys === null || keys === undefined
         ? Object.keys(local)
         : typeof keys === "string"
           ? [keys]
-          : (keys as string[]);
-    return Object.fromEntries(
-      wanted.filter((key) => key in local).map((key) => [key, local[key]]),
+          : isUnknownArray(keys)
+            ? keys.filter((key): key is string => typeof key === "string")
+            : isRecord(keys)
+              ? Object.keys(keys)
+              : [];
+    return Promise.resolve(
+      Object.fromEntries(
+        wanted.filter((key) => key in local).map((key) => [key, local[key]]),
+      ),
     );
   });
 });
@@ -57,9 +65,42 @@ describe("hasLegacyWalletData", () => {
   });
 
   it("never throws when the storage area rejects", async () => {
-    vi.mocked(browser.storage.local.get).mockRejectedValue(
+    vi.spyOn(browser.storage.local, "get").mockRejectedValue(
       new Error("storage unavailable"),
     );
+    expect(await hasLegacyWalletData()).toBe(false);
+  });
+
+  it.each([null, undefined, [], "invalid", 42])(
+    "ignores a malformed storage response (%j)",
+    async (stored) => {
+      vi.spyOn(browser.storage.local, "get").mockResolvedValue(
+        malformed(stored),
+      );
+      expect(await hasLegacyWalletData()).toBe(false);
+    },
+  );
+
+  it("preserves legacy records and unknown fields during detection", async () => {
+    const records = {
+      KEYSTORES: JSON.stringify([{ unknownVersion: 99 }, null]),
+      ACCOUNTS: { ALL_ACCOUNTS: [legacyAddress], extra: "preserved" },
+      unrelated: ["second", "first"],
+    };
+    Object.assign(local, structuredClone(records));
+    const set = vi.spyOn(browser.storage.local, "set");
+    const remove = vi.spyOn(browser.storage.local, "remove");
+    const clear = vi.spyOn(browser.storage.local, "clear");
+
+    expect(await hasLegacyWalletData()).toBe(true);
+    expect(local).toEqual(records);
+    expect(set).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it("ignores an account array carrying object fields", async () => {
+    local.ACCOUNTS = Object.assign([], { ALL_ACCOUNTS: [legacyAddress] });
     expect(await hasLegacyWalletData()).toBe(false);
   });
 });

@@ -1,3 +1,5 @@
+import { isRecord } from "@/services/explorerGuards";
+
 // Primary: the wallet backend's IPFS proxy (CID-validated, size-capped).
 // Preferred over public gateways like ipfs.io, which time out often enough
 // on freshly pinned content that NFTs would appear permanently blank.
@@ -28,8 +30,7 @@ export function substituteErc1155TokenId(
     return uri;
   }
   if (hex.length > 64) hex = hex.slice(-64);
-  // split/join instead of replaceAll: the tsconfig lib target predates
-  // es2021, and a regex replace would need escaping for the braces.
+  // split/join supports the pre-ES2021 tsconfig lib target and literal braces.
   return uri.split("{id}").join(hex.padStart(64, "0"));
 }
 
@@ -72,18 +73,22 @@ export function resolveIpfsFallbackUrl(uri: string): string {
 const fetchJson = async (
   url: string,
 ): Promise<Record<string, unknown> | null> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(),
-      METADATA_TIMEOUT_MS,
-    );
+    timeoutId = setTimeout(() => {
+      controller.abort();
+    }, METADATA_TIMEOUT_MS);
     const response = await fetch(url, { signal: controller.signal });
+    // The timeout covers receipt of headers; a valid body may take longer.
     clearTimeout(timeoutId);
     if (!response.ok) return null;
-    return await response.json();
+    const metadata: unknown = await response.json();
+    return isRecord(metadata) ? metadata : null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 };
 

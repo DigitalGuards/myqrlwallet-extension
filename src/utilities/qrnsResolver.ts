@@ -31,8 +31,8 @@ const ADDRESS_SELECTOR = selector("addr(bytes32)");
 
 export type QrnsResolverChainConfig = Pick<
   BlockchainDataType,
-  "chainId" | "defaultRpcUrl" | "qrnsRegistryAddress"
->;
+  "chainId" | "defaultRpcUrl"
+> & { qrnsRegistryAddress?: unknown };
 
 export class QrnsNameError extends Error {
   constructor(message: string) {
@@ -47,7 +47,7 @@ export const normalizeQrnsName = (name: string): string => {
 
   let lowered = "";
   for (const character of name) {
-    const codePoint = character.codePointAt(0)!;
+    const codePoint = character.charCodeAt(0);
     lowered +=
       codePoint >= 0x41 && codePoint <= 0x5a
         ? String.fromCharCode(codePoint + 32)
@@ -206,7 +206,7 @@ export async function resolveQrnsName(
     throw new Error("QRNS RPC chain does not match the selected chain");
   }
 
-  const registryCode = await requestManager.send({
+  const registryCode: unknown = await requestManager.send({
     method: "qrl_getCode",
     params: [registryAddress, "latest"],
   });

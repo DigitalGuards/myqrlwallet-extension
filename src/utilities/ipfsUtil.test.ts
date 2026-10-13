@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   resolveIpfsUrl,
   resolveIpfsFallbackUrl,
@@ -46,7 +46,14 @@ describe("resolveIpfsUrl", () => {
 });
 
 describe("fetchMetadata", () => {
+  const abortSignal: unknown = expect.any(AbortSignal);
+
   beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -57,73 +64,182 @@ describe("fetchMetadata", () => {
 
   it("should return parsed JSON on success", async () => {
     const mockData = { name: "Test NFT", image: "ipfs://Qm123" };
-    global.fetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(mockData),
-      }),
-    ) as any;
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify(mockData)));
 
     const result = await fetchMetadata("ipfs://QmMetadata");
     expect(result).toEqual(mockData);
-    expect(global.fetch).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenCalledWith(
       "https://qrlwallet.com/api/ipfs/QmMetadata",
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ signal: abortSignal }),
     );
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("should fall back to the public gateway when the proxy fails", async () => {
     const mockData = { name: "Rescued NFT" };
-    global.fetch = vi
-      .fn()
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
       // Primary (proxy) throttled or rejecting the URI shape.
-      .mockResolvedValueOnce({ ok: false, status: 429 })
+      .mockResolvedValueOnce(new Response(null, { status: 429 }))
       // Fallback (ipfs.io) succeeds.
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockData),
-      }) as any;
+      .mockResolvedValueOnce(new Response(JSON.stringify(mockData)));
 
     const result = await fetchMetadata("ipfs://QmMetadata");
     expect(result).toEqual(mockData);
-    expect(global.fetch).toHaveBeenNthCalledWith(
+    expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       "https://qrlwallet.com/api/ipfs/QmMetadata",
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ signal: abortSignal }),
     );
-    expect(global.fetch).toHaveBeenNthCalledWith(
+    expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "https://ipfs.io/ipfs/QmMetadata",
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ signal: abortSignal }),
     );
   });
 
   it("should not retry non-gateway URIs after a failure", async () => {
-    global.fetch = vi.fn(() => Promise.resolve({ ok: false })) as any;
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 500 }));
 
     const result = await fetchMetadata("https://example.com/meta.json");
     expect(result).toBeNull();
-    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("should return null when both gateways fail", async () => {
-    global.fetch = vi.fn(() =>
-      Promise.resolve({ ok: false }),
-    ) as any;
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 500 }));
 
     const result = await fetchMetadata("ipfs://QmBad");
     expect(result).toBeNull();
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("should return null on fetch error for both gateways", async () => {
-    global.fetch = vi.fn(() =>
-      Promise.reject(new Error("Network error")),
-    ) as any;
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network error"));
 
     const result = await fetchMetadata("ipfs://QmFail");
     expect(result).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
   });
+
+  it.each([null, [], ["metadata"], "metadata", 42, true])(
+    "rejects a non-record JSON response (%j)",
+    async (metadata) => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response(JSON.stringify(metadata)));
+
+      expect(await fetchMetadata("https://example.com/meta.json")).toBeNull();
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("falls back after a non-record primary response", async () => {
+    const metadata = { name: "Fallback", extra: { preserved: [null, 42] } };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("[]"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(metadata)));
+
+    expect(await fetchMetadata("ipfs://QmMetadata")).toEqual(metadata);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("preserves empty metadata objects", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}"));
+
+    expect(await fetchMetadata("ipfs://QmMetadata")).toEqual({});
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("cleans up the timeout when JSON parsing fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("invalid"));
+
+    expect(await fetchMetadata("https://example.com/meta.json")).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("times out a pending fetch and tries the fallback", async () => {
+    const metadata = { name: "Fallback" };
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementationOnce(
+        (_url, options) =>
+          new Promise<Response>((_resolve, reject) => {
+            options?.signal?.addEventListener("abort", () => {
+              reject(new Error("aborted"));
+            });
+          }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify(metadata)));
+
+    const result = fetchMetadata("ipfs://QmMetadata");
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(await result).toEqual(metadata);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    "http://example.com/meta.json",
+    "https://example.com/meta.json",
+    "ipfs://QmMetadata",
+  ])(
+    "accepts a slow response body after timely headers for %s",
+    async (uri) => {
+      const metadata = {
+        name: "Slow valid NFT",
+        image: "ipfs://QmImage",
+        extra: { preserved: [2, 1] },
+      };
+      const body = new TextEncoder().encode(JSON.stringify(metadata));
+      const onAbort = vi.fn();
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementationOnce((_url, options) => {
+          const response = new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(body.slice(0, 12));
+                const bodyTimeoutId = setTimeout(() => {
+                  controller.enqueue(body.slice(12));
+                  controller.close();
+                }, 11_000);
+                options?.signal?.addEventListener("abort", () => {
+                  onAbort();
+                  clearTimeout(bodyTimeoutId);
+                  controller.error(new Error("aborted"));
+                });
+              },
+            }),
+          );
+          return Promise.resolve(response);
+        })
+        .mockResolvedValue(new Response('{"name":"Fallback"}'));
+
+      const result = fetchMetadata(uri);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(onAbort).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(await result).toEqual(metadata);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
 });
 
 describe("resolveIpfsFallbackUrl", () => {

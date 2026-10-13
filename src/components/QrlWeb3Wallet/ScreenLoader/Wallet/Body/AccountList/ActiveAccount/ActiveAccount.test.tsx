@@ -7,13 +7,24 @@ import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import ActiveAccount from "./ActiveAccount";
 
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock("react-router-dom", async () => ({
+  ...(await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom",
+  )),
+  useNavigate: () => navigate,
+}));
+
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AccountList/AccountId/AccountId",
   () => ({ default: () => <div>Mocked Account Id</div> }),
 );
 
 describe("ActiveAccount", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -30,6 +41,72 @@ describe("ActiveAccount", () => {
     const trigger = screen.getByTestId("account-menu");
     await userEvent.click(trigger);
   };
+
+  it.each(["button", "Enter"])(
+    "retains the edited label when saving by %s fails",
+    async (action) => {
+      const error = new Error("label storage failed");
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      const setLabel = vi.fn().mockRejectedValue(error);
+      renderComponent(mockedStore({ accountLabelsStore: { setLabel } }));
+      await openMenu();
+      await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+      const input = screen.getByRole("textbox", { name: "Edit account label" });
+      await userEvent.type(input, "Savings");
+      if (action === "Enter") await userEvent.keyboard("{Enter}");
+      else
+        await userEvent.click(
+          screen.getByRole("button", { name: "Save label" }),
+        );
+
+      await waitFor(() => {
+        expect(report).toHaveBeenCalledWith(
+          "Failed to save the account label:",
+          error,
+        );
+      });
+      expect(setLabel).toHaveBeenCalledTimes(1);
+      expect(input).toHaveValue("Savings");
+    },
+  );
+
+  it.each(["hide", "activate"])(
+    "reports a failed %s while hiding the active account",
+    async (step) => {
+      const error = new Error("account storage failed");
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      const hideAccount = vi.fn().mockResolvedValue(undefined);
+      const setActiveAccount = vi.fn().mockResolvedValue(undefined);
+      if (step === "hide") hideAccount.mockRejectedValue(error);
+      else setActiveAccount.mockRejectedValue(error);
+      renderComponent(
+        mockedStore({
+          qrlStore: {
+            activeAccount: { accountAddress: "QActive" },
+            qrlAccounts: {
+              accounts: [
+                { accountAddress: "QNext", accountBalance: "0.0 Quanta" },
+              ],
+            },
+            setActiveAccount,
+          },
+          hiddenAccountsStore: { hideAccount },
+        }),
+      );
+      await openMenu();
+      await userEvent.click(screen.getByRole("menuitem", { name: "Hide" }));
+
+      await waitFor(() => {
+        expect(report).toHaveBeenCalledWith(
+          "Failed to hide the active account:",
+          error,
+        );
+      });
+      expect(hideAccount).toHaveBeenCalledWith("QActive");
+      if (step === "hide") expect(setActiveAccount).not.toHaveBeenCalled();
+      else expect(setActiveAccount).toHaveBeenCalledWith("QNext");
+    },
+  );
 
   it("exposes the account menu trigger as a named button", () => {
     renderComponent(
@@ -95,8 +172,8 @@ describe("ActiveAccount", () => {
     await openMenu();
     const copyItem = screen.getByRole("menuitem", { name: "Copy Address" });
     await userEvent.click(copyItem);
-    expect(mockedWriteText).toBeCalledTimes(1);
-    expect(mockedWriteText).toBeCalledWith(
+    expect(mockedWriteText).toHaveBeenCalledTimes(1);
+    expect(mockedWriteText).toHaveBeenCalledWith(
       "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
     );
   });
@@ -347,5 +424,19 @@ describe("ActiveAccount", () => {
     expect(setActiveAccount).toHaveBeenCalledWith(
       "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1",
     );
+  });
+  it.each([
+    ["Send Quanta", "Failed to open token transfer:"],
+    ["Receive", "Failed to open account receive:"],
+  ])("reports a rejected %s navigation", async (menuItem, message) => {
+    const error = new Error("navigation failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    navigate.mockRejectedValueOnce(error);
+    renderComponent();
+    await openMenu();
+    await userEvent.click(screen.getByRole("menuitem", { name: menuItem }));
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(message, error);
+    });
   });
 });

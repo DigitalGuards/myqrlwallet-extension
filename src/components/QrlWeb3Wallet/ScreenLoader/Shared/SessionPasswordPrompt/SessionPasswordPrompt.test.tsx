@@ -39,7 +39,7 @@ describe("SessionPasswordPrompt (F1)", () => {
   });
 
   it("verifies the password through lockStore.unlock and calls onUnlocked on success", async () => {
-    const unlock = vi.fn(async () => "success" as const);
+    const unlock = vi.fn(() => Promise.resolve("success" as const));
     const onUnlocked = vi.fn();
     renderComponent(onUnlocked, mockedStore({ lockStore: { unlock } }));
 
@@ -58,7 +58,7 @@ describe("SessionPasswordPrompt (F1)", () => {
   });
 
   it("shows the normal wrong-password error and does not call onUnlocked", async () => {
-    const unlock = vi.fn(async () => "wrong-password" as const);
+    const unlock = vi.fn(() => Promise.resolve("wrong-password" as const));
     const onUnlocked = vi.fn();
     renderComponent(onUnlocked, mockedStore({ lockStore: { unlock } }));
 
@@ -79,7 +79,7 @@ describe("SessionPasswordPrompt (F1)", () => {
     // caller here is mid-Import/Create with lockStore.isLocked already
     // false; onUnlocked must not fire (nothing to retry yet) and the
     // pending screen must not be torn down by a locked flip.
-    const unlock = vi.fn(async () => "failed" as const);
+    const unlock = vi.fn(() => Promise.resolve("failed" as const));
     const onUnlocked = vi.fn();
     const store = mockedStore({ lockStore: { unlock, isLocked: false } });
     renderComponent(onUnlocked, store);
@@ -97,11 +97,13 @@ describe("SessionPasswordPrompt (F1)", () => {
   });
 
   it("surfaces the specific error unlock() throws, e.g. the legacy-address migration guard (N7)", async () => {
-    const unlock = vi.fn(async () => {
-      throw new Error(
-        "Legacy Z-prefixed addresses require migration before unlocking.",
+    const unlock = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          "Legacy Z-prefixed addresses require migration before unlocking.",
+        ),
       );
-    });
     const onUnlocked = vi.fn();
     renderComponent(onUnlocked, mockedStore({ lockStore: { unlock } }));
 
@@ -123,9 +125,7 @@ describe("SessionPasswordPrompt (F1)", () => {
   });
 
   it("falls back to the generic error message when unlock() throws a non-Error value", async () => {
-    const unlock = vi.fn(async () => {
-      throw "SW unreachable";
-    });
+    const unlock = vi.fn().mockRejectedValue("SW unreachable");
     const onUnlocked = vi.fn();
     renderComponent(onUnlocked, mockedStore({ lockStore: { unlock } }));
 
@@ -151,5 +151,20 @@ describe("SessionPasswordPrompt (F1)", () => {
     );
 
     expect(passwordField).toHaveAttribute("type", "text");
+  });
+
+  it("reports a rejected continuation and keeps the form available", async () => {
+    const unlock = vi.fn().mockResolvedValue("success");
+    const onUnlocked = vi
+      .fn()
+      .mockRejectedValue(new Error("Continuation failed"));
+    renderComponent(onUnlocked, mockedStore({ lockStore: { unlock } }));
+
+    await userEvent.type(screen.getByLabelText("Enter password"), "password");
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByText("Continuation failed")).toBeInTheDocument();
+    expect(onUnlocked).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Enter password")).toBeEnabled();
   });
 });

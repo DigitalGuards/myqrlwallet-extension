@@ -76,7 +76,9 @@ const Welcome = observer(({ selectStep }: WelcomeProps) => {
       <CardFooter>
         <Button
           className="w-full"
-          onClick={() => selectStep(ONBOARDING_STEPS.SET_PASSWORD)}
+          onClick={() => {
+            selectStep(ONBOARDING_STEPS.SET_PASSWORD);
+          }}
         >
           <MoveRight className="mr-2 h-4 w-4" />
           {t("welcome.button")}

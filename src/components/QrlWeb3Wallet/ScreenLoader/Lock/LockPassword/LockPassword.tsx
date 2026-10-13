@@ -18,9 +18,13 @@ const LockPassword = observer(() => {
   useEffect(() => {
     if (!hasPasswordSet) {
       if (isPopupWindow) {
-        browser.tabs.create({
-          url: browser.runtime.getURL(APP_TAB_FILE),
-        });
+        browser.tabs
+          .create({
+            url: browser.runtime.getURL(APP_TAB_FILE),
+          })
+          .catch((error: unknown) => {
+            console.error("Failed to open onboarding:", error);
+          });
       } else {
         setIsOnboarding(true);
       }
@@ -31,9 +35,7 @@ const LockPassword = observer(() => {
 
   if (!isLocked || !hasPasswordSet) return;
 
-  if (hasPasswordSet) return <LockPasswordCheck />;
-
-  return;
+  return <LockPasswordCheck />;
 });
 
 export default LockPassword;

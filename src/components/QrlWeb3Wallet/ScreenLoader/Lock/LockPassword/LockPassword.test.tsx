@@ -4,19 +4,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import LockPassword from "./LockPassword";
+import browser from "webextension-polyfill";
 
 vi.mock("webextension-polyfill", async () => {
-  const originalModule: any = await vi.importActual("webextension-polyfill");
+  const originalModule = await vi.importActual<{ default: typeof browser }>(
+    "webextension-polyfill",
+  );
   return {
     ...originalModule,
     default: {
       ...originalModule.default,
       tabs: {
-        ...originalModule.default?.tabs,
-        create: vi.fn(),
+        ...originalModule.default.tabs,
+        create: vi.fn().mockResolvedValue({ id: 1 }),
       },
       runtime: {
-        ...originalModule.default?.runtime,
+        ...originalModule.default.runtime,
         getURL: vi.fn().mockReturnValue("chrome-extension://id/index.html"),
       },
     },
@@ -32,7 +35,10 @@ vi.mock(
 );
 
 describe("LockPassword", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -72,6 +78,38 @@ describe("LockPassword", () => {
         screen.getByText("Mocked Lock Password Check"),
       ).toBeInTheDocument();
       expect(screen.queryByText("Mocked Onboarding")).not.toBeInTheDocument();
+    });
+  });
+
+  it("opens onboarding in a tab from the popup", async () => {
+    const createTab = vi.spyOn(browser.tabs, "create");
+    renderComponent(
+      mockedStore({
+        lockStore: { hasPasswordSet: false, isLocked: true },
+        settingsStore: { isPopupWindow: true },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(createTab).toHaveBeenCalledWith({
+        url: "chrome-extension://id/index.html",
+      });
+    });
+  });
+
+  it("reports a rejected onboarding tab creation", async () => {
+    const error = new Error("tab creation failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(browser.tabs, "create").mockRejectedValueOnce(error);
+    renderComponent(
+      mockedStore({
+        lockStore: { hasPasswordSet: false, isLocked: true },
+        settingsStore: { isPopupWindow: true },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith("Failed to open onboarding:", error);
     });
   });
 });
