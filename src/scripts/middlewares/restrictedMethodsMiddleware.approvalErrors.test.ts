@@ -1,4 +1,5 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
+import { CHAIN } from "@/utilities/__mocks__/storageFixtures";
 import { isRecord } from "@/utilities/storageGuards";
 import { Json, JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { toChecksumAddress } from "@theqrl/wallet.js";
@@ -166,7 +167,7 @@ describe("the dApp receives the code the approval recorded", () => {
       },
     );
     // The origin holds a grant for this account on the active chain, so a
-    // signing request reaches the approval surface.
+    // signing request passes the precheck and reaches the approval surface.
     vi.spyOn(browser.storage.local, "get").mockImplementation(
       (key: unknown) => {
         switch (key) {
@@ -177,7 +178,7 @@ describe("the dApp receives the code the approval recorded", () => {
                   [ORIGIN]: {
                     urlOrigin: ORIGIN,
                     accounts: [ACCOUNT],
-                    blockchains: [{ chainId: CHAIN_ID }],
+                    blockchains: [{ ...CHAIN, chainId: CHAIN_ID }],
                     permissions: [],
                   },
                 },

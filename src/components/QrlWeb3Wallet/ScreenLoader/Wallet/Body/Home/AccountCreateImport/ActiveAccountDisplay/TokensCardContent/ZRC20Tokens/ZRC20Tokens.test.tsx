@@ -16,8 +16,9 @@ vi.mock("@/utilities/storageUtil", async () => {
   >("@/utilities/storageUtil");
   return {
     ...originalModule,
-    default: class extends originalModule.default {
-      static override getTokenContractsList = vi.fn(() =>
+    default: {
+      ...originalModule.default,
+      getTokenContractsList: vi.fn(() =>
         Promise.resolve([
           {
             address: "Q28c4113a9d3a2e836f28c23ed8e3c1e7c243f566",
@@ -38,7 +39,7 @@ vi.mock("@/utilities/storageUtil", async () => {
             image: "testImage3",
           },
         ]),
-      );
+      ),
     },
   };
 });

@@ -1,3 +1,8 @@
+import {
+  tokenView,
+  nftCollectionView,
+  storedText,
+} from "@/utilities/storageViews";
 import { Button } from "@/components/UI/Button";
 import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
 import {
@@ -129,14 +134,18 @@ const CalldataSummary = observer(
           ]);
           if (!isCurrent) return;
           setToken(
-            tokens.find((entry) =>
-              areAddressesEquivalent(entry.address, contractAddress),
-            ),
+            tokens
+              .map(tokenView)
+              .find((entry) =>
+                areAddressesEquivalent(entry.address, contractAddress),
+              ),
           );
           setCollection(
-            collections.find((entry) =>
-              areAddressesEquivalent(entry.address, contractAddress),
-            ),
+            collections
+              .map(nftCollectionView)
+              .find((entry) =>
+                areAddressesEquivalent(entry.address, contractAddress),
+              ),
           );
         } catch {
           // An unreadable asset list only costs the symbol and decimals;
@@ -214,7 +223,7 @@ const CalldataSummary = observer(
       )?.name;
 
     const renderAddress = (label: string, address: string) => {
-      const name = contactName(address);
+      const name = storedText(contactName(address));
       return (
         <DetailRow label={label}>
           {name ? <div className="mb-1">{name}</div> : null}
@@ -227,7 +236,13 @@ const CalldataSummary = observer(
     };
 
     const renderAmount = (amount: bigint, labelKey: string) => {
-      if (token) {
+      if (
+        token &&
+        token.decimals !== null &&
+        Number.isInteger(token.decimals) &&
+        token.decimals >= 0 &&
+        token.decimals <= 255
+      ) {
         return (
           <DetailRow label={t(labelKey)}>
             {`${formatTokenBaseUnits(amount, token.decimals)} ${token.symbol}`}

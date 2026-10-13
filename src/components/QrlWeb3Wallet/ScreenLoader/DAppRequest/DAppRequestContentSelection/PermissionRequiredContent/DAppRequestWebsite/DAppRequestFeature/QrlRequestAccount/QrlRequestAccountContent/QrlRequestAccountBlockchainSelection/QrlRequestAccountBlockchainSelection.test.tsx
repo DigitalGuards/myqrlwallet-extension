@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { ComponentProps } from "react";
 import userEvent from "@testing-library/user-event";
 import QrlRequestAccountBlockchainSelection from "./QrlRequestAccountBlockchainSelection";
+import type { StoredBlockchain } from "@/utilities/storageGuards";
 
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/ChainIcon/ChainIcon",
@@ -71,6 +72,36 @@ describe("QrlRequestAccountBlockchainSelection", () => {
     expect(screen.getByText("Test chain name")).toBeInTheDocument();
     expect(screen.getByText("Chain ID 5")).toBeInTheDocument();
     expect(screen.getByText("http://testDefaultRpcUrl")).toBeInTheDocument();
+  });
+
+  it("keeps raw chain metadata intact when selecting a stored chain", async () => {
+    const blockchain = {
+      chainId: "0x5",
+      chainName: { label: "Imported chain" },
+      defaultRpcUrl: null,
+      defaultIconUrl: 42,
+      nativeCurrency: null,
+      futureMetadata: { version: 2 },
+    };
+    const onBlockchainSelection =
+      vi.fn<(chain: StoredBlockchain, checked: boolean) => void>();
+    renderComponent(mockedStore(), {
+      isLoading: false,
+      allBlockchains: [blockchain],
+      selectedBlockchains: [],
+      onBlockchainSelection,
+    });
+
+    expect(screen.getByText("Chain ID 5")).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: "blockchainCheckbox" }),
+    );
+
+    expect(onBlockchainSelection).toHaveBeenCalledExactlyOnceWith(
+      blockchain,
+      true,
+    );
+    expect(onBlockchainSelection.mock.calls[0]?.[0]).toBe(blockchain);
   });
 
   it("should display the message is no blockchains are available", () => {

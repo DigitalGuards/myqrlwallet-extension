@@ -1,3 +1,4 @@
+import { tokenView } from "@/utilities/storageViews";
 import { useStore } from "@/stores/store";
 import StorageUtil from "@/utilities/storageUtil";
 import { observer } from "mobx-react-lite";
@@ -37,7 +38,7 @@ const ZRC20Tokens = observer(
       (async () => {
         const storedTokens =
           await StorageUtil.getTokenContractsList(accountAddress);
-        setTokenContractsList(storedTokens);
+        setTokenContractsList(storedTokens.map(tokenView));
         onCountChange?.(storedTokens.length);
       })().catch((error: unknown) => {
         console.error("Failed to load tokens:", error);

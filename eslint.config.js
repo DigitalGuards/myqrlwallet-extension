@@ -216,7 +216,6 @@ export const lintRatchet = [
       "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/SwitchQrlChainContent/SwitchQrlChainInfo/SwitchQrlChainInfo.test.tsx",
     ],
     rules: {
-      "@typescript-eslint/no-misused-spread": "off",
       "@typescript-eslint/require-await": "off",
     },
   },
@@ -1279,17 +1278,6 @@ export const lintRatchet = [
       "@typescript-eslint/no-unsafe-call": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: ["src/utilities/storageUtil.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-extraneous-class": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
     },
   },
 ];

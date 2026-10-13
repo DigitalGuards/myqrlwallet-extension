@@ -21,8 +21,9 @@ vi.mock("@/utilities/storageUtil", async () => {
   >("@/utilities/storageUtil");
   return {
     ...originalModule,
-    default: class extends originalModule.default {
-      static override clearFromTokenContractsList = vi.fn(async () => {});
+    default: {
+      ...originalModule.default,
+      clearFromTokenContractsList: vi.fn(async () => {}),
     },
   };
 });
