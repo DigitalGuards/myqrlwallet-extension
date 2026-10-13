@@ -125,82 +125,6 @@ export const baseConfig = [
 // BEGIN LINT RATCHET
 export const lintRatchet = [
   {
-    files: ["e2e/bfcacheProvider.spec.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-deprecated": "off",
-      "@typescript-eslint/no-unnecessary-boolean-literal-compare": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
-    files: ["e2e/dAppCalldataApproval.spec.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-deprecated": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
-    files: ["e2e/dataLifecycle.spec.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-deprecated": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-    },
-  },
-  {
-    files: ["e2e/providerMethodBinding.spec.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-deprecated": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unnecessary-type-conversion": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-    },
-  },
-  {
-    files: ["e2e/quantaSwapLifecycle.spec.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-deprecated": "off",
-      "@typescript-eslint/no-unnecessary-boolean-literal-compare": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
-    files: ["e2e/quantaSwapUi.spec.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-deprecated": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
     files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSendTransaction/QrlSendTransactionForContent/QrlSendTransactionForContent.tsx",
     ],
@@ -916,33 +840,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/scripts/phishing/phishingDetector.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-extraneous-class": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-    },
-  },
-  {
-    files: ["src/scripts/phishing/phishingDetector.ts"],
-    rules: {
-      "@typescript-eslint/await-thenable": "off",
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-    },
-  },
-  {
-    files: ["src/scripts/phishing/qrlPhishingConfig.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-    },
-  },
-  {
     files: ["src/scripts/utils/approvalSlot.test.ts"],
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
@@ -1160,20 +1057,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/scripts/workers/keystoreWorkerPool.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
-    files: ["src/scripts/workers/keystoreWorkerPool.ts"],
-    rules: {
-      "@typescript-eslint/no-unnecessary-type-parameters": "off",
-    },
-  },
-  {
     files: ["src/services/ledger/ledgerApdu.test.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
@@ -1223,27 +1106,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/stores/dAppRequestStore.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/require-await": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: ["src/stores/dAppRequestStore.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-floating-promises": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
     files: ["src/stores/dataLifecycle.test.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
@@ -1282,29 +1144,6 @@ export const lintRatchet = [
       "@typescript-eslint/no-non-null-assertion": "off",
       "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
-    },
-  },
-  {
-    files: ["src/stores/lockStore.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-floating-promises": "off",
-      "@typescript-eslint/no-misused-promises": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-    },
-  },
-  {
-    files: ["src/stores/priceStore.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unnecessary-type-conversion": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -1354,13 +1193,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/stores/qrlStore.nonce.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
     files: ["src/stores/qrlStore.removeAccount.test.ts"],
     rules: {
       "@typescript-eslint/no-extraneous-class": "off",
@@ -1392,15 +1224,6 @@ export const lintRatchet = [
       "@typescript-eslint/no-deprecated": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
-    files: ["src/stores/transactionHistoryStore.test.ts"],
-    rules: {
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-      "@typescript-eslint/unbound-method": "off",
     },
   },
   {

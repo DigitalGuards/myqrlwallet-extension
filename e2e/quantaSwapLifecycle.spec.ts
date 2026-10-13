@@ -1,3 +1,22 @@
+import { readApprovalTransaction } from "../src/utilities/approvalGuards";
+import {
+  beginFixtureRequest,
+  closeFixtureServer,
+  fixtureRequestResult,
+  hasFixtureAccount,
+  hasFixtureProvider,
+  isRequestState,
+  isSignProof,
+  readPendingRequest,
+  readProviderProperty,
+  readRpcBody,
+  readStoredValue,
+  readWindowValue,
+  reportFixtureError,
+  storedConnection,
+  writeStorage,
+  type DAppRequest,
+} from "./fixtureHelpers";
 import { expect, test, chromium, type Page } from "@playwright/test";
 import { shake256 } from "@noble/hashes/sha3.js";
 import { cryptoSignVerify } from "@theqrl/mldsa87";
@@ -26,6 +45,9 @@ const REPO_ROOT = path.resolve(
   "..",
 );
 const EXTENSION_PATH = path.join(REPO_ROOT, "Extension");
+const STORAGE_PREFIX =
+  "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4";
+const DAPPS_KEY = `${STORAGE_PREFIX}:DAPPS`;
 
 // Public deterministic fixture from canonical.json. Never fund this account.
 const TEST_ONLY_HEX_SEED =
@@ -34,37 +56,6 @@ const CHECKSUM_ACCOUNT =
   "Q6aFB7dFC849bC16E439033DfEE7B296484619Db8fc7e3b7c20a1b1688B128259338aFfd79b7cdda8F28509607bc26eB67a4799Ae457Ec82b57A6a57dea04C194";
 const CANONICAL_ACCOUNT = `Q${CHECKSUM_ACCOUNT.slice(1).toLowerCase()}`;
 const MESSAGE_HEX = "0x5175616e746153776170205149502d353520453245";
-
-interface QrlProvider {
-  request(args: { method: string; params?: unknown[] }): Promise<unknown>;
-  on(event: "accountsChanged", listener: (accounts: string[]) => void): void;
-  chainId: string | null;
-  selectedAddress: string | null;
-}
-
-interface DAppRequestState {
-  done: boolean;
-  result?: unknown;
-  error?: { code?: number; message: string };
-}
-
-interface DAppWindow extends Window {
-  qrlProvider?: QrlProvider;
-  accountEvents: string[][];
-  requestState?: DAppRequestState;
-  requestSettlements: number;
-  trackedRequestStates: Record<string, DAppRequestState>;
-  trackedRequestSettlements: Record<string, number>;
-}
-
-interface SignProof {
-  signature: string;
-  publicKey: string;
-  descriptor: string;
-  signer: string;
-  digest: string;
-  schemeVersion: string;
-}
 
 const dAppHtml = `<!doctype html>
 <html>
@@ -111,23 +102,13 @@ const rpcResult = (method: string): unknown => {
   }
 };
 
-const readBody = async (request: IncomingMessage): Promise<string> => {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString("utf8");
-};
-
 const handleRpc = async (
   request: IncomingMessage,
   response: ServerResponse,
   methods: string[],
   waitForHeldRpc: (methods: string[]) => Promise<void>,
 ) => {
-  const body = JSON.parse(await readBody(request)) as
-    | { id?: string | number; method: string }
-    | Array<{ id?: string | number; method: string }>;
+  const body = await readRpcBody(request);
   const requests = Array.isArray(body) ? body : [body];
   methods.push(...requests.map(({ method }) => method));
   await waitForHeldRpc(requests.map(({ method }) => method));
@@ -149,17 +130,25 @@ const startFixtureServer = async () => {
   let heldRpcResolvers: Array<() => void> = [];
   const waitForHeldRpc = async (methods: string[]) => {
     if (!methods.some((method) => heldRpcMethods.has(method))) return;
-    await new Promise<void>((resolve) => heldRpcResolvers.push(resolve));
+    await new Promise<void>((resolve) => {
+      heldRpcResolvers.push(resolve);
+    });
   };
   const releaseHeldRpc = () => {
     heldRpcMethods.clear();
     const resolvers = heldRpcResolvers;
     heldRpcResolvers = [];
-    resolvers.forEach((resolve) => resolve());
+    resolvers.forEach((resolve) => {
+      resolve();
+    });
   };
   const server = createServer((request, response) => {
     if (request.method === "POST" && request.url === "/rpc") {
-      void handleRpc(request, response, rpcMethods, waitForHeldRpc);
+      handleRpc(request, response, rpcMethods, waitForHeldRpc).catch(
+        (error: unknown) => {
+          reportFixtureError(response, error);
+        },
+      );
       return;
     }
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -178,59 +167,30 @@ const startFixtureServer = async () => {
     releaseHeldRpc,
     close: () => {
       releaseHeldRpc();
-      return new Promise<void>((resolve) => server.close(() => resolve()));
+      return closeFixtureServer(server);
     },
   };
 };
 
 const waitForProvider = async (page: Page) => {
-  await page.waitForFunction(() =>
-    Boolean((window as unknown as DAppWindow).qrlProvider),
-  );
+  await page.waitForFunction(hasFixtureProvider);
 };
 
-const beginRequest = async (page: Page, method: string, params?: unknown[]) => {
-  await page.evaluate(
-    ({ requestMethod, requestParams }) => {
-      const dApp = window as unknown as DAppWindow;
-      if (!dApp.qrlProvider) throw new Error("Provider unavailable");
-      dApp.requestState = { done: false };
-      dApp.requestSettlements = 0;
-      void dApp.qrlProvider
-        .request({ method: requestMethod, params: requestParams })
-        .then((result) => {
-          dApp.requestSettlements += 1;
-          dApp.requestState = { done: true, result };
-        })
-        .catch((error: unknown) => {
-          dApp.requestSettlements += 1;
-          const rpcError = error as { code?: number; message?: string };
-          dApp.requestState = {
-            done: true,
-            error: {
-              code: rpcError.code,
-              message: rpcError.message ?? String(error),
-            },
-          };
-        });
-    },
-    { requestMethod: method, requestParams: params },
-  );
+const beginRequest = async (
+  page: Page,
+  method: string,
+  params?: DAppRequest["params"],
+) => {
+  await page.evaluate(beginFixtureRequest, {
+    stateKey: "requestState" as const,
+    settlementsKey: "requestSettlements" as const,
+    method,
+    params,
+  });
 };
 
-const requestResult = async <T>(page: Page): Promise<T> => {
-  await page.waitForFunction(
-    () => (window as unknown as DAppWindow).requestState?.done === true,
-  );
-  const state = await page.evaluate(
-    () => (window as unknown as DAppWindow).requestState as DAppRequestState,
-  );
-  if (state.error)
-    throw new Error(
-      `RPC ${state.error.code ?? "error"}: ${state.error.message}`,
-    );
-  return state.result as T;
-};
+const requestResult = (page: Page) =>
+  fixtureRequestResult(page, { stateKey: "requestState" as const });
 
 const beginTrackedRequest = async (
   page: Page,
@@ -238,52 +198,20 @@ const beginTrackedRequest = async (
   method: string,
   params?: unknown[],
 ) => {
-  await page.evaluate(
-    ({ requestKey, requestMethod, requestParams }) => {
-      const dApp = window as unknown as DAppWindow;
-      if (!dApp.qrlProvider) throw new Error("Provider unavailable");
-      dApp.trackedRequestStates[requestKey] = { done: false };
-      dApp.trackedRequestSettlements[requestKey] = 0;
-      void dApp.qrlProvider
-        .request({ method: requestMethod, params: requestParams })
-        .then((result) => {
-          dApp.trackedRequestSettlements[requestKey] += 1;
-          dApp.trackedRequestStates[requestKey] = { done: true, result };
-        })
-        .catch((error: unknown) => {
-          dApp.trackedRequestSettlements[requestKey] += 1;
-          const rpcError = error as { code?: number; message?: string };
-          dApp.trackedRequestStates[requestKey] = {
-            done: true,
-            error: {
-              code: rpcError.code,
-              message: rpcError.message ?? String(error),
-            },
-          };
-        });
-    },
-    { requestKey: key, requestMethod: method, requestParams: params },
-  );
+  await page.evaluate(beginFixtureRequest, {
+    stateKey: "trackedRequestStates" as const,
+    requestKey: key,
+    settlementsKey: "trackedRequestSettlements" as const,
+    method,
+    params,
+  });
 };
 
-const trackedRequestResult = async <T>(page: Page, key: string): Promise<T> => {
-  await page.waitForFunction(
-    (requestKey) =>
-      (window as unknown as DAppWindow).trackedRequestStates[requestKey]
-        ?.done === true,
-    key,
-  );
-  const state = await page.evaluate(
-    (requestKey) =>
-      (window as unknown as DAppWindow).trackedRequestStates[requestKey],
-    key,
-  );
-  if (state.error)
-    throw new Error(
-      `RPC ${state.error.code ?? "error"}: ${state.error.message}`,
-    );
-  return state.result as T;
-};
+const trackedRequestResult = (page: Page, key: string) =>
+  fixtureRequestResult(page, {
+    stateKey: "trackedRequestStates" as const,
+    requestKey: key,
+  });
 
 const approveCurrentRequest = async (extensionPage: Page) => {
   const yes = extensionPage.getByRole("button", { name: "Yes" });
@@ -320,45 +248,40 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
       context.serviceWorkers()[0] ??
       (await context.waitForEvent("serviceworker"));
     const extensionId = new URL(serviceWorker.url()).host;
-    await serviceWorker.evaluate(
-      async ({ rpcUrl }) => {
-        await chrome.storage.local.set({
-          KEYSTORES: "legacy-v2-encrypted-record",
-          ACCOUNTS: { ALL_ACCOUNTS: [`Q${"a".repeat(40)}`] },
-          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:SETTINGS":
+    await writeStorage(serviceWorker, "local", {
+      KEYSTORES: "legacy-v2-encrypted-record",
+      ACCOUNTS: { ALL_ACCOUNTS: [`Q${"a".repeat(40)}`] },
+      "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:SETTINGS":
+        {
+          sidePanelPreferred: true,
+          phishingDetectionEnabled: false,
+          autoLockMinutes: 30,
+        },
+      "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:BLOCKCHAINS":
+        {
+          ACTIVE_BLOCKCHAIN: "0x301825",
+          ALL_BLOCKCHAINS: [
             {
-              sidePanelPreferred: true,
-              phishingDetectionEnabled: false,
-              autoLockMinutes: 30,
+              chainId: "0x301825",
+              chainName: "QRL E2E Testnet",
+              rpcUrls: [`${fixture.origin}/rpc`],
+              blockExplorerUrls: ["https://example.invalid"],
+              nativeCurrency: {
+                name: "Quanta",
+                symbol: "Quanta",
+                decimals: 18,
+              },
+              iconUrls: [],
+              defaultRpcUrl: `${fixture.origin}/rpc`,
+              defaultBlockExplorerUrl: "https://example.invalid",
+              defaultIconUrl: "",
+              isTestnet: true,
+              defaultWsRpcUrl: `${fixture.origin}/rpc`,
+              isCustomChain: true,
             },
-          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:BLOCKCHAINS":
-            {
-              ACTIVE_BLOCKCHAIN: "0x301825",
-              ALL_BLOCKCHAINS: [
-                {
-                  chainId: "0x301825",
-                  chainName: "QRL E2E Testnet",
-                  rpcUrls: [rpcUrl],
-                  blockExplorerUrls: ["https://example.invalid"],
-                  nativeCurrency: {
-                    name: "Quanta",
-                    symbol: "Quanta",
-                    decimals: 18,
-                  },
-                  iconUrls: [],
-                  defaultRpcUrl: rpcUrl,
-                  defaultBlockExplorerUrl: "https://example.invalid",
-                  defaultIconUrl: "",
-                  isTestnet: true,
-                  defaultWsRpcUrl: rpcUrl,
-                  isCustomChain: true,
-                },
-              ],
-            },
-        });
-      },
-      { rpcUrl: `${fixture.origin}/rpc` },
-    );
+          ],
+        },
+    });
 
     let extensionPage = await context.newPage();
     const pageErrors: string[] = [];
@@ -412,30 +335,7 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
     await expect
       .poll(
         () =>
-          serviceWorker.evaluate(async (expectedAccount) => {
-            const {
-              ["v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:KEYSTORES"]:
-                KEYSTORES,
-              ["v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:ACCOUNTS"]:
-                ACCOUNTS,
-            } = await chrome.storage.local.get([
-              "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:KEYSTORES",
-              "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:ACCOUNTS",
-            ]);
-            const keystores = JSON.parse(KEYSTORES ?? "[]") as Array<{
-              address?: string;
-            }>;
-            const normalizedExpected = expectedAccount.toLowerCase();
-            return (
-              keystores.some(
-                ({ address }) => address?.toLowerCase() === normalizedExpected,
-              ) &&
-              ACCOUNTS?.ALL_ACCOUNTS?.some(
-                (account: string) =>
-                  account.toLowerCase() === normalizedExpected,
-              )
-            );
-          }, CHECKSUM_ACCOUNT),
+          hasFixtureAccount(serviceWorker, STORAGE_PREFIX, CHECKSUM_ACCOUNT),
         { timeout: 60_000 },
       )
       .toBe(true);
@@ -452,11 +352,7 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
     await dAppPage.bringToFront();
     await waitForProvider(dAppPage);
     await expect
-      .poll(() =>
-        dAppPage.evaluate(
-          () => (window as unknown as DAppWindow).qrlProvider?.chainId ?? null,
-        ),
-      )
+      .poll(() => dAppPage.evaluate(readProviderProperty, "chainId"))
       .toBe("0x301825");
     expect(fixture.rpcMethods).toContain("qrl_chainId");
     await beginRequest(dAppPage, "qrl_walletCapabilities");
@@ -467,15 +363,11 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
         "0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4",
     });
     expect(
-      await dAppPage.evaluate(
-        () => (window as unknown as DAppWindow).qrlProvider?.selectedAddress,
-      ),
+      await dAppPage.evaluate(readProviderProperty, "selectedAddress"),
     ).toBeNull();
-    expect(
-      await serviceWorker.evaluate(
-        async () => (await chrome.storage.local.get("KEYSTORES")).KEYSTORES,
-      ),
-    ).toBe("legacy-v2-encrypted-record");
+    expect(await readStoredValue(serviceWorker, "local", "KEYSTORES")).toBe(
+      "legacy-v2-encrypted-record",
+    );
 
     const blockCallsBeforeRestart = fixture.rpcMethods.filter(
       (method) => method === "qrl_blockNumber",
@@ -540,15 +432,13 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
     fixture.releaseHeldRpc();
     await expect(
       Promise.all([
-        trackedRequestResult<string>(dAppPage, "interrupted"),
-        trackedRequestResult<string>(dAppPage, "during-reconnect"),
+        trackedRequestResult(dAppPage, "interrupted"),
+        trackedRequestResult(dAppPage, "during-reconnect"),
       ]),
     ).resolves.toEqual(["0x1", "myqrlwallet-e2e"]);
     await dAppPage.waitForTimeout(100);
     expect(
-      await dAppPage.evaluate(
-        () => (window as unknown as DAppWindow).trackedRequestSettlements,
-      ),
+      await dAppPage.evaluate(readWindowValue, "trackedRequestSettlements"),
     ).toMatchObject({ interrupted: 1, "during-reconnect": 1 });
     await dAppPage.waitForTimeout(500);
     expect(
@@ -576,8 +466,12 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
     await beginRequest(dAppPage, "qrl_requestAccounts");
     await dAppPage.waitForTimeout(500);
     const earlyRequestState = await dAppPage.evaluate(
-      () => (window as unknown as DAppWindow).requestState,
+      readWindowValue,
+      "requestState",
     );
+    if (earlyRequestState !== undefined && !isRequestState(earlyRequestState)) {
+      throw new Error("Invalid fixture request state");
+    }
     if (earlyRequestState?.error) {
       throw new Error(
         `qrl_requestAccounts failed before approval: ${JSON.stringify(earlyRequestState.error)}`,
@@ -585,35 +479,19 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
     }
     await expect
       .poll(() =>
-        extensionPage.evaluate(
-          async () =>
-            (
-              await chrome.storage.session.get(
-                "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS",
-              )
-            )[
-              "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS"
-            ]?.DAPPS_REQUEST_DATA?.method ?? null,
+        readPendingRequest(extensionPage, DAPPS_KEY).then(
+          (request) => request?.method ?? null,
         ),
       )
       .toBe("qrl_requestAccounts");
     await approveCurrentRequest(extensionPage);
-    await expect(requestResult<string[]>(dAppPage)).resolves.toEqual([
-      CHECKSUM_ACCOUNT,
-    ]);
+    await expect(requestResult(dAppPage)).resolves.toEqual([CHECKSUM_ACCOUNT]);
 
-    const storedConnection = await extensionPage.evaluate(
-      async (origin) =>
-        (
-          await chrome.storage.local.get(
-            "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS",
-          )
-        )[
-          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS"
-        ]?.ALL_DAPPS?.[origin],
+    const connection = storedConnection(
+      await readStoredValue(extensionPage, "local", DAPPS_KEY),
       fixture.origin,
     );
-    expect(storedConnection?.accounts).toEqual([CHECKSUM_ACCOUNT]);
+    expect(connection?.accounts).toEqual([CHECKSUM_ACCOUNT]);
 
     await beginRequest(dAppPage, "qrl_sendTransaction", [
       {
@@ -628,13 +506,10 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
     await expect(
       extensionPage.getByRole("button", { name: "Yes" }),
     ).toBeEnabled();
-    const transactionChain = await extensionPage.evaluate(async () => {
-      const key =
-        "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS";
-      return (await chrome.storage.session.get(key))[key]?.DAPPS_REQUEST_DATA
-        ?.params?.[0]?.chainId;
-    });
-    expect(transactionChain).toBe("0x301825");
+    const transaction = readApprovalTransaction(
+      (await readPendingRequest(extensionPage, DAPPS_KEY))?.params,
+    );
+    expect(transaction?.chainId).toBe("0x301825");
     await extensionPage
       .getByRole("button", { name: "No", exact: true })
       .click();
@@ -662,11 +537,7 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
     await dAppPage.reload();
     await waitForProvider(dAppPage);
     await expect
-      .poll(() =>
-        dAppPage.evaluate(
-          () => (window as unknown as DAppWindow).qrlProvider?.selectedAddress,
-        ),
-      )
+      .poll(() => dAppPage.evaluate(readProviderProperty, "selectedAddress"))
       .toBe(CHECKSUM_ACCOUNT);
     // The provider state is served from the stored active chain now, so a
     // page load asks the node nothing. It used to issue qrl_chainId and
@@ -682,7 +553,8 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
       MESSAGE_HEX,
     ]);
     await approveCurrentRequest(extensionPage);
-    const proof = await requestResult<SignProof>(dAppPage);
+    const proof = await requestResult(dAppPage);
+    if (!isSignProof(proof)) throw new Error("Invalid fixture signing proof");
     const digest = computeMessageDigest(hexToBytes(MESSAGE_HEX));
     expect(proof.schemeVersion).toBe(SCHEME_VERSION_MSG);
     expect(proof.digest).toBe(bytesToHex(digest));
@@ -717,60 +589,35 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
       .click();
 
     await expect
-      .poll(() =>
-        dAppPage.evaluate(
-          () => (window as unknown as DAppWindow).accountEvents,
-        ),
-      )
+      .poll(() => dAppPage.evaluate(readWindowValue, "accountEvents"))
       .toContainEqual([]);
     await expect
-      .poll(() =>
-        dAppPage.evaluate(
-          () =>
-            (window as unknown as DAppWindow).qrlProvider?.selectedAddress ??
-            null,
-        ),
-      )
+      .poll(() => dAppPage.evaluate(readProviderProperty, "selectedAddress"))
       .toBeNull();
     await expect
       .poll(() =>
-        extensionPage.evaluate(
-          async (origin) =>
-            (
-              await chrome.storage.local.get(
-                "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS",
-              )
-            )[
-              "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS"
-            ]?.ALL_DAPPS?.[origin] ?? null,
-          fixture.origin,
+        readStoredValue(extensionPage, "local", DAPPS_KEY).then(
+          (stored) => storedConnection(stored, fixture.origin) ?? null,
         ),
       )
       .toBeNull();
 
-    await beginRequest(dAppPage, "qrl_requestAccounts");
-    await approveCurrentRequest(extensionPage);
-    await expect(requestResult<string[]>(dAppPage)).resolves.toEqual([
-      CHECKSUM_ACCOUNT,
-    ]);
+    await beginRequest(dAppPage, "qrl_requestAccounts", {});
     await expect
-      .poll(() =>
-        dAppPage.evaluate(
-          () => (window as unknown as DAppWindow).accountEvents,
-        ),
-      )
+      .poll(() => readPendingRequest(extensionPage, DAPPS_KEY))
+      .toMatchObject({ method: "qrl_requestAccounts", params: {} });
+    await approveCurrentRequest(extensionPage);
+    await expect(requestResult(dAppPage)).resolves.toEqual([CHECKSUM_ACCOUNT]);
+    await expect
+      .poll(() => dAppPage.evaluate(readWindowValue, "accountEvents"))
       .toContainEqual([CHECKSUM_ACCOUNT]);
 
     await beginRequest(dAppPage, "wallet_revokePermissions", [
       { qrl_accounts: {} },
     ]);
-    await expect(requestResult<null>(dAppPage)).resolves.toBeNull();
+    await expect(requestResult(dAppPage)).resolves.toBeNull();
     await expect
-      .poll(() =>
-        dAppPage.evaluate(
-          () => (window as unknown as DAppWindow).accountEvents,
-        ),
-      )
+      .poll(() => dAppPage.evaluate(readWindowValue, "accountEvents"))
       .toContainEqual([]);
     // The authorization checks still read the chain from the node; only
     // the per-page-load provider state stopped doing so.
@@ -783,11 +630,9 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
       fixture.rpcMethods.filter((method) => method === "net_version"),
     ).toHaveLength(0);
     expect(providerLifecycleErrors).toEqual([]);
-    expect(
-      await extensionPage.evaluate(
-        async () => (await chrome.storage.local.get("KEYSTORES")).KEYSTORES,
-      ),
-    ).toBe("legacy-v2-encrypted-record");
+    expect(await readStoredValue(extensionPage, "local", "KEYSTORES")).toBe(
+      "legacy-v2-encrypted-record",
+    );
   } finally {
     await context.close();
     await fixture.close();

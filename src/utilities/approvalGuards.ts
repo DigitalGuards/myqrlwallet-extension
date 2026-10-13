@@ -2,6 +2,7 @@ import type {
   BlockchainAdditionalDataType,
   BlockchainDataType,
 } from "@/configuration/qrlBlockchainConfig";
+import type { DAppRequestType } from "@/scripts/middlewares/middlewareTypes";
 
 export const isApprovalRecord = (
   value: unknown,
@@ -80,6 +81,36 @@ export const isApprovalSender = (value: unknown): value is ApprovalSender =>
   ["url", "favIconUrl", "title", "mainFrameOrigin"].every(
     (key) => value[key] === undefined || typeof value[key] === "string",
   );
+
+export const isDAppRequest = (value: unknown): value is DAppRequestType => {
+  if (!isApprovalRecord(value)) return false;
+  const requestData = value.requestData;
+  const phishing = value.phishingResult;
+  return (
+    typeof value.method === "string" &&
+    (value.requestId === undefined || typeof value.requestId === "string") &&
+    (value.authorizedChainId === undefined ||
+      typeof value.authorizedChainId === "string") &&
+    (requestData === undefined ||
+      (isApprovalRecord(requestData) &&
+        (requestData.senderData === undefined ||
+          (isApprovalSender(requestData.senderData) &&
+            (!("tabId" in requestData.senderData) ||
+              requestData.senderData.tabId === undefined ||
+              typeof requestData.senderData.tabId === "number"))))) &&
+    (phishing === undefined ||
+      (isApprovalRecord(phishing) &&
+        typeof phishing.isDomainPhishing === "boolean" &&
+        (phishing.matchType === undefined ||
+          typeof phishing.matchType === "string") &&
+        (phishing.matchedDomain === undefined ||
+          typeof phishing.matchedDomain === "string") &&
+        (phishing.detectorStatus === undefined ||
+          phishing.detectorStatus === "ready" ||
+          phishing.detectorStatus === "initializing" ||
+          phishing.detectorStatus === "unavailable")))
+  );
+};
 
 // Keep the original records intact; this view only needs their display fields.
 export type ApprovalBlockchain = Pick<

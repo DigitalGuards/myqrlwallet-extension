@@ -1,44 +1,51 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import type StorageUtil from "@/utilities/storageUtil";
+import type { PriceCache } from "@/utilities/storageUtil";
 
 const { mockGetPriceCache, mockSetPriceCache } = vi.hoisted(() => ({
-  mockGetPriceCache: vi.fn().mockResolvedValue(null),
-  mockSetPriceCache: vi.fn().mockResolvedValue(undefined),
+  mockGetPriceCache: vi
+    .fn<typeof StorageUtil.getPriceCache>()
+    .mockResolvedValue(null),
+  mockSetPriceCache: vi
+    .fn<typeof StorageUtil.setPriceCache>()
+    .mockResolvedValue(undefined),
 }));
 
 vi.mock("@/utilities/storageUtil", () => ({
   __esModule: true,
   default: {
-    getPriceCache: (...args: any[]) => mockGetPriceCache(...args),
-    setPriceCache: (...args: any[]) => mockSetPriceCache(...args),
+    getPriceCache: mockGetPriceCache,
+    setPriceCache: mockSetPriceCache,
   },
 }));
 
 // Mock global fetch
-const mockFetch = vi.fn();
-(globalThis as any).fetch = mockFetch;
+const mockFetch = vi.fn<typeof fetch>();
 
 const COINGECKO_HOST = "api.coingecko.com";
 
 /** Answers the CoinGecko call and lets every other URL fail. */
 const mockCoinGecko = (qrlData: Record<string, number>) => {
-  mockFetch.mockImplementation(async (url: string) =>
-    String(url).includes(COINGECKO_HOST)
-      ? {
-          ok: true,
-          json: async () => ({ "quantum-resistant-ledger": qrlData }),
-        }
-      : { ok: false, status: 404 },
-  );
+  mockFetch.mockImplementation((input) => {
+    const url = input instanceof Request ? input.url : String(input);
+    return Promise.resolve(
+      url.includes(COINGECKO_HOST)
+        ? Response.json({ "quantum-resistant-ledger": qrlData })
+        : new Response(null, { status: 404 }),
+    );
+  });
 };
 
-/** Refuses the CoinGecko call the way its CDN does, and answers the
- *  explorer fallback. */
+/** Refuses the CoinGecko call and answers the explorer fallback. */
 const mockCoinGeckoBlocked = (overview: unknown) => {
-  mockFetch.mockImplementation(async (url: string) =>
-    String(url).includes(COINGECKO_HOST)
-      ? { ok: false, status: 403 }
-      : { ok: true, json: async () => overview },
-  );
+  mockFetch.mockImplementation((input) => {
+    const url = input instanceof Request ? input.url : String(input);
+    return Promise.resolve(
+      url.includes(COINGECKO_HOST)
+        ? new Response(null, { status: 403 })
+        : Response.json(overview),
+    );
+  });
 };
 
 describe("PriceStore", () => {
@@ -49,12 +56,14 @@ describe("PriceStore", () => {
     vi.useFakeTimers();
     mockGetPriceCache.mockResolvedValue(null);
     mockFetch.mockReset();
+    vi.stubGlobal("fetch", mockFetch);
     const module = await import("@/stores/priceStore");
     PriceStore = module.default;
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("should initialize with default state", () => {
@@ -204,18 +213,17 @@ describe("PriceStore", () => {
   });
 
   it("keeps a fresher fetch when the cache read lands after it", async () => {
-    let releaseCache: (value: unknown) => void = () => {};
+    let releaseCache: (value: PriceCache | null) => void = () => {};
     mockGetPriceCache.mockReturnValueOnce(
       new Promise((resolve) => {
         releaseCache = resolve;
       }),
     );
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
+    mockFetch.mockResolvedValue(
+      Response.json({
         "quantum-resistant-ledger": { usd: 9.99, usd_24h_change: 1 },
       }),
-    });
+    );
 
     const store = new PriceStore();
     const initializing = store.initialize();
@@ -298,9 +306,8 @@ describe("PriceStore", () => {
   // ── fetchPrices ──
 
   it("should fetch prices from CoinGecko and update state", async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
+    mockFetch.mockResolvedValue(
+      Response.json({
         "quantum-resistant-ledger": {
           usd: 1.5,
           eur: 1.3,
@@ -308,7 +315,7 @@ describe("PriceStore", () => {
           eur_24h_change: 2.1,
         },
       }),
-    });
+    );
 
     const store = new PriceStore();
     await store.fetchPrices();
@@ -339,7 +346,7 @@ describe("PriceStore", () => {
   });
 
   it("should set hasError on non-ok response", async () => {
-    mockFetch.mockResolvedValue({ ok: false, status: 429 });
+    mockFetch.mockResolvedValue(new Response(null, { status: 429 }));
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const store = new PriceStore();
@@ -351,10 +358,7 @@ describe("PriceStore", () => {
   });
 
   it("should set hasError when response has no QRL data", async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
-    });
+    mockFetch.mockResolvedValue(Response.json({}));
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const store = new PriceStore();
@@ -367,12 +371,11 @@ describe("PriceStore", () => {
   // ── startAutoRefresh / stopAutoRefresh ──
 
   it("should start auto-refresh and call fetchPrices on interval", async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
+    mockFetch.mockResolvedValue(
+      Response.json({
         "quantum-resistant-ledger": { usd: 1.5 },
       }),
-    });
+    );
 
     const store = new PriceStore();
     store.startAutoRefresh();
@@ -538,7 +541,7 @@ describe("PriceStore", () => {
 
   it("reports an error only when both sources fail", async () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mockFetch.mockResolvedValue({ ok: false, status: 503 });
+    mockFetch.mockResolvedValue(new Response(null, { status: 503 }));
 
     const store = new PriceStore();
     await store.fetchPrices();
@@ -561,23 +564,20 @@ describe("PriceStore", () => {
   });
 
   it("does not start a second request while one is in flight", async () => {
-    let release: (value: unknown) => void = () => {};
+    let release: (value: Response) => void = () => {};
     mockFetch.mockImplementation(
-      async () =>
-        await new Promise((resolve) => {
+      () =>
+        new Promise<Response>((resolve) => {
           release = resolve;
         }),
     );
 
     const store = new PriceStore();
     const first = store.fetchPrices();
-    void store.fetchPrices();
+    await store.fetchPrices();
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
-    release({
-      ok: true,
-      json: async () => ({ "quantum-resistant-ledger": { usd: 4 } }),
-    });
+    release(Response.json({ "quantum-resistant-ledger": { usd: 4 } }));
     await first;
     expect(store.getPrice("usd")).toBe(4);
   });

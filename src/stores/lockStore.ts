@@ -20,6 +20,10 @@ import {
   runWorkerJob,
   splitIntoChunks,
 } from "@/scripts/workers/keystoreWorkerPool";
+import {
+  isChangePasswordWorkerResponse,
+  isUnlockWorkerResponse,
+} from "@/scripts/workers/keystoreWorkerGuards";
 import StorageUtil, {
   LockState,
   PRICE_CACHE_IDENTIFIER,
@@ -30,7 +34,8 @@ import {
   LEGACY_QRL_ADDRESS_MIGRATION_ERROR,
 } from "@/utilities/addressUtil";
 import { checkForLastError } from "@/scripts/utils/scriptUtils";
-import { Web3BaseWalletAccount } from "@theqrl/web3";
+import { isRecord } from "@/utilities/storageGuards";
+import { isLockState } from "./lockStoreGuards";
 import { action, makeAutoObservable, runInAction } from "mobx";
 import browser from "webextension-polyfill";
 
@@ -107,7 +112,9 @@ class LockStore {
     // should linger and hold the worker awake before the persistent port
     // (connected later, once genuinely unlocked) has any reason to exist.
     this.wakeServiceWorker();
-    this.initialize();
+    this.initialize().catch((error: unknown) => {
+      console.warn("QrlWeb3Wallet: Failed to initialize the lock state", error);
+    });
     this.registerActivityPing();
   }
 
@@ -148,7 +155,7 @@ class LockStore {
       // lockManagerListener's auto-lock activity allow-list, so this can
       // never re-arm auto-lock itself - only the USER_ACTIVITY ping above
       // does that.
-      this.readLockState();
+      void this.readLockState();
     };
     const passiveListener: AddEventListenerOptions = { passive: true };
     document.addEventListener("pointerdown", ping, passiveListener);
@@ -293,10 +300,12 @@ class LockStore {
         this.bootAttempt = i + 1;
       });
       try {
-        const { isLocked, hasPasswordSet } = await browser.runtime.sendMessage({
+        const response: unknown = await browser.runtime.sendMessage({
           name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
         });
-        this.applyLockState(isLocked, hasPasswordSet);
+        if (!isLockState(response))
+          throw new Error("Invalid lock state response");
+        this.applyLockState(response.isLocked, response.hasPasswordSet);
         break;
       } catch {
         // Nudge again to wake the SW. Backoff starts at 150ms so a cold SW
@@ -317,7 +326,7 @@ class LockStore {
   }
 
   initializeStorageListener() {
-    browser.storage.onChanged.addListener(async (changes, areaName) => {
+    browser.storage.onChanged.addListener((changes, areaName) => {
       const changedKeys = Object.keys(changes);
       if (changedKeys.length === 0) return;
       // Ignore the automated 60s price-cache refresh. It is not user
@@ -344,7 +353,7 @@ class LockStore {
       ) {
         return;
       }
-      await this.readLockState();
+      void this.readLockState();
     });
   }
 
@@ -362,10 +371,10 @@ class LockStore {
   async ensureWalletPassword(): Promise<void> {
     let hasPassword = false;
     try {
-      const response = (await browser.runtime.sendMessage({
+      const response: unknown = await browser.runtime.sendMessage({
         name: LOCK_MANAGER_MESSAGES.HAS_WALLET_PASSWORD,
-      })) as { hasPassword?: boolean } | undefined;
-      hasPassword = response?.hasPassword === true;
+      });
+      hasPassword = isRecord(response) && response.hasPassword === true;
     } catch {
       hasPassword = false;
     }
@@ -377,11 +386,13 @@ class LockStore {
   async getMnemonicPhrases(accountAddress: string) {
     // Exactly the one requested account's key (F4), via the chokepoint
     // every signing caller shares.
-    const key: DecryptedKeyType = await browser.runtime.sendMessage({
+    const key: unknown = await browser.runtime.sendMessage({
       name: LOCK_MANAGER_MESSAGES.GET_DECRYPTED_KEY_FOR_ADDRESS,
       data: accountAddress,
     });
-    return key?.mnemonicPhrases ?? "";
+    return isRecord(key) && typeof key.mnemonicPhrases === "string"
+      ? key.mnemonicPhrases
+      : "";
   }
 
   /**
@@ -393,14 +404,17 @@ class LockStore {
    * omits it and the worker encrypts with the password its unlock session
    * already holds, which keeps that plaintext out of this page entirely.
    */
-  async encryptAccount(account: Web3BaseWalletAccount, password?: string) {
+  async encryptAccount(account: unknown, password?: string) {
     // Never persist a keystore under an empty password (the SW rejects it too;
     // this stops the round-trip early and keeps the guarantee visible here).
     if (password !== undefined && !password) {
       throw new Error("WALLET_PASSWORD_UNAVAILABLE");
     }
     const accountData: EncryptAccountType = {
-      seed: account?.seed ?? "",
+      seed:
+        isRecord(account) && typeof account.seed === "string"
+          ? account.seed
+          : "",
       ...(password === undefined ? {} : { password }),
     };
     await browser.runtime.sendMessage({
@@ -452,6 +466,8 @@ class LockStore {
               ),
             { keystores: chunk, oldPassword, newPassword },
             { success: false, wrongPassword: false },
+            (value): value is ChangePasswordWorkerResponse =>
+              isChangePasswordWorkerResponse(value, chunk),
           ),
         ),
       );
@@ -516,10 +532,11 @@ class LockStore {
    */
   async readLockState() {
     try {
-      const { isLocked, hasPasswordSet } = await browser.runtime.sendMessage({
+      const response: unknown = await browser.runtime.sendMessage({
         name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
       });
-      this.applyLockState(isLocked, hasPasswordSet);
+      if (!isLockState(response)) return;
+      this.applyLockState(response.isLocked, response.hasPasswordSet);
     } catch {
       // SW not reachable - will be retried via the storage listener or the
       // next activity poll. If a keep-alive port is open, its own
@@ -568,10 +585,13 @@ class LockStore {
     await browser.runtime.sendMessage({
       name: LOCK_MANAGER_MESSAGES.LOCK,
     });
-    const { isLocked } = await browser.runtime.sendMessage({
+    const response: unknown = await browser.runtime.sendMessage({
       name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
     });
-    this.isLocked = isLocked;
+    this.isLocked =
+      isRecord(response) && typeof response.isLocked === "boolean"
+        ? response.isLocked
+        : true;
     // lock() closes the keep-alive port itself immediately here, on
     // purpose: waiting on the port's own onDisconnect (or Chrome's idle
     // timer) to eventually drop it would leave it open for a while after
@@ -642,6 +662,8 @@ class LockStore {
               ),
             { keystores: chunk, password },
             { success: false, wrongPassword: false },
+            (value): value is UnlockWorkerResponse =>
+              isUnlockWorkerResponse(value, chunk),
           ),
         ),
       );
@@ -658,7 +680,7 @@ class LockStore {
       // peak memory matches the old single-worker path, before giving up.
       responses = await runUnlockChunks([keyStores]);
       const retry = responses[0];
-      if (retry && !retry.success) {
+      if (!retry.success) {
         if (retry.wrongPassword) return "wrong-password";
         throw new Error(
           "Unable to decrypt the wallet on this device right now. Close other tabs or apps to free memory and try again.",
@@ -713,10 +735,10 @@ class LockStore {
 
     // Verify the SW now considers us unlocked.
     try {
-      const { isLocked } = await browser.runtime.sendMessage({
+      const response: unknown = await browser.runtime.sendMessage({
         name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
       });
-      if (!isLocked) {
+      if (isRecord(response) && response.isLocked === false) {
         runInAction(() => {
           this.isLocked = false;
         });
@@ -724,7 +746,14 @@ class LockStore {
         // fix, PR #71 audit) so Chrome does not idle-kill this worker
         // instance out from under an active session.
         this.connectKeepAlive();
-        StorageUtil.updateLockStateTimeStamp(LockState.UNLOCKED);
+        StorageUtil.updateLockStateTimeStamp(LockState.UNLOCKED).catch(
+          (error: unknown) => {
+            console.warn(
+              "QrlWeb3Wallet: failed to persist the unlock timestamp",
+              error,
+            );
+          },
+        );
         return "success";
       }
       // Still reports locked despite a successful SET_DECRYPTED_KEYS: the

@@ -1,3 +1,5 @@
+import type PhishingDetector from "eth-phishing-detect/src/detector";
+
 /**
  * A locally maintained phishing config for the QRL ecosystem.
  *
@@ -128,14 +130,16 @@ export const QRL_ALLOWLIST_DOMAINS = [
   ...THIRD_PARTY_QRL_DOMAINS,
 ].sort();
 
-export const QRL_PHISHING_CONFIG = {
+export const QRL_PHISHING_CONFIG: ConstructorParameters<
+  typeof PhishingDetector
+>[0][number] = {
   name: "QRL",
   version: 3,
   tolerance: 1,
   // Nothing is blocked outright here. Known-bad QRL domains would go in this
   // list; the fuzzylist is what catches lookalikes that nobody has reported
   // yet.
-  blocklist: [] as string[],
+  blocklist: [],
   allowlist: [...QRL_ALLOWLIST_DOMAINS],
   fuzzylist: [...QRL_FUZZY_DOMAINS],
 };

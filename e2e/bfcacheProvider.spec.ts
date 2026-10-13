@@ -1,3 +1,16 @@
+import {
+  beginFixtureRequest,
+  closeFixtureServer,
+  fixtureRequestResult,
+  hasFixtureProvider,
+  readProviderProperty,
+  readRpcBody,
+  readStoredValue,
+  readWindowValue,
+  reportFixtureError,
+  revokeFixtureAccounts,
+  writeStorage,
+} from "./fixtureHelpers";
 import { expect, test, chromium, type Page } from "@playwright/test";
 import {
   createServer,
@@ -25,28 +38,6 @@ const CHECKSUM_ACCOUNT =
 const PROFILE_PREFIX =
   "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:";
 const DAPPS_KEY = `${PROFILE_PREFIX}DAPPS`;
-
-interface QrlProvider {
-  request(args: { method: string; params?: unknown[] }): Promise<unknown>;
-  on(event: "accountsChanged", listener: (accounts: string[]) => void): void;
-  chainId: string | null;
-  selectedAddress: string | null;
-}
-
-interface DAppRequestState {
-  done: boolean;
-  result?: unknown;
-  error?: { code?: number; message: string };
-}
-
-interface DAppWindow extends Window {
-  qrlProvider?: QrlProvider;
-  accountEvents: string[][];
-  announcements: number;
-  pageShows: boolean[];
-  requestStates: Record<string, DAppRequestState>;
-  requestSettlements: Record<string, number>;
-}
 
 // Records every pageshow so the test can prove the back navigation was a
 // real back/forward-cache restore: persisted === true rules out a reload.
@@ -102,23 +93,13 @@ const rpcResult = (method: string): unknown => {
   }
 };
 
-const readBody = async (request: IncomingMessage): Promise<string> => {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString("utf8");
-};
-
 const handleRpc = async (
   request: IncomingMessage,
   response: ServerResponse,
   methods: string[],
   waitForHeldRpc: (methods: string[]) => Promise<void>,
 ) => {
-  const body = JSON.parse(await readBody(request)) as
-    | { id?: string | number; method: string }
-    | Array<{ id?: string | number; method: string }>;
+  const body = await readRpcBody(request);
   const requests = Array.isArray(body) ? body : [body];
   methods.push(...requests.map(({ method }) => method));
   await waitForHeldRpc(requests.map(({ method }) => method));
@@ -140,17 +121,25 @@ const startFixtureServer = async () => {
   let heldRpcResolvers: Array<() => void> = [];
   const waitForHeldRpc = async (methods: string[]) => {
     if (!methods.some((method) => heldRpcMethods.has(method))) return;
-    await new Promise<void>((resolve) => heldRpcResolvers.push(resolve));
+    await new Promise<void>((resolve) => {
+      heldRpcResolvers.push(resolve);
+    });
   };
   const releaseHeldRpc = () => {
     heldRpcMethods.clear();
     const resolvers = heldRpcResolvers;
     heldRpcResolvers = [];
-    resolvers.forEach((resolve) => resolve());
+    resolvers.forEach((resolve) => {
+      resolve();
+    });
   };
   const server = createServer((request, response) => {
     if (request.method === "POST" && request.url === "/rpc") {
-      void handleRpc(request, response, rpcMethods, waitForHeldRpc);
+      handleRpc(request, response, rpcMethods, waitForHeldRpc).catch(
+        (error: unknown) => {
+          reportFixtureError(response, error);
+        },
+      );
       return;
     }
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -171,7 +160,7 @@ const startFixtureServer = async () => {
     releaseHeldRpc,
     close: () => {
       releaseHeldRpc();
-      return new Promise<void>((resolve) => server.close(() => resolve()));
+      return closeFixtureServer(server);
     },
   };
 };
@@ -182,56 +171,21 @@ const beginRequest = async (
   method: string,
   params?: unknown[],
 ) => {
-  await page.evaluate(
-    ({ requestKey, requestMethod, requestParams }) => {
-      const dApp = window as unknown as DAppWindow;
-      if (!dApp.qrlProvider) throw new Error("Provider unavailable");
-      dApp.requestStates[requestKey] = { done: false };
-      dApp.requestSettlements[requestKey] = 0;
-      void dApp.qrlProvider
-        .request({ method: requestMethod, params: requestParams })
-        .then((result) => {
-          dApp.requestSettlements[requestKey] += 1;
-          dApp.requestStates[requestKey] = { done: true, result };
-        })
-        .catch((error: unknown) => {
-          dApp.requestSettlements[requestKey] += 1;
-          const rpcError = error as { code?: number; message?: string };
-          dApp.requestStates[requestKey] = {
-            done: true,
-            error: {
-              code: rpcError.code,
-              message: rpcError.message ?? String(error),
-            },
-          };
-        });
-    },
-    { requestKey: key, requestMethod: method, requestParams: params },
-  );
+  await page.evaluate(beginFixtureRequest, {
+    stateKey: "requestStates" as const,
+    requestKey: key,
+    settlementsKey: "requestSettlements" as const,
+    method,
+    params,
+  });
 };
 
-const requestResult = async <T>(
-  page: Page,
-  key: string,
-  timeout = 20_000,
-): Promise<T> => {
-  await page.waitForFunction(
-    (requestKey) =>
-      (window as unknown as DAppWindow).requestStates[requestKey]?.done ===
-      true,
-    key,
-    { timeout },
+const requestResult = (page: Page, key: string, timeout = 20_000) =>
+  fixtureRequestResult(
+    page,
+    { stateKey: "requestStates" as const, requestKey: key },
+    timeout,
   );
-  const state = await page.evaluate(
-    (requestKey) => (window as unknown as DAppWindow).requestStates[requestKey],
-    key,
-  );
-  if (state.error)
-    throw new Error(
-      `RPC ${state.error.code ?? "error"}: ${state.error.message}`,
-    );
-  return state.result as T;
-};
 
 // Chrome closes a page's extension ports when it enters the back/forward
 // cache and tells only the service worker, so the content script has to
@@ -272,56 +226,46 @@ test("provider survives a back/forward-cache round trip", async () => {
     // Seeding the connected-dApp record directly keeps this spec off the
     // approval flow that quantaSwapLifecycle.spec.ts covers; all this one
     // needs is an origin the provider reports as connected.
-    await serviceWorker.evaluate(
-      async ({ rpcUrl, origin, account, prefix }) => {
-        await chrome.storage.local.set({
-          [`${prefix}SETTINGS`]: {
-            sidePanelPreferred: true,
-            phishingDetectionEnabled: false,
-            autoLockMinutes: 30,
-          },
-          [`${prefix}BLOCKCHAINS`]: {
-            ACTIVE_BLOCKCHAIN: "0x301825",
-            ALL_BLOCKCHAINS: [
-              {
-                chainId: "0x301825",
-                chainName: "QRL E2E Testnet",
-                rpcUrls: [rpcUrl],
-                blockExplorerUrls: ["https://example.invalid"],
-                nativeCurrency: {
-                  name: "Quanta",
-                  symbol: "Quanta",
-                  decimals: 18,
-                },
-                iconUrls: [],
-                defaultRpcUrl: rpcUrl,
-                defaultBlockExplorerUrl: "https://example.invalid",
-                defaultIconUrl: "",
-                isTestnet: true,
-                defaultWsRpcUrl: rpcUrl,
-                isCustomChain: true,
-              },
-            ],
-          },
-          [`${prefix}DAPPS`]: {
-            ALL_DAPPS: {
-              [origin]: {
-                urlOrigin: origin,
-                accounts: [account],
-                blockchains: [],
-                permissions: [],
-              },
+    await writeStorage(serviceWorker, "local", {
+      [`${PROFILE_PREFIX}SETTINGS`]: {
+        sidePanelPreferred: true,
+        phishingDetectionEnabled: false,
+        autoLockMinutes: 30,
+      },
+      [`${PROFILE_PREFIX}BLOCKCHAINS`]: {
+        ACTIVE_BLOCKCHAIN: "0x301825",
+        ALL_BLOCKCHAINS: [
+          {
+            chainId: "0x301825",
+            chainName: "QRL E2E Testnet",
+            rpcUrls: [`${fixture.origin}/rpc`],
+            blockExplorerUrls: ["https://example.invalid"],
+            nativeCurrency: {
+              name: "Quanta",
+              symbol: "Quanta",
+              decimals: 18,
             },
+            iconUrls: [],
+            defaultRpcUrl: `${fixture.origin}/rpc`,
+            defaultBlockExplorerUrl: "https://example.invalid",
+            defaultIconUrl: "",
+            isTestnet: true,
+            defaultWsRpcUrl: `${fixture.origin}/rpc`,
+            isCustomChain: true,
           },
-        });
+        ],
       },
-      {
-        rpcUrl: `${fixture.origin}/rpc`,
-        origin: fixture.origin,
-        account: CHECKSUM_ACCOUNT,
-        prefix: PROFILE_PREFIX,
+      [`${PROFILE_PREFIX}DAPPS`]: {
+        ALL_DAPPS: {
+          [fixture.origin]: {
+            urlOrigin: fixture.origin,
+            accounts: [CHECKSUM_ACCOUNT],
+            blockchains: [],
+            permissions: [],
+          },
+        },
       },
-    );
+    });
 
     // The grant is seeded, but a locked wallet reports no accounts to the
     // page, exactly as qrl_accounts does. Onboarding the seeded account
@@ -356,15 +300,9 @@ test("provider survives a back/forward-cache round trip", async () => {
     const dAppPage = await context.newPage();
     await dAppPage.goto(`${fixture.origin}/dapp`);
     await dAppPage.bringToFront();
-    await dAppPage.waitForFunction(() =>
-      Boolean((window as unknown as DAppWindow).qrlProvider),
-    );
+    await dAppPage.waitForFunction(hasFixtureProvider);
     await expect
-      .poll(() =>
-        dAppPage.evaluate(
-          () => (window as unknown as DAppWindow).qrlProvider?.selectedAddress,
-        ),
-      )
+      .poll(() => dAppPage.evaluate(readProviderProperty, "selectedAddress"))
       .toBe(CHECKSUM_ACCOUNT);
 
     // Baseline: the provider answers before the round trip.
@@ -401,9 +339,7 @@ test("provider survives a back/forward-cache round trip", async () => {
     // is as far as this navigation can be awaited.
     await dAppPage.goBack({ waitUntil: "commit" });
     await expect
-      .poll(() =>
-        dAppPage.evaluate(() => (window as unknown as DAppWindow).pageShows),
-      )
+      .poll(() => dAppPage.evaluate(readWindowValue, "pageShows"))
       .toEqual([false, true]);
 
     // The read is replayed onto the rebuilt connection.
@@ -433,22 +369,15 @@ test("provider survives a back/forward-cache round trip", async () => {
     // The account subscription has to survive the restore as well: the
     // service worker registers its notification stream per port, so a
     // reconnect that never happened leaves the dApp deaf to revocation.
-    await serviceWorker.evaluate(
-      async ({ storageKey, origin }) => {
-        const stored = (await chrome.storage.local.get(storageKey))[storageKey];
-        stored.ALL_DAPPS[origin].accounts = [];
-        await chrome.storage.local.set({ [storageKey]: stored });
-      },
-      { storageKey: DAPPS_KEY, origin: fixture.origin },
+    const stored = revokeFixtureAccounts(
+      await readStoredValue(serviceWorker, "local", DAPPS_KEY),
+      fixture.origin,
     );
+    await writeStorage(serviceWorker, "local", { [DAPPS_KEY]: stored });
     await expect
-      .poll(
-        () =>
-          dAppPage.evaluate(
-            () => (window as unknown as DAppWindow).accountEvents,
-          ),
-        { timeout: 20_000 },
-      )
+      .poll(() => dAppPage.evaluate(readWindowValue, "accountEvents"), {
+        timeout: 20_000,
+      })
       .toContainEqual([]);
 
     // Back, Forward, Back on one tab caches and restores this page a second
@@ -460,9 +389,7 @@ test("provider survives a back/forward-cache round trip", async () => {
     await dAppPage.goForward({ waitUntil: "commit" });
     await dAppPage.goBack({ waitUntil: "commit" });
     await expect
-      .poll(() =>
-        dAppPage.evaluate(() => (window as unknown as DAppWindow).pageShows),
-      )
+      .poll(() => dAppPage.evaluate(readWindowValue, "pageShows"))
       .toEqual([false, true, true]);
     const secondRestoreGapMs = Date.now() - restoreStartedAt;
 
@@ -477,16 +404,10 @@ test("provider survives a back/forward-cache round trip", async () => {
 
     // Restoring a page reuses its JavaScript context, so the in-page script
     // must not have run a second time.
-    expect(
-      await dAppPage.evaluate(
-        () => (window as unknown as DAppWindow).announcements,
-      ),
-    ).toBe(1);
+    expect(await dAppPage.evaluate(readWindowValue, "announcements")).toBe(1);
     await dAppPage.waitForTimeout(500);
     expect(
-      await dAppPage.evaluate(
-        () => (window as unknown as DAppWindow).requestSettlements,
-      ),
+      await dAppPage.evaluate(readWindowValue, "requestSettlements"),
     ).toEqual({
       before: 1,
       inFlight: 1,

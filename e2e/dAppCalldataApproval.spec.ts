@@ -1,5 +1,14 @@
+import {
+  beginFixtureRequest,
+  closeFixtureServer,
+  hasFixtureProvider,
+  isRequestDone,
+  readRpcBody,
+  reportFixtureError,
+  writeStorage,
+} from "./fixtureHelpers";
 import { expect, test, chromium, type Page } from "@playwright/test";
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer } from "node:http";
 import { mkdtemp, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -32,17 +41,6 @@ const MAX_UINT256 = (1n << 256n) - 1n;
 
 const call = (signature: string, types: string[], values: unknown[]) =>
   `${encodeFunctionSignature(signature)}${encodeParameters(types, values).slice(2)}`;
-
-interface QrlProvider {
-  request(args: { method: string; params?: unknown[] }): Promise<unknown>;
-  on(event: "accountsChanged", listener: (accounts: string[]) => void): void;
-  chainId: string | null;
-}
-
-interface DAppWindow extends Window {
-  qrlProvider?: QrlProvider;
-  requestState?: { done: boolean; result?: unknown; error?: unknown };
-}
 
 const dAppHtml = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Calldata screenshot fixture</title></head>
@@ -82,21 +80,11 @@ const rpcResult = (method: string): unknown => {
   }
 };
 
-const readBody = async (request: IncomingMessage): Promise<string> => {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString("utf8");
-};
-
 const startFixtureServer = async () => {
   const server = createServer((request, response) => {
     if (request.method === "POST" && request.url === "/rpc") {
-      void (async () => {
-        const body = JSON.parse(await readBody(request)) as
-          | { id?: string | number; method: string }
-          | Array<{ id?: string | number; method: string }>;
+      (async () => {
+        const body = await readRpcBody(request);
         const requests = Array.isArray(body) ? body : [body];
         response.writeHead(200, {
           "Access-Control-Allow-Origin": "*",
@@ -110,7 +98,9 @@ const startFixtureServer = async () => {
         response.end(
           JSON.stringify(Array.isArray(body) ? results : results[0]),
         );
-      })();
+      })().catch((error: unknown) => {
+        reportFixtureError(response, error);
+      });
       return;
     }
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -123,27 +113,17 @@ const startFixtureServer = async () => {
   }
   return {
     origin: `http://127.0.0.1:${address.port}`,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    close: () => closeFixtureServer(server),
   };
 };
 
 const beginRequest = async (page: Page, method: string, params: unknown[]) => {
-  await page.evaluate(
-    ({ requestMethod, requestParams }) => {
-      const dApp = window as unknown as DAppWindow;
-      if (!dApp.qrlProvider) throw new Error("Provider unavailable");
-      dApp.requestState = { done: false };
-      void dApp.qrlProvider
-        .request({ method: requestMethod, params: requestParams })
-        .then((result) => {
-          dApp.requestState = { done: true, result };
-        })
-        .catch((error: unknown) => {
-          dApp.requestState = { done: true, error };
-        });
-    },
-    { requestMethod: method, requestParams: params },
-  );
+  await page.evaluate(beginFixtureRequest, {
+    stateKey: "requestState" as const,
+    method,
+    params,
+    rawError: true,
+  });
 };
 
 test("puts a decoded token approval in words on the approval screen", async () => {
@@ -165,41 +145,36 @@ test("puts a decoded token approval in words on the approval screen", async () =
       context.serviceWorkers()[0] ??
       (await context.waitForEvent("serviceworker"));
     const extensionId = new URL(serviceWorker.url()).host;
-    await serviceWorker.evaluate(
-      async ({ rpcUrl, profileKey }) => {
-        await chrome.storage.local.set({
-          [`${profileKey}:SETTINGS`]: {
-            sidePanelPreferred: false,
-            phishingDetectionEnabled: false,
-            autoLockMinutes: 30,
-          },
-          [`${profileKey}:BLOCKCHAINS`]: {
-            ACTIVE_BLOCKCHAIN: "0x301825",
-            ALL_BLOCKCHAINS: [
-              {
-                chainId: "0x301825",
-                chainName: "QRL E2E Testnet",
-                rpcUrls: [rpcUrl],
-                blockExplorerUrls: ["https://example.invalid"],
-                nativeCurrency: {
-                  name: "Quanta",
-                  symbol: "Quanta",
-                  decimals: 18,
-                },
-                iconUrls: [],
-                defaultRpcUrl: rpcUrl,
-                defaultBlockExplorerUrl: "https://example.invalid",
-                defaultIconUrl: "",
-                isTestnet: true,
-                defaultWsRpcUrl: rpcUrl,
-                isCustomChain: true,
-              },
-            ],
-          },
-        });
+    await writeStorage(serviceWorker, "local", {
+      [`${PROFILE}:SETTINGS`]: {
+        sidePanelPreferred: false,
+        phishingDetectionEnabled: false,
+        autoLockMinutes: 30,
       },
-      { rpcUrl: `${fixture.origin}/rpc`, profileKey: PROFILE },
-    );
+      [`${PROFILE}:BLOCKCHAINS`]: {
+        ACTIVE_BLOCKCHAIN: "0x301825",
+        ALL_BLOCKCHAINS: [
+          {
+            chainId: "0x301825",
+            chainName: "QRL E2E Testnet",
+            rpcUrls: [`${fixture.origin}/rpc`],
+            blockExplorerUrls: ["https://example.invalid"],
+            nativeCurrency: {
+              name: "Quanta",
+              symbol: "Quanta",
+              decimals: 18,
+            },
+            iconUrls: [],
+            defaultRpcUrl: `${fixture.origin}/rpc`,
+            defaultBlockExplorerUrl: "https://example.invalid",
+            defaultIconUrl: "",
+            isTestnet: true,
+            defaultWsRpcUrl: `${fixture.origin}/rpc`,
+            isCustomChain: true,
+          },
+        ],
+      },
+    });
 
     let extensionPage = await context.newPage();
     await extensionPage.goto(
@@ -235,54 +210,44 @@ test("puts a decoded token approval in words on the approval screen", async () =
     await onboardingClosed;
 
     // An imported token and collection so the summary can name the asset.
-    await serviceWorker.evaluate(
-      async ({ profileKey, account, tokenAddress, collectionAddress }) => {
-        await chrome.storage.local.set({
-          [`${profileKey}:TOKENS`]: {
-            ALL_TOKENS: {
-              [account]: {
-                "0x301825": {
-                  tokens: [
-                    {
-                      address: tokenAddress,
-                      symbol: "MQW",
-                      decimals: 18,
-                      image: "",
-                    },
-                  ],
+    await writeStorage(serviceWorker, "local", {
+      [`${PROFILE}:TOKENS`]: {
+        ALL_TOKENS: {
+          [CHECKSUM_ACCOUNT]: {
+            "0x301825": {
+              tokens: [
+                {
+                  address: TOKEN_CONTRACT,
+                  symbol: "MQW",
+                  decimals: 18,
+                  image: "",
                 },
-              },
+              ],
             },
           },
-          [`${profileKey}:NFT_COLLECTIONS`]: {
-            ALL_NFT_COLLECTIONS: {
-              [account]: {
-                "0x301825": {
-                  collections: [
-                    {
-                      address: collectionAddress,
-                      name: "Quanta Relics",
-                      symbol: "RELIC",
-                      standard: "ZRC721",
-                      image: "",
-                    },
-                  ],
+        },
+      },
+      [`${PROFILE}:NFT_COLLECTIONS`]: {
+        ALL_NFT_COLLECTIONS: {
+          [CHECKSUM_ACCOUNT]: {
+            "0x301825": {
+              collections: [
+                {
+                  address: COLLECTION_CONTRACT,
+                  name: "Quanta Relics",
+                  symbol: "RELIC",
+                  standard: "ZRC721",
+                  image: "",
                 },
-              },
+              ],
             },
           },
-          [`${profileKey}:CONTACTS`]: {
-            ALL_CONTACTS: [],
-          },
-        });
+        },
       },
-      {
-        profileKey: PROFILE,
-        account: CHECKSUM_ACCOUNT,
-        tokenAddress: TOKEN_CONTRACT,
-        collectionAddress: COLLECTION_CONTRACT,
+      [`${PROFILE}:CONTACTS`]: {
+        ALL_CONTACTS: [],
       },
-    );
+    });
 
     extensionPage = await context.newPage();
     await extensionPage.setViewportSize({ width: 360, height: 2000 });
@@ -296,9 +261,7 @@ test("puts a decoded token approval in words on the approval screen", async () =
     const dAppPage = await context.newPage();
     await dAppPage.goto(fixture.origin);
     await dAppPage.bringToFront();
-    await dAppPage.waitForFunction(() =>
-      Boolean((window as unknown as DAppWindow).qrlProvider),
-    );
+    await dAppPage.waitForFunction(hasFixtureProvider);
 
     await beginRequest(dAppPage, "qrl_requestAccounts", []);
     const yes = extensionPage.getByRole("button", { name: "Yes" });
@@ -344,9 +307,9 @@ test("puts a decoded token approval in words on the approval screen", async () =
       await extensionPage
         .getByRole("button", { name: "No", exact: true })
         .click();
-      await dAppPage.waitForFunction(
-        () => (window as unknown as DAppWindow).requestState?.done === true,
-      );
+      await dAppPage.waitForFunction(isRequestDone, {
+        stateKey: "requestState" as const,
+      });
     };
 
     const capture = async (name: string) => {

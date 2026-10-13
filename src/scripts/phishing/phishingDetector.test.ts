@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.doUnmock("./defaultPhishingConfig.json");
+  vi.doUnmock("eth-phishing-detect/src/detector");
+});
+
 /**
  * H1 (PR #71 audit): initializePhishingDetector() must never reject, no
  * matter which of its three blocklist sources (a fresh remote fetch, the
@@ -10,30 +22,38 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * for the end-to-end version of that scenario.
  */
 
-const localStore: Record<string, unknown> = {};
+let localStore: Record<string, unknown> = {};
+
+const { getLocal, setLocal, createAlarm } = vi.hoisted(() => ({
+  getLocal: vi.fn<(key: string) => Promise<unknown>>((key) =>
+    Promise.resolve(key in localStore ? { [key]: localStore[key] } : {}),
+  ),
+  setLocal: vi.fn((data: Record<string, unknown>) => {
+    Object.assign(localStore, data);
+    return Promise.resolve();
+  }),
+  createAlarm: vi.fn<
+    (name: string, info: { periodInMinutes: number }) => void | Promise<void>
+  >(() => Promise.resolve()),
+}));
 
 vi.mock("webextension-polyfill", () => ({
   __esModule: true,
   default: {
     storage: {
       local: {
-        get: vi.fn((key: string) =>
-          Promise.resolve(key in localStore ? { [key]: localStore[key] } : {}),
-        ),
-        set: vi.fn((data: Record<string, unknown>) => {
-          Object.assign(localStore, data);
-          return Promise.resolve();
-        }),
+        get: getLocal,
+        set: setLocal,
       },
     },
     alarms: {
-      create: vi.fn().mockResolvedValue(undefined),
+      create: createAlarm,
     },
   },
 }));
 
 const clearLocalStore = () => {
-  for (const key of Object.keys(localStore)) delete localStore[key];
+  localStore = {};
 };
 
 describe("phishingDetector (H1)", () => {
@@ -89,10 +109,7 @@ describe("phishingDetector (H1)", () => {
   });
 
   it("never rejects when storage.local.get itself throws", async () => {
-    const browserModule = await import("webextension-polyfill");
-    (browserModule.default.storage.local.get as any).mockRejectedValueOnce(
-      new Error("storage exploded"),
-    );
+    getLocal.mockRejectedValueOnce(new Error("storage exploded"));
     const { initializePhishingDetector, getPhishingDetectorStatus } =
       await import("./phishingDetector");
 
@@ -130,10 +147,7 @@ describe("phishingDetector (H1)", () => {
           }),
       }),
     );
-    const browserModule = await import("webextension-polyfill");
-    (browserModule.default.storage.local.set as any).mockRejectedValueOnce(
-      new Error("quota exceeded"),
-    );
+    setLocal.mockRejectedValueOnce(new Error("quota exceeded"));
     const {
       initializePhishingDetector,
       getPhishingDetectorStatus,
@@ -146,13 +160,144 @@ describe("phishingDetector (H1)", () => {
     expect(checkDomain("https://phish.example").isDomainPhishing).toBe(true);
   });
 
+  it.each([
+    { value: null },
+    { value: undefined },
+    { value: [] },
+    { value: "invalid" },
+    { value: { PHISHING_BLOCKLIST_CACHE: [] } },
+    { value: { PHISHING_BLOCKLIST_CACHE: "invalid" } },
+  ])(
+    "falls back on malformed storage envelopes ($value)",
+    async ({ value }) => {
+      getLocal.mockResolvedValueOnce(value);
+      const { initializePhishingDetector, checkDomain } =
+        await import("./phishingDetector");
+      await expect(initializePhishingDetector()).resolves.toBeUndefined();
+      expect(checkDomain("https://ogntoken-migration.icu")).toMatchObject({
+        isDomainPhishing: true,
+        detectorStatus: "ready",
+      });
+    },
+  );
+
+  it.each([
+    { config: [] },
+    { config: null },
+    { config: { whitelist: [1] } },
+    { config: { blacklist: [null] } },
+    { config: { fuzzylist: ["valid.example", 1] } },
+    { config: { blacklist: new Array<unknown>(1) } },
+    { config: { tolerance: "1" } },
+    { config: { tolerance: Number.NaN } },
+    { config: { tolerance: Infinity } },
+  ])(
+    "rejects malformed remote and cached configs ($config)",
+    async ({ config }) => {
+      const cached = { config, timestamp: Date.now() };
+      localStore.PHISHING_BLOCKLIST_CACHE = cached;
+      localStore.unrelated = { values: ["keep", "this", "order"] };
+      const snapshot = { ...localStore };
+      const fetchConfig = vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(config),
+        }),
+      );
+      vi.stubGlobal("fetch", fetchConfig);
+      const { initializePhishingDetector, checkDomain } =
+        await import("./phishingDetector");
+      await expect(initializePhishingDetector()).resolves.toBeUndefined();
+      expect(fetchConfig).toHaveBeenCalledOnce();
+      expect(
+        checkDomain("https://ogntoken-migration.icu").isDomainPhishing,
+      ).toBe(true);
+      expect(setLocal).not.toHaveBeenCalled();
+      expect(localStore).toEqual(snapshot);
+    },
+  );
+
+  it.each([Number.NaN, Infinity, -Infinity, "invalid", undefined])(
+    "rejects the invalid cache timestamp %s without changing storage",
+    async (timestamp) => {
+      const cached = { config: { blacklist: ["cached.example"] }, timestamp };
+      localStore.PHISHING_BLOCKLIST_CACHE = cached;
+      const { initializePhishingDetector, checkDomain } =
+        await import("./phishingDetector");
+      await initializePhishingDetector();
+      expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
+      expect(
+        checkDomain("https://ogntoken-migration.icu").isDomainPhishing,
+      ).toBe(true);
+      expect(localStore.PHISHING_BLOCKLIST_CACHE).toBe(cached);
+    },
+  );
+
+  it("uses a fresh valid cache without fetching or writing", async () => {
+    const cached = {
+      config: { blacklist: ["cached.example"] },
+      timestamp: Date.now(),
+    };
+    localStore.PHISHING_BLOCKLIST_CACHE = cached;
+    const { initializePhishingDetector, checkDomain } =
+      await import("./phishingDetector");
+    await initializePhishingDetector();
+    expect(checkDomain("https://cached.example").isDomainPhishing).toBe(true);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(setLocal).not.toHaveBeenCalled();
+    expect(localStore.PHISHING_BLOCKLIST_CACHE).toBe(cached);
+  });
+
+  it("uses a stale valid cache when refresh fails", async () => {
+    const cached = {
+      config: { blacklist: ["cached.example"] },
+      timestamp: Date.now() - 25 * 60 * 60 * 1000,
+    };
+    localStore.PHISHING_BLOCKLIST_CACHE = cached;
+    const { initializePhishingDetector, checkDomain } =
+      await import("./phishingDetector");
+    await initializePhishingDetector();
+    expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
+    expect(checkDomain("https://cached.example").isDomainPhishing).toBe(true);
+    expect(localStore.PHISHING_BLOCKLIST_CACHE).toBe(cached);
+  });
+
+  it("retries the remote config and preserves its values when caching it", async () => {
+    const { initializePhishingDetector, checkDomain } =
+      await import("./phishingDetector");
+    await initializePhishingDetector();
+    const config = {
+      blacklist: ["second.example", "first.example"],
+      tolerance: 0,
+    };
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(config)),
+    );
+    localStore.unrelated = ["preserve", "order"];
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(localStore).toEqual({
+      PHISHING_BLOCKLIST_CACHE: { config, timestamp: Date.now() },
+      unrelated: ["preserve", "order"],
+    });
+    expect(checkDomain("https://first.example").isDomainPhishing).toBe(true);
+    expect(checkDomain("https://second.example").isDomainPhishing).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("reports unavailable when the bundled config is malformed", async () => {
+    vi.doMock("./defaultPhishingConfig.json", () => ({ default: [] }));
+    const { initializePhishingDetector, getPhishingDetectorStatus } =
+      await import("./phishingDetector");
+    await expect(initializePhishingDetector()).resolves.toBeUndefined();
+    expect(getPhishingDetectorStatus()).toBe("unavailable");
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
   it("reports 'unavailable' when every source fails to build a detector at all, without throwing", async () => {
     vi.doMock("eth-phishing-detect/src/detector", () => ({
-      default: class {
-        constructor() {
-          throw new Error("detector construction always fails");
-        }
-      },
+      default: vi.fn(function () {
+        throw new Error("detector construction always fails");
+      }),
     }));
     const {
       initializePhishingDetector,
@@ -169,6 +314,43 @@ describe("phishingDetector (H1)", () => {
     const result = checkDomain("https://example.com");
     expect(result.isDomainPhishing).toBe(false);
     expect(result.detectorStatus).toBe("unavailable");
+  });
+});
+
+describe("phishing refresh alarms", () => {
+  it("preserves synchronous alarm creation and its schedule", async () => {
+    createAlarm.mockImplementationOnce(() => {});
+    const { setupPhishingRefreshAlarm, PHISHING_ALARM_NAME } =
+      await import("./phishingDetector");
+    await expect(setupPhishingRefreshAlarm()).resolves.toBeUndefined();
+    expect(createAlarm).toHaveBeenCalledExactlyOnceWith(PHISHING_ALARM_NAME, {
+      periodInMinutes: 24 * 60,
+    });
+  });
+
+  it("waits for asynchronous alarm creation", async () => {
+    let finish = () => {};
+    const created = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    createAlarm.mockReturnValueOnce(created);
+    const { setupPhishingRefreshAlarm } = await import("./phishingDetector");
+    let settled = false;
+    const setup = setupPhishingRefreshAlarm().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finish();
+    await setup;
+    expect(settled).toBe(true);
+  });
+
+  it("propagates asynchronous alarm creation errors", async () => {
+    const error = new Error("alarm creation failed");
+    createAlarm.mockImplementationOnce(() => Promise.reject(error));
+    const { setupPhishingRefreshAlarm } = await import("./phishingDetector");
+    await expect(setupPhishingRefreshAlarm()).rejects.toBe(error);
   });
 });
 
