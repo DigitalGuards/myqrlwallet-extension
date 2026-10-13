@@ -1,11 +1,26 @@
 import {
+  closeFixtureServer,
+  fixtureTypedDataEncoder,
+  hasFixtureAccount,
+  installEthereumFixture,
+  parseSignedFillIntent,
+  readBody,
+  readPendingRequest,
+  readRpcBody,
+  reportFixtureError,
+  type DAppRequest,
+  type ProtocolAuth,
+  type SignedFillIntent,
+  writeStorage,
+} from "./fixtureHelpers";
+import {
   chromium,
   expect,
   test,
   type Page,
   type Worker,
 } from "@playwright/test";
-import { sha256 } from "@noble/hashes/sha256";
+import { sha256 } from "@noble/hashes/sha2";
 import { shake256 } from "@noble/hashes/sha3.js";
 import {
   CryptoBytes,
@@ -37,6 +52,9 @@ const REPO_ROOT = path.resolve(
   "..",
 );
 const EXTENSION_PATH = path.join(REPO_ROOT, "Extension");
+const STORAGE_PREFIX =
+  "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4";
+const DAPPS_KEY = `${STORAGE_PREFIX}:DAPPS`;
 const QUANTASWAP_FRONTEND_DIR = path.resolve(
   process.env.QUANTASWAP_FRONTEND_DIR ??
     path.join(REPO_ROOT, "..", "QuantaSwap", "frontend"),
@@ -46,15 +64,7 @@ const QUANTASWAP_DIST_DIR = path.join(QUANTASWAP_FRONTEND_DIR, "dist");
 const frontendRequire = createRequire(
   path.join(QUANTASWAP_FRONTEND_DIR, "package.json"),
 );
-const { TypedDataEncoder } = frontendRequire("ethers") as {
-  TypedDataEncoder: {
-    hash(
-      domain: Record<string, unknown>,
-      types: Record<string, readonly TypedField[]>,
-      value: Record<string, unknown>,
-    ): string;
-  };
-};
+const TypedDataEncoder = fixtureTypedDataEncoder(frontendRequire("ethers"));
 
 // Public deterministic fixture from canonical.json. Never fund this account.
 const TEST_ONLY_HEX_SEED =
@@ -134,17 +144,6 @@ const FILL_INTENT_V1_FIELDS: readonly TypedField[] = [
   { name: "qrlHtlc", type: "string" },
 ];
 
-interface ProtocolAuth {
-  version: "1";
-  scheme: "qrl-sign-typed-v1";
-  issuedAt: number;
-  expiresAt: number;
-  nonce: string;
-  signature: string;
-  publicKey: string;
-  descriptor: string;
-}
-
 interface MakerAuth extends ProtocolAuth {
   makerTokenCommitment: string;
   shareTokenCommitment: string;
@@ -172,24 +171,6 @@ interface PortableOrder {
   updatedAt: number;
   makerAuth: MakerAuth;
   orderDigest: string;
-}
-
-interface FillIntentBody {
-  orderDigest: string;
-  takerEthAccount: string;
-  takerQrlAccount: string;
-  releaseCommitment: string;
-}
-
-interface SignedFillIntent {
-  intent: FillIntentBody;
-  auth: ProtocolAuth;
-}
-
-interface DAppRequest {
-  method: string;
-  params?: unknown[];
-  requestId?: string;
 }
 
 const hex = (bytes: Uint8Array): string =>
@@ -305,14 +286,6 @@ const makePortableOrder = (): PortableOrder => {
   };
 };
 
-const readBody = async (request: IncomingMessage): Promise<string> => {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString("utf8");
-};
-
 const writeJson = (
   response: ServerResponse,
   payload: unknown,
@@ -356,9 +329,7 @@ const handleRpc = async (
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> => {
-  const body = JSON.parse(await readBody(request)) as
-    | { id?: string | number; method: string }
-    | Array<{ id?: string | number; method: string }>;
+  const body = await readRpcBody(request);
   const requests = Array.isArray(body) ? body : [body];
   const replies = requests.map(({ id, method }) => ({
     jsonrpc: "2.0",
@@ -429,7 +400,9 @@ const startFixtureServer = async (order: PortableOrder) => {
         requestUrl.pathname,
       )
     ) {
-      void handleRpc(request, response);
+      handleRpc(request, response).catch((error: unknown) => {
+        reportFixtureError(response, error);
+      });
       return;
     }
     if (request.method === "GET" && requestUrl.pathname === "/api/orders") {
@@ -463,9 +436,9 @@ const startFixtureServer = async (order: PortableOrder) => {
       request.method === "POST" &&
       requestUrl.pathname === `/api/orders/${order.id}/intents`
     ) {
-      void readBody(request)
+      readBody(request)
         .then((raw) => {
-          const signed = JSON.parse(raw) as SignedFillIntent;
+          const signed = parseSignedFillIntent(raw);
           intentPosts.push(signed);
           const status = intentPosts.length === 1 ? 201 : 200;
           intentStatuses.push(status);
@@ -529,7 +502,7 @@ const startFixtureServer = async (order: PortableOrder) => {
     intentStatuses,
     close: async () => {
       streamResponses.forEach((stream) => stream.end());
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeFixtureServer(server);
     },
   };
 };
@@ -539,27 +512,14 @@ const waitForDAppRequest = async (
   method: string,
 ): Promise<DAppRequest> => {
   await expect
-    .poll(() =>
-      serviceWorker.evaluate(async () => {
-        const stored = await chrome.storage.session.get(
-          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS",
-        );
-        return (
-          stored[
-            "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS"
-          ]?.DAPPS_REQUEST_DATA?.method ?? null
-        );
-      }),
+    .poll(
+      async () =>
+        (await readPendingRequest(serviceWorker, DAPPS_KEY))?.method ?? null,
     )
     .toBe(method);
-  return serviceWorker.evaluate(async () => {
-    const stored = await chrome.storage.session.get(
-      "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS",
-    );
-    return stored[
-      "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS"
-    ]?.DAPPS_REQUEST_DATA as DAppRequest;
-  });
+  const request = await readPendingRequest(serviceWorker, DAPPS_KEY);
+  if (!request) throw new Error("Fixture dApp request unavailable");
+  return request;
 };
 
 const approveCurrentRequest = async (extensionPage: Page): Promise<void> => {
@@ -609,29 +569,7 @@ const onboardExtension = async (
   await expect
     .poll(
       () =>
-        serviceWorker.evaluate(async (expectedAccount) => {
-          const {
-            ["v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:KEYSTORES"]:
-              KEYSTORES,
-            ["v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:ACCOUNTS"]:
-              ACCOUNTS,
-          } = await chrome.storage.local.get([
-            "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:KEYSTORES",
-            "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:ACCOUNTS",
-          ]);
-          const keystores = JSON.parse(KEYSTORES ?? "[]") as Array<{
-            address?: string;
-          }>;
-          const expected = expectedAccount.toLowerCase();
-          return (
-            keystores.some(
-              ({ address }) => address?.toLowerCase() === expected,
-            ) &&
-            ACCOUNTS?.ALL_ACCOUNTS?.some(
-              (account: string) => account.toLowerCase() === expected,
-            )
-          );
-        }, CHECKSUM_QRL_ACCOUNT),
+        hasFixtureAccount(serviceWorker, STORAGE_PREFIX, CHECKSUM_QRL_ACCOUNT),
       { timeout: 60_000 },
     )
     .toBe(true);
@@ -669,90 +607,47 @@ test("legacy QuantaSwap UI refuses a QIP-55 account before signing", async () =>
       lifecycleErrors.push(text);
     }
   });
-  await context.addInitScript(
-    ({ ethAccount }) => {
-      const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
-      const provider = {
-        request: async ({ method }: { method: string }) => {
-          if (method === "eth_requestAccounts" || method === "eth_accounts") {
-            return [ethAccount];
-          }
-          if (method === "eth_chainId") return "0xaa36a7";
-          if (method === "net_version") return "11155111";
-          return null;
-        },
-        on: (event: string, listener: (...args: unknown[]) => void) => {
-          const handlers = listeners.get(event) ?? new Set();
-          handlers.add(listener);
-          listeners.set(event, handlers);
-        },
-        removeListener: (
-          event: string,
-          listener: (...args: unknown[]) => void,
-        ) => {
-          listeners.get(event)?.delete(listener);
-        },
-      };
-      const detail = {
-        info: {
-          uuid: "00000000-0000-4000-8000-000000000001",
-          name: "E2E Ethereum Wallet",
-          icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>",
-          rdns: "io.quantawallet.e2e",
-        },
-        provider,
-      };
-      const announce = () =>
-        window.dispatchEvent(
-          new CustomEvent("eip6963:announceProvider", { detail }),
-        );
-      window.addEventListener("eip6963:requestProvider", announce);
-      announce();
-    },
-    { ethAccount: ETH_ACCOUNT },
-  );
+  await context.addInitScript(installEthereumFixture, {
+    ethAccount: ETH_ACCOUNT,
+  });
 
   try {
-    let serviceWorker = context.serviceWorkers()[0];
+    const workers: readonly (Worker | undefined)[] = context.serviceWorkers();
+    let serviceWorker = workers[0];
     serviceWorker ??= await context.waitForEvent("serviceworker");
     const extensionId = new URL(serviceWorker.url()).host;
-    await serviceWorker.evaluate(
-      async ({ rpcUrl }) => {
-        await chrome.storage.local.set({
-          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:SETTINGS":
+    await writeStorage(serviceWorker, "local", {
+      "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:SETTINGS":
+        {
+          sidePanelPreferred: true,
+          phishingDetectionEnabled: false,
+          autoLockMinutes: 30,
+        },
+      "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:BLOCKCHAINS":
+        {
+          ACTIVE_BLOCKCHAIN: "0x301825",
+          ALL_BLOCKCHAINS: [
             {
-              sidePanelPreferred: true,
-              phishingDetectionEnabled: false,
-              autoLockMinutes: 30,
+              chainId: "0x301825",
+              chainName: "QRL E2E Testnet",
+              rpcUrls: [`${fixture.origin}/rpc/qrl`],
+              blockExplorerUrls: ["https://example.invalid"],
+              nativeCurrency: {
+                name: "Quanta",
+                symbol: "Quanta",
+                decimals: 18,
+              },
+              iconUrls: [],
+              defaultRpcUrl: `${fixture.origin}/rpc/qrl`,
+              defaultBlockExplorerUrl: "https://example.invalid",
+              defaultIconUrl: "",
+              isTestnet: true,
+              defaultWsRpcUrl: `${fixture.origin}/rpc/qrl`,
+              isCustomChain: true,
             },
-          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:BLOCKCHAINS":
-            {
-              ACTIVE_BLOCKCHAIN: "0x301825",
-              ALL_BLOCKCHAINS: [
-                {
-                  chainId: "0x301825",
-                  chainName: "QRL E2E Testnet",
-                  rpcUrls: [rpcUrl],
-                  blockExplorerUrls: ["https://example.invalid"],
-                  nativeCurrency: {
-                    name: "Quanta",
-                    symbol: "Quanta",
-                    decimals: 18,
-                  },
-                  iconUrls: [],
-                  defaultRpcUrl: rpcUrl,
-                  defaultBlockExplorerUrl: "https://example.invalid",
-                  defaultIconUrl: "",
-                  isTestnet: true,
-                  defaultWsRpcUrl: rpcUrl,
-                  isCustomChain: true,
-                },
-              ],
-            },
-        });
-      },
-      { rpcUrl: `${fixture.origin}/rpc/qrl` },
-    );
+          ],
+        },
+    });
     const extensionPage = await onboardExtension(
       context,
       serviceWorker,
@@ -783,16 +678,8 @@ test("legacy QuantaSwap UI refuses a QIP-55 account before signing", async () =>
       quantaSwapPage.getByTitle("View address on Zondscan"),
     ).toHaveCount(0);
     expect(fixture.intentPosts).toEqual([]);
-    const pendingMethod = await serviceWorker.evaluate(
-      async () =>
-        (
-          await chrome.storage.session.get(
-            "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS",
-          )
-        )[
-          "v3:0x301825:0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4:DAPPS"
-        ]?.DAPPS_REQUEST_DATA?.method ?? null,
-    );
+    const pendingMethod =
+      (await readPendingRequest(serviceWorker, DAPPS_KEY))?.method ?? null;
     expect(pendingMethod).not.toBe("qrl_signTypedData");
     expect(lifecycleErrors).toEqual([]);
   } finally {
