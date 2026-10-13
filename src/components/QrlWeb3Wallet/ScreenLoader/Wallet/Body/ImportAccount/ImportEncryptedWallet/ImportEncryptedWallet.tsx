@@ -31,7 +31,7 @@ import { useStore } from "@/stores/store";
 import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import { cn } from "@/utilities/stylingUtil";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Web3BaseWalletAccount } from "@theqrl/web3";
+import { KeyStore, Web3BaseWalletAccount } from "@theqrl/web3";
 import { Loader, Upload } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useEffect, useRef, useState } from "react";
@@ -55,6 +55,11 @@ const getAccountDisplay = (address: string, index: number): string =>
   address.length >= 12
     ? formatQrlAddressFingerprint(address)
     : `Account ${index + 1}`;
+
+const getSelectedKeystore = (
+  keystores: readonly KeyStore[],
+  selection: string,
+): KeyStore | undefined => keystores[Number(selection)] ?? keystores[0];
 
 const ImportEncryptedWallet = observer(
   ({ onImported }: ImportEncryptedWalletProps) => {
@@ -98,6 +103,27 @@ const ImportEncryptedWallet = observer(
       formState: { isSubmitting, isValid },
     } = form;
 
+    const reportFileReadError = (error: unknown) => {
+      // The raw exception goes to the console only. It carries
+      // library internals and can echo fragments of the file being
+      // decrypted, so the user sees a translated message.
+      console.error(
+        "[ImportEncryptedWallet] Wallet file could not be read:",
+        error,
+      );
+      setFileError(t("importAccount.walletFileReadFailed"));
+    };
+
+    const reportSubmitError = (error: unknown) => {
+      console.error(
+        "[ImportEncryptedWallet] Wallet file import failed:",
+        error,
+      );
+      setError("password", {
+        message: t("importAccount.walletFileImportFailed"),
+      });
+    };
+
     const handleFileChange = async (
       event: React.ChangeEvent<HTMLInputElement>,
     ) => {
@@ -121,14 +147,7 @@ const ImportEncryptedWallet = observer(
         } else if (error instanceof WalletFileFormatError) {
           setFileError(t("importAccount.walletFileInvalid"));
         } else {
-          // The raw exception goes to the console only. It carries
-          // library internals and can echo fragments of the file being
-          // decrypted, so the user sees a translated message.
-          console.error(
-            "[ImportEncryptedWallet] Wallet file could not be read:",
-            error,
-          );
-          setFileError(t("importAccount.walletFileReadFailed"));
+          reportFileReadError(error);
         }
       } finally {
         if (token === parseTokenRef.current) {
@@ -146,8 +165,10 @@ const ImportEncryptedWallet = observer(
       try {
         let hexSeed: string;
         if (parsed.kind === "backup") {
-          const keystore =
-            parsed.keystores[Number(selectedKeystore)] ?? parsed.keystores[0];
+          const keystore = getSelectedKeystore(
+            parsed.keystores,
+            selectedKeystore,
+          );
           if (!keystore) {
             setFileError(t("importAccount.walletFileNoAccounts"));
             return;
@@ -184,13 +205,7 @@ const ImportEncryptedWallet = observer(
             ),
           });
         } else {
-          console.error(
-            "[ImportEncryptedWallet] Wallet file import failed:",
-            error,
-          );
-          setError("password", {
-            message: t("importAccount.walletFileImportFailed"),
-          });
+          reportSubmitError(error);
         }
       }
     }
@@ -198,7 +213,7 @@ const ImportEncryptedWallet = observer(
     const isBackup = parsed?.kind === "backup";
     const keystores = isBackup ? parsed.keystores : [];
     const activeKeystore = isBackup
-      ? (keystores[Number(selectedKeystore)] ?? keystores[0])
+      ? getSelectedKeystore(keystores, selectedKeystore)
       : undefined;
     const busy = isSubmitting || isParsing;
 
@@ -208,7 +223,9 @@ const ImportEncryptedWallet = observer(
           name="importEncryptedWallet"
           aria-label="importEncryptedWallet"
           className="w-full min-w-0"
-          onSubmit={handleSubmit(onSubmit)}
+          onSubmit={(event) => {
+            handleSubmit(onSubmit)(event).catch(reportSubmitError);
+          }}
         >
           <div className="space-y-4">
             <div className="space-y-2">
@@ -227,7 +244,9 @@ const ImportEncryptedWallet = observer(
                 accept="application/json,.json"
                 aria-label="walletFile"
                 disabled={busy}
-                onChange={handleFileChange}
+                onChange={(event) => {
+                  handleFileChange(event).catch(reportFileReadError);
+                }}
                 // sr-only only clips the element, so the input would
                 // otherwise stay in the tab order as an invisible stop
                 // whose focus ring is clipped away. The themed button is
@@ -325,9 +344,8 @@ const ImportEncryptedWallet = observer(
                       id="walletFilePassword"
                       type="password"
                       aria-label="walletFilePassword"
-                      // This unlocks an imported keystore, so it is secret
-                      // material rather than a credential a password
-                      // manager should learn or offer to fill.
+                      // This secret unlocks an imported keystore. Keep it
+                      // out of password-manager storage and autofill.
                       autoComplete="off"
                       autoCorrect="off"
                       autoCapitalize="off"
