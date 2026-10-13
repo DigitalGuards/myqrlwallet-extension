@@ -18,7 +18,10 @@ vi.mock("@theqrl/web3", () => ({
 }));
 
 describe("ContactsPage", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -211,4 +214,69 @@ describe("ContactsPage", () => {
     // Add button should be visible again
     expect(screen.getByText("Add")).toBeInTheDocument();
   });
+
+  it("reports a rejected contact load", async () => {
+    const error = new Error("Contacts unavailable");
+    const loadContacts = vi.fn<() => Promise<void>>().mockRejectedValue(error);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComponent(mockedStore({ contactsStore: { loadContacts } }));
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith("Failed to load contacts:", error);
+    });
+  });
+
+  it("reports a rejected contact deletion and preserves the displayed contact", async () => {
+    const error = new Error("Contact deletion failed");
+    const removeContact = vi.fn<() => Promise<void>>().mockRejectedValue(error);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComponent(
+      mockedStore({
+        contactsStore: {
+          contacts: [{ name: "Alice", address: ALICE_ADDRESS }],
+          removeContact,
+        },
+      }),
+    );
+    await userEvent.click(screen.getByLabelText("Delete"));
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith("Failed to delete contact:", error);
+    });
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+  });
+
+  it.each([false, true])(
+    "keeps the contact form after a rejected save (edit: %s)",
+    async (editing) => {
+      const error = new Error("Contact save failed");
+      const save = vi.fn<() => Promise<void>>().mockRejectedValue(error);
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      renderComponent(
+        mockedStore({
+          contactsStore: {
+            contacts: editing
+              ? [{ name: "Alice", address: ALICE_ADDRESS }]
+              : [],
+            addContact: save,
+            updateContact: save,
+          },
+        }),
+      );
+      await userEvent.click(
+        screen.getByRole("button", { name: editing ? "Edit" : "Add" }),
+      );
+      const name = screen.getByPlaceholderText("Contact name");
+      await userEvent.clear(name);
+      await userEvent.type(name, "Alice Updated");
+      if (!editing)
+        await userEvent.type(
+          screen.getByPlaceholderText("Q address"),
+          ALICE_ADDRESS,
+        );
+      await userEvent.click(screen.getByRole("button", { name: /Save/i }));
+      await waitFor(() => {
+        expect(report).toHaveBeenCalledWith("Failed to save contact:", error);
+      });
+      expect(name).toHaveValue("Alice Updated");
+    },
+  );
 });

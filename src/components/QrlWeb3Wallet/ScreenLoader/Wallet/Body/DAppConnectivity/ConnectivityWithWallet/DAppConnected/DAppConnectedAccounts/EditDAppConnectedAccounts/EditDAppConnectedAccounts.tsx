@@ -10,6 +10,7 @@ import QrlRequestAccountAccountSelection from "@/components/QrlWeb3Wallet/Screen
 import BackButton from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/BackButton/BackButton";
 import CircuitBackground from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/CircuitBackground/CircuitBackground";
 import { ROUTES } from "@/router/router";
+import { isRecord } from "@/utilities/storageGuards";
 import { useStore } from "@/stores/store";
 import { Pencil, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -22,10 +23,10 @@ import { updateAccountsAndBlockchainsForUrlOrigin } from "@/scripts/utils/restri
 const EditDAppConnectedAccounts = observer(() => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { state } = useLocation();
+  const state: unknown = useLocation().state;
   const { dAppRequestStore } = useStore();
   const { currentTabData } = dAppRequestStore;
-  const hasState = !!state?.hasState;
+  const hasState = isRecord(state) && state.hasState === true;
 
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>(
     currentTabData?.connectedAccounts ?? [],
@@ -33,7 +34,11 @@ const EditDAppConnectedAccounts = observer(() => {
 
   useEffect(() => {
     if (!hasState) {
-      navigate(ROUTES.DAPP_CONNECTIVITY);
+      Promise.resolve(navigate(ROUTES.DAPP_CONNECTIVITY)).catch(
+        (error: unknown) => {
+          console.error("Failed to return to dApp connectivity:", error);
+        },
+      );
     }
   }, [hasState]);
 
@@ -57,7 +62,11 @@ const EditDAppConnectedAccounts = observer(() => {
       accounts: selectedAccounts,
       blockchains: currentTabData?.connectedBlockchains ?? [],
     });
-    navigate(ROUTES.DAPP_CONNECTIVITY);
+    Promise.resolve(navigate(ROUTES.DAPP_CONNECTIVITY)).catch(
+      (error: unknown) => {
+        console.error("Failed to return to dApp connectivity:", error);
+      },
+    );
   };
 
   return (
@@ -86,7 +95,14 @@ const EditDAppConnectedAccounts = observer(() => {
               variant="outline"
               aria-label={t('common.cancel')}
               onClick={() => {
-                navigate(ROUTES.DAPP_CONNECTIVITY);
+                Promise.resolve(navigate(ROUTES.DAPP_CONNECTIVITY)).catch(
+                  (error: unknown) => {
+                    console.error(
+                      "Failed to return to dApp connectivity:",
+                      error,
+                    );
+                  },
+                );
               }}
             >
               <X className="mr-2 h-4 w-4" />
@@ -97,7 +113,11 @@ const EditDAppConnectedAccounts = observer(() => {
               disabled={!selectedAccounts.length}
               type="submit"
               aria-label={t('dapp.editAccounts')}
-              onClick={onEdit}
+              onClick={() => {
+                onEdit().catch((error: unknown) => {
+                  console.error("Failed to edit connected accounts:", error);
+                });
+              }}
             >
               <Pencil className="mr-2 h-4 w-4" />
               {t('common.edit')}

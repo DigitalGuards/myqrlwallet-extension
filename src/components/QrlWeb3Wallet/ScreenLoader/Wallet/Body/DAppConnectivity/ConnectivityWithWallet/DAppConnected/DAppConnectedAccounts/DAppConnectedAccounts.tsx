@@ -50,7 +50,7 @@ const DAppConnectedAccounts = observer(() => {
         </div>
       </div>
       <div className="flex flex-col gap-2">
-        {currentTabData?.connectedAccounts?.map((accountAddress) => (
+        {currentTabData?.connectedAccounts.map((accountAddress) => (
           <Card
             key={accountAddress}
             id={accountAddress}

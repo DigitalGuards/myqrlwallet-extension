@@ -15,7 +15,10 @@ const ACCOUNT_A = toChecksumAddress(`Q${"a".repeat(128)}`);
 const ACCOUNT_B = toChecksumAddress(`Q${"b".repeat(128)}`);
 
 describe("ContactForm", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it("should render name and address inputs", () => {
     render(<ContactForm onSave={vi.fn()} onCancel={vi.fn()} />);
@@ -157,5 +160,28 @@ describe("ContactForm", () => {
         address: ACCOUNT_A,
       });
     });
+  });
+
+  it("reports a thrown save callback and keeps the contact fields", async () => {
+    const error = new Error("Save failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <ContactForm
+        initialContact={{ name: "Alice", address: ACCOUNT_A }}
+        onSave={() => {
+          throw error;
+        }}
+        onCancel={vi.fn()}
+      />,
+    );
+    const save = screen.getByRole("button", { name: /Save/i });
+    await waitFor(() => {
+      expect(save).toBeEnabled();
+    });
+    await userEvent.click(save);
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith("Failed to submit contact:", error);
+    });
+    expect(screen.getByPlaceholderText("Contact name")).toHaveValue("Alice");
   });
 });
