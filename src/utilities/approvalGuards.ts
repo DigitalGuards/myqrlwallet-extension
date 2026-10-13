@@ -26,7 +26,7 @@ export const readApprovalTransaction = (
   return isApprovalRecord(transaction) ? transaction : undefined;
 };
 
-const isStringArray = (value: unknown): value is string[] => {
+export const isStringArray = (value: unknown): value is string[] => {
   if (!isUnknownArray(value)) return false;
   for (const entry of value) {
     if (typeof entry !== "string") return false;
