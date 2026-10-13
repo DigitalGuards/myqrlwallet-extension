@@ -4,9 +4,9 @@ import pluginReact from "eslint-plugin-react";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
-export const testFiles = [
-  "**/*.test.{ts,tsx}",
-  "**/__mocks__/**/*.{ts,tsx}",
+export const strictFiles = [
+  "src/**/*.{ts,tsx}",
+  "e2e/**/*.ts",
   "vitest.setup.ts",
 ];
 
@@ -20,8 +20,7 @@ export const baseConfig = [
   ...tseslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked.map((config) => ({
     ...config,
-    files: ["src/**/*.{ts,tsx}"],
-    ignores: testFiles,
+    files: strictFiles,
   })),
   {
     files: ["**/*.{ts,tsx}"],
@@ -59,8 +58,7 @@ export const baseConfig = [
   },
   pluginJestDom.configs["flat/recommended"],
   {
-    files: ["src/**/*.{ts,tsx}"],
-    ignores: testFiles,
+    files: strictFiles,
     rules: {
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-non-null-assertion": "error",
@@ -85,8 +83,6 @@ export const baseConfig = [
             "Double type assertions are banned. Narrow unknown input with a guard.",
         },
       ],
-      // Defensive runtime checks on typed wire input are deliberate.
-      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/restrict-template-expressions": [
         "error",
         { allowNumber: true },
@@ -94,16 +90,12 @@ export const baseConfig = [
     },
   },
   {
-    files: testFiles,
+    files: ["src/test-utils/malformed.ts"],
     rules: {
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-non-null-assertion": "off",
-      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/consistent-type-assertions": [
+        "error",
+        { assertionStyle: "as" },
+      ],
     },
   },
   {
@@ -115,14 +107,126 @@ export const baseConfig = [
   },
 ];
 
-// Existing production lint debt. Entries may only be removed.
+// Existing lint debt, including tests. Entries may only be removed.
 // Regenerate with node scripts/lint-ratchet.mjs after fixing a file/rule pair.
 // BEGIN LINT RATCHET
 export const lintRatchet = [
   {
+    files: ["e2e/bfcacheProvider.spec.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-deprecated": "off",
+      "@typescript-eslint/no-unnecessary-boolean-literal-compare": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "no-restricted-syntax": "off",
+    },
+  },
+  {
+    files: ["e2e/dAppCalldataApproval.spec.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-deprecated": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "no-restricted-syntax": "off",
+    },
+  },
+  {
+    files: ["e2e/dataLifecycle.spec.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-deprecated": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+    },
+  },
+  {
+    files: ["e2e/providerMethodBinding.spec.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-deprecated": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/no-unnecessary-type-conversion": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+    },
+  },
+  {
+    files: ["e2e/quantaSwapLifecycle.spec.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-deprecated": "off",
+      "@typescript-eslint/no-unnecessary-boolean-literal-compare": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "no-restricted-syntax": "off",
+    },
+  },
+  {
+    files: ["e2e/quantaSwapUi.spec.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-deprecated": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: ["src/__mocks__/i18nTestSetup.ts"],
+    rules: {
+      "@typescript-eslint/no-floating-promises": "off",
+    },
+  },
+  {
+    files: ["src/__mocks__/mockedStore.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/require-await": "off",
+      "no-restricted-syntax": "off",
+    },
+  },
+  {
+    files: ["src/bufferPolyfill.ts"],
+    rules: {
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/components/QrlWeb3Wallet/QrlWeb3Wallet.test.tsx"],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
     files: ["src/components/QrlWeb3Wallet/RouteMonitor/RouteMonitor.tsx"],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequest.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -132,7 +236,16 @@ export const lintRatchet = [
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/AddQrlChainContent/AddQrlChainContent.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -142,6 +255,7 @@ export const lintRatchet = [
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/unbound-method": "off",
     },
@@ -152,7 +266,19 @@ export const lintRatchet = [
     ],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/AddQrlChainContent/AddQrlChainInfo/AddQrlChainDetails/CurrencyImagePreload/CurrencyImagePreload.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -162,7 +288,18 @@ export const lintRatchet = [
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/prefer-promise-reject-errors": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlPqSign/QrlPqSign.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -172,9 +309,18 @@ export const lintRatchet = [
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-base-to-string": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlRequestAccount/QrlRequestAccountContent/QrlRequestAccountAccountSelection/QrlRequestAccountAccountSelection.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -183,6 +329,15 @@ export const lintRatchet = [
     ],
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlRequestAccount/QrlRequestAccountContent/QrlRequestAccountBlockchainSelection/QrlRequestAccountBlockchainSelection.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -191,6 +346,16 @@ export const lintRatchet = [
     ],
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlRequestAccount/QrlRequestAccountContent/QrlRequestAccountContent.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -204,11 +369,24 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSendTransaction/CalldataSummary/CalldataSummary.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSendTransaction/CalldataSummary/CalldataSummary.tsx",
     ],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "no-restricted-syntax": "off",
     },
   },
@@ -223,11 +401,30 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSendTransaction/QrlSendTransactionForContent/QrlSendTransactionForContent.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unnecessary-type-assertion": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSendTransaction/QrlSendTransactionForContent/QrlSendTransactionForContent.tsx",
     ],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unnecessary-type-conversion": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
@@ -239,14 +436,36 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSignTypedDataV4/PersonalSign/PersonalSign.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSignTypedDataV4/PersonalSign/PersonalSign.tsx",
     ],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSignTypedDataV4/QrlSignTypedDataV4Content/QrlSignTypedDataV4Content.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
     },
   },
   {
@@ -256,12 +475,21 @@ export const lintRatchet = [
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-base-to-string": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unnecessary-type-assertion": "off",
       "@typescript-eslint/no-unnecessary-type-conversion": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestWebsite.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
     },
   },
   {
@@ -274,11 +502,27 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/PermissionRequiredContent.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/PermissionRequiredContent.tsx",
     ],
     rules: {
       "@typescript-eslint/no-misused-promises": "off",
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/SwitchQrlChainContent/SwitchQrlChainContent.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -295,10 +539,20 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/SwitchQrlChainContent/SwitchQrlChainInfo/SwitchQrlChainInfo.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-misused-spread": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/SwitchQrlChainContent/SwitchQrlChainInfo/SwitchQrlChainInfo.tsx",
     ],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-call": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
@@ -327,10 +581,19 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/WatchAssetContent/WatchAssetVerification/WatchAssetVerification.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/WatchAssetContent/WatchAssetVerification/WatchAssetVerification.tsx",
     ],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
@@ -339,10 +602,30 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Lock/LockPassword/LockPassword.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Lock/LockPassword/LockPassword.tsx",
     ],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Lock/LockPassword/LockPasswordCheck/LockPasswordCheck.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -357,10 +640,21 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Lock/LockPassword/Onboarding/AddOrImportAccount/AddOrImportAccount.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Lock/LockPassword/Onboarding/AddOrImportAccount/AddOrImportAccount.tsx",
     ],
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/restrict-template-expressions": "off",
     },
   },
@@ -370,6 +664,18 @@ export const lintRatchet = [
     ],
     rules: {
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Lock/LockPassword/Onboarding/Onboarding.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/unbound-method": "off",
     },
   },
   {
@@ -377,6 +683,7 @@ export const lintRatchet = [
       "src/components/QrlWeb3Wallet/ScreenLoader/Lock/LockPassword/Onboarding/Onboarding.tsx",
     ],
     rules: {
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/unbound-method": "off",
     },
   },
@@ -397,6 +704,13 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/components/QrlWeb3Wallet/ScreenLoader/ScreenLoader.test.tsx"],
+    rules: {
+      "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
     files: ["src/components/QrlWeb3Wallet/ScreenLoader/ScreenLoader.tsx"],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
@@ -409,6 +723,14 @@ export const lintRatchet = [
     ],
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressDisplay.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-unnecessary-condition": "off",
     },
   },
   {
@@ -430,11 +752,42 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Shared/RetryConnection/RetryConnection.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-misused-spread": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Shared/SeedBackup/SeedBackup.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unnecessary-type-assertion": "off",
+      "no-restricted-syntax": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Shared/SeedBackup/SeedBackup.tsx",
     ],
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Shared/SessionPasswordPrompt/SessionPasswordPrompt.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/only-throw-error": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -444,6 +797,14 @@ export const lintRatchet = [
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-misused-promises": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AccountList/AccountList.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-unnecessary-type-conversion": "off",
     },
   },
   {
@@ -458,6 +819,14 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AccountList/ActiveAccount/ActiveAccount.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-deprecated": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AccountList/ActiveAccount/ActiveAccount.tsx",
     ],
     rules: {
@@ -465,6 +834,16 @@ export const lintRatchet = [
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AccountList/OtherAccounts/OtherAccounts.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-deprecated": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unnecessary-type-conversion": "off",
     },
   },
   {
@@ -498,6 +877,17 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/NewChain/AddEditChain/AddEditChainForm/AddEditChainForm.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-misused-spread": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/NewChain/AddEditChain/AddEditChainForm/AddEditChainForm.tsx",
     ],
     rules: {
@@ -526,11 +916,28 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/OtherChains/OtherChainItem/OtherChainItem.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-misused-spread": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/OtherChains/OtherChainItem/OtherChainItem.tsx",
     ],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/OtherChains/OtherChains.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -564,6 +971,23 @@ export const lintRatchet = [
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/CreateAccount/AccountCreationSuccess/AccountCreationSuccess.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/CreateAccount/CreateAccount.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -605,6 +1029,30 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/ConnectivityWithWallet/DAppConnected/DAppConnectedAccounts/DAppConnectedAccounts.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/ConnectivityWithWallet/DAppConnected/DAppConnectedAccounts/DAppConnectedAccounts.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/ConnectivityWithWallet/DAppConnected/DAppConnectedAccounts/EditDAppConnectedAccounts/EditDAppConnectedAccounts.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/ConnectivityWithWallet/DAppConnected/DAppConnectedAccounts/EditDAppConnectedAccounts/EditDAppConnectedAccounts.tsx",
     ],
     rules: {
@@ -612,6 +1060,30 @@ export const lintRatchet = [
       "@typescript-eslint/no-misused-promises": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/ConnectivityWithWallet/DAppConnected/DAppConnectedBlockchains/DAppConnectedBlockchains.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/ConnectivityWithWallet/DAppConnected/DAppConnectedBlockchains/DAppConnectedBlockchains.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/ConnectivityWithWallet/DAppConnected/DAppConnectedBlockchains/EditDAppConnectedBlockchains/EditDAppConnectedBlockchains.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -628,10 +1100,35 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/AccountCreateImport.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/AccountCreateImport.tsx",
     ],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/NFTCollections/NFTCollectionItem/NFTCollectionItem.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -642,7 +1139,18 @@ export const lintRatchet = [
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/NFTCollections/NFTCollections.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
     },
   },
   {
@@ -655,12 +1163,21 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/TokenListItem/TokenListItem.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-misused-spread": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/TokenListItem/TokenListItem.tsx",
     ],
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
     },
   },
   {
@@ -669,6 +1186,15 @@ export const lintRatchet = [
     ],
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/ZRC20Tokens/ZRC20Token/ZRC20Token.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -682,10 +1208,47 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/ZRC20Tokens/ZRC20Tokens.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-misused-spread": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/ZRC20Tokens/ZRC20Tokens.tsx",
     ],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/Home.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/AccountImportSuccess/AccountImportSuccess.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-base-to-string": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportAccount.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -699,10 +1262,27 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportEncryptedWallet/ImportEncryptedWallet.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportEncryptedWallet/ImportEncryptedWallet.tsx",
     ],
     rules: {
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportHexSeedForm/ImportHexSeedForm.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -711,6 +1291,7 @@ export const lintRatchet = [
     ],
     rules: {
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
     },
   },
   {
@@ -719,7 +1300,21 @@ export const lintRatchet = [
     ],
     rules: {
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/restrict-template-expressions": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportLedger/ImportLedger.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -741,6 +1336,7 @@ export const lintRatchet = [
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
     },
   },
   {
@@ -763,10 +1359,20 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportToken/DiscoveredTokens/DiscoveredTokens.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportToken/DiscoveredTokens/DiscoveredTokens.tsx",
     ],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
     },
   },
   {
@@ -780,11 +1386,29 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportToken/TokenImportSuccess/TokenImportSuccess.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportToken/TokenImportSuccess/TokenImportSuccess.tsx",
     ],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/NFTDetail/NFTDetail.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
     },
   },
   {
@@ -800,11 +1424,20 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/NFTGallery/NFTGallery.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/NFTGallery/NFTGallery.tsx",
     ],
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
@@ -819,7 +1452,22 @@ export const lintRatchet = [
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/NFTTransfer/NFTTransfer.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -830,6 +1478,7 @@ export const lintRatchet = [
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
@@ -861,6 +1510,7 @@ export const lintRatchet = [
     rules: {
       "@typescript-eslint/no-deprecated": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
     },
   },
   {
@@ -871,6 +1521,14 @@ export const lintRatchet = [
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-misused-promises": "off",
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/SettingsData.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-misused-spread": "off",
     },
   },
   {
@@ -905,12 +1563,32 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TokenTransfer/GasFeeNotice/GasFeeNotice.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TokenTransfer/GasFeeNotice/GasFeeNotice.tsx",
     ],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/restrict-template-expressions": "off",
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TokenTransfer/GasFeeNotice/GasFeeSelector.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -922,7 +1600,19 @@ export const lintRatchet = [
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TokenTransfer/RecipientPicker/RecipientPicker.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
     },
   },
   {
@@ -932,6 +1622,21 @@ export const lintRatchet = [
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TokenTransfer/TokenTransfer.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -943,11 +1648,33 @@ export const lintRatchet = [
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/unbound-method": "off",
       "@typescript-eslint/use-unknown-in-catch-callback-variable": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TokenTransfer/TransactionSuccessful/TransactionSuccessful.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TransactionHistory/TransactionDetail/TransactionDetail.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/unbound-method": "off",
     },
   },
   {
@@ -960,9 +1687,20 @@ export const lintRatchet = [
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
       "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/restrict-template-expressions": "off",
       "@typescript-eslint/use-unknown-in-catch-callback-variable": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TransactionHistory/TransactionHistory.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
     },
   },
   {
@@ -982,6 +1720,15 @@ export const lintRatchet = [
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Header/AccountBadge/AccountBadge.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-misused-spread": "off",
     },
   },
   {
@@ -994,12 +1741,25 @@ export const lintRatchet = [
   },
   {
     files: [
+      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Header/QrlWeb3WalletMoreOptions/QrlWeb3WalletMoreOptions.test.tsx",
+    ],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Header/QrlWeb3WalletMoreOptions/QrlWeb3WalletMoreOptions.tsx",
     ],
     rules: {
       "@typescript-eslint/no-deprecated": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/unbound-method": "off",
     },
   },
@@ -1013,10 +1773,35 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/components/QrlWeb3Wallet/formFieldPolicy.test.tsx"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unnecessary-type-assertion": "off",
+      "no-restricted-syntax": "off",
+    },
+  },
+  {
     files: ["src/components/UI/Form.tsx"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unnecessary-template-expression": "off",
+    },
+  },
+  {
+    files: ["src/configuration/assetDiscoveryConfig.ts"],
+    rules: {
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/configuration/releaseProfile.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -1029,29 +1814,85 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/crypto/keystoreCrypto.test.ts"],
+    rules: {
+      "@typescript-eslint/no-confusing-void-expression": "off",
+    },
+  },
+  {
     files: ["src/crypto/keystoreCrypto.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/functions/describeExtensionError.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+    },
+  },
+  {
+    files: ["src/functions/formatTransactionAmount.ts"],
+    rules: {
+      "@typescript-eslint/no-unnecessary-condition": "off",
     },
   },
   {
     files: ["src/functions/mnemonicHelper.ts"],
     rules: {
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
+    },
+  },
+  {
+    files: ["src/functions/pqSigning/pqSigning.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "no-restricted-syntax": "off",
     },
   },
   {
     files: ["src/functions/pqSigning/typedData.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
+    },
+  },
+  {
+    files: ["src/functions/pqSigning/typedDataSecurity.test.ts"],
+    rules: {
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/functions/transactionOutcome.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
     },
   },
   {
     files: ["src/functions/transactionOutcome.ts"],
     rules: {
       "@typescript-eslint/no-base-to-string": "off",
+    },
+  },
+  {
+    files: ["src/functions/walletBackupImport.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unnecessary-type-assertion": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/use-unknown-in-catch-callback-variable": "off",
     },
   },
   {
@@ -1068,9 +1909,21 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/functions/withTimeout.test.ts"],
+    rules: {
+      "@typescript-eslint/use-unknown-in-catch-callback-variable": "off",
+    },
+  },
+  {
     files: ["src/functions/withTimeout.ts"],
     rules: {
       "@typescript-eslint/no-non-null-assertion": "off",
+    },
+  },
+  {
+    files: ["src/hooks/useCopy.test.tsx"],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -1090,6 +1943,30 @@ export const lintRatchet = [
     files: ["src/main.tsx"],
     rules: {
       "@typescript-eslint/no-non-null-assertion": "off",
+    },
+  },
+  {
+    files: ["src/scripts/contentScript.contextInvalidated.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+    },
+  },
+  {
+    files: ["src/scripts/contentScript.keepAlive.test.ts"],
+    rules: {
+      "@typescript-eslint/no-extraneous-class": "off",
+    },
+  },
+  {
+    files: ["src/scripts/contentScript.restore.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "no-restricted-syntax": "off",
     },
   },
   {
@@ -1114,6 +1991,34 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/scripts/lockManager/lockManager.integration.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+    },
+  },
+  {
+    files: ["src/scripts/lockManager/lockManager.test.ts"],
+    rules: {
+      "@typescript-eslint/await-thenable": "off",
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
     files: ["src/scripts/lockManager/lockManager.ts"],
     rules: {
       "@typescript-eslint/await-thenable": "off",
@@ -1121,7 +2026,14 @@ export const lintRatchet = [
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-extraneous-class": "off",
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
+    },
+  },
+  {
+    files: ["src/scripts/middlewares/appendSenderDataMiddleware.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
     },
   },
   {
@@ -1129,6 +2041,51 @@ export const lintRatchet = [
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: [
+      "src/scripts/middlewares/restrictedMethodsMiddleware.approvalErrors.test.ts",
+    ],
+    rules: {
+      "@typescript-eslint/await-thenable": "off",
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/scripts/middlewares/restrictedMethodsMiddleware.approvalSlot.test.ts",
+    ],
+    rules: {
+      "@typescript-eslint/await-thenable": "off",
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: ["src/scripts/middlewares/restrictedMethodsMiddleware.test.ts"],
+    rules: {
+      "@typescript-eslint/await-thenable": "off",
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/unbound-method": "off",
     },
   },
   {
@@ -1138,6 +2095,7 @@ export const lintRatchet = [
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-misused-promises": "off",
       "@typescript-eslint/no-unnecessary-boolean-literal-compare": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
@@ -1150,6 +2108,18 @@ export const lintRatchet = [
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/scripts/phishing/phishingDetector.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
     },
   },
   {
@@ -1158,6 +2128,7 @@ export const lintRatchet = [
       "@typescript-eslint/await-thenable": "off",
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-return": "off",
     },
   },
@@ -1168,12 +2139,56 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/scripts/serviceWorker.alarmListener.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "no-restricted-syntax": "off",
+    },
+  },
+  {
+    files: ["src/scripts/serviceWorker.earlyListeners.test.ts"],
+    rules: {
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+    },
+  },
+  {
+    files: ["src/scripts/serviceWorker.startupResilience.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+    },
+  },
+  {
+    files: ["src/scripts/serviceWorker.transactionNotificationSender.test.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+    },
+  },
+  {
     files: ["src/scripts/serviceWorker.ts"],
     rules: {
       "@typescript-eslint/no-deprecated": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
       "@typescript-eslint/no-redundant-type-constituents": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-call": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
@@ -1182,9 +2197,32 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/scripts/utils/approvalSlot.test.ts"],
+    rules: {
+      "@typescript-eslint/no-confusing-void-expression": "off",
+    },
+  },
+  {
+    files: ["src/scripts/utils/approvalSurface.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
     files: ["src/scripts/utils/approvalSurface.ts"],
     rules: {
       "@typescript-eslint/no-deprecated": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/scripts/utils/boundProvider.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/unbound-method": "off",
     },
   },
   {
@@ -1194,9 +2232,29 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/scripts/utils/dAppAccountNotifications.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
     files: ["src/scripts/utils/dAppAccountNotifications.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/scripts/utils/dAppTransactionWatcher.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/unbound-method": "off",
+      "no-restricted-syntax": "off",
     },
   },
   {
@@ -1205,6 +2263,17 @@ export const lintRatchet = [
       "@typescript-eslint/await-thenable": "off",
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/scripts/utils/providerConnectionLifecycle.test.ts"],
+    rules: {
+      "@typescript-eslint/no-base-to-string": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -1215,9 +2284,21 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/scripts/utils/providerLogger.test.ts"],
+    rules: {
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
     files: ["src/scripts/utils/providerLogger.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+    },
+  },
+  {
+    files: ["src/scripts/utils/qip55LogFilter.test.ts"],
+    rules: {
+      "@typescript-eslint/no-unsafe-assignment": "off",
     },
   },
   {
@@ -1227,9 +2308,29 @@ export const lintRatchet = [
     },
   },
   {
+    files: [
+      "src/scripts/utils/restrictedMethodsMiddlewareUtils.authorization.test.ts",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: [
+      "src/scripts/utils/restrictedMethodsMiddlewareUtils.dAppTransactionWatch.test.ts",
+    ],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+    },
+  },
+  {
     files: ["src/scripts/utils/restrictedMethodsMiddlewareUtils.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/no-unsafe-return": "off",
@@ -1248,7 +2349,20 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/scripts/utils/sidePanelContentBridge.test.ts"],
+    rules: {
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
     files: ["src/scripts/utils/sidePanelContentBridge.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/scripts/utils/sidePanelPreference.test.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
     },
@@ -1257,6 +2371,17 @@ export const lintRatchet = [
     files: ["src/scripts/utils/sidePanelPreference.ts"],
     rules: {
       "@typescript-eslint/no-deprecated": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/scripts/utils/sidePanelSurface.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/unbound-method": "off",
     },
   },
   {
@@ -1264,6 +2389,7 @@ export const lintRatchet = [
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-deprecated": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
     },
   },
   {
@@ -1273,10 +2399,39 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/scripts/utils/trustedSender.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "no-restricted-syntax": "off",
+    },
+  },
+  {
+    files: ["src/scripts/utils/unrestrictedMethodExecutor.test.ts"],
+    rules: {
+      "@typescript-eslint/await-thenable": "off",
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
     files: ["src/scripts/utils/unrestrictedMethodExecutor.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
+    },
+  },
+  {
+    files: ["src/scripts/workers/keystoreWorkerPool.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "no-restricted-syntax": "off",
     },
   },
   {
@@ -1289,6 +2444,14 @@ export const lintRatchet = [
     files: ["src/services/assetDiscovery.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/services/ledger/ledgerApdu.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
     },
   },
   {
@@ -1298,9 +2461,40 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/services/ledger/ledgerService.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
     files: ["src/services/ledger/ledgerService.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+    },
+  },
+  {
+    files: ["src/services/ledger/ledgerTransport.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/no-unnecessary-type-assertion": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+    },
+  },
+  {
+    files: ["src/services/ledger/ledgerTransport.ts"],
+    rules: {
+      "@typescript-eslint/no-unnecessary-condition": "off",
     },
   },
   {
@@ -1315,9 +2509,26 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/services/onChainHistory.test.ts"],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
     files: ["src/services/onChainHistory.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/stores/accountLabelsStore.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
     },
   },
   {
@@ -1327,14 +2538,47 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/stores/contactsStore.test.ts"],
+    rules: {
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+    },
+  },
+  {
+    files: ["src/stores/dAppRequestStore.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
     files: ["src/stores/dAppRequestStore.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: ["src/stores/dataLifecycle.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "no-restricted-syntax": "off",
+    },
+  },
+  {
+    files: ["src/stores/hiddenAccountsStore.test.ts"],
+    rules: {
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
     },
   },
   {
@@ -1345,12 +2589,38 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/stores/ledgerStore.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
     files: ["src/stores/ledgerStore.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
+    },
+  },
+  {
+    files: ["src/stores/lockStore.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/unbound-method": "off",
     },
   },
   {
@@ -1359,8 +2629,21 @@ export const lintRatchet = [
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
+    },
+  },
+  {
+    files: ["src/stores/priceStore.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unnecessary-type-conversion": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/require-await": "off",
     },
   },
   {
@@ -1370,11 +2653,75 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/stores/qrlStore.amounts.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: ["src/stores/qrlStore.balancePolling.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-useless-constructor": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: ["src/stores/qrlStore.balanceReactivity.test.tsx"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-misused-spread": "off",
+      "@typescript-eslint/no-useless-constructor": "off",
+    },
+  },
+  {
+    files: ["src/stores/qrlStore.connectionHealth.test.ts"],
+    rules: {
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-useless-constructor": "off",
+    },
+  },
+  {
+    files: ["src/stores/qrlStore.initialization.test.ts"],
+    rules: {
+      "@typescript-eslint/no-confusing-void-expression": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    files: ["src/stores/qrlStore.nonce.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: ["src/stores/qrlStore.removeAccount.test.ts"],
+    rules: {
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-useless-constructor": "off",
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: ["src/stores/qrlStore.tokenGas.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-useless-constructor": "off",
+    },
+  },
+  {
     files: ["src/stores/qrlStore.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unnecessary-type-assertion": "off",
       "@typescript-eslint/no-unnecessary-type-conversion": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
@@ -1385,16 +2732,50 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/stores/settingsStore.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
     files: ["src/stores/settingsStore.ts"],
     rules: {
       "@typescript-eslint/no-deprecated": "off",
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/stores/transactionHistoryStore.test.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/unbound-method": "off",
     },
   },
   {
     files: ["src/stores/transactionHistoryStore.ts"],
     rules: {
       "@typescript-eslint/no-misused-promises": "off",
+    },
+  },
+  {
+    files: ["src/test-utils/malformed.ts"],
+    rules: {
+      "@typescript-eslint/no-unnecessary-type-parameters": "off",
+    },
+  },
+  {
+    files: ["src/utilities/ipfsUtil.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
     },
   },
   {
@@ -1405,9 +2786,28 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/utilities/legacyWalletData.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
     files: ["src/utilities/legacyWalletData.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/utilities/profileStorage.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/unbound-method": "off",
     },
   },
   {
@@ -1417,9 +2817,31 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/utilities/qrnsResolver.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+    },
+  },
+  {
     files: ["src/utilities/qrnsResolver.ts"],
     rules: {
       "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/utilities/storageUtil.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/unbound-method": "off",
     },
   },
   {
@@ -1428,6 +2850,7 @@ export const lintRatchet = [
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-dynamic-delete": "off",
       "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
     },
@@ -1436,12 +2859,30 @@ export const lintRatchet = [
     files: ["src/utilities/stringUtil.ts"],
     rules: {
       "@typescript-eslint/no-extraneous-class": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["src/utilities/unlockAttemptLimiter.test.ts"],
+    rules: {
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
     },
   },
   {
     files: ["src/utilities/unlockAttemptLimiter.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+    },
+  },
+  {
+    files: ["vitest.setup.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
     },
   },
 ];
