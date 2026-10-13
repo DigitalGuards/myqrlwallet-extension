@@ -6,7 +6,7 @@ import tseslint from "typescript-eslint";
 
 export const strictFiles = [
   "src/**/*.{ts,tsx}",
-  "e2e/**/*.ts",
+  "e2e/**/*.{ts,tsx}",
   "vitest.setup.ts",
 ];
 
@@ -32,10 +32,13 @@ export const baseConfig = [
     },
   },
   {
+    // JavaScript tooling has no TypeScript project for type-aware rules.
     ...tseslint.configs.disableTypeChecked,
     files: ["**/*.{js,mjs,cjs,jsx}"],
   },
   pluginReact.configs.flat.recommended,
+  // The automatic JSX runtime supplies React without an in-scope import.
+  pluginReact.configs.flat["jsx-runtime"],
   {
     settings: {
       react: {
@@ -43,17 +46,23 @@ export const baseConfig = [
       },
     },
     rules: {
-      "react/react-in-jsx-scope": "off",
-      "react/display-name": "off",
-      "react/prop-types": "off",
+      "react/display-name": "error",
+      "react/no-unsafe": "error",
       "react/jsx-filename-extension": [
-        1,
+        "error",
         { extensions: [".js", ".jsx", ".ts", ".tsx"] },
       ],
       "@typescript-eslint/no-unused-vars": [
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
+    },
+  },
+  {
+    files: ["**/*.{ts,tsx}"],
+    rules: {
+      // TypeScript types every prop in these files.
+      "react/prop-types": "off",
     },
   },
   pluginJestDom.configs["flat/recommended"],
@@ -71,8 +80,7 @@ export const baseConfig = [
         {
           "ts-ignore": true,
           "ts-nocheck": true,
-          "ts-expect-error": "allow-with-description",
-          minimumDescriptionLength: 10,
+          "ts-expect-error": true,
         },
       ],
       "no-restricted-syntax": [
@@ -101,7 +109,12 @@ export const baseConfig = [
   {
     files: ["tailwind.config.js", "postcss.config.js"],
     languageOptions: { globals: globals.node },
+  },
+  {
+    files: ["tailwind.config.js"],
+    languageOptions: { sourceType: "commonjs" },
     rules: {
+      // Tailwind's CommonJS configuration loads plugins with require.
       "@typescript-eslint/no-require-imports": "off",
     },
   },
@@ -1909,6 +1922,12 @@ export const lintRatchet = [
     },
   },
   {
+    files: ["src/functions/withSuspense.tsx"],
+    rules: {
+      "react/display-name": "off",
+    },
+  },
+  {
     files: ["src/functions/withTimeout.test.ts"],
     rules: {
       "@typescript-eslint/use-unknown-in-catch-callback-variable": "off",
@@ -2091,6 +2110,7 @@ export const lintRatchet = [
   {
     files: ["src/scripts/middlewares/restrictedMethodsMiddleware.ts"],
     rules: {
+      "@typescript-eslint/ban-ts-comment": "off",
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-misused-promises": "off",
@@ -2105,6 +2125,7 @@ export const lintRatchet = [
   {
     files: ["src/scripts/middlewares/unrestrictedMethodsMiddleware.ts"],
     rules: {
+      "@typescript-eslint/ban-ts-comment": "off",
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-misused-promises": "off",
@@ -2184,6 +2205,7 @@ export const lintRatchet = [
   {
     files: ["src/scripts/serviceWorker.ts"],
     rules: {
+      "@typescript-eslint/ban-ts-comment": "off",
       "@typescript-eslint/no-deprecated": "off",
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-misused-promises": "off",
@@ -2329,6 +2351,7 @@ export const lintRatchet = [
   {
     files: ["src/scripts/utils/restrictedMethodsMiddlewareUtils.ts"],
     rules: {
+      "@typescript-eslint/ban-ts-comment": "off",
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
@@ -2342,6 +2365,7 @@ export const lintRatchet = [
   {
     files: ["src/scripts/utils/scriptUtils.ts"],
     rules: {
+      "@typescript-eslint/ban-ts-comment": "off",
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-base-to-string": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
@@ -2421,6 +2445,7 @@ export const lintRatchet = [
   {
     files: ["src/scripts/utils/unrestrictedMethodExecutor.ts"],
     rules: {
+      "@typescript-eslint/ban-ts-comment": "off",
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
