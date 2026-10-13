@@ -1,3 +1,4 @@
+import { filterStorageRecord, isFiniteNumber } from "@/utilities/storageGuards";
 import StorageUtil from "@/utilities/storageUtil";
 import {
   action,
@@ -143,18 +144,26 @@ class PriceStore {
       // Storage is slower than a warm network call, so a live fetch armed
       // alongside this can land first. Only older data is replaced, which
       // keeps the cache read from putting stale prices back on screen.
-      if (!cached || cached.timestamp <= this.lastUpdated) return;
-      this.prices = cached.prices;
-      this.change24h = cached.change24h;
+      if (!cached) return;
+      const timestamp = isFiniteNumber(cached.timestamp) ? cached.timestamp : 0;
+      if (
+        isFiniteNumber(cached.timestamp)
+          ? timestamp <= this.lastUpdated
+          : this.lastUpdated > 0
+      )
+        return;
+      this.prices = filterStorageRecord(cached.prices, isFiniteNumber);
+      this.change24h = filterStorageRecord(cached.change24h, isFiniteNumber);
+      const updatedAt = filterStorageRecord(cached.updatedAt, isFiniteNumber);
       // A cache written before per-currency stamps existed dates every
       // quote in it to the one timestamp it does carry.
       this.updatedAt = Object.fromEntries(
-        Object.keys(cached.prices).map((key) => [
+        Object.keys(this.prices).map((key) => [
           key,
-          cached.updatedAt?.[key] ?? cached.timestamp,
+          updatedAt[key] ?? timestamp,
         ]),
       );
-      this.lastUpdated = cached.timestamp;
+      this.lastUpdated = timestamp;
     });
 
     if (showBalanceAndPrice) this.setRefreshEnabled(true);

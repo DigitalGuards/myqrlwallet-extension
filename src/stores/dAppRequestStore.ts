@@ -1,6 +1,6 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
 import { approvalProducedNothingProviderError } from "@/functions/describeExtensionError";
-import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
+import type { StoredBlockchain as BlockchainDataType } from "@/utilities/storageGuards";
 import { EXTENSION_MESSAGES } from "@/scripts/constants/streamConstants";
 import {
   DAppRequestType,

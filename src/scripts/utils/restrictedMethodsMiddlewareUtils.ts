@@ -1,7 +1,11 @@
+import {
+  isRecord,
+  isStorageIdentity,
+  isStoredBlockchain,
+} from "@/utilities/storageGuards";
 import { providerErrors, rpcErrors } from "@theqrl/qrl-wallet-provider";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import StorageUtil from "@/utilities/storageUtil";
-import { isRecord } from "@/utilities/storageGuards";
 import {
   isApprovalSender,
   isStringArray,
@@ -15,6 +19,7 @@ import {
   areAddressesEquivalent,
   isCanonicalQrlAddress,
   isQrlAddress,
+  toCanonicalQrlAddress,
 } from "@/utilities/addressUtil";
 import {
   CAVEAT_TYPES,
@@ -32,19 +37,12 @@ type AuthorizationRequest = {
 
 type ChainGrant = Parameters<
   typeof StorageUtil.setDAppsConnectedAccountsData
->[0]["blockchains"][number] &
-  Record<string, unknown>;
-
-const isChainGrant = (value: unknown): value is ChainGrant =>
-  isRecord(value) &&
-  typeof value.chainId === "string" &&
-  (value.qrnsRegistryAddress === undefined ||
-    typeof value.qrnsRegistryAddress === "string");
+>[0]["blockchains"][number];
 
 const isChainGrantList = (value: unknown): value is ChainGrant[] => {
   if (!isUnknownArray(value)) return false;
   for (const chain of value) {
-    if (!isChainGrant(chain)) return false;
+    if (!isStoredBlockchain(chain)) return false;
   }
   return true;
 };
@@ -924,7 +922,7 @@ const validateWalletWatchAssetParams = (paramObject: unknown) => {
   const options = paramObject.options;
   if (
     !isRecord(options) ||
-    !options.address ||
+    !isStorageIdentity(options.address) ||
     !options.decimals ||
     !options.symbol
   ) {
@@ -932,15 +930,6 @@ const validateWalletWatchAssetParams = (paramObject: unknown) => {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
         message: "Must specify address, symbol, and decimals.",
-      }),
-    };
-  }
-
-  if (typeof options.address !== "string") {
-    return {
-      canProceed: false,
-      proceedError: rpcErrors.invalidParams({
-        message: "Invalid address: not a string.",
       }),
     };
   }
@@ -1020,22 +1009,27 @@ export const checkWalletRequestPermissionParams = (paramObject: unknown) =>
     },
   );
 
-export const updateAccountsAndBlockchainsForUrlOrigin = async ({
+type ApprovedConnection = Pick<
+  Parameters<typeof StorageUtil.setDAppsConnectedAccountsData>[0],
+  "accounts" | "blockchains"
+> & { urlOrigin?: string | null };
+
+export const updateAccountsAndBlockchainsForUrlOrigin = async (
+  connection: ApprovedConnection,
+) => {
+  await updatePermissionsForUrlOrigin(connection);
+  return connection.accounts;
+};
+
+export const updatePermissionsForUrlOrigin = async ({
   urlOrigin,
   accounts,
   blockchains,
-}: {
-  urlOrigin?: string | null;
-  accounts: string[];
-  blockchains: Parameters<
-    typeof StorageUtil.setDAppsConnectedAccountsData
-  >[0]["blockchains"];
-}) => {
+}: ApprovedConnection): Promise<Permission[]> => {
   const origin = new URL(urlOrigin ?? "").origin;
-  // Do not silently force-switch the globally-active chain when granting
-  // permissions. The user approved the connection. If the
-  // dApp needs a different chain, it can call wallet_switchQRLChain, which
-  // will surface to the user via the popup (F-3).
+  // A connection approval grants access to the selected chains. Changing the
+  // active chain requires a separate wallet_switchQRLChain approval (F-3).
+  const canonicalAccounts = accounts.map(toCanonicalQrlAddress);
   const blockchainIds = blockchains.map((blockchain) => blockchain.chainId);
   const permissions: Permission[] = [
     {
@@ -1044,7 +1038,7 @@ export const updateAccountsAndBlockchainsForUrlOrigin = async ({
       caveats: [
         {
           type: CAVEAT_TYPES.RESTRICT_RETURNED_ACCOUNTS,
-          value: [...accounts],
+          value: [...canonicalAccounts],
         },
       ],
     },
@@ -1065,7 +1059,9 @@ export const updateAccountsAndBlockchainsForUrlOrigin = async ({
     blockchains: [...blockchains],
     permissions,
   });
-  return accounts;
+  // Respond with the approved usable grants after the raw storage merge. Opaque
+  // stored siblings remain available to future readers and subsequent writes.
+  return canonicalAccounts.length > 0 ? permissions : [];
 };
 
 export const includeChainForUrlOrigin = async ({
@@ -1076,29 +1072,13 @@ export const includeChainForUrlOrigin = async ({
   chainId?: string | null;
 }) => {
   const origin = new URL(urlOrigin ?? "").origin;
-  const dAppConnectedData = readConnectionGrants(
-    await StorageUtil.getDAppsConnectedAccountsData(origin),
-  );
   const allBlockchains = readStoredChains(
     await StorageUtil.getAllBlockChains(),
   );
   const blockchain = allBlockchains.find(
     (chain) => chain.chainId.toLowerCase() === chainId?.toLowerCase(),
   );
-  const isAdditionRequired = !(dAppConnectedData?.blockchains ?? []).find(
-    (chain) =>
-      chain.chainId.toLowerCase() === blockchain?.chainId.toLowerCase(),
-  );
-  const updatedBlockchains = [
-    ...(dAppConnectedData?.blockchains ?? []),
-    ...(isAdditionRequired && blockchain ? [blockchain] : []),
-  ];
-
-  await updateAccountsAndBlockchainsForUrlOrigin({
-    urlOrigin: origin,
-    accounts: dAppConnectedData?.accounts ?? [],
-    blockchains: updatedBlockchains,
-  });
+  if (blockchain) await StorageUtil.addDAppChain(origin, blockchain);
 };
 
 /**
@@ -1190,17 +1170,5 @@ export const excludeChainForUrlOrigin = async ({
   chainId: string;
 }) => {
   const origin = new URL(urlOrigin ?? "").origin;
-  const dAppConnectedData = readConnectionGrants(
-    await StorageUtil.getDAppsConnectedAccountsData(origin),
-  );
-  const updatedBlockchains =
-    dAppConnectedData?.blockchains?.filter(
-      (chain) => chain.chainId.toLowerCase() !== chainId.toLowerCase(),
-    ) ?? [];
-
-  await updateAccountsAndBlockchainsForUrlOrigin({
-    urlOrigin: origin,
-    accounts: dAppConnectedData?.accounts ?? [],
-    blockchains: updatedBlockchains,
-  });
+  await StorageUtil.removeDAppChain(origin, chainId);
 };

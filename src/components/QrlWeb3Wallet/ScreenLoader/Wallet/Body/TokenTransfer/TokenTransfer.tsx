@@ -106,8 +106,8 @@ const createFormSchema = (t: TFunction, decimals: number) =>
 type TransferTokenDetails = {
   isZrc20Token: boolean;
   tokenContractAddress: string;
-  tokenDecimals: number;
-  tokenImage: string;
+  tokenDecimals: number | null;
+  tokenImage: unknown;
   tokenBalance: string;
   tokenBalanceBaseUnits?: string;
   tokenName: string;
@@ -147,7 +147,7 @@ const TokenTransfer = observer(() => {
   const [isZrc20Token, setIsZrc20Token] = useState(false);
   const [tokenContractAddress, setTokenContractAddress] = useState("");
   const [tokenDecimals, setTokenDecimals] = useState(0);
-  const [tokenImage, setTokenImage] = useState(NATIVE_TOKEN.image);
+  const [tokenImage, setTokenImage] = useState<unknown>(NATIVE_TOKEN.image);
   const [tokenBalance, setTokenBalance] = useState("");
   // Exact on-chain integer balance for the selected ZRC-20. Every guard
   // and the Max button work off this; `tokenBalance` above is the
@@ -461,7 +461,7 @@ const TokenTransfer = observer(() => {
           await resetForm();
           setIsZrc20Token(tokenDetailsFromState?.isZrc20Token);
           setTokenContractAddress(tokenDetailsFromState?.tokenContractAddress);
-          setTokenDecimals(tokenDetailsFromState?.tokenDecimals);
+          setTokenDecimals(tokenDetailsFromState?.tokenDecimals ?? Number.NaN);
           setTokenImage(tokenDetailsFromState?.tokenImage);
           setTokenBalance(tokenDetailsFromState?.tokenBalance);
           setTokenBalanceBaseUnits(
@@ -475,8 +475,10 @@ const TokenTransfer = observer(() => {
           setTokenContractAddress(
             tokenDetailsFromStorage?.tokenContractAddress,
           );
-          setTokenDecimals(tokenDetailsFromStorage?.tokenDecimals);
-          setTokenImage(tokenDetailsFromStorage?.tokenImage);
+          setTokenDecimals(
+            tokenDetailsFromStorage?.tokenDecimals ?? Number.NaN,
+          );
+          setTokenImage(tokenDetailsFromStorage.tokenImage);
           setTokenBalance(tokenDetailsFromStorage?.tokenBalance);
           setTokenBalanceBaseUnits(
             tokenDetailsFromStorage?.tokenBalanceBaseUnits ?? "",
@@ -654,6 +656,13 @@ const TokenTransfer = observer(() => {
   // native balance, so their full token balance is sendable.
   const maxSendable = useMemo(() => {
     if (isZrc20Token) {
+      if (
+        !Number.isInteger(tokenDecimals) ||
+        tokenDecimals < 0 ||
+        tokenDecimals > 255
+      ) {
+        return new BigNumber(0);
+      }
       // Exact, so Max spends the whole balance. The rounded display
       // value used to leave dust behind. shift moves the decimal point by
       // exact multiplication, which no rounding setting can truncate;
@@ -818,7 +827,7 @@ const TokenTransfer = observer(() => {
           <Card className="w-full">
             <CardHeader className="flex flex-col gap-4 pb-4">
               <TokenDisplaySection
-                tokenImage={tokenImage}
+                tokenImage={typeof tokenImage === "string" ? tokenImage : ""}
                 tokenName={tokenName}
                 tokenSymbol={tokenSymbol}
               />

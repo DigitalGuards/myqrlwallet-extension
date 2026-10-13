@@ -6,7 +6,7 @@ import {
   SIDE_PANEL_PATH,
 } from "@/scripts/utils/sidePanelPreference";
 import type { GasTier } from "@/types/gasFee";
-import StorageUtil from "@/utilities/storageUtil";
+import StorageUtil, { type WalletSettings } from "@/utilities/storageUtil";
 import { action, makeAutoObservable, observable, runInAction } from "mobx";
 import browser from "webextension-polyfill";
 
@@ -169,34 +169,37 @@ class SettingsStore {
     this.isDarkMode = resolved === THEME.DARK;
   }
 
-  async #persistSettings() {
-    await StorageUtil.setSettings({
-      themePreference: this.themePreference,
-      autoLockMinutes: this.autoLockMinutes,
-      currency: this.currency,
-      language: this.language,
-      defaultGasTier: this.defaultGasTier,
-      showBalanceAndPrice: this.showBalanceAndPrice,
-      // Kept in sync so a downgrade to an older build still reads a sane
-      // value. The surface decision itself uses sidePanelSurface.
-      sidePanelPreferred: this.sidePanelPreferred,
-      sidePanelSurface: this.sidePanelSurface,
-      sidePanelNoticePending: this.sidePanelNoticePending,
-      sidePanelNoticeSeen: this.sidePanelNoticeSeen,
-      notificationsEnabled: this.notificationsEnabled,
-      phishingDetectionEnabled: this.phishingDetectionEnabled,
-    });
+  async #persistSettings(changedFields: (keyof WalletSettings)[]) {
+    await StorageUtil.setSettings(
+      {
+        themePreference: this.themePreference,
+        autoLockMinutes: this.autoLockMinutes,
+        currency: this.currency,
+        language: this.language,
+        defaultGasTier: this.defaultGasTier,
+        showBalanceAndPrice: this.showBalanceAndPrice,
+        // Kept in sync so a downgrade to an older build still reads a sane
+        // value. The surface decision itself uses sidePanelSurface.
+        sidePanelPreferred: this.sidePanelPreferred,
+        sidePanelSurface: this.sidePanelSurface,
+        sidePanelNoticePending: this.sidePanelNoticePending,
+        sidePanelNoticeSeen: this.sidePanelNoticeSeen,
+        notificationsEnabled: this.notificationsEnabled,
+        phishingDetectionEnabled: this.phishingDetectionEnabled,
+      },
+      changedFields,
+    );
   }
 
   async setThemePreference(pref: ThemePreference) {
     this.themePreference = pref;
     this.#applyTheme(pref);
-    await this.#persistSettings();
+    await this.#persistSettings(["themePreference"]);
   }
 
   async setAutoLockMinutes(minutes: number) {
     this.autoLockMinutes = minutes;
-    await this.#persistSettings();
+    await this.#persistSettings(["autoLockMinutes"]);
     browser.runtime
       .sendMessage({ name: LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK })
       .catch(() => {});
@@ -204,33 +207,33 @@ class SettingsStore {
 
   async setCurrency(currency: string) {
     this.currency = currency;
-    await this.#persistSettings();
+    await this.#persistSettings(["currency"]);
   }
 
   async setLanguage(language: string) {
     this.language = language;
     i18n.changeLanguage(language);
-    await this.#persistSettings();
+    await this.#persistSettings(["language"]);
   }
 
   async setDefaultGasTier(tier: GasTier) {
     this.defaultGasTier = tier;
-    await this.#persistSettings();
+    await this.#persistSettings(["defaultGasTier"]);
   }
 
   async setShowBalanceAndPrice(enabled: boolean) {
     this.showBalanceAndPrice = enabled;
-    await this.#persistSettings();
+    await this.#persistSettings(["showBalanceAndPrice"]);
   }
 
   async setNotificationsEnabled(enabled: boolean) {
     this.notificationsEnabled = enabled;
-    await this.#persistSettings();
+    await this.#persistSettings(["notificationsEnabled"]);
   }
 
   async setPhishingDetectionEnabled(enabled: boolean) {
     this.phishingDetectionEnabled = enabled;
-    await this.#persistSettings();
+    await this.#persistSettings(["phishingDetectionEnabled"]);
   }
 
   /**
@@ -244,7 +247,12 @@ class SettingsStore {
     // The choice itself answers the notice.
     this.sidePanelNoticePending = false;
     this.sidePanelNoticeSeen = true;
-    await this.#persistSettings();
+    await this.#persistSettings([
+      "sidePanelPreferred",
+      "sidePanelSurface",
+      "sidePanelNoticePending",
+      "sidePanelNoticeSeen",
+    ]);
     if (
       typeof chrome !== "undefined" &&
       typeof chrome?.sidePanel?.setPanelBehavior === "function"
@@ -266,7 +274,10 @@ class SettingsStore {
   async dismissSidePanelNotice() {
     this.sidePanelNoticePending = false;
     this.sidePanelNoticeSeen = true;
-    await this.#persistSettings();
+    await this.#persistSettings([
+      "sidePanelNoticePending",
+      "sidePanelNoticeSeen",
+    ]);
   }
 }
 

@@ -1,3 +1,4 @@
+import { storedText } from "@/utilities/storageViews";
 import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import type { Contact } from "@/types/contact";
 import { Pencil, Trash2 } from "lucide-react";
@@ -15,7 +16,7 @@ const ContactItem = ({ contact, onEdit, onDelete }: ContactItemProps) => {
   return (
     <div className="flex items-center justify-between rounded-md border p-3">
       <div className="flex min-w-0 flex-col gap-1">
-        <span className="text-sm font-medium">{contact.name}</span>
+        <span className="text-sm font-medium">{storedText(contact.name)}</span>
         <AddressFingerprint
           address={contact.address}
           className="text-xs text-muted-foreground"

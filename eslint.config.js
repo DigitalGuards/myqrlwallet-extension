@@ -216,7 +216,6 @@ export const lintRatchet = [
       "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/SwitchQrlChainContent/SwitchQrlChainInfo/SwitchQrlChainInfo.test.tsx",
     ],
     rules: {
-      "@typescript-eslint/no-misused-spread": "off",
       "@typescript-eslint/require-await": "off",
     },
   },
@@ -272,95 +271,6 @@ export const lintRatchet = [
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/ZRC20Tokens/ZRC20Token/ZRC20Token.test.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
-    files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/ZRC20Tokens/ZRC20Token/ZRC20Token.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/no-floating-promises": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/AccountImportSuccess/AccountImportSuccess.test.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-base-to-string": "off",
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
-    files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportAccount.test.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
-    files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportAccount.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/no-misused-promises": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportEncryptedWallet/ImportEncryptedWallet.test.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
-    files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportEncryptedWallet/ImportEncryptedWallet.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/no-misused-promises": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
-    files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportHexSeedForm/ImportHexSeedForm.test.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
-    files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportHexSeedForm/ImportHexSeedForm.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/no-misused-promises": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
-    files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportMnemonicForm/ImportMnemonicForm.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/no-misused-promises": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/restrict-template-expressions": "off",
     },
   },
   {
@@ -1219,17 +1129,6 @@ export const lintRatchet = [
       "@typescript-eslint/no-unsafe-call": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: ["src/utilities/storageUtil.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-extraneous-class": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
     },
   },
 ];

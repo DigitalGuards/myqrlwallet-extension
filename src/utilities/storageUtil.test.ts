@@ -52,6 +52,12 @@ vi.mock("@/configuration/qrlBlockchainConfig", () => ({
     blockExplorerUrls: [""],
     nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
     iconUrls: [],
+    defaultRpcUrl: "https://rpc.example",
+    defaultBlockExplorerUrl: "",
+    defaultIconUrl: "",
+    defaultWsRpcUrl: "",
+    isTestnet: true,
+    isCustomChain: false,
   },
   QRL_BLOCKCHAINS: [
     {
@@ -61,6 +67,12 @@ vi.mock("@/configuration/qrlBlockchainConfig", () => ({
       blockExplorerUrls: [""],
       nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
       iconUrls: [],
+      defaultRpcUrl: "https://rpc.example",
+      defaultBlockExplorerUrl: "",
+      defaultIconUrl: "",
+      defaultWsRpcUrl: "",
+      isTestnet: true,
+      isCustomChain: false,
     },
   ],
 }));
@@ -410,6 +422,12 @@ describe("StorageUtil", () => {
       blockExplorerUrls: [""],
       nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
       iconUrls: [],
+      defaultRpcUrl: "https://rpc.example",
+      defaultBlockExplorerUrl: "",
+      defaultIconUrl: "",
+      defaultWsRpcUrl: "",
+      isTestnet: true,
+      isCustomChain: false,
     };
     const chain2 = {
       chainId: "0x2",
@@ -418,6 +436,12 @@ describe("StorageUtil", () => {
       blockExplorerUrls: [""],
       nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
       iconUrls: [],
+      defaultRpcUrl: "https://rpc.example",
+      defaultBlockExplorerUrl: "",
+      defaultIconUrl: "",
+      defaultWsRpcUrl: "",
+      isTestnet: true,
+      isCustomChain: false,
     };
 
     it("should store and retrieve all blockchains", async () => {
@@ -740,6 +764,12 @@ describe("StorageUtil", () => {
       blockExplorerUrls: [],
       nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
       iconUrls: [],
+      defaultRpcUrl: "https://rpc.example",
+      defaultBlockExplorerUrl: "",
+      defaultIconUrl: "",
+      defaultWsRpcUrl: "",
+      isTestnet: true,
+      isCustomChain: false,
     };
     const connectedData = {
       urlOrigin: "https://example.com",

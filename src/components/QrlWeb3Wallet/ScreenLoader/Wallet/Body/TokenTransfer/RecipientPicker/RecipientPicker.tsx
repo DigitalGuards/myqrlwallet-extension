@@ -1,3 +1,4 @@
+import { storedText } from "@/utilities/storageViews";
 import {
   Dialog,
   DialogContent,
@@ -157,7 +158,7 @@ const RecipientPicker = observer(
                     <AddressRow
                       key={c.address}
                       address={c.address}
-                      label={c.name}
+                      label={storedText(c.name)}
                       onClick={() => handleSelect(c.address)}
                     />
                   ))}

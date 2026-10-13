@@ -44,6 +44,7 @@ import {
   registerDAppTransactionWatchIfApproved,
   UNSUPPORTED_TYPED_DATA_V4_MESSAGE,
   updateAccountsAndBlockchainsForUrlOrigin,
+  updatePermissionsForUrlOrigin,
 } from "../utils/restrictedMethodsMiddlewareUtils";
 import { DAppRequestType, DAppResponseType } from "./middlewareTypes";
 
@@ -241,8 +242,10 @@ export const checkRequestCanCompleteSilently = async (req: JsonRpcRequest) => {
     // normal approval flow.
     try {
       const urlOrigin = new URL(senderData?.url ?? "").origin;
-      const stored: unknown =
-        await StorageUtil.getDAppsConnectedAccountsData(urlOrigin);
+      const stored: unknown = await StorageUtil.getDAppsConnectedAccountsData(
+        urlOrigin,
+        isConnectionGrants,
+      );
       if (!isConnectionGrants(stored)) return { hasCompleted: false };
       const storedAccounts = stored.accounts;
       if (storedAccounts.length === 0) {
@@ -817,21 +820,11 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
                 break;
               }
               const urlOrigin = requesterOrigin;
-              await updateAccountsAndBlockchainsForUrlOrigin({
+              res.result = await updatePermissionsForUrlOrigin({
                 urlOrigin,
                 accounts: response.accounts,
                 blockchains: response.blockchains,
               });
-              const dAppConnectedAccountsData: unknown =
-                await StorageUtil.getDAppsConnectedAccountsData(urlOrigin);
-              const permissions = isRecord(dAppConnectedAccountsData)
-                ? (dAppConnectedAccountsData.permissions ?? [])
-                : [];
-              if (isUnknownArray(permissions) && isValidJson(permissions)) {
-                res.result = permissions;
-              } else {
-                res.error = invalidApprovalResponse();
-              }
               break;
             }
             case RESTRICTED_METHODS.QRL_SEND_TRANSACTION: {

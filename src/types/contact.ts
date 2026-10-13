@@ -1,4 +1,4 @@
 export type Contact = {
-  name: string;
+  name?: unknown;
   address: string;
 };

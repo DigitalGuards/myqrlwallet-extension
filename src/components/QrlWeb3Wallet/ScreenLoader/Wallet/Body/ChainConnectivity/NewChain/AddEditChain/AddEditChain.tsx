@@ -1,3 +1,4 @@
+import { blockchainView } from "@/utilities/storageViews";
 import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 import { ROUTES } from "@/router/router";
 import StorageUtil from "@/utilities/storageUtil";
@@ -29,7 +30,9 @@ const AddEditChain = observer(() => {
   useEffect(() => {
     if (chainIdToEdit) {
       (async () => {
-        const blockchains = await StorageUtil.getAllBlockChains();
+        const blockchains = (await StorageUtil.getAllBlockChains()).map(
+          blockchainView,
+        );
         setChainToEdit(
           blockchains.find((chain) => chain.chainId === chainIdToEdit),
         );

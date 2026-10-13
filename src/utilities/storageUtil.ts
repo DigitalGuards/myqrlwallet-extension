@@ -1,6 +1,4 @@
-import type { AddedBlockchainData } from "@/utilities/approvalGuards";
 import {
-  BlockchainDataType,
   DEFAULT_BLOCKCHAIN,
   LEGACY_TESTNET_RPC,
   QRL_BLOCKCHAINS,
@@ -9,24 +7,82 @@ import {
 import type {
   ConnectedAccountsDataType,
   DAppRequestType,
-  TokenContractType,
 } from "@/scripts/middlewares/middlewareTypes";
-import type { LedgerAccount } from "@/services/ledger/ledgerTypes";
-import type { Contact } from "@/types/contact";
 import type { GasTier } from "@/types/gasFee";
-import type { NFTCollectionType } from "@/types/nft";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import {
-  isCanonicalQrlAddress,
   isLegacyQrlAddress,
   isQrlAddress,
   toCanonicalQrlAddress,
 } from "@/utilities/addressUtil";
-import { KeyStore } from "@theqrl/web3";
+import type { KeyStore } from "@theqrl/web3";
 import {
   walletLocalStorage,
   walletSessionStorage,
 } from "@/utilities/profileStorage";
+
+import {
+  ensureStorageRecord,
+  filterStorageRecord,
+  getStorageArray,
+  getStorageRecord,
+  getStoredValue,
+  hasCanonicalRegistry,
+  isArrayOf,
+  isBoolean,
+  isBooleanRecord,
+  isConnectedAccounts,
+  isContact,
+  isDAppRequest,
+  isFiniteNumber,
+  isLedgerAccount,
+  isNFTCollection,
+  isNormalizableContact,
+  isNormalizableQrlAddress,
+  isPriceCache,
+  isRecord,
+  isStoredBlockchain,
+  isStoredKeystore,
+  isString,
+  isStringRecord,
+  isTokenContract,
+  isTransactionHistoryEntry,
+  isTransactionValues,
+  isWalletSettings,
+  readStoredSettings,
+  mergeStorageArray,
+  mergeStorageRecord,
+  normalizeStoredPermissions,
+  isStorageIdentity,
+  matchesStoredAccount,
+  replaceStoredEntry,
+  mergeStoredPermissions,
+  revokeStoredCaveats,
+  replaceStoredRequest,
+  replaceStoredSettings,
+  replaceStoredPriceCache,
+  addStoredChainPermission,
+  matchesStoredChain,
+  type StoredBlockchain,
+  type StoredToken,
+  type StoredNFTCollection,
+  type StoredContact,
+  type StoredLedgerAccount,
+  type StoredHistoryEntry,
+} from "@/utilities/storageGuards";
+
+const readLocalStorage = async (
+  key: string,
+): Promise<Record<string, unknown>> => {
+  const stored: unknown = await walletLocalStorage.get(key);
+  return getStorageRecord(stored);
+};
+const readSessionStorage = async (
+  key: string,
+): Promise<Record<string, unknown>> => {
+  const stored: unknown = await walletSessionStorage.get(key);
+  return getStorageRecord(stored);
+};
 
 const KEYSTORES_IDENTIFIER = "KEYSTORES";
 
@@ -36,16 +92,6 @@ export class KeystoreStorageCorruptError extends Error {
     this.name = "KeystoreStorageCorruptError";
   }
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-// Validate the storage envelope here; decryption validates crypto parameters.
-const isStoredKeystore = (value: unknown): value is KeyStore =>
-  isRecord(value) &&
-  typeof value.address === "string" &&
-  (isQrlAddress(value.address) || isLegacyQrlAddress(value.address)) &&
-  isRecord(value.crypto);
 
 const ACCOUNTS_IDENTIFIER = "ACCOUNTS";
 const ALL_ACCOUNTS_IDENTIFIER = "ALL_ACCOUNTS";
@@ -61,7 +107,7 @@ const ACTIVE_BLOCKCHAIN_IDENTIFIER = "ACTIVE_BLOCKCHAIN";
 const DAPPS_IDENTIFIER = "DAPPS";
 const ALL_DAPPS_IDENTIFIER = "ALL_DAPPS";
 // Mirrors CAVEAT_TYPES.RESTRICT_RETURNED_ACCOUNTS in middlewareTypes, copied
-// rather than imported on purpose: that module has a runtime dependency on
+// as a literal because that module has a runtime dependency on
 // @theqrl/qrl-wallet-provider, and importing a *value* from it (types are
 // erased at build) pulls the provider into every bundle that touches
 // storageUtil, including the popup, which has no Buffer polyfill and dies at
@@ -85,29 +131,26 @@ const ALL_CONTACTS_IDENTIFIER = "ALL_CONTACTS";
 const ACCOUNT_LABELS_IDENTIFIER = "ACCOUNT_LABELS";
 const HIDDEN_ACCOUNTS_IDENTIFIER = "HIDDEN_ACCOUNTS";
 
-const sanitizeQrnsRegistry = <T extends { qrnsRegistryAddress?: string }>(
-  chain: T,
+const sanitizeQrnsRegistry = (
+  chain: StoredBlockchain,
   rejectInvalid: boolean,
-): T => {
-  const registryAddress: unknown = chain.qrnsRegistryAddress;
+): StoredBlockchain => {
+  if (hasCanonicalRegistry(chain)) return chain;
+  const { qrnsRegistryAddress: registryAddress, ...withoutRegistry } = chain;
   if (
     registryAddress === undefined ||
     registryAddress === null ||
     registryAddress === ""
   ) {
-    if (registryAddress === undefined) return chain;
-    const withoutRegistry = { ...chain };
-    delete withoutRegistry.qrnsRegistryAddress;
-    return withoutRegistry;
+    return rejectInvalid
+      ? { ...withoutRegistry, qrnsRegistryAddress: undefined }
+      : withoutRegistry;
   }
-  if (isCanonicalQrlAddress(registryAddress)) return chain;
   if (rejectInvalid) {
     throw new Error(
       "QRNS registry must be a canonical uppercase-Q address with 128 hexadecimal characters and a valid checksum",
     );
   }
-  const withoutRegistry = { ...chain };
-  delete withoutRegistry.qrnsRegistryAddress;
   return withoutRegistry;
 };
 
@@ -144,25 +187,20 @@ export type WalletSettings = {
 };
 
 export type PriceCache = {
-  prices: Record<string, number>;
-  change24h: Record<string, number>;
-  /**
-   * When each individual currency was last quoted. Optional: a cache
-   * written by an older build carries only `timestamp`, and every quote in
-   * it is dated to that instead.
-   */
-  updatedAt?: Record<string, number>;
-  timestamp: number;
+  prices?: unknown;
+  change24h?: unknown;
+  updatedAt?: unknown;
+  timestamp?: unknown;
 };
 
-type TransactionValuesType = {
+export type TransactionValuesType = {
   receiverAddress?: string;
   amount?: string | number;
   tokenDetails?: {
     isZrc20Token: boolean;
     tokenContractAddress: string;
-    tokenDecimals: number;
-    tokenImage: string;
+    tokenDecimals: number | null;
+    tokenImage: unknown;
     tokenBalance: string;
     tokenBalanceBaseUnits?: string;
     tokenName: string;
@@ -180,16 +218,16 @@ export type LockStateType = (typeof LockState)[keyof typeof LockState];
 /**
  * A utility for storing and retrieving states of different components to and from the browser storage.
  */
-class StorageUtil {
+const StorageUtil = {
   // Cap retained tx-history entries per account+chain so unbounded
   // growth under `unlimitedStorage` cannot wedge the popup ↔ SW port
   // (Chromium's 64 MB silent-drop limit).
-  static readonly TX_HISTORY_MAX_PER_ACCOUNT_CHAIN = 1000;
+  TX_HISTORY_MAX_PER_ACCOUNT_CHAIN: 1000,
   /**
    * A function for storing the keystore data.
    * Call the getKeystore function to retrieve the stored value, and clearKeystore for clearing the stored value.
    */
-  static async setKeystores(keystores: KeyStore[]) {
+  async setKeystores(keystores: KeyStore[]) {
     if (
       keystores.some(
         (keystore) =>
@@ -199,14 +237,35 @@ class StorageUtil {
     ) {
       throw new Error("Cannot persist a keystore with an invalid QRL address");
     }
+    if (!isArrayOf(keystores, isStoredKeystore))
+      throw new Error("Cannot persist an unreadable keystore");
+    const storageData = await readLocalStorage(KEYSTORES_IDENTIFIER);
+    const stored = storageData[KEYSTORES_IDENTIFIER];
+    let raw: unknown = stored;
+    if (typeof stored === "string" && stored !== "") {
+      try {
+        raw = JSON.parse(stored);
+      } catch {
+        throw new KeystoreStorageCorruptError();
+      }
+    }
     await walletLocalStorage.set({
-      [KEYSTORES_IDENTIFIER]: JSON.stringify(keystores),
+      [KEYSTORES_IDENTIFIER]: JSON.stringify(
+        mergeStorageArray(
+          getStorageArray(raw === "" ? undefined : raw, KEYSTORES_IDENTIFIER),
+          keystores,
+          isStoredKeystore,
+          (keystore) => keystore.address.toLowerCase(),
+          (raw, replacement) =>
+            replaceStoredEntry("keystore", raw, replacement),
+        ),
+      ),
     });
-  }
+  },
 
-  static async getKeystores(): Promise<KeyStore[]> {
-    const storageData = await walletLocalStorage.get(KEYSTORES_IDENTIFIER);
-    const stored: unknown = storageData?.[KEYSTORES_IDENTIFIER];
+  async getKeystores(): Promise<KeyStore[]> {
+    const storageData = await readLocalStorage(KEYSTORES_IDENTIFIER);
+    const stored: unknown = storageData[KEYSTORES_IDENTIFIER];
     if (stored === undefined || stored === "") return [];
     if (typeof stored !== "string") throw new KeystoreStorageCorruptError();
 
@@ -216,36 +275,37 @@ class StorageUtil {
     } catch {
       throw new KeystoreStorageCorruptError();
     }
-    if (!Array.isArray(parsed) || !parsed.every(isStoredKeystore)) {
+    if (!isArrayOf(parsed, isStoredKeystore)) {
       throw new KeystoreStorageCorruptError();
     }
     return parsed;
-  }
+  },
 
-  static async clearKeystores() {
+  async clearKeystores() {
     await walletLocalStorage.remove(KEYSTORES_IDENTIFIER);
-  }
+  },
 
-  static async updateLockStateTimeStamp(lockState: LockStateType) {
+  async updateLockStateTimeStamp(lockState: LockStateType) {
     const lockStatusIdentifier = `LOCK_MANAGER_${lockState}_TIMESTAMP`;
     await walletLocalStorage.set({
       [lockStatusIdentifier]: Date.now(),
     });
-  }
+  },
 
-  static async getLockStateTimeStamp(
-    lockState: LockStateType,
-  ): Promise<number> {
+  async getLockStateTimeStamp(lockState: LockStateType): Promise<number> {
     const key = `LOCK_MANAGER_${lockState}_TIMESTAMP`;
-    const data = await walletLocalStorage.get(key);
-    return (data?.[key] ?? 0) as number;
-  }
+    const data = await readLocalStorage(key);
+    const timestamp = data[key];
+    return isFiniteNumber(timestamp) ? timestamp : 0;
+  },
 
   /**
    * A function for storing the transaction state values, so that the user need not fill in the field values if the extension is closed and opened again.
    * Call the getTransactionValues fuction to retieve the stored value.
    */
-  static async setTransactionValues(transactionValues: TransactionValuesType) {
+  async setTransactionValues(transactionValues: TransactionValuesType) {
+    if (!isTransactionValues(transactionValues))
+      throw new Error("Cannot persist an unreadable transaction draft");
     const { chainId } = await this.getActiveBlockChain();
     const transactionValuesIdentifier = `${chainId}_${TRANSACTION_VALUES_IDENTIFIER}`;
     const transactionValuesWithDefaultValues = {
@@ -253,12 +313,17 @@ class StorageUtil {
       amount: transactionValues.amount ?? 0,
       tokenDetails: transactionValues.tokenDetails,
     };
+    const storageData = await readLocalStorage(transactionValuesIdentifier);
     await walletLocalStorage.set({
-      [transactionValuesIdentifier]: transactionValuesWithDefaultValues,
+      [transactionValuesIdentifier]: replaceStoredEntry(
+        "draft",
+        storageData[transactionValuesIdentifier],
+        transactionValuesWithDefaultValues,
+      ),
     });
-  }
+  },
 
-  static async getTransactionValues() {
+  async getTransactionValues() {
     const { chainId } = await this.getActiveBlockChain();
     const transactionValuesIdentifier = `${chainId}_${TRANSACTION_VALUES_IDENTIFIER}`;
     let transactionValues: TransactionValuesType = {
@@ -266,55 +331,65 @@ class StorageUtil {
       amount: 0,
     };
 
-    const storedTransactionValues = await walletLocalStorage.get(
+    const storedTransactionValues = await readLocalStorage(
       transactionValuesIdentifier,
     );
-    if (storedTransactionValues) {
+    const stored = storedTransactionValues[transactionValuesIdentifier];
+    if (isTransactionValues(stored)) {
       transactionValues = {
         ...transactionValues,
-        ...storedTransactionValues[transactionValuesIdentifier],
+        ...stored,
       };
     }
 
     return transactionValues;
-  }
+  },
 
-  static async clearTransactionValues() {
+  async clearTransactionValues() {
     const { chainId } = await this.getActiveBlockChain();
     const transactionValuesIdentifier = `${chainId}_${TRANSACTION_VALUES_IDENTIFIER}`;
     await walletLocalStorage.remove(transactionValuesIdentifier);
-  }
+  },
 
   /**
    * A function for storing the accounts created and imported within the qrl web3 wallet extension.
    * Call the getAllAccounts function to retrieve the stored value.
    */
-  static async setAllAccounts(accountList: string[]) {
+  async setAllAccounts(accountList: string[]) {
     const canonicalAccounts = accountList.map(toCanonicalQrlAddress);
-    const existing = (await walletLocalStorage.get(ACCOUNTS_IDENTIFIER))?.[
+    const existing = (await readLocalStorage(ACCOUNTS_IDENTIFIER))[
       ACCOUNTS_IDENTIFIER
     ];
     await walletLocalStorage.set({
       [ACCOUNTS_IDENTIFIER]: {
-        ...existing,
-        [ALL_ACCOUNTS_IDENTIFIER]: canonicalAccounts,
+        ...getStorageRecord(existing),
+        [ALL_ACCOUNTS_IDENTIFIER]: mergeStorageArray(
+          getStorageArray(
+            getStoredValue(existing, ALL_ACCOUNTS_IDENTIFIER),
+            ALL_ACCOUNTS_IDENTIFIER,
+          ),
+          canonicalAccounts,
+          isNormalizableQrlAddress,
+          toCanonicalQrlAddress,
+        ),
       },
     });
-  }
+  },
 
-  static async getStoredAccounts() {
-    const storedAllAccounts = (
-      await walletLocalStorage.get(ACCOUNTS_IDENTIFIER)
-    )?.[ACCOUNTS_IDENTIFIER];
-    return (storedAllAccounts?.[ALL_ACCOUNTS_IDENTIFIER] ?? []) as string[];
-  }
+  async getStoredAccounts() {
+    const storedAllAccounts = (await readLocalStorage(ACCOUNTS_IDENTIFIER))[
+      ACCOUNTS_IDENTIFIER
+    ];
+    const accounts = getStoredValue(storedAllAccounts, ALL_ACCOUNTS_IDENTIFIER);
+    return getStorageArray(accounts, ALL_ACCOUNTS_IDENTIFIER).filter(isString);
+  },
 
   /**
    * Return only QIP-55 accounts to live wallet and provider flows. Legacy
    * entries stay byte-for-byte in storage for an explicit seed-aware
    * migration.
    */
-  static async getAllAccounts() {
+  async getAllAccounts() {
     const storedAccounts = await this.getStoredAccounts();
     return storedAccounts.flatMap((address) => {
       try {
@@ -323,79 +398,99 @@ class StorageUtil {
         return [];
       }
     });
-  }
+  },
 
   /**
    * A function for storing the active account in the wallet.
    * Call the getActiveAccount function to retrieve the stored value, and clearActiveAccount for clearing the stored value.
    */
-  static async setActiveAccount(activeAccount?: string) {
+  async setActiveAccount(activeAccount?: string) {
+    if (activeAccount !== undefined && !isString(activeAccount))
+      throw new Error("Invalid active account");
     if (activeAccount) {
       const canonicalAddress = toCanonicalQrlAddress(activeAccount);
-      const existing = (await walletLocalStorage.get(ACCOUNTS_IDENTIFIER))?.[
+      const existing = (await readLocalStorage(ACCOUNTS_IDENTIFIER))[
         ACCOUNTS_IDENTIFIER
       ];
       await walletLocalStorage.set({
         [ACCOUNTS_IDENTIFIER]: {
-          ...existing,
+          ...getStorageRecord(existing),
           [ACTIVE_ACCOUNT_IDENTIFIER]: canonicalAddress,
         },
       });
     } else {
       await this.clearActiveAccount();
     }
-  }
+  },
 
-  static async getActiveAccount() {
-    const storedAccounts = (
-      await walletLocalStorage.get(ACCOUNTS_IDENTIFIER)
-    )?.[ACCOUNTS_IDENTIFIER];
-    const storedAddress = storedAccounts?.[ACTIVE_ACCOUNT_IDENTIFIER];
+  async getActiveAccount() {
+    const storedAccounts = (await readLocalStorage(ACCOUNTS_IDENTIFIER))[
+      ACCOUNTS_IDENTIFIER
+    ];
+    const storedAddress = getStoredValue(
+      storedAccounts,
+      ACTIVE_ACCOUNT_IDENTIFIER,
+    );
     try {
       return toCanonicalQrlAddress(storedAddress);
     } catch {
       return "";
     }
-  }
+  },
 
-  static async clearActiveAccount() {
+  async clearActiveAccount() {
     const storedAccounts =
-      (await walletLocalStorage.get(ACCOUNTS_IDENTIFIER))?.[
-        ACCOUNTS_IDENTIFIER
-      ] ?? {};
-    delete storedAccounts?.[ACTIVE_ACCOUNT_IDENTIFIER];
+      (await readLocalStorage(ACCOUNTS_IDENTIFIER))[ACCOUNTS_IDENTIFIER] ?? {};
+    const accounts = getStorageRecord(storedAccounts);
+    Reflect.deleteProperty(accounts, ACTIVE_ACCOUNT_IDENTIFIER);
     await walletLocalStorage.set({
-      [ACCOUNTS_IDENTIFIER]: storedAccounts,
+      [ACCOUNTS_IDENTIFIER]: accounts,
     });
-  }
+  },
 
   /**
    * A function for storing all the available blockchains.
    * Call the getAllBlockChains function to retrieve all the stored blockchains.
    */
-  static async setAllBlockChains(
-    blockchains: (BlockchainDataType | AddedBlockchainData)[],
-  ) {
+  async setAllBlockChains(blockchains: StoredBlockchain[]) {
+    if (!isArrayOf(blockchains, isStoredBlockchain))
+      throw new Error("Invalid stored chain identity");
     const canonicalBlockchains = blockchains.map((chain) =>
       sanitizeQrnsRegistry(chain, true),
     );
-    const existing = (await walletLocalStorage.get(BLOCKCHAINS_IDENTIFIER))?.[
+    const existing = (await readLocalStorage(BLOCKCHAINS_IDENTIFIER))[
       BLOCKCHAINS_IDENTIFIER
     ];
     await walletLocalStorage.set({
       [BLOCKCHAINS_IDENTIFIER]: {
-        ...existing,
-        [ALL_BLOCKCHAINS_IDENTIFIER]: canonicalBlockchains,
+        ...getStorageRecord(existing),
+        [ALL_BLOCKCHAINS_IDENTIFIER]: mergeStorageArray(
+          getStorageArray(
+            getStoredValue(existing, ALL_BLOCKCHAINS_IDENTIFIER),
+            ALL_BLOCKCHAINS_IDENTIFIER,
+          ),
+          canonicalBlockchains,
+          isStoredBlockchain,
+          (chain) => chain.chainId,
+          (raw, replacement) => replaceStoredEntry("chain", raw, replacement),
+        ),
       },
     });
-  }
+  },
 
-  static async getAllBlockChains() {
-    const storedBlockchains = (
-      await walletLocalStorage.get(BLOCKCHAINS_IDENTIFIER)
-    )?.[BLOCKCHAINS_IDENTIFIER];
-    const chains = (storedBlockchains?.[ALL_BLOCKCHAINS_IDENTIFIER] ??
-      QRL_BLOCKCHAINS) as BlockchainDataType[];
+  async getAllBlockChains() {
+    const storedBlockchains = (await readLocalStorage(BLOCKCHAINS_IDENTIFIER))[
+      BLOCKCHAINS_IDENTIFIER
+    ];
+    const storedChains = getStoredValue(
+      storedBlockchains,
+      ALL_BLOCKCHAINS_IDENTIFIER,
+    );
+    const chains = getStorageArray(
+      storedChains,
+      ALL_BLOCKCHAINS_IDENTIFIER,
+      QRL_BLOCKCHAINS,
+    ).filter(isStoredBlockchain);
     // Read-time migrations. Stored lists persisted before 0.4.10 still carry
     // the cleartext builtin-testnet RPC: rewrite only that exact default on
     // non-custom chains; custom chains and user-edited URLs are untouched.
@@ -408,7 +503,8 @@ class StorageUtil {
       let migrated = sanitizeQrnsRegistry(chain, false);
       if (
         !migrated.isCustomChain &&
-        migrated.rpcUrls?.[0] === LEGACY_TESTNET_RPC
+        Array.isArray(migrated.rpcUrls) &&
+        migrated.rpcUrls[0] === LEGACY_TESTNET_RPC
       ) {
         migrated = {
           ...migrated,
@@ -418,7 +514,8 @@ class StorageUtil {
       }
       if (
         !migrated.isCustomChain &&
-        migrated.nativeCurrency?.symbol === "QRL"
+        isRecord(migrated.nativeCurrency) &&
+        migrated.nativeCurrency.symbol === "QRL"
       ) {
         migrated = {
           ...migrated,
@@ -431,31 +528,35 @@ class StorageUtil {
       }
       return migrated;
     });
-  }
+  },
 
   /**
    * A function for storing the blockchain selection.
    * Call the getActiveBlockChain function to retrieve the stored value.
    */
-  static async setActiveBlockChain(selectedBlockchainId: string) {
-    const existing = (await walletLocalStorage.get(BLOCKCHAINS_IDENTIFIER))?.[
+  async setActiveBlockChain(selectedBlockchainId: string) {
+    if (!isString(selectedBlockchainId))
+      throw new Error("Invalid active chain");
+    const existing = (await readLocalStorage(BLOCKCHAINS_IDENTIFIER))[
       BLOCKCHAINS_IDENTIFIER
     ];
     await walletLocalStorage.set({
       [BLOCKCHAINS_IDENTIFIER]: {
-        ...existing,
+        ...getStorageRecord(existing),
         [ACTIVE_BLOCKCHAIN_IDENTIFIER]: selectedBlockchainId,
       },
     });
-  }
+  },
 
-  static async getActiveBlockChain() {
-    const storedBlockchains = (
-      await walletLocalStorage.get(BLOCKCHAINS_IDENTIFIER)
-    )?.[BLOCKCHAINS_IDENTIFIER];
+  async getActiveBlockChain() {
+    const storedBlockchains = (await readLocalStorage(BLOCKCHAINS_IDENTIFIER))[
+      BLOCKCHAINS_IDENTIFIER
+    ];
     const blockchains = await this.getAllBlockChains();
-    const storedActiveChainId: unknown =
-      storedBlockchains?.[ACTIVE_BLOCKCHAIN_IDENTIFIER];
+    const storedActiveChainId: unknown = getStoredValue(
+      storedBlockchains,
+      ACTIVE_BLOCKCHAIN_IDENTIFIER,
+    );
     const activeChainId = (
       typeof storedActiveChainId === "string"
         ? storedActiveChainId
@@ -470,207 +571,217 @@ class StorageUtil {
       findChain(DEFAULT_BLOCKCHAIN.chainId.toLowerCase()) ??
       DEFAULT_BLOCKCHAIN
     );
-  }
+  },
 
   /**
    * A function for storing the route to be displayed on opening the extension.
    * Call the getActivePage function to retrieve the stored value, and clearActivePage for clearing the stored value.
    */
-  static async setActivePage(activePage: string) {
+  async setActivePage(activePage: string) {
+    if (!isString(activePage)) throw new Error("Invalid active page");
     if (activePage) {
       await walletLocalStorage.set({ [ACTIVE_PAGE_IDENTIFIER]: activePage });
     } else {
       await walletLocalStorage.remove(ACTIVE_PAGE_IDENTIFIER);
     }
-  }
+  },
 
-  static async getActivePage() {
-    const storedActivePage = await walletLocalStorage.get(
-      ACTIVE_PAGE_IDENTIFIER,
-    );
-    return (storedActivePage?.[ACTIVE_PAGE_IDENTIFIER] ?? "") as string;
-  }
+  async getActivePage() {
+    const storedActivePage = await readLocalStorage(ACTIVE_PAGE_IDENTIFIER);
+    const page = storedActivePage[ACTIVE_PAGE_IDENTIFIER];
+    return typeof page === "string" ? page : "";
+  },
 
-  static async clearActivePage() {
+  async clearActivePage() {
     await walletLocalStorage.remove(ACTIVE_PAGE_IDENTIFIER);
-  }
+  },
 
   /**
    * A function for storing the list of imported tokens.
    * Call the getTokenContractsList function to retrieve the stored value, and clearFromTokenList for clearing the stored value.
    */
-  static async setTokenContractsList(
+  async setTokenContractsList(
     accountAddress: string,
-    tokenContract: TokenContractType,
+    tokenContract: StoredToken,
   ) {
+    if (!isStorageIdentity(accountAddress) || !isTokenContract(tokenContract))
+      throw new Error("Invalid stored token identity");
     const { chainId } = await this.getActiveBlockChain();
 
-    const storageData = await walletLocalStorage.get(TOKENS_IDENTIFIER);
-    if (!storageData[TOKENS_IDENTIFIER]) {
-      storageData[TOKENS_IDENTIFIER] = {};
-    }
-    if (!storageData[TOKENS_IDENTIFIER][ALL_TOKENS_IDENTIFIER]) {
-      storageData[TOKENS_IDENTIFIER][ALL_TOKENS_IDENTIFIER] = {};
-    }
-    if (
-      !storageData[TOKENS_IDENTIFIER][ALL_TOKENS_IDENTIFIER][accountAddress]
-    ) {
-      storageData[TOKENS_IDENTIFIER][ALL_TOKENS_IDENTIFIER][accountAddress] =
-        {};
-    }
-    if (
-      !storageData[TOKENS_IDENTIFIER][ALL_TOKENS_IDENTIFIER][accountAddress][
-        chainId
-      ]
-    ) {
-      storageData[TOKENS_IDENTIFIER][ALL_TOKENS_IDENTIFIER][accountAddress][
-        chainId
-      ] = {};
-    }
-    const storedTokenContracts =
-      await this.getTokenContractsList(accountAddress);
-    storageData[TOKENS_IDENTIFIER][ALL_TOKENS_IDENTIFIER][accountAddress][
-      chainId
-    ].tokens = [
-      ...(storedTokenContracts?.filter(
-        (token) => token.address !== tokenContract.address,
-      ) ?? []),
-      tokenContract,
+    const storageData = await readLocalStorage(TOKENS_IDENTIFIER);
+    const chainData = ensureStorageRecord(
+      storageData,
+      TOKENS_IDENTIFIER,
+      ALL_TOKENS_IDENTIFIER,
+      accountAddress,
+      chainId,
+    );
+    const storedTokenContracts = getStorageArray(
+      chainData.tokens,
+      ALL_TOKENS_IDENTIFIER,
+    );
+    chainData.tokens = [
+      ...storedTokenContracts.filter(
+        (token) =>
+          !isTokenContract(token) || token.address !== tokenContract.address,
+      ),
+      replaceStoredEntry(
+        "token",
+        storedTokenContracts.find(
+          (token) =>
+            isTokenContract(token) && token.address === tokenContract.address,
+        ),
+        tokenContract,
+      ),
     ];
 
     await walletLocalStorage.set(storageData);
-  }
+  },
 
-  static async getTokenContractsList(accountAddress: string) {
+  async getTokenContractsList(accountAddress: string) {
     const { chainId } = await this.getActiveBlockChain();
 
-    const storageData = await walletLocalStorage.get(TOKENS_IDENTIFIER);
-    const storedTokenContracts =
-      storageData?.[TOKENS_IDENTIFIER]?.[ALL_TOKENS_IDENTIFIER]?.[
-        accountAddress
-      ]?.[chainId]?.tokens ?? [];
+    const storageData = await readLocalStorage(TOKENS_IDENTIFIER);
+    const storedTokenContracts = getStoredValue(
+      storageData,
+      TOKENS_IDENTIFIER,
+      ALL_TOKENS_IDENTIFIER,
+      accountAddress,
+      chainId,
+      "tokens",
+    );
+    return getStorageArray(storedTokenContracts, ALL_TOKENS_IDENTIFIER).filter(
+      isTokenContract,
+    );
+  },
 
-    return storedTokenContracts as TokenContractType[];
-  }
-
-  static async clearFromTokenContractsList(
+  async clearFromTokenContractsList(
     accountAddress: string,
     contractAddress: string,
   ) {
     const { chainId } = await this.getActiveBlockChain();
 
-    const storageData = await walletLocalStorage.get(TOKENS_IDENTIFIER);
-    const storedTokenContracts =
-      await this.getTokenContractsList(accountAddress);
-    storageData[TOKENS_IDENTIFIER][ALL_TOKENS_IDENTIFIER][accountAddress][
-      chainId
-    ].tokens = storedTokenContracts.filter(
-      (token) => token.address !== contractAddress,
+    const storageData = await readLocalStorage(TOKENS_IDENTIFIER);
+    const chainData = ensureStorageRecord(
+      storageData,
+      TOKENS_IDENTIFIER,
+      ALL_TOKENS_IDENTIFIER,
+      accountAddress,
+      chainId,
+    );
+    chainData.tokens = getStorageArray(
+      chainData.tokens,
+      ALL_TOKENS_IDENTIFIER,
+    ).filter(
+      (token) => !isTokenContract(token) || token.address !== contractAddress,
     );
 
     await walletLocalStorage.set({ ...storageData });
-  }
+  },
 
-  static async setNFTCollectionsList(
+  async setNFTCollectionsList(
     accountAddress: string,
-    collection: NFTCollectionType,
+    collection: StoredNFTCollection,
   ) {
+    if (!isNFTCollection(collection))
+      throw new Error("Invalid stored NFT identity");
     const { chainId } = await this.getActiveBlockChain();
 
-    const storageData = await walletLocalStorage.get(
+    const storageData = await readLocalStorage(NFT_COLLECTIONS_IDENTIFIER);
+    const chainData = ensureStorageRecord(
+      storageData,
       NFT_COLLECTIONS_IDENTIFIER,
+      ALL_NFT_COLLECTIONS_IDENTIFIER,
+      accountAddress,
+      chainId,
     );
-    if (!storageData[NFT_COLLECTIONS_IDENTIFIER]) {
-      storageData[NFT_COLLECTIONS_IDENTIFIER] = {};
-    }
-    if (
-      !storageData[NFT_COLLECTIONS_IDENTIFIER][ALL_NFT_COLLECTIONS_IDENTIFIER]
-    ) {
-      storageData[NFT_COLLECTIONS_IDENTIFIER][ALL_NFT_COLLECTIONS_IDENTIFIER] =
-        {};
-    }
-    if (
-      !storageData[NFT_COLLECTIONS_IDENTIFIER][ALL_NFT_COLLECTIONS_IDENTIFIER][
-        accountAddress
-      ]
-    ) {
-      storageData[NFT_COLLECTIONS_IDENTIFIER][ALL_NFT_COLLECTIONS_IDENTIFIER][
-        accountAddress
-      ] = {};
-    }
-    if (
-      !storageData[NFT_COLLECTIONS_IDENTIFIER][ALL_NFT_COLLECTIONS_IDENTIFIER][
-        accountAddress
-      ][chainId]
-    ) {
-      storageData[NFT_COLLECTIONS_IDENTIFIER][ALL_NFT_COLLECTIONS_IDENTIFIER][
-        accountAddress
-      ][chainId] = {};
-    }
-    const storedCollections = await this.getNFTCollectionsList(accountAddress);
-    storageData[NFT_COLLECTIONS_IDENTIFIER][ALL_NFT_COLLECTIONS_IDENTIFIER][
-      accountAddress
-    ][chainId].collections = [
-      ...storedCollections.filter((c) => c.address !== collection.address),
-      collection,
+    const storedCollections = getStorageArray(
+      chainData.collections,
+      ALL_NFT_COLLECTIONS_IDENTIFIER,
+    );
+    chainData.collections = [
+      ...storedCollections.filter(
+        (c) => !isNFTCollection(c) || c.address !== collection.address,
+      ),
+      replaceStoredEntry(
+        "nft",
+        storedCollections.find(
+          (item) =>
+            isNFTCollection(item) && item.address === collection.address,
+        ),
+        collection,
+      ),
     ];
 
     await walletLocalStorage.set(storageData);
-  }
+  },
 
-  static async getNFTCollectionsList(accountAddress: string) {
+  async getNFTCollectionsList(accountAddress: string) {
     const { chainId } = await this.getActiveBlockChain();
 
-    const storageData = await walletLocalStorage.get(
+    const storageData = await readLocalStorage(NFT_COLLECTIONS_IDENTIFIER);
+    const storedCollections = getStoredValue(
+      storageData,
       NFT_COLLECTIONS_IDENTIFIER,
+      ALL_NFT_COLLECTIONS_IDENTIFIER,
+      accountAddress,
+      chainId,
+      "collections",
     );
-    const storedCollections =
-      storageData?.[NFT_COLLECTIONS_IDENTIFIER]?.[
-        ALL_NFT_COLLECTIONS_IDENTIFIER
-      ]?.[accountAddress]?.[chainId]?.collections ?? [];
+    return getStorageArray(
+      storedCollections,
+      ALL_NFT_COLLECTIONS_IDENTIFIER,
+    ).filter(isNFTCollection);
+  },
 
-    return storedCollections as NFTCollectionType[];
-  }
-
-  static async clearFromNFTCollectionsList(
+  async clearFromNFTCollectionsList(
     accountAddress: string,
     contractAddress: string,
   ) {
     const { chainId } = await this.getActiveBlockChain();
 
-    const storageData = await walletLocalStorage.get(
+    const storageData = await readLocalStorage(NFT_COLLECTIONS_IDENTIFIER);
+    const chainData = ensureStorageRecord(
+      storageData,
       NFT_COLLECTIONS_IDENTIFIER,
+      ALL_NFT_COLLECTIONS_IDENTIFIER,
+      accountAddress,
+      chainId,
     );
-    const storedCollections = await this.getNFTCollectionsList(accountAddress);
-    storageData[NFT_COLLECTIONS_IDENTIFIER][ALL_NFT_COLLECTIONS_IDENTIFIER][
-      accountAddress
-    ][chainId].collections = storedCollections.filter(
-      (c) => c.address !== contractAddress,
-    );
+    chainData.collections = getStorageArray(
+      chainData.collections,
+      ALL_NFT_COLLECTIONS_IDENTIFIER,
+    ).filter((c) => !isNFTCollection(c) || c.address !== contractAddress);
 
     await walletLocalStorage.set({ ...storageData });
-  }
+  },
 
   /**
    * A function for storing the request info temporarily by the dApp, which will be read by the qrl web3 wallet.
    * Call the getDAppsRequestData function to retrieve the stored value, and clearDAppsRequestData for clearing the stored value.
    */
-  static async setDAppsRequestData(dAppsRequestData: DAppRequestType) {
-    await walletSessionStorage.set({
-      [DAPPS_IDENTIFIER]: {
-        [DAPPS_REQUEST_DATA_IDENTIFIER]: dAppsRequestData,
-      },
-    });
-  }
+  async setDAppsRequestData(dAppsRequestData: DAppRequestType) {
+    if (!isDAppRequest(dAppsRequestData))
+      throw new Error("Cannot persist an unreadable dApp request");
+    const storageData = await readSessionStorage(DAPPS_IDENTIFIER);
+    const dApps = ensureStorageRecord(storageData, DAPPS_IDENTIFIER);
+    dApps[DAPPS_REQUEST_DATA_IDENTIFIER] = replaceStoredRequest(
+      dApps[DAPPS_REQUEST_DATA_IDENTIFIER],
+      dAppsRequestData,
+    );
+    await walletSessionStorage.set(storageData);
+  },
 
-  static async getDAppsRequestData() {
-    const storedDAppsRequestData = (
-      await walletSessionStorage.get(DAPPS_IDENTIFIER)
-    )?.[DAPPS_IDENTIFIER];
-    return storedDAppsRequestData?.[DAPPS_REQUEST_DATA_IDENTIFIER] as
-      | DAppRequestType
-      | undefined;
-  }
+  async getDAppsRequestData() {
+    const storedDAppsRequestData = (await readSessionStorage(DAPPS_IDENTIFIER))[
+      DAPPS_IDENTIFIER
+    ];
+    const request = getStoredValue(
+      storedDAppsRequestData,
+      DAPPS_REQUEST_DATA_IDENTIFIER,
+    );
+    return isDAppRequest(request) ? request : undefined;
+  },
 
   /**
    * Clear the pending dApp request only while the slot still holds the
@@ -682,151 +793,235 @@ class StorageUtil {
    * An undefined requestId falls back to the unconditional clear so callers
    * from before requestIds existed keep working.
    */
-  static async clearDAppsRequestDataForRequestId(requestId?: string) {
+  async clearDAppsRequestDataForRequestId(requestId?: string) {
     if (requestId === undefined) {
       await this.clearDAppsRequestData();
       return;
     }
-    const storedDAppsRequestData = await this.getDAppsRequestData();
-    if (storedDAppsRequestData?.requestId !== requestId) return;
-    await this.clearDAppsRequestData();
-  }
+    const storageData = await readSessionStorage(DAPPS_IDENTIFIER);
+    const dApps = getStorageRecord(storageData, DAPPS_IDENTIFIER);
+    if (
+      getStoredValue(dApps, DAPPS_REQUEST_DATA_IDENTIFIER, "requestId") !==
+      requestId
+    )
+      return;
+    Reflect.deleteProperty(dApps, DAPPS_REQUEST_DATA_IDENTIFIER);
+    await walletSessionStorage.set(storageData);
+  },
 
-  static async clearDAppsRequestData() {
+  async clearDAppsRequestData() {
     const storedDAppsRequestData =
-      (await walletSessionStorage.get(DAPPS_IDENTIFIER))?.[DAPPS_IDENTIFIER] ??
-      {};
-    delete storedDAppsRequestData?.[DAPPS_REQUEST_DATA_IDENTIFIER];
+      (await readSessionStorage(DAPPS_IDENTIFIER))[DAPPS_IDENTIFIER] ?? {};
+    const dApps = getStorageRecord(storedDAppsRequestData);
+    Reflect.deleteProperty(dApps, DAPPS_REQUEST_DATA_IDENTIFIER);
     await walletSessionStorage.set({
-      [DAPPS_IDENTIFIER]: storedDAppsRequestData,
+      [DAPPS_IDENTIFIER]: dApps,
     });
-  }
+  },
 
   /**
    * A function for storing the connected accounts info temporarily, which will be read by method like 'qrl_accounts'.
    * Call the getDAppsConnectedAccountsData function to retrieve the stored value, and clearDAppsConnectedAccountsData for clearing the stored value.
    */
-  static async setDAppsConnectedAccountsData(
+  async setDAppsConnectedAccountsData(
     data: Omit<ConnectedAccountsDataType, "blockchains"> & {
-      blockchains: Pick<BlockchainDataType, "chainId" | "qrnsRegistryAddress">[];
+      blockchains: StoredBlockchain[];
     },
   ) {
+    if (!isConnectedAccounts(data))
+      throw new Error("Invalid stored dApp identity");
+    if (!isArrayOf(data.blockchains, isStoredBlockchain))
+      throw new Error("Invalid stored dApp chain identity");
     const urlOrigin = data.urlOrigin;
     const accounts = data.accounts.map(toCanonicalQrlAddress);
     const blockchains = data.blockchains.map((chain) =>
       sanitizeQrnsRegistry(chain, true),
     );
-    const permissions = (data.permissions ?? []).map((permission) => ({
-      ...permission,
-      caveats: (permission.caveats ?? []).map((caveat) =>
-        caveat.type === RESTRICT_RETURNED_ACCOUNTS_CAVEAT &&
-        Array.isArray(caveat.value)
-          ? {
-              ...caveat,
-              value: (caveat.value as string[]).map(toCanonicalQrlAddress),
-            }
-          : caveat,
-      ),
-    }));
+    const rawPermissions: unknown = data.permissions;
+    if (rawPermissions != null && !Array.isArray(rawPermissions))
+      throw new Error("Invalid stored dApp permissions");
+    const permissions = normalizeStoredPermissions(rawPermissions);
 
-    const storageData = await walletLocalStorage.get(DAPPS_IDENTIFIER);
-    if (!storageData[DAPPS_IDENTIFIER]) {
-      storageData[DAPPS_IDENTIFIER] = {};
-    }
-    if (!storageData[DAPPS_IDENTIFIER][ALL_DAPPS_IDENTIFIER]) {
-      storageData[DAPPS_IDENTIFIER][ALL_DAPPS_IDENTIFIER] = {};
-    }
-    if (!storageData[DAPPS_IDENTIFIER][ALL_DAPPS_IDENTIFIER][urlOrigin]) {
-      storageData[DAPPS_IDENTIFIER][ALL_DAPPS_IDENTIFIER][urlOrigin] = {};
-    }
-    storageData[DAPPS_IDENTIFIER][ALL_DAPPS_IDENTIFIER][urlOrigin].urlOrigin =
-      urlOrigin;
-    storageData[DAPPS_IDENTIFIER][ALL_DAPPS_IDENTIFIER][urlOrigin].accounts =
-      accounts;
-    storageData[DAPPS_IDENTIFIER][ALL_DAPPS_IDENTIFIER][urlOrigin].blockchains =
-      blockchains;
-    storageData[DAPPS_IDENTIFIER][ALL_DAPPS_IDENTIFIER][urlOrigin].permissions =
-      permissions;
+    const storageData = await readLocalStorage(DAPPS_IDENTIFIER);
+    const dApp = ensureStorageRecord(
+      storageData,
+      DAPPS_IDENTIFIER,
+      ALL_DAPPS_IDENTIFIER,
+      urlOrigin,
+    );
+    Object.assign(dApp, {
+      urlOrigin,
+      accounts: mergeStorageArray(
+        getStorageArray(dApp.accounts, "dApp accounts"),
+        accounts,
+        isNormalizableQrlAddress,
+        toCanonicalQrlAddress,
+      ),
+      blockchains: mergeStorageArray(
+        getStorageArray(dApp.blockchains, "dApp blockchains"),
+        blockchains,
+        isStoredBlockchain,
+        (chain) => chain.chainId.toLowerCase(),
+        (raw, replacement) => replaceStoredEntry("chain", raw, replacement),
+      ),
+      permissions: mergeStoredPermissions(dApp.permissions, permissions),
+    });
 
     await walletLocalStorage.set(storageData);
-  }
+  },
 
-  static async getDAppsConnectedAccountsData(urlOrigin: string = "") {
-    const storageData = await walletLocalStorage.get(DAPPS_IDENTIFIER);
-    const storedData = storageData?.[DAPPS_IDENTIFIER]?.[
-      ALL_DAPPS_IDENTIFIER
-    ]?.[urlOrigin] as ConnectedAccountsDataType | undefined;
-    if (!storedData) return undefined;
+  async getDAppsConnectedAccountsData(
+    urlOrigin: string = "",
+    validateStored?: (value: unknown) => boolean,
+  ) {
+    const storageData = await readLocalStorage(DAPPS_IDENTIFIER);
+    const storedData = getStoredValue(
+      storageData,
+      DAPPS_IDENTIFIER,
+      ALL_DAPPS_IDENTIFIER,
+      urlOrigin,
+    );
+    // Consumers can validate the raw grants before normalization filters entries.
+    if (
+      !isConnectedAccounts(storedData) ||
+      validateStored?.(storedData) === false
+    )
+      return undefined;
 
-    const accounts = (storedData.accounts ?? []).flatMap((address) => {
-      try {
-        return [toCanonicalQrlAddress(address)];
-      } catch {
-        return [];
-      }
-    });
+    const accounts = getStorageArray(storedData.accounts, "dApp accounts")
+      .filter(isNormalizableQrlAddress)
+      .map(toCanonicalQrlAddress);
     if (accounts.length === 0) return undefined;
 
-    const permissions = (storedData.permissions ?? []).map((permission) => ({
-      ...permission,
-      caveats: (permission.caveats ?? []).map((caveat) =>
-        caveat.type === RESTRICT_RETURNED_ACCOUNTS_CAVEAT &&
-        Array.isArray(caveat.value)
-          ? {
-              ...caveat,
-              value: (caveat.value as string[]).flatMap((address) => {
-                try {
-                  return [toCanonicalQrlAddress(address)];
-                } catch {
-                  return [];
-                }
-              }),
-            }
-          : caveat,
-      ),
-    }));
-    const blockchains = (storedData.blockchains ?? []).map((chain) =>
-      sanitizeQrnsRegistry(chain, false),
-    );
+    const permissions = normalizeStoredPermissions(storedData.permissions);
+    const blockchains = (
+      Array.isArray(storedData.blockchains) ? storedData.blockchains : []
+    )
+      .filter(isStoredBlockchain)
+      .map((chain) => sanitizeQrnsRegistry(chain, false));
     return { ...storedData, accounts, blockchains, permissions };
-  }
+  },
 
-  static async clearDAppsConnectedAccountsData(urlOrigin: string = "") {
-    const storageData = await walletLocalStorage.get(DAPPS_IDENTIFIER);
-    delete storageData[DAPPS_IDENTIFIER]?.[ALL_DAPPS_IDENTIFIER]?.[urlOrigin];
+  async addDAppChain(urlOrigin: string, chain: StoredBlockchain) {
+    if (!isStorageIdentity(urlOrigin) || !isStoredBlockchain(chain))
+      throw new Error("Invalid stored dApp chain identity");
+    const blockchain = sanitizeQrnsRegistry(chain, true);
+    const storageData = await readLocalStorage(DAPPS_IDENTIFIER);
+    const dApp = ensureStorageRecord(
+      storageData,
+      DAPPS_IDENTIFIER,
+      ALL_DAPPS_IDENTIFIER,
+      urlOrigin,
+    );
+    if (!Object.prototype.hasOwnProperty.call(dApp, "urlOrigin"))
+      dApp.urlOrigin = urlOrigin;
+    if (!Object.prototype.hasOwnProperty.call(dApp, "accounts"))
+      dApp.accounts = [];
+    const chains = getStorageArray(dApp.blockchains, "dApp blockchains");
+    if (
+      !chains.some((value) =>
+        matchesStoredChain(
+          getStoredValue(value, "chainId"),
+          blockchain.chainId,
+        ),
+      )
+    )
+      chains.push(blockchain);
+    dApp.blockchains = chains;
+    dApp.permissions = addStoredChainPermission(
+      dApp.permissions,
+      urlOrigin,
+      dApp.accounts,
+      chains.filter(isStoredBlockchain).map((value) => value.chainId),
+      blockchain.chainId,
+    );
     await walletLocalStorage.set(storageData);
-  }
+  },
+
+  async removeDAppChain(urlOrigin: string, chainId: string) {
+    const storageData = await readLocalStorage(DAPPS_IDENTIFIER);
+    const allDApps = getStorageRecord(
+      storageData,
+      DAPPS_IDENTIFIER,
+      ALL_DAPPS_IDENTIFIER,
+    );
+    let changed = false;
+    for (const [origin, data] of Object.entries(allDApps)) {
+      if (
+        !isRecord(data) ||
+        (origin !== urlOrigin && data.urlOrigin !== urlOrigin)
+      )
+        continue;
+      if (Array.isArray(data.blockchains)) {
+        const remaining: unknown[] = data.blockchains.filter(
+          (value: unknown) =>
+            !matchesStoredChain(getStoredValue(value, "chainId"), chainId),
+        );
+        if (remaining.length !== data.blockchains.length) {
+          data.blockchains = remaining;
+          changed = true;
+        }
+      }
+      if (
+        revokeStoredCaveats(
+          data.permissions,
+          "restrictNetworkSwitching",
+          (value) => matchesStoredChain(value, chainId),
+        )
+      )
+        changed = true;
+    }
+    if (changed) await walletLocalStorage.set(storageData);
+  },
+
+  async clearDAppsConnectedAccountsData(urlOrigin: string = "") {
+    const storageData = await readLocalStorage(DAPPS_IDENTIFIER);
+    const allDApps = getStorageRecord(
+      storageData,
+      DAPPS_IDENTIFIER,
+      ALL_DAPPS_IDENTIFIER,
+    );
+    for (const [origin, data] of Object.entries(allDApps)) {
+      if (
+        origin === urlOrigin ||
+        getStoredValue(data, "urlOrigin") === urlOrigin
+      )
+        Reflect.deleteProperty(allDApps, origin);
+    }
+    await walletLocalStorage.set(storageData);
+  },
 
   /**
    * Erase everything stored per-account for a removed address: transaction
    * history, imported token contracts, and NFT collections, on *every*
-   * chain rather than only the active one.
+   * chain.
    *
    * All three maps key by account address at the same level, with chain IDs
    * nested underneath, so dropping the address key clears every chain at
    * once. Leaving these behind would keep a full record of the account and
    * its activity after the user removed it.
    */
-  static async clearAllAccountData(accountAddress: string) {
+  async clearAllAccountData(accountAddress: string) {
     const maps: Array<[string, string]> = [
       [TX_HISTORY_IDENTIFIER, ALL_TX_HISTORY_IDENTIFIER],
       [TOKENS_IDENTIFIER, ALL_TOKENS_IDENTIFIER],
       [NFT_COLLECTIONS_IDENTIFIER, ALL_NFT_COLLECTIONS_IDENTIFIER],
     ];
     for (const [identifier, allIdentifier] of maps) {
-      const storageData = await walletLocalStorage.get(identifier);
-      const byAccount = storageData?.[identifier]?.[allIdentifier] as
-        | Record<string, unknown>
-        | undefined;
-      if (!byAccount) continue;
-      const match = Object.keys(byAccount).find(
-        (address) => address.toLowerCase() === accountAddress.toLowerCase(),
+      const storageData = await readLocalStorage(identifier);
+      const byAccount = getStorageRecord(
+        storageData,
+        identifier,
+        allIdentifier,
       );
-      if (!match) continue;
-      delete byAccount[match];
+      const matches = Object.keys(byAccount).filter((address) =>
+        matchesStoredAccount(address, accountAddress),
+      );
+      if (matches.length === 0) continue;
+      for (const match of matches) Reflect.deleteProperty(byAccount, match);
       await walletLocalStorage.set(storageData);
     }
-  }
+  },
 
   /**
    * Revoke a removed account across every connected dApp: drop it from each
@@ -837,65 +1032,80 @@ class StorageUtil {
    * no longer sign for, and a transaction request naming it still passes
    * the authorization check and opens a full approval screen.
    */
-  static async removeAccountFromAllDApps(accountAddress: string) {
-    const target = accountAddress.toLowerCase();
-    const storageData = await walletLocalStorage.get(DAPPS_IDENTIFIER);
-    const allDApps = storageData?.[DAPPS_IDENTIFIER]?.[ALL_DAPPS_IDENTIFIER] as
-      | Record<string, ConnectedAccountsDataType>
-      | undefined;
-    if (!allDApps) return;
-
+  async removeAccountFromAllDApps(accountAddress: string) {
+    const storageData = await readLocalStorage(DAPPS_IDENTIFIER);
+    const allDApps = getStorageRecord(
+      storageData,
+      DAPPS_IDENTIFIER,
+      ALL_DAPPS_IDENTIFIER,
+    );
+    const matches = (value: unknown) =>
+      matchesStoredAccount(value, accountAddress);
     let changed = false;
     for (const [origin, data] of Object.entries(allDApps)) {
-      const accounts = data?.accounts ?? [];
-      const remaining = accounts.filter(
-        (address) => address?.toLowerCase() !== target,
-      );
-      if (remaining.length === accounts.length) continue;
-      changed = true;
-      if (remaining.length === 0) {
-        delete allDApps[origin];
-        continue;
+      if (!isRecord(data)) continue;
+      if (Array.isArray(data.accounts)) {
+        const remaining: unknown[] = data.accounts.filter(
+          (value: unknown) => !matches(value),
+        );
+        if (remaining.length !== data.accounts.length) {
+          changed = true;
+          if (remaining.length === 0) {
+            Reflect.deleteProperty(allDApps, origin);
+            continue;
+          }
+          data.accounts = remaining;
+        }
       }
-      data.accounts = remaining;
-      data.permissions = (data.permissions ?? []).map((permission) => ({
-        ...permission,
-        caveats: (permission.caveats ?? []).map((caveat) =>
-          caveat.type === RESTRICT_RETURNED_ACCOUNTS_CAVEAT &&
-          Array.isArray(caveat.value)
-            ? {
-                ...caveat,
-                value: (caveat.value as string[]).filter(
-                  (address) => address?.toLowerCase() !== target,
-                ),
-              }
-            : caveat,
-        ),
-      }));
+      if (
+        revokeStoredCaveats(
+          data.permissions,
+          RESTRICT_RETURNED_ACCOUNTS_CAVEAT,
+          matches,
+        )
+      )
+        changed = true;
     }
+    if (changed) await walletLocalStorage.set(storageData);
+  },
 
-    if (changed) {
-      await walletLocalStorage.set(storageData);
-    }
-  }
-
-  static async setContacts(contacts: Contact[]) {
+  async setContacts(contacts: StoredContact[]) {
     const canonicalContacts = contacts.map((contact) => ({
       ...contact,
       address: toCanonicalQrlAddress(contact.address),
     }));
+    const storageData = await readLocalStorage(CONTACTS_IDENTIFIER);
+    const stored = getStoredValue(
+      storageData,
+      CONTACTS_IDENTIFIER,
+      ALL_CONTACTS_IDENTIFIER,
+    );
     await walletLocalStorage.set({
       [CONTACTS_IDENTIFIER]: {
-        [ALL_CONTACTS_IDENTIFIER]: canonicalContacts,
+        ...getStorageRecord(storageData, CONTACTS_IDENTIFIER),
+        [ALL_CONTACTS_IDENTIFIER]: mergeStorageArray(
+          getStorageArray(stored, ALL_CONTACTS_IDENTIFIER),
+          canonicalContacts,
+          isNormalizableContact,
+          (contact) => toCanonicalQrlAddress(contact.address),
+          (raw, replacement) => replaceStoredEntry("contact", raw, replacement),
+        ),
       },
     });
-  }
+  },
 
-  static async getContacts(): Promise<Contact[]> {
-    const storageData = await walletLocalStorage.get(CONTACTS_IDENTIFIER);
-    const contacts =
-      storageData?.[CONTACTS_IDENTIFIER]?.[ALL_CONTACTS_IDENTIFIER] ?? [];
-    return (contacts as Contact[]).flatMap((contact) => {
+  async getContacts(): Promise<StoredContact[]> {
+    const storageData = await readLocalStorage(CONTACTS_IDENTIFIER);
+    const storedContacts = getStoredValue(
+      storageData,
+      CONTACTS_IDENTIFIER,
+      ALL_CONTACTS_IDENTIFIER,
+    );
+    const contacts = getStorageArray(
+      storedContacts,
+      ALL_CONTACTS_IDENTIFIER,
+    ).filter(isContact);
+    return contacts.flatMap((contact) => {
       try {
         return [
           {
@@ -907,73 +1117,99 @@ class StorageUtil {
         return [];
       }
     });
-  }
+  },
 
-  static async clearContacts() {
+  async clearContacts() {
     await walletLocalStorage.remove(CONTACTS_IDENTIFIER);
-  }
+  },
 
   /**
    * Account labels - a map from account address to a user-defined label.
    */
-  static async setAccountLabels(labels: Record<string, string>) {
+  async setAccountLabels(labels: Record<string, string>) {
+    if (!isStringRecord(labels))
+      throw new Error("Cannot persist unreadable account labels");
+    const storageData = await readLocalStorage(ACCOUNT_LABELS_IDENTIFIER);
     await walletLocalStorage.set({
-      [ACCOUNT_LABELS_IDENTIFIER]: labels,
+      [ACCOUNT_LABELS_IDENTIFIER]: mergeStorageRecord(
+        storageData[ACCOUNT_LABELS_IDENTIFIER],
+        labels,
+        isString,
+        (address) =>
+          isNormalizableQrlAddress(address) || isLegacyQrlAddress(address),
+      ),
     });
-  }
+  },
 
-  static async getAccountLabels(): Promise<Record<string, string>> {
-    const storageData = await walletLocalStorage.get(ACCOUNT_LABELS_IDENTIFIER);
-    return (storageData?.[ACCOUNT_LABELS_IDENTIFIER] ?? {}) as Record<
-      string,
-      string
-    >;
-  }
+  async getAccountLabels(): Promise<Record<string, string>> {
+    const storageData = await readLocalStorage(ACCOUNT_LABELS_IDENTIFIER);
+    const labels = storageData[ACCOUNT_LABELS_IDENTIFIER];
+    return filterStorageRecord(labels, isString);
+  },
 
-  static async setAccountLabel(address: string, label: string) {
-    const labels = await this.getAccountLabels();
-    labels[address] = label;
-    await this.setAccountLabels(labels);
-  }
+  async setAccountLabel(address: string, label: string) {
+    if (!isString(label)) throw new Error("Invalid account label");
+    const storageData = await readLocalStorage(ACCOUNT_LABELS_IDENTIFIER);
+    const labels = getStorageRecord(storageData, ACCOUNT_LABELS_IDENTIFIER);
+    await walletLocalStorage.set({
+      [ACCOUNT_LABELS_IDENTIFIER]: { ...labels, [address]: label },
+    });
+  },
 
-  static async clearAccountLabels() {
+  async clearAccountLabels() {
     await walletLocalStorage.remove(ACCOUNT_LABELS_IDENTIFIER);
-  }
+  },
 
-  static async setHiddenAccounts(hidden: Record<string, boolean>) {
+  async setHiddenAccounts(hidden: Record<string, boolean>) {
+    if (!isBooleanRecord(hidden))
+      throw new Error("Cannot persist unreadable hidden accounts");
+    const storageData = await readLocalStorage(HIDDEN_ACCOUNTS_IDENTIFIER);
     await walletLocalStorage.set({
-      [HIDDEN_ACCOUNTS_IDENTIFIER]: hidden,
+      [HIDDEN_ACCOUNTS_IDENTIFIER]: mergeStorageRecord(
+        storageData[HIDDEN_ACCOUNTS_IDENTIFIER],
+        hidden,
+        isBoolean,
+        (address) =>
+          isNormalizableQrlAddress(address) || isLegacyQrlAddress(address),
+      ),
     });
-  }
+  },
 
-  static async getHiddenAccounts(): Promise<Record<string, boolean>> {
-    const storageData = await walletLocalStorage.get(
-      HIDDEN_ACCOUNTS_IDENTIFIER,
-    );
-    return (storageData?.[HIDDEN_ACCOUNTS_IDENTIFIER] ?? {}) as Record<
-      string,
-      boolean
-    >;
-  }
+  async getHiddenAccounts(): Promise<Record<string, boolean>> {
+    const storageData = await readLocalStorage(HIDDEN_ACCOUNTS_IDENTIFIER);
+    const hidden = storageData[HIDDEN_ACCOUNTS_IDENTIFIER];
+    return filterStorageRecord(hidden, isBoolean);
+  },
 
-  static async clearHiddenAccounts() {
+  async clearHiddenAccounts() {
     await walletLocalStorage.remove(HIDDEN_ACCOUNTS_IDENTIFIER);
-  }
+  },
 
-  static async setSettings(settings: WalletSettings) {
+  async setSettings(
+    settings: WalletSettings,
+    changedFields?: readonly (keyof WalletSettings)[],
+  ) {
+    if (!isWalletSettings(settings))
+      throw new Error("Cannot persist unreadable settings");
+    const storageData = await readLocalStorage(SETTINGS_IDENTIFIER);
     await walletLocalStorage.set({
-      [SETTINGS_IDENTIFIER]: settings,
+      [SETTINGS_IDENTIFIER]: replaceStoredSettings(
+        storageData[SETTINGS_IDENTIFIER],
+        settings,
+        changedFields,
+      ),
     });
-  }
+  },
 
-  static async getSettings(): Promise<WalletSettings> {
-    const storageData = await walletLocalStorage.get(SETTINGS_IDENTIFIER);
-    return (storageData?.[SETTINGS_IDENTIFIER] ?? {}) as WalletSettings;
-  }
+  async getSettings(): Promise<WalletSettings> {
+    const storageData = await readLocalStorage(SETTINGS_IDENTIFIER);
+    const settings = storageData[SETTINGS_IDENTIFIER];
+    return readStoredSettings(settings);
+  },
 
-  static async clearAllData() {
+  async clearAllData() {
     await walletLocalStorage.clear();
-  }
+  },
 
   /**
    * Stores Ledger accounts.
@@ -994,72 +1230,94 @@ class StorageUtil {
    *   }
    * }
    */
-  static async setLedgerAccounts(accounts: LedgerAccount[]) {
+  async setLedgerAccounts(accounts: StoredLedgerAccount[]) {
+    if (!isArrayOf(accounts, isLedgerAccount))
+      throw new Error("Invalid stored Ledger identity");
     const existing =
-      (await walletLocalStorage.get(LEDGER_IDENTIFIER))?.[LEDGER_IDENTIFIER] ??
-      {};
+      (await readLocalStorage(LEDGER_IDENTIFIER))[LEDGER_IDENTIFIER] ?? {};
 
     await walletLocalStorage.set({
       [LEDGER_IDENTIFIER]: {
-        ...existing,
-        [LEDGER_ACCOUNTS_IDENTIFIER]: accounts,
+        ...getStorageRecord(existing),
+        [LEDGER_ACCOUNTS_IDENTIFIER]: mergeStorageArray(
+          getStorageArray(
+            getStoredValue(existing, LEDGER_ACCOUNTS_IDENTIFIER),
+            LEDGER_ACCOUNTS_IDENTIFIER,
+          ),
+          accounts,
+          isLedgerAccount,
+          (account) => account.address.toLowerCase(),
+          (raw, replacement) => replaceStoredEntry("ledger", raw, replacement),
+        ),
       },
     });
-  }
+  },
 
   /**
    * Retrieves all stored Ledger accounts.
    *
    * @returns Array of Ledger accounts (empty array if none)
    */
-  static async getLedgerAccounts(): Promise<LedgerAccount[]> {
-    const storedLedger = (await walletLocalStorage.get(LEDGER_IDENTIFIER))?.[
+  async getLedgerAccounts(): Promise<StoredLedgerAccount[]> {
+    const storedLedger = (await readLocalStorage(LEDGER_IDENTIFIER))[
       LEDGER_IDENTIFIER
     ];
-    return (storedLedger?.[LEDGER_ACCOUNTS_IDENTIFIER] ??
-      []) as LedgerAccount[];
-  }
+    const accounts = getStoredValue(storedLedger, LEDGER_ACCOUNTS_IDENTIFIER);
+    return getStorageArray(accounts, LEDGER_ACCOUNTS_IDENTIFIER).filter(
+      isLedgerAccount,
+    );
+  },
 
   /**
    * Clears all stored Ledger accounts.
    * Use with caution - removes all Ledger account data.
    */
-  static async clearLedgerAccounts() {
+  async clearLedgerAccounts() {
     const storedLedger =
-      (await walletLocalStorage.get(LEDGER_IDENTIFIER))?.[LEDGER_IDENTIFIER] ??
-      {};
-    delete storedLedger?.[LEDGER_ACCOUNTS_IDENTIFIER];
+      (await readLocalStorage(LEDGER_IDENTIFIER))[LEDGER_IDENTIFIER] ?? {};
+    const ledger = getStorageRecord(storedLedger);
+    Reflect.deleteProperty(ledger, LEDGER_ACCOUNTS_IDENTIFIER);
     await walletLocalStorage.set({
-      [LEDGER_IDENTIFIER]: storedLedger,
+      [LEDGER_IDENTIFIER]: ledger,
     });
-  }
+  },
 
   /**
    * Adds a Ledger account address to the global accounts list.
    *
    * @param address - Ledger account address to add
    */
-  static async addLedgerAccountToAllAccounts(address: string) {
-    const allAccounts = await this.getAllAccounts();
-
-    // Avoid duplicates
-    if (!allAccounts.some((a) => a.toLowerCase() === address.toLowerCase())) {
-      await this.setAllAccounts([...allAccounts, address]);
-    }
-  }
-
-  /**
-   * Removes a Ledger account address from the global accounts list.
-   *
-   * @param address - Ledger account address to remove
-   */
-  static async removeLedgerAccountFromAllAccounts(address: string) {
-    const allAccounts = await this.getAllAccounts();
-    const filteredAccounts = allAccounts.filter(
-      (a) => a.toLowerCase() !== address.toLowerCase(),
+  async addLedgerAccountToAllAccounts(address: string) {
+    const storageData = await readLocalStorage(ACCOUNTS_IDENTIFIER);
+    const accounts = ensureStorageRecord(storageData, ACCOUNTS_IDENTIFIER);
+    const raw = getStorageArray(
+      accounts[ALL_ACCOUNTS_IDENTIFIER],
+      ALL_ACCOUNTS_IDENTIFIER,
     );
-    await this.setAllAccounts(filteredAccounts);
-  }
+    if (raw.some((item) => matchesStoredAccount(item, address))) return;
+    accounts[ALL_ACCOUNTS_IDENTIFIER] = [
+      ...raw.map((item) =>
+        isNormalizableQrlAddress(item) ? toCanonicalQrlAddress(item) : item,
+      ),
+      toCanonicalQrlAddress(address),
+    ];
+    await walletLocalStorage.set(storageData);
+  },
+
+  /** Remove only the matching address from the raw global account list. */
+  async removeLedgerAccountFromAllAccounts(address: string) {
+    const storageData = await readLocalStorage(ACCOUNTS_IDENTIFIER);
+    const accounts = ensureStorageRecord(storageData, ACCOUNTS_IDENTIFIER);
+    accounts[ALL_ACCOUNTS_IDENTIFIER] = getStorageArray(
+      accounts[ALL_ACCOUNTS_IDENTIFIER],
+      ALL_ACCOUNTS_IDENTIFIER,
+    )
+      .filter((item) => !matchesStoredAccount(item, address))
+      .map((item) =>
+        isNormalizableQrlAddress(item) ? toCanonicalQrlAddress(item) : item,
+      );
+    await walletLocalStorage.set(storageData);
+  },
 
   /**
    * Checks if an address belongs to a Ledger account.
@@ -1067,12 +1325,12 @@ class StorageUtil {
    * @param address - Address to check
    * @returns true if address is a Ledger account
    */
-  static async isLedgerAccount(address: string): Promise<boolean> {
+  async isLedgerAccount(address: string): Promise<boolean> {
     const ledgerAccounts = await this.getLedgerAccounts();
     return ledgerAccounts.some(
       (a) => a.address.toLowerCase() === address.toLowerCase(),
     );
-  }
+  },
 
   /**
    * Gets a Ledger account by address.
@@ -1080,98 +1338,116 @@ class StorageUtil {
    * @param address - Address to look up
    * @returns Ledger account or undefined if not found
    */
-  static async getLedgerAccountByAddress(
+  async getLedgerAccountByAddress(
     address: string,
-  ): Promise<LedgerAccount | undefined> {
+  ): Promise<StoredLedgerAccount | undefined> {
     const ledgerAccounts = await this.getLedgerAccounts();
     return ledgerAccounts.find(
       (a) => a.address.toLowerCase() === address.toLowerCase(),
     );
-  }
+  },
 
-  static async setTransactionHistoryEntry(
+  async setTransactionHistoryEntry(
     accountAddress: string,
-    entry: TransactionHistoryEntry,
+    entry: StoredHistoryEntry,
   ) {
+    if (!isTransactionHistoryEntry(entry))
+      throw new Error("Invalid stored transaction identity");
     const { chainId } = await this.getActiveBlockChain();
 
-    const storageData = await walletLocalStorage.get(TX_HISTORY_IDENTIFIER);
-    if (!storageData[TX_HISTORY_IDENTIFIER]) {
-      storageData[TX_HISTORY_IDENTIFIER] = {};
-    }
-    if (!storageData[TX_HISTORY_IDENTIFIER][ALL_TX_HISTORY_IDENTIFIER]) {
-      storageData[TX_HISTORY_IDENTIFIER][ALL_TX_HISTORY_IDENTIFIER] = {};
-    }
-    if (
-      !storageData[TX_HISTORY_IDENTIFIER][ALL_TX_HISTORY_IDENTIFIER][
-        accountAddress
-      ]
-    ) {
-      storageData[TX_HISTORY_IDENTIFIER][ALL_TX_HISTORY_IDENTIFIER][
-        accountAddress
-      ] = {};
-    }
-    if (
-      !storageData[TX_HISTORY_IDENTIFIER][ALL_TX_HISTORY_IDENTIFIER][
-        accountAddress
-      ][chainId]
-    ) {
-      storageData[TX_HISTORY_IDENTIFIER][ALL_TX_HISTORY_IDENTIFIER][
-        accountAddress
-      ][chainId] = {};
-    }
-
-    const existing = await this.getTransactionHistory(accountAddress);
+    const storageData = await readLocalStorage(TX_HISTORY_IDENTIFIER);
+    const chainData = ensureStorageRecord(
+      storageData,
+      TX_HISTORY_IDENTIFIER,
+      ALL_TX_HISTORY_IDENTIFIER,
+      accountAddress,
+      chainId,
+    );
+    const existing = getStorageArray(
+      chainData.transactions,
+      ALL_TX_HISTORY_IDENTIFIER,
+    );
     const merged = [
-      entry,
-      ...existing.filter((tx) => tx.transactionHash !== entry.transactionHash),
+      replaceStoredEntry(
+        "history",
+        existing.find(
+          (tx) =>
+            isTransactionHistoryEntry(tx) &&
+            tx.transactionHash === entry.transactionHash,
+        ),
+        entry,
+      ),
+      ...existing.filter(
+        (tx) =>
+          !isTransactionHistoryEntry(tx) ||
+          tx.transactionHash !== entry.transactionHash,
+      ),
     ];
-    storageData[TX_HISTORY_IDENTIFIER][ALL_TX_HISTORY_IDENTIFIER][
-      accountAddress
-    ][chainId].transactions = merged.slice(
-      0,
-      StorageUtil.TX_HISTORY_MAX_PER_ACCOUNT_CHAIN,
+    // The retention cap counts readable entries only, so an unrelated write
+    // never evicts a raw record it cannot read. For a fully readable list this
+    // equals merged.slice(0, cap).
+    let readable = 0;
+    chainData.transactions = merged.filter(
+      (tx) =>
+        !isTransactionHistoryEntry(tx) ||
+        ++readable <= StorageUtil.TX_HISTORY_MAX_PER_ACCOUNT_CHAIN,
     );
 
     await walletLocalStorage.set(storageData);
-  }
+  },
 
-  static async getTransactionHistory(
+  async getTransactionHistory(
     accountAddress: string,
-  ): Promise<TransactionHistoryEntry[]> {
+  ): Promise<StoredHistoryEntry[]> {
     const { chainId } = await this.getActiveBlockChain();
 
-    const storageData = await walletLocalStorage.get(TX_HISTORY_IDENTIFIER);
-    const transactions =
-      storageData?.[TX_HISTORY_IDENTIFIER]?.[ALL_TX_HISTORY_IDENTIFIER]?.[
-        accountAddress
-      ]?.[chainId]?.transactions ?? [];
+    const storageData = await readLocalStorage(TX_HISTORY_IDENTIFIER);
+    const transactions = getStoredValue(
+      storageData,
+      TX_HISTORY_IDENTIFIER,
+      ALL_TX_HISTORY_IDENTIFIER,
+      accountAddress,
+      chainId,
+      "transactions",
+    );
+    return getStorageArray(transactions, ALL_TX_HISTORY_IDENTIFIER).filter(
+      isTransactionHistoryEntry,
+    );
+  },
 
-    return transactions as TransactionHistoryEntry[];
-  }
-
-  static async updateTransactionHistoryEntry(
+  async updateTransactionHistoryEntry(
     accountAddress: string,
     transactionHash: string,
     updates: Partial<TransactionHistoryEntry>,
   ) {
     const { chainId } = await this.getActiveBlockChain();
 
-    const storageData = await walletLocalStorage.get(TX_HISTORY_IDENTIFIER);
-    const transactions: TransactionHistoryEntry[] =
-      storageData?.[TX_HISTORY_IDENTIFIER]?.[ALL_TX_HISTORY_IDENTIFIER]?.[
-        accountAddress
-      ]?.[chainId]?.transactions ?? [];
+    const storageData = await readLocalStorage(TX_HISTORY_IDENTIFIER);
+    const storedTransactions = getStoredValue(
+      storageData,
+      TX_HISTORY_IDENTIFIER,
+      ALL_TX_HISTORY_IDENTIFIER,
+      accountAddress,
+      chainId,
+      "transactions",
+    );
+    const transactions = getStorageArray(
+      storedTransactions,
+      ALL_TX_HISTORY_IDENTIFIER,
+    );
 
     // confirmed / failed are terminal states; refuse updates that would
     // revert a tx back to pending (or otherwise change a terminal status).
-    const TERMINAL: Array<TransactionHistoryEntry["pendingStatus"]> = [
-      "confirmed",
-      "failed",
-    ];
+    const TERMINAL: unknown[] = ["confirmed", "failed"];
     const updatedTransactions = transactions.map((tx) => {
-      if (tx.transactionHash !== transactionHash) return tx;
+      if (
+        !isTransactionHistoryEntry(tx) ||
+        tx.transactionHash !== transactionHash
+      )
+        return tx;
       const merged = { ...tx, ...updates };
+      if (!isTransactionHistoryEntry(merged))
+        throw new Error("Invalid stored transaction identity");
       const hasReceipt =
         !!updates.receiptStatusVerified &&
         !!updates.blockNumber &&
@@ -1184,46 +1460,57 @@ class StorageUtil {
       return merged;
     });
 
-    storageData[TX_HISTORY_IDENTIFIER][ALL_TX_HISTORY_IDENTIFIER][
-      accountAddress
-    ][chainId].transactions = updatedTransactions;
+    const chainData = ensureStorageRecord(
+      storageData,
+      TX_HISTORY_IDENTIFIER,
+      ALL_TX_HISTORY_IDENTIFIER,
+      accountAddress,
+      chainId,
+    );
+    chainData.transactions = updatedTransactions;
 
     await walletLocalStorage.set(storageData);
-  }
+  },
 
-  static async getPendingTransactions(
+  async getPendingTransactions(
     accountAddress: string,
-  ): Promise<TransactionHistoryEntry[]> {
+  ): Promise<StoredHistoryEntry[]> {
     const history = await this.getTransactionHistory(accountAddress);
     return history.filter((tx) => tx.pendingStatus === "pending");
-  }
+  },
 
-  static async clearTransactionHistory(accountAddress: string) {
+  async clearTransactionHistory(accountAddress: string) {
     const { chainId } = await this.getActiveBlockChain();
 
-    const storageData = await walletLocalStorage.get(TX_HISTORY_IDENTIFIER);
-    if (
-      storageData?.[TX_HISTORY_IDENTIFIER]?.[ALL_TX_HISTORY_IDENTIFIER]?.[
-        accountAddress
-      ]?.[chainId]
-    ) {
-      storageData[TX_HISTORY_IDENTIFIER][ALL_TX_HISTORY_IDENTIFIER][
-        accountAddress
-      ][chainId].transactions = [];
+    const storageData = await readLocalStorage(TX_HISTORY_IDENTIFIER);
+    const chainData = getStoredValue(
+      storageData,
+      TX_HISTORY_IDENTIFIER,
+      ALL_TX_HISTORY_IDENTIFIER,
+      accountAddress,
+      chainId,
+    );
+    if (isRecord(chainData)) {
+      chainData.transactions = [];
       await walletLocalStorage.set(storageData);
     }
-  }
+  },
 
-  static async setPriceCache(cache: PriceCache) {
+  async setPriceCache(cache: PriceCache) {
+    const storageData = await readLocalStorage(PRICE_CACHE_IDENTIFIER);
     await walletLocalStorage.set({
-      [PRICE_CACHE_IDENTIFIER]: cache,
+      [PRICE_CACHE_IDENTIFIER]: replaceStoredPriceCache(
+        storageData[PRICE_CACHE_IDENTIFIER],
+        cache,
+      ),
     });
-  }
+  },
 
-  static async getPriceCache(): Promise<PriceCache | null> {
-    const storageData = await walletLocalStorage.get(PRICE_CACHE_IDENTIFIER);
-    return (storageData?.[PRICE_CACHE_IDENTIFIER] ?? null) as PriceCache | null;
-  }
-}
+  async getPriceCache(): Promise<PriceCache | null> {
+    const storageData = await readLocalStorage(PRICE_CACHE_IDENTIFIER);
+    const cache = storageData[PRICE_CACHE_IDENTIFIER];
+    return isPriceCache(cache) ? cache : null;
+  },
+};
 
 export default StorageUtil;

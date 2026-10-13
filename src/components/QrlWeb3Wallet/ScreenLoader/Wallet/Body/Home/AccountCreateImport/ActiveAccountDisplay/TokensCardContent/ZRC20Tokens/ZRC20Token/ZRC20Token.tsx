@@ -29,12 +29,14 @@ const ZRC20Token = observer(
   }: ZRC20TokenProps) => {
     const { t } = useTranslation();
     const { qrlStore } = useStore();
-    const { qrlConnection, activeAccount, getZrc20TokenDetails } = qrlStore;
+    const { qrlConnection, activeAccount } = qrlStore;
     const { blockchain } = qrlConnection;
     const { accountAddress } = activeAccount;
 
     const [token, setToken] =
-      useState<Awaited<ReturnType<typeof getZrc20TokenDetails>>["token"]>();
+      useState<
+        Awaited<ReturnType<typeof qrlStore.getZrc20TokenDetails>>["token"]
+      >();
     const [hasError, setHasError] = useState(false);
     const [isRetrying, setIsRetrying] = useState(false);
     const [retryCount, setRetryCount] = useState(0);
@@ -55,7 +57,8 @@ const ZRC20Token = observer(
       // error and no retry.
       setToken(undefined);
       (async () => {
-        const tokenDetails = await getZrc20TokenDetails(contractAddress);
+        const tokenDetails =
+          await qrlStore.getZrc20TokenDetails(contractAddress);
         if (requestId !== requestIdRef.current) return;
         setIsRetrying(false);
         if (tokenDetails.error || !tokenDetails.token) {
@@ -67,7 +70,12 @@ const ZRC20Token = observer(
         }
         setToken(tokenDetails.token);
         setHasError(false);
-      })();
+      })().catch(() => {
+        if (requestId !== requestIdRef.current) return;
+        setIsRetrying(false);
+        setHasError(true);
+        setToken(undefined);
+      });
       return () => {
         // Discard whatever this run resolves to: it belongs to the account
         // or chain that was active when it started.
