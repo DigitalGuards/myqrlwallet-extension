@@ -14,8 +14,7 @@ const DAppRequest = observer(() => {
   const { qrlStore, dAppRequestStore, settingsStore } = useStore();
   const { qrlConnection, initProgress } = qrlStore;
   const { isLoading } = qrlConnection;
-  const { dAppRequestData, approvalProcessingStatus, onPermission } =
-    dAppRequestStore;
+  const { dAppRequestData, approvalProcessingStatus } = dAppRequestStore;
   const { hasCompleted } = approvalProcessingStatus;
   const { phishingDetectionEnabled, isPopupWindow } = settingsStore;
 
@@ -75,9 +74,9 @@ const DAppRequest = observer(() => {
         <CircuitBackground />
         <div className="relative z-10 flex w-full justify-center pt-24">
           <BrandedLoader
-            progress={initProgress?.active ? initProgress.fraction : undefined}
+            progress={initProgress.active ? initProgress.fraction : undefined}
             label={
-              initProgress?.active
+              initProgress.active
                 ? phaseLabels[initProgress.phase]
                 : t("home.connecting")
             }
@@ -102,7 +101,7 @@ const DAppRequest = observer(() => {
         {phishingDetectorUnavailable && (
           <div className="w-full max-w-md rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
             <strong>{t("dapp.phishingUnavailableTitle")}</strong>{" "}
-            {phishingResult?.detectorStatus
+            {phishingResult.detectorStatus
               ? t("dapp.phishingUnavailableBodyWithStatus", {
                   status: phishingResult.detectorStatus,
                 })
@@ -115,8 +114,12 @@ const DAppRequest = observer(() => {
         isOpen={showPhishingWarning}
         domain={domain}
         matchedDomain={phishingResult?.matchedDomain}
-        onReject={() => onPermission(false)}
-        onProceedAnyway={() => setPhishingAcknowledged(true)}
+        onReject={() => {
+          void dAppRequestStore.onPermission(false);
+        }}
+        onProceedAnyway={() => {
+          setPhishingAcknowledged(true);
+        }}
       />
     </>
   );

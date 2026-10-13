@@ -14,8 +14,9 @@ import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import {
   signMessage,
   signTypedData,
-  type TypedDataPayload,
+  parseTypedDataPayload,
 } from "@/functions/pqSigning";
+import { readApprovalParams } from "@/utilities/approvalGuards";
 import { RESTRICTED_METHODS } from "@/scripts/constants/requestConstants";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import { useStore } from "@/stores/store";
@@ -41,16 +42,14 @@ const QrlPqSign = observer(() => {
   const { t } = useTranslation();
   const { copied, failed: copyFailed, copy } = useCopy();
   const { lockStore, qrlStore, dAppRequestStore } = useStore();
-  const { getMnemonicPhrases, readLockState } = lockStore;
   const { qrlInstance } = qrlStore;
-  const { dAppRequestData, setOnPermissionCallBack, setCanProceed } =
-    dAppRequestStore;
+  const { dAppRequestData } = dAppRequestStore;
   const [isWalletLocked, setIsWalletLocked] = useState(false);
 
   const method = dAppRequestData?.method;
   const isTypedData = method === RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA;
-  const params = dAppRequestData?.params;
-  const fromAddress: string = params?.[0] ?? "";
+  const params = readApprovalParams(dAppRequestData?.params);
+  const fromAddress = typeof params?.[0] === "string" ? params[0] : "";
   const payload: unknown = params?.[1];
 
   // Message-mode display: decode the hex payload to UTF-8 when possible.
@@ -72,10 +71,14 @@ const QrlPqSign = observer(() => {
   const { sanitized: challenge, hadHidden: hasHiddenChars } =
     sanitizeForDisplay(decodedChallenge);
 
-  const typedPayload =
-    isTypedData && payload && typeof payload === "object"
-      ? (payload as TypedDataPayload)
-      : null;
+  const typedPayload = (() => {
+    if (!isTypedData) return undefined;
+    try {
+      return parseTypedDataPayload(payload);
+    } catch {
+      return undefined;
+    }
+  })();
 
   // The ML-DSA digest binds the whole QRLDomain (hashStruct("QRLDomain",
   // ...)), so surface the fields that decide WHICH contract/chain the
@@ -86,7 +89,9 @@ const QrlPqSign = observer(() => {
       ? domain.verifyingContract
       : "";
   const domainChainId =
-    domain?.chainId !== undefined && domain?.chainId !== null
+    typeof domain?.chainId === "string" ||
+    typeof domain?.chainId === "number" ||
+    typeof domain?.chainId === "bigint"
       ? String(domain.chainId)
       : "";
   const hasChainId = domainChainId !== "";
@@ -96,7 +101,7 @@ const QrlPqSign = observer(() => {
   // instead let the store's no-op default answer the page with an empty
   // success. The effect also no longer re-runs on a connectivity flip.
   useEffect(() => {
-    setOnPermissionCallBack(
+    dAppRequestStore.setOnPermissionCallBack(
       async (hasApproved: boolean, record: ResponseRecorder) => {
         if (hasApproved) {
           const authorization =
@@ -112,7 +117,7 @@ const QrlPqSign = observer(() => {
   }, [dAppRequestData]);
 
   useEffect(() => {
-    setCanProceed(true);
+    dAppRequestStore.setCanProceed(true);
   }, []);
 
   const copyMessage = () => {
@@ -121,15 +126,18 @@ const QrlPqSign = observer(() => {
 
   const pqSign = async (record: ResponseRecorder) => {
     try {
-      const mnemonicPhrases = await getMnemonicPhrases(fromAddress);
+      if (!fromAddress || (!isTypedData && typeof payload !== "string")) {
+        throw new Error("Invalid signing parameters");
+      }
+      const mnemonicPhrases = await lockStore.getMnemonicPhrases(fromAddress);
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
       const addressFromMnemonic =
-        qrlInstance?.accounts.seedToAccount(seed)?.address;
+        qrlInstance?.accounts.seedToAccount(seed).address;
       if (!areAddressesEquivalent(fromAddress, addressFromMnemonic)) {
         throw new Error("Mnemonic phrases did not match with the address");
       }
       const result = isTypedData
-        ? signTypedData(typedPayload as TypedDataPayload, seed)
+        ? signTypedData(parseTypedDataPayload(payload), seed)
         : signMessage(rawMessage, seed);
       record({ ...result });
     } catch (error) {
@@ -140,7 +148,7 @@ const QrlPqSign = observer(() => {
         // translated message here too, and give the dApp a stable
         // EIP-1193 error; the raw guard text never reaches the dApp response.
         setIsWalletLocked(true);
-        void readLockState();
+        void lockStore.readLockState();
         record({ error: walletLockedProviderError() });
         return;
       }
@@ -171,7 +179,7 @@ const QrlPqSign = observer(() => {
           </div>
           <div className="flex flex-col gap-1 rounded bg-muted/40 p-2 text-xs">
             <div className="font-semibold text-secondary">
-              {String(typedPayload?.domain?.name ?? "")} ·{" "}
+              {typeof domain?.name === "string" ? domain.name : ""} ·{" "}
               {typedPayload?.primaryType}
             </div>
             {verifyingContract && (

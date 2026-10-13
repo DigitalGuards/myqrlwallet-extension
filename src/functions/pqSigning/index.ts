@@ -8,6 +8,7 @@ export {
 export { computeMessageDigest } from "./messageDigest";
 export {
   computeTypedDataDigest,
+  parsePayload as parseTypedDataPayload,
   typedDataSchemeVersion,
   typedDataSchemeTag,
   TYPED_DATA_LIMITS,

@@ -1,4 +1,7 @@
-import { BlockchainBaseDataType } from "@/configuration/qrlBlockchainConfig";
+import {
+  isAddQrlChainParameters,
+  readApprovalParams,
+} from "@/utilities/approvalGuards";
 import { useStore } from "@/stores/store";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -10,7 +13,8 @@ const AddQrlChainDetails = observer(() => {
   const { dAppRequestStore } = useStore();
   const { dAppRequestData } = dAppRequestStore;
 
-  const blockchain = dAppRequestData?.params?.[0] as BlockchainBaseDataType;
+  const candidate = readApprovalParams(dAppRequestData?.params)?.[0];
+  const blockchain = isAddQrlChainParameters(candidate) ? candidate : undefined;
   const currencyName = blockchain?.nativeCurrency?.name;
   const currencySymbol = blockchain?.nativeCurrency?.symbol;
   const currencyDecimal = blockchain?.nativeCurrency?.decimals;
@@ -30,7 +34,7 @@ const AddQrlChainDetails = observer(() => {
         <div className="flex flex-col gap-1">
           <div>{t('chain.chainIdLabel')}</div>
           <div className="font-bold text-secondary">
-            {parseInt(chainId, 16)}
+            {chainId === undefined ? "" : parseInt(chainId, 16)}
           </div>
         </div>
       </div>

@@ -2,7 +2,7 @@ import { cva } from "class-variance-authority";
 import { useEffect, useState } from "react";
 
 type CurrencyImagePreloadProps = {
-  iconUrls: string[];
+  iconUrls: readonly unknown[];
 };
 
 const currencyImageClasses = cva("mt-1 transition-all duration-1000", {
@@ -29,7 +29,7 @@ const ALLOWED_DATA_URI_PREFIXES = [
   "data:image/gif",
 ];
 
-const isInlineImageDataUri = (url: string): boolean => {
+const isInlineImageDataUri = (url: unknown): url is string => {
   if (typeof url !== "string") {
     return false;
   }
@@ -41,9 +41,9 @@ const CurrencyImagePreload = ({ iconUrls }: CurrencyImagePreloadProps) => {
   const [validUrl, setValidUrl] = useState<string | undefined>();
 
   useEffect(() => {
-    let hasUnmounted = false;
+    const lifecycle = new AbortController();
 
-    (async () => {
+    void (async () => {
       for (const url of iconUrls) {
         if (!isInlineImageDataUri(url)) {
           continue;
@@ -51,12 +51,16 @@ const CurrencyImagePreload = ({ iconUrls }: CurrencyImagePreloadProps) => {
         try {
           await new Promise<void>((resolve, reject) => {
             const img = new Image();
-            img.onload = () => resolve();
-            img.onerror = () => reject();
+            img.onload = () => {
+              resolve();
+            };
+            img.onerror = () => {
+              reject(new Error("Currency icon failed to load"));
+            };
             img.src = url;
           });
 
-          if (!hasUnmounted) {
+          if (!lifecycle.signal.aborted) {
             setValidUrl(url);
             break;
           }
@@ -67,7 +71,7 @@ const CurrencyImagePreload = ({ iconUrls }: CurrencyImagePreloadProps) => {
     })();
 
     return () => {
-      hasUnmounted = true;
+      lifecycle.abort();
     };
   }, [iconUrls]);
 

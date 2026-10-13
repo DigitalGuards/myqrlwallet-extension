@@ -17,8 +17,7 @@ import DAppRequestWebsite from "./DAppRequestWebsite/DAppRequestWebsite";
 const PermissionRequiredContent = observer(() => {
   const { t } = useTranslation();
   const { dAppRequestStore } = useStore();
-  const { onPermission, canProceed, approvalProcessingStatus } =
-    dAppRequestStore;
+  const { canProceed, approvalProcessingStatus } = dAppRequestStore;
   const { isProcessing, hasApproved } = approvalProcessingStatus;
   const isRejectionProcessing = isProcessing && !hasApproved;
   const isApprovalProcessing = isProcessing && hasApproved;
@@ -46,7 +45,9 @@ const PermissionRequiredContent = observer(() => {
             type="button"
             disabled={isProcessing}
             aria-label="No"
-            onClick={() => onPermission(false)}
+            onClick={() => {
+              void dAppRequestStore.onPermission(false);
+            }}
           >
             {isRejectionProcessing ? (
               <Loader className="mr-2 h-4 w-4 animate-spin" />
@@ -60,7 +61,9 @@ const PermissionRequiredContent = observer(() => {
             type="button"
             disabled={!canProceed || isProcessing}
             aria-label="Yes"
-            onClick={() => onPermission(true)}
+            onClick={() => {
+              void dAppRequestStore.onPermission(true);
+            }}
           >
             {isApprovalProcessing ? (
               <Loader className="mr-2 h-4 w-4 animate-spin" />

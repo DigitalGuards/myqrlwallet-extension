@@ -3,6 +3,7 @@ import {
   BlockchainDataType,
   DEFAULT_BLOCKCHAIN,
 } from "@/configuration/qrlBlockchainConfig";
+import type { AddedBlockchainData } from "@/utilities/approvalGuards";
 import { NATIVE_TOKEN_UNITS_OF_GAS } from "@/constants/nativeToken";
 import {
   ZRC_721_CONTRACT_ABI,
@@ -497,8 +498,8 @@ class QrlStore {
     this.initProgress = progress;
   }
 
-  async addChain(chainData: BlockchainDataType) {
-    const newChain: BlockchainDataType = {
+  async addChain(chainData: BlockchainDataType | AddedBlockchainData) {
+    const newChain = {
       ...chainData,
       chainId: chainData?.chainId?.trim(),
       chainName: chainData?.chainName?.trim()?.substring(0, 100),

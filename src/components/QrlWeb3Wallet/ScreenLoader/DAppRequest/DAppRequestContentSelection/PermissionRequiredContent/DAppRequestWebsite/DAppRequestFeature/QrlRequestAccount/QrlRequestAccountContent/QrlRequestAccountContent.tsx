@@ -6,13 +6,16 @@ import { useEffect, useState } from "react";
 import QrlRequestAccountAccountSelection from "./QrlRequestAccountAccountSelection/QrlRequestAccountAccountSelection";
 import QrlRequestAccountBlockchainSelection from "./QrlRequestAccountBlockchainSelection/QrlRequestAccountBlockchainSelection";
 import StorageUtil from "@/utilities/storageUtil";
-import type { StoredBlockchain as BlockchainDataType } from "@/utilities/storageGuards";
+import {
+  isApprovalBlockchainList,
+  isApprovalGrants,
+  type ApprovalBlockchain,
+} from "@/utilities/approvalGuards";
 
 const QrlRequestAccountContent = observer(() => {
   const { t } = useTranslation();
   const { dAppRequestStore, qrlStore } = useStore();
-  const { addToResponseData, setCanProceed, dAppRequestData } =
-    dAppRequestStore;
+  const { dAppRequestData } = dAppRequestStore;
 
   // The origin that actually sent this request. The active browser tab is a
   // different thing: the approval surface outlives tab switches, and an
@@ -32,22 +35,34 @@ const QrlRequestAccountContent = observer(() => {
 
   const [isLoadingBlockchains, setIsLoadingBlockchains] = useState(true);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
-  const [allBlockchains, setAllBlockchains] = useState<BlockchainDataType[]>(
+  const [allBlockchains, setAllBlockchains] = useState<ApprovalBlockchain[]>(
     [],
   );
   const [selectedBlockchains, setSelectedBlockchains] = useState<
-    BlockchainDataType[]
+    ApprovalBlockchain[]
   >([]);
 
   const activeAddress = qrlStore.activeAccount.accountAddress;
   const activeChainId = qrlStore.qrlConnection.blockchain.chainId;
 
   useEffect(() => {
+    const lifecycle = new AbortController();
     (async () => {
-      const allBlockchains = await StorageUtil.getAllBlockChains();
-      const grantedToRequestOrigin = requestOrigin
+      const allBlockchains: unknown = await StorageUtil.getAllBlockChains();
+      if (!isApprovalBlockchainList(allBlockchains)) {
+        throw new Error("Invalid blockchain list");
+      }
+      const grantedToRequestOrigin: unknown = requestOrigin
         ? await StorageUtil.getDAppsConnectedAccountsData(requestOrigin)
         : undefined;
+      if (lifecycle.signal.aborted) return;
+      if (
+        grantedToRequestOrigin !== undefined &&
+        grantedToRequestOrigin !== null &&
+        !isApprovalGrants(grantedToRequestOrigin)
+      ) {
+        throw new Error("Invalid account permissions");
+      }
 
       // First connect for this site: preselect the active account and the
       // wallet's current chain so the default approval is a single click.
@@ -74,18 +89,33 @@ const QrlRequestAccountContent = observer(() => {
             : [],
       );
       setIsLoadingBlockchains(false);
-    })();
+    })().catch((error: unknown) => {
+      if (lifecycle.signal.aborted) return;
+      console.warn(
+        "QrlWeb3Wallet: Error while loading account permissions\n",
+        error,
+      );
+      setAllBlockchains([]);
+      setSelectedAccounts([]);
+      setSelectedBlockchains([]);
+      setIsLoadingBlockchains(false);
+    });
+    return () => {
+      lifecycle.abort();
+    };
     // The wallet is often still booting when this screen mounts, so the
     // active account and chain arrive after the first pass. Both are in the
     // dependency list so the defaults land once they do.
   }, [requestOrigin, activeAddress, activeChainId]);
 
   useEffect(() => {
-    addToResponseData({
+    dAppRequestStore.addToResponseData({
       accounts: selectedAccounts,
       blockchains: selectedBlockchains,
     });
-    setCanProceed(!!selectedAccounts.length && !!selectedBlockchains.length);
+    dAppRequestStore.setCanProceed(
+      !!selectedAccounts.length && !!selectedBlockchains.length,
+    );
   }, [selectedAccounts, selectedBlockchains]);
 
   const onAccountSelection = (selectedAccount: string, checked: boolean) => {
@@ -103,7 +133,7 @@ const QrlRequestAccountContent = observer(() => {
   };
 
   const onBlockchainSelection = (
-    selectedBlockchain: BlockchainDataType,
+    selectedBlockchain: ApprovalBlockchain,
     checked: boolean,
   ) => {
     let updatedBlockchains = selectedBlockchains;

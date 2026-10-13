@@ -1,8 +1,10 @@
+import { readApprovalTransaction } from "@/utilities/approvalGuards";
 import { useStore } from "@/stores/store";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import QrlSendTransactionForContent from "./QrlSendTransactionForContent/QrlSendTransactionForContent";
 import { useEffect, useState } from "react";
+import { rpcErrors } from "@theqrl/qrl-wallet-provider";
 
 export const SEND_TRANSACTION_TYPES = {
   CONTRACT_DEPLOYMENT: "CONTRACT_DEPLOYMENT",
@@ -17,6 +19,7 @@ const QrlSendTransaction = observer(() => {
   const { t } = useTranslation();
   const { dAppRequestStore } = useStore();
   const { dAppRequestData } = dAppRequestStore;
+  const params = readApprovalTransaction(dAppRequestData?.params);
 
   // Every shape gets a heading and a description. An unclassified request
   // used to render an empty heading and hide its recipient while still
@@ -33,8 +36,19 @@ const QrlSendTransaction = observer(() => {
   >(SEND_TRANSACTION_TYPES.UNKNOWN);
 
   useEffect(() => {
-    const params = dAppRequestData?.params[0];
-    if (!params || typeof params !== "object") {
+    if (!params) {
+      setTransactionHeading(t("dapp.sendTransaction.unknownShape"));
+      setTransactionSubHeading(
+        t("dapp.sendTransaction.unknownShapeDescription"),
+      );
+      setTransactionType(SEND_TRANSACTION_TYPES.UNKNOWN);
+      dAppRequestStore.setCanProceed(false);
+      dAppRequestStore.setOnPermissionCallBack((hasApproved, record) => {
+        if (hasApproved) {
+          record({ error: rpcErrors.invalidParams() });
+        }
+        return Promise.resolve();
+      });
       return;
     }
     // The first three branches keep the exact conditions (and therefore the
@@ -83,7 +97,9 @@ const QrlSendTransaction = observer(() => {
         <div>{transactionSubHeading}</div>
       </div>
       <div className="flex flex-col gap-4">
-        <QrlSendTransactionForContent transactionType={transactionType} />
+        {params && (
+          <QrlSendTransactionForContent transactionType={transactionType} />
+        )}
       </div>
     </div>
   );
