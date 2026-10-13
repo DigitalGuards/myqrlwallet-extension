@@ -1,9 +1,17 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
-import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
+import { malformed } from "@/test-utils/malformed";
+import type {
+  Json,
+  JsonRpcRequest,
+  PendingJsonRpcResponse,
+} from "@theqrl/qrl-wallet-provider/utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
 import { toChecksumAddress } from "@theqrl/wallet.js";
 import { EXTENSION_MESSAGES } from "../constants/streamConstants";
+import type LockManager from "../lockManager/lockManager";
+import type { checkDomain } from "../phishing/phishingDetector";
+import type { openApprovalSurface } from "../utils/approvalSurface";
 import {
   APPROVAL_ORIGIN_COOLDOWN_MS,
   APPROVAL_REFUSAL_GRACE,
@@ -16,33 +24,36 @@ import {
   POPUP_RESPONSE_TIMEOUT_MS,
   restrictedMethodsMiddleware,
 } from "./restrictedMethodsMiddleware";
-import { DAppResponseType } from "./middlewareTypes";
+import type { DAppResponseType } from "./middlewareTypes";
 
 const { mockIsLocked, mockCheckDomain, mockOpenApprovalSurface } = vi.hoisted(
   () => ({
     mockIsLocked: vi
-      .fn()
+      .fn<typeof LockManager.isLocked>()
       .mockResolvedValue({ isLocked: false, hasPasswordSet: true }),
-    mockCheckDomain: vi.fn(() => ({ isDomainPhishing: false })),
-    mockOpenApprovalSurface: vi.fn().mockResolvedValue(undefined),
+    mockCheckDomain: vi
+      .fn<typeof checkDomain>()
+      .mockReturnValue({ isDomainPhishing: false }),
+    mockOpenApprovalSurface: vi
+      .fn<typeof openApprovalSurface>()
+      .mockResolvedValue(undefined),
   }),
 );
 
 vi.mock("../lockManager/lockManager", () => ({
   __esModule: true,
 
-  default: { isLocked: (...args: any[]) => mockIsLocked(...args) },
+  default: { isLocked: mockIsLocked },
 }));
 
 vi.mock("../phishing/phishingDetector", () => ({
-  checkDomain: (...args: Parameters<typeof mockCheckDomain>) =>
-    mockCheckDomain(...args),
+  checkDomain: mockCheckDomain,
 }));
 
 // The surface itself is covered by approvalSurface.test.ts; here only the
 // tab id the middleware asks it to raise matters.
 vi.mock("../utils/approvalSurface", () => ({
-  openApprovalSurface: (...args: unknown[]) => mockOpenApprovalSurface(...args),
+  openApprovalSurface: mockOpenApprovalSurface,
 }));
 
 const ORIGIN_A = "https://a.example";
@@ -50,44 +61,60 @@ const ORIGIN_B = "https://b.example";
 const DAPPS_KEY = profileStorageKey("DAPPS");
 const SILENT_ACCOUNT = toChecksumAddress(`Q${"a".repeat(128)}`);
 
-type ResponseShape = {
-  result?: unknown;
-  error?: { code?: number; message?: string };
+const mockedRuntime = vi.mocked(browser.runtime, true);
+const mockedStorage = vi.mocked(browser.storage, true);
+
+type ApprovalMessage = Partial<Omit<DAppResponseType, "response">> & {
+  response?: unknown;
+  transactionHash?: string;
 };
 
-const buildRequest = (
-  origin: string,
-  tabId: number,
-): JsonRpcRequest<JsonRpcRequest> =>
-  ({
-    id: 1,
-    jsonrpc: "2.0",
-    method: "qrl_requestAccounts",
-    params: [],
-    senderData: { url: `${origin}/app`, tabId },
-  }) as never;
+type ApprovalRequest = JsonRpcRequest & {
+  senderData: {
+    url: string;
+    tabId: number;
+    mainFrameOrigin?: string;
+  };
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const buildRequest = (origin: string, tabId: number): ApprovalRequest => ({
+  id: 1,
+  jsonrpc: "2.0",
+  method: "qrl_requestAccounts",
+  params: [],
+  senderData: { url: `${origin}/app`, tabId },
+});
+
+const buildResponse = (): PendingJsonRpcResponse<Json> => ({
+  id: 1,
+  jsonrpc: "2.0",
+});
 
 describe("restricted method approval slot and timers", () => {
-  let sessionStore: Record<string, unknown>;
+  let sessionStore: Map<string, unknown>;
 
   const pendingRequestId = (): string | undefined => {
-    const dapps = sessionStore[DAPPS_KEY] as
-      | { DAPPS_REQUEST_DATA?: { requestId?: string } }
-      | undefined;
-    return dapps?.DAPPS_REQUEST_DATA?.requestId;
+    const dapps = sessionStore.get(DAPPS_KEY);
+    if (!isRecord(dapps)) return undefined;
+    const request = dapps.DAPPS_REQUEST_DATA;
+    if (!isRecord(request)) return undefined;
+    return typeof request.requestId === "string"
+      ? request.requestId
+      : undefined;
   };
 
   // browser.runtime.onMessage.removeListener is a bare spy in the mock, so
   // the listeners the middleware has taken back have to be filtered out by
   // hand before a test may post to the ones still live.
   const liveMessageListeners = () => {
-    const added = vi
-      .mocked(browser.runtime.onMessage.addListener)
-      .mock.calls.map((call) => call[0]);
+    const added = mockedRuntime.onMessage.addListener.mock.calls.map(
+      (call) => call[0],
+    );
     const removed = new Set(
-      vi
-        .mocked(browser.runtime.onMessage.removeListener)
-        .mock.calls.map((call) => call[0]),
+      mockedRuntime.onMessage.removeListener.mock.calls.map((call) => call[0]),
     );
     return added.filter((listener) => !removed.has(listener));
   };
@@ -100,15 +127,12 @@ describe("restricted method approval slot and timers", () => {
   };
 
   const post = (
-    message: Partial<DAppResponseType>,
-    sender: unknown = TRUSTED_SENDER,
+    message: ApprovalMessage,
+    sender: browser.Runtime.MessageSender = TRUSTED_SENDER,
   ) => {
     const answers: unknown[] = [];
     for (const listener of liveMessageListeners()) {
-      const answer = (listener as (value: unknown, sender: unknown) => unknown)(
-        message,
-        sender,
-      );
+      const answer: unknown = listener(message, sender, vi.fn());
       if (answer !== undefined) answers.push(answer);
     }
     return answers;
@@ -130,16 +154,18 @@ describe("restricted method approval slot and timers", () => {
       action: EXTENSION_MESSAGES.DAPP_REQUEST_PENDING_TRANSACTION,
       requestId,
       transactionHash,
-    } as never);
+    });
   };
 
   /** Wait until the middleware has written a request other than `previous`. */
   const awaitPendingRequest = async (previous?: string) => {
-    await vi.waitFor(() => {
+    return await vi.waitFor(() => {
       const id = pendingRequestId();
-      expect(typeof id === "string" && id !== previous).toBe(true);
+      if (typeof id !== "string" || id === previous) {
+        throw new Error("Expected a new pending request ID");
+      }
+      return id;
     });
-    return pendingRequestId() as string;
   };
 
   /**
@@ -154,47 +180,57 @@ describe("restricted method approval slot and timers", () => {
       requestId: pendingRequestId(),
       response,
     });
-    delete sessionStore[DAPPS_KEY];
+    sessionStore.delete(DAPPS_KEY);
   };
 
   /**
    * Connect the approval surface's lifecycle port the way DAppRequest.tsx
    * does, and hand back its disconnect trigger.
    */
-  const connectApprovalPort = (sender: unknown = TRUSTED_SENDER) => {
-    const disconnectListeners: Array<() => unknown> = [];
-    const port = {
+  const connectApprovalPort = (
+    sender: browser.Runtime.MessageSender = TRUSTED_SENDER,
+  ) => {
+    const disconnectListeners: Array<(port: browser.Runtime.Port) => unknown> =
+      [];
+    const port: browser.Runtime.Port = {
       name: "qrl-wallet-dapp-request",
       sender,
+      disconnect: vi.fn<() => void>(),
+      postMessage: vi.fn<(message: unknown) => void>(),
+      onMessage: {
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        hasListener: vi.fn<() => boolean>().mockReturnValue(false),
+        hasListeners: vi.fn<() => boolean>().mockReturnValue(false),
+      },
       onDisconnect: {
-        addListener: (listener: () => unknown) => {
+        addListener: (listener) => {
           disconnectListeners.push(listener);
         },
-        removeListener: (listener: () => unknown) => {
+        removeListener: (listener) => {
           const index = disconnectListeners.indexOf(listener);
           if (index >= 0) disconnectListeners.splice(index, 1);
         },
+        hasListener: (listener) => disconnectListeners.includes(listener),
+        hasListeners: () => disconnectListeners.length > 0,
       },
     };
-    for (const listener of vi
-      .mocked(browser.runtime.onConnect.addListener)
-      .mock.calls.map((call) => call[0])) {
-      (listener as (value: unknown) => unknown)(port);
+    for (const [listener] of mockedRuntime.onConnect.addListener.mock.calls) {
+      listener(port);
     }
     return {
       disconnect: async () => {
-        await Promise.all(disconnectListeners.map((listener) => listener()));
+        await Promise.all(
+          disconnectListeners.map((listener) => listener(port)),
+        );
       },
       hasDisconnectListener: () => disconnectListeners.length > 0,
     };
   };
 
-  const isSettled = async (promise: unknown) => {
+  const isSettled = async (promise: Promise<void>) => {
     const sentinel = Symbol("pending");
-    const winner = await Promise.race([
-      Promise.resolve(promise).then(() => "settled" as const),
-      Promise.resolve(sentinel),
-    ]);
+    const winner = await Promise.race([promise, Promise.resolve(sentinel)]);
     return winner !== sentinel;
   };
 
@@ -205,23 +241,27 @@ describe("restricted method approval slot and timers", () => {
     mockCheckDomain.mockReturnValue({ isDomainPhishing: false });
     mockOpenApprovalSurface.mockResolvedValue(undefined);
 
-    sessionStore = {};
-    vi.mocked(browser.storage.session.get).mockImplementation(
-      async (key: unknown) => {
-        if (typeof key === "string") {
-          return key in sessionStore ? { [key]: sessionStore[key] } : {};
-        }
-        return { ...sessionStore };
-      },
-    );
-    vi.mocked(browser.storage.session.set).mockImplementation(
-      async (values: unknown) => {
-        Object.assign(sessionStore, values as Record<string, unknown>);
-      },
-    );
+    sessionStore = new Map();
+    mockedStorage.session.get.mockImplementation((key: unknown) => {
+      if (typeof key === "string") {
+        return Promise.resolve(
+          sessionStore.has(key) ? { [key]: sessionStore.get(key) } : {},
+        );
+      }
+      return Promise.resolve(Object.fromEntries(sessionStore));
+    });
+    mockedStorage.session.set.mockImplementation((values: unknown) => {
+      if (!isRecord(values)) {
+        return Promise.reject(new Error("Expected a session storage record"));
+      }
+      for (const [key, value] of Object.entries(values)) {
+        sessionStore.set(key, value);
+      }
+      return Promise.resolve();
+    });
     // No stored grant for either origin, so qrl_requestAccounts always
-    // reaches the approval surface rather than completing silently.
-    vi.mocked(browser.storage.local.get).mockResolvedValue({});
+    // reaches the approval surface.
+    mockedStorage.local.get.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -229,24 +269,54 @@ describe("restricted method approval slot and timers", () => {
     resetApprovalSlot();
   });
 
+  it.each([
+    undefined,
+    null,
+    [],
+    "invalid",
+    {},
+    { DAPPS_REQUEST_DATA: null },
+    { DAPPS_REQUEST_DATA: [] },
+    { DAPPS_REQUEST_DATA: { requestId: 42 } },
+  ])("ignores malformed pending request storage: %j", (stored: unknown) => {
+    sessionStore.set(DAPPS_KEY, stored);
+    expect(pendingRequestId()).toBeUndefined();
+  });
+
+  it("rejects malformed session writes and preserves existing records", async () => {
+    const existing = { accounts: [SILENT_ACCOUNT] };
+    await mockedStorage.session.set({ existing });
+
+    await expect(
+      mockedStorage.session.set(
+        malformed<Parameters<typeof browser.storage.session.set>[0]>(null),
+      ),
+    ).rejects.toThrow("Expected a session storage record");
+
+    expect(await mockedStorage.session.get()).toEqual({ existing });
+  });
+
   it("serializes two requests that arrive in the same tick (L2)", async () => {
-    const firstRes = {} as ResponseShape;
-    const secondRes = {} as ResponseShape;
+    const existing = { accounts: [SILENT_ACCOUNT] };
+    await mockedStorage.session.set({ existing });
+    const firstRes = buildResponse();
+    const secondRes = buildResponse();
 
     const first = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      firstRes as never,
+      firstRes,
       vi.fn(),
       vi.fn(),
     );
     const second = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_B, 22),
-      secondRes as never,
+      secondRes,
       vi.fn(),
       vi.fn(),
     );
 
     await second;
+    expect(await isSettled(second)).toBe(true);
     expect(secondRes.error?.message).toBe("A request is already pending");
 
     await vi.waitFor(() => {
@@ -254,25 +324,29 @@ describe("restricted method approval slot and timers", () => {
     });
     // Exactly one request reached the approval slot, so neither dApp was
     // orphaned by the other's session-storage write.
-    const requestWrites = vi
-      .mocked(browser.storage.session.set)
-      .mock.calls.filter(
-        (call) =>
-          (call[0] as Record<string, { DAPPS_REQUEST_DATA?: unknown }>)[
-            DAPPS_KEY
-          ]?.DAPPS_REQUEST_DATA !== undefined,
-      );
+    const requestWrites = mockedStorage.session.set.mock.calls.filter(
+      ([values]) => {
+        const dapps: unknown = values[DAPPS_KEY];
+        return isRecord(dapps) && dapps.DAPPS_REQUEST_DATA !== undefined;
+      },
+    );
     expect(requestWrites).toHaveLength(1);
+    expect(await isSettled(first)).toBe(false);
 
     answerPending(false);
     await first;
+    expect(await isSettled(first)).toBe(true);
+    expect(await mockedStorage.session.get()).toEqual({
+      existing,
+      [DAPPS_KEY]: {},
+    });
   });
 
   it("raises the approval surface in the tab that owns the pending request (L2)", async () => {
-    const firstRes = {} as ResponseShape;
+    const firstRes = buildResponse();
     const first = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      firstRes as never,
+      firstRes,
       vi.fn(),
       vi.fn(),
     );
@@ -283,7 +357,7 @@ describe("restricted method approval slot and timers", () => {
 
     await restrictedMethodsMiddleware(
       buildRequest(ORIGIN_B, 22),
-      {} as never,
+      buildResponse(),
       vi.fn(),
       vi.fn(),
     );
@@ -299,7 +373,7 @@ describe("restricted method approval slot and timers", () => {
     for (let attempt = 0; attempt < times; attempt += 1) {
       const pending = restrictedMethodsMiddleware(
         buildRequest(origin, 11),
-        {} as never,
+        buildResponse(),
         vi.fn(),
         vi.fn(),
       );
@@ -312,10 +386,10 @@ describe("restricted method approval slot and timers", () => {
   it("lets a site ask again right after the first refusals (L2)", async () => {
     await rejectRepeatedly(ORIGIN_A, APPROVAL_REFUSAL_GRACE);
 
-    const retryRes = {} as ResponseShape;
+    const retryRes = buildResponse();
     const retry = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      retryRes as never,
+      retryRes,
       vi.fn(),
       vi.fn(),
     );
@@ -330,10 +404,10 @@ describe("restricted method approval slot and timers", () => {
     await rejectRepeatedly(ORIGIN_A, APPROVAL_REFUSAL_GRACE + 1);
 
     mockOpenApprovalSurface.mockClear();
-    const retryRes = {} as ResponseShape;
+    const retryRes = buildResponse();
     await restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      retryRes as never,
+      retryRes,
       vi.fn(),
       vi.fn(),
     );
@@ -343,10 +417,10 @@ describe("restricted method approval slot and timers", () => {
     expect(mockOpenApprovalSurface).not.toHaveBeenCalled();
 
     // Another site is unaffected by one origin's cooldown.
-    const otherRes = {} as ResponseShape;
+    const otherRes = buildResponse();
     const other = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_B, 22),
-      otherRes as never,
+      otherRes,
       vi.fn(),
       vi.fn(),
     );
@@ -361,10 +435,10 @@ describe("restricted method approval slot and timers", () => {
     await rejectRepeatedly(ORIGIN_A, APPROVAL_REFUSAL_GRACE + 1);
 
     await vi.advanceTimersByTimeAsync(APPROVAL_ORIGIN_COOLDOWN_MS + 1);
-    const retryRes = {} as ResponseShape;
+    const retryRes = buildResponse();
     const retry = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      retryRes as never,
+      retryRes,
       vi.fn(),
       vi.fn(),
     );
@@ -378,7 +452,7 @@ describe("restricted method approval slot and timers", () => {
   it("leaves an approved origin free to ask again at once (L2)", async () => {
     const first = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      {} as never,
+      buildResponse(),
       vi.fn(),
       vi.fn(),
     );
@@ -388,10 +462,10 @@ describe("restricted method approval slot and timers", () => {
     answerPending(true, { accounts: [], blockchains: [] });
     await first;
 
-    const retryRes = {} as ResponseShape;
+    const retryRes = buildResponse();
     const retry = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      retryRes as never,
+      retryRes,
       vi.fn(),
       vi.fn(),
     );
@@ -405,10 +479,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("rejects a request the user never answered (M1)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -423,10 +497,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("stops the idle timeout once the user has acted (M1)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -457,10 +531,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("ignores an in-progress signal that names another request (M1)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -476,10 +550,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("reports an unknown outcome when nothing answers after the click (M1)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -496,10 +570,10 @@ describe("restricted method approval slot and timers", () => {
     expect(res.error?.code).toBe(-32603);
     expect(res.error?.message).toContain("outcome is unknown");
     // The slot came back, so the next request is served.
-    const nextRes = {} as ResponseShape;
+    const nextRes = buildResponse();
     const next = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_B, 22),
-      nextRes as never,
+      nextRes,
       vi.fn(),
       vi.fn(),
     );
@@ -512,10 +586,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("answers a late response only when it names the pending request (M1)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -538,10 +612,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("clears the request at once when the surface dies after the click (M-1)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -568,10 +642,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("takes an answer that was already in flight when the surface died (M-1)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -595,7 +669,7 @@ describe("restricted method approval slot and timers", () => {
   it("frees the slot for the next site after an unknown outcome (M-1)", async () => {
     const first = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      {} as never,
+      buildResponse(),
       vi.fn(),
       vi.fn(),
     );
@@ -606,10 +680,10 @@ describe("restricted method approval slot and timers", () => {
     await vi.advanceTimersByTimeAsync(APPROVAL_DISCONNECT_GRACE_MS + 1);
     await first;
 
-    const nextRes = {} as ResponseShape;
+    const nextRes = buildResponse();
     const next = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_B, 22),
-      nextRes as never,
+      nextRes,
       vi.fn(),
       vi.fn(),
     );
@@ -620,10 +694,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("rejects when the surface dies before the user clicked (M-1)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -637,10 +711,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("ignores a response from an untrusted sender (L-1)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -649,17 +723,22 @@ describe("restricted method approval slot and timers", () => {
     // A content script running on the dApp page: same extension id, page
     // origin in the url.
     const contentScriptSender = { id: "mock-id", url: `${ORIGIN_A}/app` };
-    post(
-      {
-        method: "qrl_requestAccounts",
-        action: EXTENSION_MESSAGES.DAPP_RESPONSE,
-        hasApproved: true,
-        requestId,
-        response: { accounts: ["QAttacker"], blockchains: [] },
-      },
-      contentScriptSender,
-    );
-    post({ action: EXTENSION_MESSAGES.DAPP_RESPONSE }, undefined);
+    const response = {
+      method: "qrl_requestAccounts",
+      action: EXTENSION_MESSAGES.DAPP_RESPONSE,
+      hasApproved: true,
+      requestId,
+      response: { accounts: ["QAttacker"], blockchains: [] },
+    };
+    post(response, contentScriptSender);
+    for (const listener of liveMessageListeners()) {
+      const answer: unknown = listener(
+        response,
+        malformed<browser.Runtime.MessageSender>(undefined),
+        vi.fn(),
+      );
+      expect(answer).toBeUndefined();
+    }
     expect(await isSettled(pending)).toBe(false);
 
     // The in-progress handshake is refused for the same sender.
@@ -678,10 +757,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("ignores a lifecycle port from an untrusted sender (L-1)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -699,8 +778,7 @@ describe("restricted method approval slot and timers", () => {
   it("charges a refusal to the top-level origin of an iframe request (L-3)", async () => {
     const iframeRequest = (frameOrigin: string) => {
       const req = buildRequest(frameOrigin, 11);
-      (req.senderData as { mainFrameOrigin?: string }).mainFrameOrigin =
-        ORIGIN_A;
+      req.senderData.mainFrameOrigin = ORIGIN_A;
       return req;
     };
 
@@ -709,7 +787,7 @@ describe("restricted method approval slot and timers", () => {
     for (let attempt = 0; attempt <= APPROVAL_REFUSAL_GRACE; attempt += 1) {
       const pending = restrictedMethodsMiddleware(
         iframeRequest(`https://frame${attempt}.a.example`),
-        {} as never,
+        buildResponse(),
         vi.fn(),
         vi.fn(),
       );
@@ -718,10 +796,10 @@ describe("restricted method approval slot and timers", () => {
       await pending;
     }
 
-    const blockedRes = {} as ResponseShape;
+    const blockedRes = buildResponse();
     await restrictedMethodsMiddleware(
       iframeRequest("https://frame-next.a.example"),
-      blockedRes as never,
+      blockedRes,
       vi.fn(),
       vi.fn(),
     );
@@ -740,38 +818,36 @@ describe("restricted method approval slot and timers", () => {
 
   it("leaves the slot alone for a request that completes silently (L-4)", async () => {
     // A stored grant lets qrl_requestAccounts answer without a prompt.
-    vi.mocked(browser.storage.local.get).mockImplementation(
-      async (key: unknown) => {
-        if (key === profileStorageKey("DAPPS")) {
-          return {
-            [profileStorageKey("DAPPS")]: {
-              ALL_DAPPS: {
-                [ORIGIN_A]: {
-                  urlOrigin: ORIGIN_A,
-                  accounts: [SILENT_ACCOUNT],
-                  blockchains: [],
-                  permissions: [],
-                },
+    mockedStorage.local.get.mockImplementation((key: unknown) => {
+      if (key === profileStorageKey("DAPPS")) {
+        return Promise.resolve({
+          [profileStorageKey("DAPPS")]: {
+            ALL_DAPPS: {
+              [ORIGIN_A]: {
+                urlOrigin: ORIGIN_A,
+                accounts: [SILENT_ACCOUNT],
+                blockchains: [],
+                permissions: [],
               },
             },
-          };
-        }
-        if (key === profileStorageKey("ACCOUNTS")) {
-          return {
-            [profileStorageKey("ACCOUNTS")]: {
-              ALL_ACCOUNTS: [SILENT_ACCOUNT],
-            },
-          };
-        }
-        return {};
-      },
-    );
+          },
+        });
+      }
+      if (key === profileStorageKey("ACCOUNTS")) {
+        return Promise.resolve({
+          [profileStorageKey("ACCOUNTS")]: {
+            ALL_ACCOUNTS: [SILENT_ACCOUNT],
+          },
+        });
+      }
+      return Promise.resolve({});
+    });
 
-    const silentRes = {} as ResponseShape;
-    const otherRes = {} as ResponseShape;
+    const silentRes = buildResponse();
+    const otherRes = buildResponse();
     const silent = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      silentRes as never,
+      silentRes,
       vi.fn(),
       vi.fn(),
     );
@@ -780,7 +856,7 @@ describe("restricted method approval slot and timers", () => {
     // "a request is already pending" and open a surface for it.
     const other = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_B, 22),
-      otherRes as never,
+      otherRes,
       vi.fn(),
       vi.fn(),
     );
@@ -796,10 +872,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("grants the in-progress acknowledgement once per request (L-2)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -815,10 +891,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("reports a rejection when the surface dies after a Reject click (L-2)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -835,10 +911,10 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("names the transaction it may have broadcast (L-4)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -854,16 +930,14 @@ describe("restricted method approval slot and timers", () => {
 
     expect(res.error?.code).toBe(-32603);
     expect(res.error?.message).toContain("may have been broadcast");
-    expect(
-      (res.error as { data?: { transactionHash?: string } })?.data,
-    ).toEqual({ transactionHash: "0xdeadbeef" });
+    expect(res.error?.data).toEqual({ transactionHash: "0xdeadbeef" });
   });
 
   it("says the outcome is unknown when no hash was reported (L-4)", async () => {
-    const res = {} as ResponseShape;
+    const res = buildResponse();
     const pending = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -877,6 +951,6 @@ describe("restricted method approval slot and timers", () => {
 
     expect(res.error?.code).toBe(-32603);
     expect(res.error?.message).toContain("outcome is unknown");
-    expect((res.error as { data?: unknown })?.data).toBeUndefined();
+    expect(res.error?.data).toBeUndefined();
   });
 });
