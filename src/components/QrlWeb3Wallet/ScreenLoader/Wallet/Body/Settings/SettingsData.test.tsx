@@ -51,6 +51,26 @@ describe("SettingsData", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows a fixed message for other export failures", async () => {
+    const getKeystores = vi
+      .spyOn(StorageUtil, "getKeystores")
+      .mockRejectedValueOnce(new Error("QUOTA_BYTES quota exceeded"));
+    try {
+      renderComponent();
+      await userEvent.click(
+        screen.getByRole("button", { name: /Export Backup/i }),
+      );
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(
+        "The wallet backup could not be exported. Please try again.",
+      );
+      expect(alert).not.toHaveTextContent("QUOTA_BYTES");
+    } finally {
+      getKeystores.mockRestore();
+    }
+  });
+
   it("shows corrupt wallet data without downloading a backup", async () => {
     const getKeystores = vi
       .spyOn(StorageUtil, "getKeystores")
