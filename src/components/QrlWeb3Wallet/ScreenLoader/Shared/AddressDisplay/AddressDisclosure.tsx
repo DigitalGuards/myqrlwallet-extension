@@ -31,14 +31,21 @@ const AddressDisclosure = ({
   const fullAddressId = useId();
   const resetTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
-  useEffect(() => () => clearTimeout(resetTimerRef.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(resetTimerRef.current);
+    },
+    [],
+  );
 
   const onCopy = async () => {
     try {
       await navigator.clipboard.writeText(address);
       setCopied(true);
       clearTimeout(resetTimerRef.current);
-      resetTimerRef.current = setTimeout(() => setCopied(false), 1500);
+      resetTimerRef.current = setTimeout(() => {
+        setCopied(false);
+      }, 1500);
     } catch {
       setCopied(false);
     }
@@ -85,7 +92,9 @@ const AddressDisclosure = ({
               ? t("account.hideFullAddress")
               : t("account.showFullAddress")
           }
-          onClick={() => setExpanded((value) => !value)}
+          onClick={() => {
+            setExpanded((value) => !value);
+          }}
         >
           {expanded ? (
             <EyeOff className="h-3.5 w-3.5" />

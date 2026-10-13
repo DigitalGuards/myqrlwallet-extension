@@ -15,23 +15,27 @@ const RouteMonitor = () => {
 
   useEffect(() => {
     (async () => {
-      const activePage = await StorageUtil.getActivePage();
-      if (activePage) {
+      const activePage: unknown = await StorageUtil.getActivePage();
+      if (typeof activePage === "string" && activePage) {
         await StorageUtil.clearActivePage();
         setPreviousRouteUsed(true);
-        navigate(activePage);
-      } else if (!activePage) {
+        await navigate(activePage);
+      } else {
         setPreviousRouteUsed(true);
-        navigate(ROUTES.HOME);
+        await navigate(ROUTES.HOME);
       }
-    })();
+    })().catch((error: unknown) => {
+      console.error("Failed to restore the active page:", error);
+    });
   }, []);
 
   useEffect(() => {
     scrollShellToTop();
     (async () => {
       if (previousRouteUsed) await StorageUtil.setActivePage(pathname);
-    })();
+    })().catch((error: unknown) => {
+      console.error("Failed to save the active page:", error);
+    });
   }, [pathname]);
 
   return null;

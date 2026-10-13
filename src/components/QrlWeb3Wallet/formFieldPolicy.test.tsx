@@ -1,7 +1,7 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { getMnemonicFromHexSeed } from "@/functions/getMnemonicFromHexSeed";
 import { StoreProvider } from "@/stores/store";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Web3BaseWalletAccount } from "@theqrl/web3";
 import { MemoryRouter } from "react-router-dom";
@@ -28,10 +28,17 @@ vi.mock("@/utilities/unlockAttemptLimiter", () => ({
   clearUnlockAttempts: mockClearUnlockAttempts,
 }));
 
-const ACCOUNT = {
+const ACCOUNT: Web3BaseWalletAccount = {
   address: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
   seed: "0x7819dc0205e6a5c286796886ce16e637b99e1838701cc6988c5886ddc890a7f328771d9197fd17f36faa759d9b8c4c42",
-} as unknown as Web3BaseWalletAccount;
+  signTransaction: () =>
+    Promise.reject(new Error("Signing is unavailable in this fixture")),
+  sign: () => {
+    throw new Error("Signing is unavailable in this fixture");
+  },
+  encrypt: () =>
+    Promise.reject(new Error("Encryption is unavailable in this fixture")),
+};
 
 const withStore = (children: React.ReactNode) =>
   render(
@@ -60,7 +67,10 @@ const expectNeverAutofilled = (field: HTMLElement) => {
 };
 
 describe("form field policy", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   beforeEach(() => {
     mockGetUnlockAttemptState.mockReset().mockResolvedValue({
@@ -137,7 +147,7 @@ describe("form field policy", () => {
 
       const positions = screen
         .getAllByText(/^Word \d+$/)
-        .map((label) => Number(label.textContent!.replace("Word ", "")));
+        .map((label) => Number(label.textContent.replace("Word ", "")));
       expect(positions.length).toBeGreaterThan(0);
 
       const names = new Set<string>();
@@ -146,7 +156,9 @@ describe("form field policy", () => {
         expectIdentified(word);
         expectNeverAutofilled(word);
         expect(word).toHaveAttribute("name", `recoveryPhraseWord${position}`);
-        names.add(word.getAttribute("name")!);
+        const name = word.getAttribute("name");
+        if (name === null) throw new Error("Recovery word input has no name");
+        names.add(name);
       }
       expect(names.size).toBe(positions.length);
     });
@@ -155,5 +167,34 @@ describe("form field policy", () => {
       // Guards the fixture: a broken seed would make the loop above vacuous.
       expect(getMnemonicFromHexSeed(ACCOUNT.seed).split(" ")).toHaveLength(32);
     });
+  });
+  it("reports a failed password callback and keeps the current step", async () => {
+    const error = new Error("password setup failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const selectStep = vi.fn();
+    withStore(
+      <LockPasswordSetup
+        selectStep={selectStep}
+        setNewPassword={() => {
+          throw error;
+        }}
+      />,
+    );
+
+    await userEvent.type(screen.getByLabelText("password"), "testpassword");
+    await userEvent.type(
+      screen.getByLabelText("reEnteredPassword"),
+      "testpassword",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "Failed to set up the wallet password:",
+        error,
+      );
+    });
+    expect(selectStep).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("password")).toBeEnabled();
   });
 });

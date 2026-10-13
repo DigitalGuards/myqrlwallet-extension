@@ -65,7 +65,7 @@ const AddOrImportAccount = observer(
 
     const onCreate = () => {
       const { qrl } = new Web3();
-      setCreatedAccount(qrl?.accounts?.create());
+      setCreatedAccount(qrl.accounts.create());
       setPersistError("");
       setMode("create");
     };
@@ -75,7 +75,9 @@ const AddOrImportAccount = observer(
       try {
         await addAnAccountToWallet(createdAccount);
       } catch (error) {
-        setPersistError(`${t("onboarding.account.persistError")} ${error}`);
+        setPersistError(
+          `${t("onboarding.account.persistError")} ${String(error)}`,
+        );
         return;
       }
       selectStep(ONBOARDING_STEPS.COMPLETED);
@@ -118,7 +120,9 @@ const AddOrImportAccount = observer(
           <CardFooter>
             <Button
               className="w-full"
-              onClick={() => selectStep(ONBOARDING_STEPS.COMPLETED)}
+              onClick={() => {
+                selectStep(ONBOARDING_STEPS.COMPLETED);
+              }}
             >
               <MoveRight className="mr-2 h-4 w-4" />
               {t("onboarding.account.continueButton")}
@@ -168,7 +172,9 @@ const AddOrImportAccount = observer(
               className="w-full"
               type="button"
               variant="ghost"
-              onClick={() => setMode("choose")}
+              onClick={() => {
+                setMode("choose");
+              }}
             >
               <Undo className="mr-2 h-4 w-4" />
               {t("onboarding.account.back")}
@@ -195,7 +201,9 @@ const AddOrImportAccount = observer(
             className="w-full"
             type="button"
             variant="outline"
-            onClick={() => setMode("import")}
+            onClick={() => {
+              setMode("import");
+            }}
           >
             <Download className="mr-2 h-4 w-4" />
             {t("onboarding.account.importButton")}

@@ -15,6 +15,7 @@
  * backup they do not have would be noise.
  */
 import browser from "webextension-polyfill";
+import { isRecord } from "@/services/explorerGuards";
 
 // The bare v2 key names, spelled out here so this stays readable next to a
 // v2 storage dump. They deliberately do not go through profileStorage: that
@@ -36,10 +37,8 @@ const hasLegacyKeystores = (stored: unknown): boolean => {
 
 /** v2 persisted its address list at ACCOUNTS.ALL_ACCOUNTS. */
 const hasLegacyAccounts = (stored: unknown): boolean => {
-  if (typeof stored !== "object" || stored === null) return false;
-  const allAccounts = (stored as Record<string, unknown>)[
-    LEGACY_ALL_ACCOUNTS_KEY
-  ];
+  if (!isRecord(stored)) return false;
+  const allAccounts = stored[LEGACY_ALL_ACCOUNTS_KEY];
   return Array.isArray(allAccounts) && allAccounts.length > 0;
 };
 
@@ -51,13 +50,14 @@ const hasLegacyAccounts = (stored: unknown): boolean => {
  */
 export const hasLegacyWalletData = async (): Promise<boolean> => {
   try {
-    const stored = await browser.storage.local.get([
+    const stored: unknown = await browser.storage.local.get([
       LEGACY_KEYSTORES_KEY,
       LEGACY_ACCOUNTS_KEY,
     ]);
+    if (!isRecord(stored)) return false;
     return (
-      hasLegacyKeystores(stored?.[LEGACY_KEYSTORES_KEY]) ||
-      hasLegacyAccounts(stored?.[LEGACY_ACCOUNTS_KEY])
+      hasLegacyKeystores(stored[LEGACY_KEYSTORES_KEY]) ||
+      hasLegacyAccounts(stored[LEGACY_ACCOUNTS_KEY])
     );
   } catch {
     return false;

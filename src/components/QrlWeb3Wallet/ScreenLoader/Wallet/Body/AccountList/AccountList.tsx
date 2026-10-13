@@ -20,11 +20,17 @@ const AccountList = observer(() => {
   const [showHidden, setShowHidden] = useState(false);
 
   useEffect(() => {
-    accountLabelsStore.syncLabels(
-      qrlAccounts.accounts,
-      ledgerStore.isLedgerAccount.bind(ledgerStore),
-    );
-    hiddenAccountsStore.loadHiddenAccounts();
+    accountLabelsStore
+      .syncLabels(
+        qrlAccounts.accounts,
+        ledgerStore.isLedgerAccount.bind(ledgerStore),
+      )
+      .catch((error: unknown) => {
+        console.error("Failed to sync account labels:", error);
+      });
+    hiddenAccountsStore.loadHiddenAccounts().catch((error: unknown) => {
+      console.error("Failed to load hidden accounts:", error);
+    });
   }, [qrlAccounts.accounts]);
 
   const hiddenAccounts = qrlAccounts.accounts.filter(({ accountAddress }) =>
@@ -42,7 +48,9 @@ const AccountList = observer(() => {
           <div className="flex flex-col gap-2">
             <button
               className="flex items-center gap-2 text-left"
-              onClick={() => setShowHidden(!showHidden)}
+              onClick={() => {
+                setShowHidden(!showHidden);
+              }}
             >
               <Label className="cursor-pointer text-lg text-muted-foreground">
                 {t("home.hiddenAccounts", { count: hiddenAccounts.length })}
@@ -63,9 +71,13 @@ const AccountList = observer(() => {
                   </div>
                   <button
                     className="shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
-                    onClick={() =>
-                      hiddenAccountsStore.unhideAccount(accountAddress)
-                    }
+                    onClick={() => {
+                      hiddenAccountsStore
+                        .unhideAccount(accountAddress)
+                        .catch((error: unknown) => {
+                          console.error("Failed to unhide the account:", error);
+                        });
+                    }}
                     aria-label={t("home.unhide")}
                   >
                     <Eye size="16" />

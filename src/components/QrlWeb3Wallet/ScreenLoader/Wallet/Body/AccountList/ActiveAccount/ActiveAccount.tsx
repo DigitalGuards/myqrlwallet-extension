@@ -32,7 +32,7 @@ const ActiveAccount = observer(() => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { qrlStore, accountLabelsStore, hiddenAccountsStore } = useStore();
-  const { activeAccount, qrlAccounts, setActiveAccount } = qrlStore;
+  const { activeAccount, qrlAccounts } = qrlStore;
   const { accountAddress } = activeAccount;
 
   const { copy } = useCopy();
@@ -65,6 +65,12 @@ const ActiveAccount = observer(() => {
     setIsEditing(false);
   };
 
+  const onSaveEdit = () => {
+    saveEdit().catch((error: unknown) => {
+      console.error("Failed to save the account label:", error);
+    });
+  };
+
   const visibleOtherAccounts = qrlAccounts.accounts.filter(
     ({ accountAddress: addr }) =>
       addr !== accountAddress && !hiddenAccountsStore.isHidden(addr),
@@ -75,7 +81,7 @@ const ActiveAccount = observer(() => {
     if (!canHide) return;
     const nextAccount = visibleOtherAccounts[0].accountAddress;
     await hiddenAccountsStore.hideAccount(accountAddress);
-    await setActiveAccount(nextAccount);
+    await qrlStore.setActiveAccount(nextAccount);
   };
 
   return (
@@ -90,9 +96,11 @@ const ActiveAccount = observer(() => {
                 name="activeAccountLabel"
                 autoComplete="off"
                 value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
+                onChange={(e) => {
+                  setEditValue(e.target.value);
+                }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") saveEdit();
+                  if (e.key === "Enter") onSaveEdit();
                   if (e.key === "Escape") cancelEdit();
                 }}
                 className="h-7 w-40 text-sm"
@@ -104,7 +112,7 @@ const ActiveAccount = observer(() => {
                 variant="ghost"
                 size="icon"
                 className="size-6"
-                onClick={saveEdit}
+                onClick={onSaveEdit}
                 aria-label={t("home.saveLabel")}
               >
                 <Check className="h-3.5 w-3.5" />
@@ -142,11 +150,18 @@ const ActiveAccount = observer(() => {
                   <DropdownMenuGroup>
                     <DropdownMenuItem
                       className="cursor-pointer data-[highlighted]:text-secondary"
-                      onClick={() =>
-                        navigate(ROUTES.TOKEN_TRANSFER, {
-                          state: { shouldStartFresh: true },
-                        })
-                      }
+                      onClick={() => {
+                        Promise.resolve(
+                          navigate(ROUTES.TOKEN_TRANSFER, {
+                            state: { shouldStartFresh: true },
+                          }),
+                        ).catch((error: unknown) => {
+                          console.error(
+                            "Failed to open token transfer:",
+                            error,
+                          );
+                        });
+                      }}
                     >
                       <div className="flex gap-2">
                         <Send size="16" />
@@ -155,7 +170,16 @@ const ActiveAccount = observer(() => {
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       className="cursor-pointer data-[highlighted]:text-secondary"
-                      onClick={() => navigate(ROUTES.RECEIVE)}
+                      onClick={() => {
+                        Promise.resolve(navigate(ROUTES.RECEIVE)).catch(
+                          (error: unknown) => {
+                            console.error(
+                              "Failed to open account receive:",
+                              error,
+                            );
+                          },
+                        );
+                      }}
                     >
                       <div className="flex gap-2">
                         <Download size="16" />
@@ -183,7 +207,14 @@ const ActiveAccount = observer(() => {
                     {canHide && (
                       <DropdownMenuItem
                         className="cursor-pointer data-[highlighted]:text-secondary"
-                        onClick={hideActiveAccount}
+                        onClick={() => {
+                          hideActiveAccount().catch((error: unknown) => {
+                            console.error(
+                              "Failed to hide the active account:",
+                              error,
+                            );
+                          });
+                        }}
                       >
                         <div className="flex gap-2">
                           <EyeOff size="16" />

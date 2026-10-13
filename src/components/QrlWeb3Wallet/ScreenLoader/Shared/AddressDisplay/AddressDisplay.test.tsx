@@ -23,7 +23,7 @@ describe("address display primitives", () => {
     render(<FullAddress address={ADDRESS} />);
 
     const visible = screen.getByText(/^Q /);
-    expect(visible.textContent?.split(" ").join("")).toBe(ADDRESS);
+    expect(visible.textContent.split(" ").join("")).toBe(ADDRESS);
     expect(screen.getByTitle(ADDRESS)).toHaveClass(
       "min-w-0",
       "max-w-full",
