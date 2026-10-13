@@ -2,6 +2,7 @@ import { profileStorageKey } from "@/utilities/profileStorage";
 import StorageUtil from "@/utilities/storageUtil";
 import { JsonRpcEngine } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
 import { createEngineStream } from "@theqrl/qrl-wallet-provider/json-rpc-middleware-stream";
+import { serializeError } from "@theqrl/qrl-wallet-provider/rpc-errors";
 import { ExtensionPortStream } from "extension-port-stream";
 import { pipeline } from "readable-stream";
 import browser from "webextension-polyfill";
@@ -257,7 +258,11 @@ const setupProviderEngineEip1193 = ({
   // Handles the unrestricted method calls without requiring user's approval
   engine.push(unrestrictedMethodsMiddleware);
   // Handles the dApp's connect wallet functionality
-  engine.push(restrictedMethodsMiddleware);
+  engine.push((req, res, next, end) => {
+    restrictedMethodsMiddleware(req, res, next, end).catch((error: unknown) => {
+      end(serializeError(error));
+    });
+  });
 
   return engine;
 };

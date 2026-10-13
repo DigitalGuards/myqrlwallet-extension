@@ -153,6 +153,34 @@ async function connectContentScriptAndWait() {
   return port;
 }
 
+async function connectProviderAndSendRequest() {
+  mockInitializeContentScriptProviderConnection.mockImplementationOnce(
+    async (port, setup, announce) => {
+      await setup(port);
+      await announce();
+    },
+  );
+  const port = await connectContentScriptAndWait();
+  expect(port.postMessage).toHaveBeenCalledExactlyOnceWith({
+    name: "QRL_WALLET_CONNECTION_READY",
+  });
+  for (const [listener] of port.onMessage.addListener.mock.calls) {
+    listener(
+      {
+        name: "myqrlwallet-provider",
+        data: {
+          id: 42,
+          jsonrpc: "2.0",
+          method: "qrl_requestAccounts",
+          params: [],
+        },
+      },
+      port,
+    );
+  }
+  return port;
+}
+
 describe("serviceWorker startup resilience (H1)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -283,6 +311,112 @@ describe("serviceWorker startup resilience (H1)", () => {
       expect(cleanup).toHaveBeenCalledTimes(1);
     });
   });
+
+  it.each([
+    { label: "success", response: { result: ["Qfirst", "Qsecond"] } },
+    {
+      label: "approval rejection",
+      response: {
+        error: { code: 4001, message: "User rejected the request." },
+      },
+    },
+  ])(
+    "preserves a delayed restricted-method $label response",
+    async ({ response }) => {
+      await import("./serviceWorker");
+      const middlewareModule =
+        await import("./middlewares/restrictedMethodsMiddleware");
+      let completeResponse = () => {};
+      const responseReady = new Promise<void>((resolve) => {
+        completeResponse = resolve;
+      });
+      const middleware = vi
+        .spyOn(middlewareModule, "restrictedMethodsMiddleware")
+        .mockImplementationOnce(async (_req, res, _next, end) => {
+          await responseReady;
+          Object.assign(res, response);
+          end();
+        });
+
+      const port = await connectProviderAndSendRequest();
+      try {
+        await vi.waitFor(() => {
+          expect(middleware).toHaveBeenCalledTimes(1);
+        });
+        expect(port.postMessage).toHaveBeenCalledTimes(1);
+        completeResponse();
+        await vi.waitFor(() => {
+          expect(port.postMessage.mock.calls).toEqual([
+            [{ name: "QRL_WALLET_CONNECTION_READY" }],
+            [
+              {
+                name: "myqrlwallet-provider",
+                data: { id: 42, jsonrpc: "2.0", ...response },
+              },
+            ],
+          ]);
+        });
+      } finally {
+        for (const [listener] of port.onDisconnect.addListener.mock.calls)
+          listener(port);
+      }
+    },
+  );
+
+  it.each([
+    {
+      label: "an unexpected Error",
+      rejection: new Error("storage unavailable"),
+      responseError: { code: -32603, message: "Internal JSON-RPC error." },
+    },
+    {
+      label: "a structured RPC error",
+      rejection: {
+        code: 4100,
+        message: "Wallet is locked",
+        data: { locked: true },
+      },
+      responseError: {
+        code: 4100,
+        message: "Wallet is locked",
+        data: { locked: true },
+      },
+    },
+    {
+      label: "a non-Error value",
+      rejection: "storage unavailable",
+      responseError: { code: -32603, message: "Internal JSON-RPC error." },
+    },
+  ])(
+    "answers the provider request when restricted middleware rejects with $label",
+    async ({ rejection, responseError }) => {
+      await import("./serviceWorker");
+      const middlewareModule =
+        await import("./middlewares/restrictedMethodsMiddleware");
+      const middleware = vi
+        .spyOn(middlewareModule, "restrictedMethodsMiddleware")
+        .mockRejectedValueOnce(rejection);
+
+      const port = await connectProviderAndSendRequest();
+      try {
+        await vi.waitFor(() => {
+          expect(port.postMessage.mock.calls).toMatchObject([
+            [{ name: "QRL_WALLET_CONNECTION_READY" }],
+            [
+              {
+                name: "myqrlwallet-provider",
+                data: { id: 42, jsonrpc: "2.0", error: responseError },
+              },
+            ],
+          ]);
+        });
+        expect(middleware).toHaveBeenCalledTimes(1);
+      } finally {
+        for (const [listener] of port.onDisconnect.addListener.mock.calls)
+          listener(port);
+      }
+    },
+  );
 
   it("pins native session storage access before the legacy scrub", async () => {
     const setAccessLevel = vi.fn().mockResolvedValue(undefined);
