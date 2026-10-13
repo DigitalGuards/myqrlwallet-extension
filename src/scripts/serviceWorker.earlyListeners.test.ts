@@ -1,5 +1,7 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createPort, type RuntimeMessageListener } from "@/test-utils/runtime";
+import type { Runtime, Storage } from "webextension-polyfill";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Covers the real-device fix for a side-panel "Unchecked runtime.lastError:
@@ -27,16 +29,26 @@ const {
   mockNotifyDAppChainChanged,
   mockLockManagerListener,
   mockInitializeContentScriptProviderConnection,
+  mockGetDAppsRequestData,
+  mockSetBadgeText,
+  mockSetBadgeBackgroundColor,
 } = vi.hoisted(() => ({
-  mockOnMessageAddListener: vi.fn(),
-  mockOnConnectAddListener: vi.fn(),
-  mockOnStorageChangedAddListener: vi.fn(),
+  mockOnMessageAddListener: vi.fn<(listener: RuntimeMessageListener) => void>(),
+  mockOnConnectAddListener:
+    vi.fn<(listener: (port: Runtime.Port) => void) => void>(),
+  mockOnStorageChangedAddListener:
+    vi.fn<Storage.Static["onChanged"]["addListener"]>(),
   mockNotifyDAppAccountsChanged: vi.fn(),
   mockNotifyDAppChainChanged: vi.fn(),
   mockLockManagerListener: vi.fn().mockResolvedValue({ success: true }),
   mockInitializeContentScriptProviderConnection: vi
     .fn()
     .mockResolvedValue(undefined),
+  mockGetDAppsRequestData: vi
+    .fn<() => Promise<unknown>>()
+    .mockResolvedValue(undefined),
+  mockSetBadgeText: vi.fn().mockResolvedValue(undefined),
+  mockSetBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("webextension-polyfill", () => ({
@@ -67,8 +79,8 @@ vi.mock("webextension-polyfill", () => ({
       setPanelBehavior: vi.fn().mockResolvedValue(undefined),
     },
     action: {
-      setBadgeText: vi.fn().mockResolvedValue(undefined),
-      setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
+      setBadgeText: mockSetBadgeText,
+      setBadgeBackgroundColor: mockSetBadgeBackgroundColor,
     },
     notifications: {
       create: vi.fn().mockResolvedValue(undefined),
@@ -127,7 +139,7 @@ vi.mock("./utils/providerConnectionLifecycle", () => ({
 vi.mock("@/utilities/storageUtil", () => ({
   __esModule: true,
   default: {
-    getDAppsRequestData: vi.fn().mockResolvedValue(undefined),
+    getDAppsRequestData: mockGetDAppsRequestData,
     getSettings: vi.fn().mockResolvedValue({}),
   },
 }));
@@ -136,6 +148,10 @@ describe("serviceWorker listener registration survives a stuck async init", () =
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("registers runtime.onMessage and runtime.onConnect listeners synchronously, even though initializeServiceWorker() never gets past its first await", async () => {
@@ -149,12 +165,12 @@ describe("serviceWorker listener registration survives a stuck async init", () =
 
   it("forwards a local storage change to both dApp notifiers", async () => {
     await import("./serviceWorker");
-    const listener = mockOnStorageChangedAddListener.mock.calls[0]?.[0];
+    const listener = mockOnStorageChangedAddListener.mock.calls[0][0];
     expect(listener).toBeTypeOf("function");
 
     const dappsChange = { oldValue: {}, newValue: {} };
     const chainChange = { oldValue: {}, newValue: {} };
-    await listener(
+    listener(
       {
         [profileStorageKey("DAPPS")]: dappsChange,
         [profileStorageKey("BLOCKCHAINS")]: chainChange,
@@ -170,30 +186,30 @@ describe("serviceWorker listener registration survives a stuck async init", () =
 
   it("a message dispatched before init resolves is still handled by lockManagerListener", async () => {
     await import("./serviceWorker");
-    const listener = mockOnMessageAddListener.mock.calls.find(
-      (call: any) => call[0] === mockLockManagerListener,
-    )?.[0];
-
-    expect(listener).toBe(mockLockManagerListener);
+    const listener = mockOnMessageAddListener.mock.calls[0][0];
     // Directly exercising the registered function, matching how the real
     // onMessage event would invoke it.
     await expect(
       listener({ name: "LOCK_MANAGER_IS_LOCKED" }, { id: "mock-id" }),
     ).resolves.toEqual({ success: true });
+    expect(mockLockManagerListener).toHaveBeenCalledWith(
+      { name: "LOCK_MANAGER_IS_LOCKED" },
+      { id: "mock-id" },
+    );
   });
 
   it("the LOCK_MANAGER_PORT connect is answered even before init resolves", async () => {
     await import("./serviceWorker");
     const connectListeners = mockOnConnectAddListener.mock.calls.map(
-      (call: any) => call[0],
+      ([listener]) => listener,
     );
 
-    const postMessage = vi.fn();
+    const port = createPort("LOCK_MANGER_PORT");
     for (const listener of connectListeners) {
-      listener({ name: "LOCK_MANGER_PORT", postMessage });
+      listener(port);
     }
 
-    expect(postMessage).toHaveBeenCalledWith({
+    expect(port.postMessage).toHaveBeenCalledWith({
       name: "IS_LOCK_MANAGER_READY",
     });
   });
@@ -201,16 +217,10 @@ describe("serviceWorker listener registration survives a stuck async init", () =
   it("the content-script connection is captured immediately but defers its real work until init resolves", async () => {
     await import("./serviceWorker");
     const connectListeners = mockOnConnectAddListener.mock.calls.map(
-      (call: any) => call[0],
+      ([listener]) => listener,
     );
 
-    const disconnectListeners: Array<() => void> = [];
-    const mockPort = {
-      name: "myqrlwallet-content-script",
-      onDisconnect: {
-        addListener: (cb: () => void) => disconnectListeners.push(cb),
-      },
-    };
+    const mockPort = createPort("myqrlwallet-content-script");
     for (const listener of connectListeners) {
       listener(mockPort);
     }
@@ -218,8 +228,10 @@ describe("serviceWorker listener registration survives a stuck async init", () =
     // The disconnect handler is attached at once, before init resolves, so
     // a tab that closes or enters the back/forward cache in that window
     // still has its runtime.lastError read.
-    expect(disconnectListeners).toHaveLength(1);
-    expect(() => disconnectListeners[0]()).not.toThrow();
+    expect(mockPort.onDisconnect.addListener).toHaveBeenCalledTimes(1);
+    expect(() => {
+      mockPort.onDisconnect.addListener.mock.calls[0][0](mockPort);
+    }).not.toThrow();
 
     // The event was accepted: the listener ran, and is now awaiting
     // serviceWorkerReady internally. Since initializeServiceWorker() never
@@ -229,5 +241,68 @@ describe("serviceWorker listener registration survives a stuck async init", () =
     expect(
       mockInitializeContentScriptProviderConnection,
     ).not.toHaveBeenCalled();
+  });
+
+  it("keeps badge calls ordered and reports both rejected writes", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const textError = new Error("text failed");
+    const colorError = new Error("color failed");
+    mockGetDAppsRequestData.mockResolvedValueOnce({ requestId: "pending" });
+    mockSetBadgeText.mockRejectedValueOnce(textError);
+    mockSetBadgeBackgroundColor.mockRejectedValueOnce(colorError);
+    await import("./serviceWorker");
+
+    mockOnStorageChangedAddListener.mock.calls[0][0]({}, "session");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockSetBadgeText).toHaveBeenCalledExactlyOnceWith({ text: "1" });
+    expect(mockSetBadgeBackgroundColor).toHaveBeenCalledExactlyOnceWith({
+      color: "#4AAFFF",
+    });
+    expect(mockSetBadgeText.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSetBadgeBackgroundColor.mock.invocationCallOrder[0],
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "QrlWeb3Wallet: Failed to update badge text",
+      textError,
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "QrlWeb3Wallet: Failed to update badge color",
+      colorError,
+    );
+  });
+
+  it("reports failure to clear the badge when there is no pending request", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = new Error("text failed");
+    mockSetBadgeText.mockRejectedValueOnce(error);
+    await import("./serviceWorker");
+
+    mockOnStorageChangedAddListener.mock.calls[0][0]({}, "session");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockSetBadgeText).toHaveBeenCalledExactlyOnceWith({ text: "" });
+    expect(mockSetBadgeBackgroundColor).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "QrlWeb3Wallet: Failed to update badge text",
+      error,
+    );
+  });
+
+  it("reports a rejected pending-request read without changing the badge", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = new Error("read failed");
+    mockGetDAppsRequestData.mockRejectedValueOnce(error);
+    await import("./serviceWorker");
+
+    mockOnStorageChangedAddListener.mock.calls[0][0]({}, "local");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockSetBadgeText).not.toHaveBeenCalled();
+    expect(mockSetBadgeBackgroundColor).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "QrlWeb3Wallet: Storage change handling failed",
+      error,
+    );
   });
 });

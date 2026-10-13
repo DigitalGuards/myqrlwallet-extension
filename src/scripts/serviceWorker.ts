@@ -2,6 +2,7 @@ import { profileStorageKey } from "@/utilities/profileStorage";
 import StorageUtil from "@/utilities/storageUtil";
 import { JsonRpcEngine } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
 import { createEngineStream } from "@theqrl/qrl-wallet-provider/json-rpc-middleware-stream";
+import { serializeError } from "@theqrl/qrl-wallet-provider/rpc-errors";
 import { ExtensionPortStream } from "extension-port-stream";
 import { pipeline } from "readable-stream";
 import browser from "webextension-polyfill";
@@ -26,6 +27,10 @@ import {
   setupPhishingRefreshAlarm,
 } from "./phishing/phishingDetector";
 import { showTransactionNotification } from "./utils/transactionNotification";
+import {
+  isNamedMessage,
+  isTransactionNotificationData,
+} from "./utils/messageGuards";
 import { checkForLastError } from "./utils/scriptUtils";
 import { isTrustedExtensionSender } from "./utils/trustedSender";
 import { isPrematureClose, setupMultiplex } from "./utils/streamUtils";
@@ -85,15 +90,23 @@ const waitForServiceWorkerReady = (): Promise<void> =>
 // started directly on unlock.
 browser.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === DAPP_TX_WATCH_ALARM_NAME) {
-    handleDAppTransactionWatchAlarm();
+    handleDAppTransactionWatchAlarm().catch((error: unknown) => {
+      console.warn("QrlWeb3Wallet: Transaction watch alarm failed", error);
+    });
   } else if (alarm.name === LockManager.AUTO_LOCK_ALARM) {
-    LockManager.handleAutoLockAlarm();
+    LockManager.handleAutoLockAlarm().catch((error: unknown) => {
+      console.warn("QrlWeb3Wallet: Auto-lock alarm failed", error);
+    });
   } else if (alarm.name === PHISHING_ALARM_NAME) {
-    handlePhishingRefreshAlarm();
+    handlePhishingRefreshAlarm().catch((error: unknown) => {
+      console.warn("QrlWeb3Wallet: Phishing refresh alarm failed", error);
+    });
   }
 });
 
-type ContentScriptType = browser.Scripting.RegisteredContentScript;
+type ContentScriptType = browser.Scripting.RegisteredContentScript & {
+  world: "MAIN";
+};
 
 const registerScripts = async () => {
   const previouslyRegisteredScriptIds = (
@@ -106,7 +119,6 @@ const registerScripts = async () => {
       js: ["src/scripts/inPageScript.js"],
       runAt: "document_start",
       allFrames: true,
-      // @ts-expect-error - webextension-polyfill types do not include the "world" property for content scripts
       // This is important. The script must run in the "MAIN" world,
       // so that the qrl provider will be available browser wide, not just isolated to the extension.
       world: "MAIN",
@@ -133,7 +145,10 @@ const registerScripts = async () => {
 // attached - see the module-level comment above serviceWorkerReady.
 const prepareListeners = () => {
   // Listening to storage for displaying the badge in the extension.
-  browser.storage.onChanged.addListener(async (changes, areaName) => {
+  const onStorageChanged = async (
+    changes: Record<string, browser.Storage.StorageChange | undefined>,
+    areaName: string,
+  ) => {
     if (areaName === "local") {
       notifyDAppAccountsChanged(changes[profileStorageKey("DAPPS")]);
       notifyDAppChainChanged(changes[profileStorageKey("BLOCKCHAINS")]);
@@ -141,14 +156,29 @@ const prepareListeners = () => {
     const storedDAppRequestData = await StorageUtil.getDAppsRequestData();
     if (storedDAppRequestData) {
       // If there is a pending request, the badge with 1 notification will be displayed.
-      browser.action.setBadgeText({ text: "1" });
-      browser.action.setBadgeBackgroundColor({ color: "#4AAFFF" });
+      browser.action.setBadgeText({ text: "1" }).catch((error: unknown) => {
+        console.warn("QrlWeb3Wallet: Failed to update badge text", error);
+      });
+      browser.action
+        .setBadgeBackgroundColor({ color: "#4AAFFF" })
+        .catch((error: unknown) => {
+          console.warn("QrlWeb3Wallet: Failed to update badge color", error);
+        });
     } else {
-      browser.action.setBadgeText({ text: "" });
+      browser.action.setBadgeText({ text: "" }).catch((error: unknown) => {
+        console.warn("QrlWeb3Wallet: Failed to update badge text", error);
+      });
     }
+  };
+  browser.storage.onChanged.addListener((changes, areaName) => {
+    onStorageChanged(changes, areaName).catch((error: unknown) => {
+      console.warn("QrlWeb3Wallet: Storage change handling failed", error);
+    });
   });
   // Listening for messages related to the wallet locking.
-  browser.runtime.onMessage.addListener(LockManager.lockManagerListener);
+  browser.runtime.onMessage.addListener(
+    LockManager.lockManagerListener.bind(LockManager),
+  );
   // Side-panel gesture roundtrip. Registered early so a request that arrives
   // right after a cold start still finds its listener.
   registerSidePanelOpenListener();
@@ -161,7 +191,7 @@ const prepareListeners = () => {
   // Listening for transaction notification requests from the popup.
   // IMPORTANT: Must NOT be async. Returning a Promise from onMessage claims the
   // message channel and prevents lockManagerListener from responding.
-  browser.runtime.onMessage.addListener((message, sender) => {
+  browser.runtime.onMessage.addListener((message: unknown, sender) => {
     // Any frame in any tab can post to the extension, so without this guard
     // a content script could raise an OS "Transaction Confirmed" toast for a
     // transaction that never happened (security review finding L8). Only
@@ -170,10 +200,17 @@ const prepareListeners = () => {
     if (!isTrustedExtensionSender(sender)) {
       return;
     }
-    if (message.name !== LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION) {
+    if (
+      !isNamedMessage(message) ||
+      message.name !== LOCK_MANAGER_MESSAGES.SEND_TX_NOTIFICATION
+    ) {
       return;
     }
-    void showTransactionNotification(message.data ?? {});
+    const data = message.data ?? {};
+    if (!isTransactionNotificationData(data)) return;
+    showTransactionNotification(data).catch((error: unknown) => {
+      console.error("QrlWeb3Wallet: Failed to create notification:", error);
+    });
   });
 };
 
@@ -221,7 +258,11 @@ const setupProviderEngineEip1193 = ({
   // Handles the unrestricted method calls without requiring user's approval
   engine.push(unrestrictedMethodsMiddleware);
   // Handles the dApp's connect wallet functionality
-  engine.push(restrictedMethodsMiddleware);
+  engine.push((req, res, next, end) => {
+    restrictedMethodsMiddleware(req, res, next, end).catch((error: unknown) => {
+      end(serializeError(error));
+    });
+  });
 
   return engine;
 };
@@ -229,20 +270,24 @@ const setupProviderEngineEip1193 = ({
 /**
  * A method for serving qrl provider over a given stream.
  */
-const setupProviderConnectionEip1193 = async (port: browser.Runtime.Port) => {
+const setupProviderConnectionEip1193 = (
+  port: browser.Runtime.Port,
+): Promise<void> => {
+  const sender = port.sender;
+  if (sender === undefined) {
+    throw new Error("Content-script port is missing its sender");
+  }
   const portStream = new ExtensionPortStream(port);
   const mux = setupMultiplex(portStream);
   const outStream = mux.createStream(QRL_WALLET_PROVIDER_NAME);
-  const sender = port.sender;
   const unregisterAccountNotifications = registerDAppAccountNotificationStream(
-    sender ?? {},
+    sender,
     outStream,
   );
   port.onDisconnect.addListener(unregisterAccountNotifications);
 
   // messages between inpage and background
   const engine = setupProviderEngineEip1193({
-    // @ts-expect-error - port.sender may be undefined but is always present for content script connections
     sender,
   });
   // setup connection
@@ -258,27 +303,23 @@ const setupProviderConnectionEip1193 = async (port: browser.Runtime.Port) => {
       console.warn("QrlWeb3Wallet: Error in stream pipeline\n", err);
     }
     // handle any middleware cleanup
-    // @ts-expect-error - _middleware is a private property on JsonRpcEngine not exposed in type definitions
-    engine?._middleware?.forEach((mid: { destroy?: () => void }) => {
-      if (mid.destroy && typeof mid.destroy === "function") {
-        mid.destroy();
-      }
-    });
+    engine.destroy();
   });
 
   port.postMessage({ name: EXTENSION_MESSAGES.CONNECTION_READY });
+  return Promise.resolve();
 };
 
 const establishContenScriptConnection = () => {
-  browser.runtime.onConnect.addListener(async (port) => {
+  const onConnect = async (port: browser.Runtime.Port) => {
     // Ensuring the port connected to is the content script
     if (port.name === QRL_POST_MESSAGE_STREAM.CONTENT_SCRIPT) {
       // The page side closes this port on tab close, navigation and entry
       // into the back/forward cache. Reading lastError here keeps each of
       // those from logging an "Unchecked runtime.lastError".
-      let disconnected = false;
+      const connection = { disconnected: false };
       port.onDisconnect.addListener(() => {
-        disconnected = true;
+        connection.disconnected = true;
         checkForLastError();
       });
       // The connection event itself is never dropped - this listener is
@@ -293,13 +334,21 @@ const establishContenScriptConnection = () => {
       await waitForServiceWorkerReady();
       // A tab that closed while this connection waited has nothing left to
       // wire up, and posting CONNECTION_READY to its dead port would throw.
-      if (disconnected) return;
+      if (connection.disconnected) return;
       await initializeContentScriptProviderConnection(
         port,
         setupProviderConnectionEip1193,
         announceServiceWorkerReady,
       );
     }
+  };
+  browser.runtime.onConnect.addListener((port) => {
+    onConnect(port).catch((error: unknown) => {
+      console.warn(
+        "QrlWeb3Wallet: Failed to initialize the provider connection",
+        error,
+      );
+    });
   });
 };
 
@@ -333,7 +382,18 @@ const enforceSessionStorageAccessLevel = async () => {
   // TRUSTED_CONTEXTS is the MV3 default; we set it explicitly so a future
   // Chromium default change cannot quietly widen us.
   try {
-    await chrome.storage.session.setAccessLevel({
+    const extensionContext: {
+      chrome?: {
+        storage?: {
+          session?: {
+            setAccessLevel?: (options: {
+              accessLevel: "TRUSTED_CONTEXTS";
+            }) => Promise<void>;
+          };
+        };
+      };
+    } = globalThis;
+    await extensionContext.chrome?.storage?.session?.setAccessLevel?.({
       accessLevel: "TRUSTED_CONTEXTS",
     });
   } catch {
@@ -350,7 +410,7 @@ const enforceSessionStorageAccessLevel = async () => {
 // console.
 const runStartupStep = async (
   label: string,
-  step: () => Promise<unknown> | unknown,
+  step: () => unknown,
 ): Promise<void> => {
   try {
     await step();
@@ -422,4 +482,6 @@ const initializeServiceWorker = async () => {
 
 // This is the starting point of service worker of qrl web3 wallet.
 // This file is set as an entry in the "background" section of the manifest file.
-initializeServiceWorker();
+initializeServiceWorker().catch((error: unknown) => {
+  console.warn("QrlWeb3Wallet: Failed to initialize the service worker", error);
+});

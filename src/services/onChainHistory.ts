@@ -1,6 +1,7 @@
 import { getExplorerApiBase } from "@/configuration/assetDiscoveryConfig";
 import { NATIVE_TOKEN } from "@/constants/nativeToken";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
+import { isNullishString, isRecord, isUnknownArray } from "./explorerGuards";
 
 /**
  * Explorer-side transaction history, same plumbing as assetDiscovery.
@@ -8,7 +9,7 @@ import type { TransactionHistoryEntry } from "@/types/transactionHistory";
  * explorer fills in everything else (received transfers, sends made from
  * other wallets on the same seed). Chains without a configured explorer
  * and every error path resolve to an empty page, so a flaky explorer
- * degrades to local-only history instead of breaking the screen.
+ * degrades to local-only history and keeps the screen usable.
  */
 
 export const ON_CHAIN_PAGE_SIZE = 10;
@@ -16,49 +17,75 @@ export const ON_CHAIN_PAGE_SIZE = 10;
 export type OnChainHistoryPage = {
   entries: TransactionHistoryEntry[];
   totalCount: number;
-  /** True when the explorer could not be read: unreachable, or answering
-   *  with an error status. A chain with no configured explorer is not a
-   *  failure, it simply has no on-chain history to add. */
+  /** True when the explorer is unreachable or returns an error status or
+   *  malformed response envelope. Chains without a configured explorer
+   *  produce an empty successful page. */
   failed: boolean;
 };
 
 // One row of the zondscan /api/address/aggregate/:addr response,
 // restricted to the fields the extension consumes.
 type ExplorerAggregateTx = {
-  From?: string;
-  To?: string;
-  TxHash?: string;
+  From?: string | null;
+  To?: string | null;
+  TxHash: string;
   /** Block timestamp, hex seconds ("0x6a4fb2e4"). */
-  TimeStamp?: string;
+  TimeStamp?: string | null;
   /** Decimal string already in QRL units ("750.000000000000000000"). */
-  Amount?: string;
+  Amount?: string | null;
   /** Decimal string already in QRL units. */
   PaidFees?: string;
-  BlockNumber?: string;
-  Status?: string;
+  BlockNumber?: string | null;
+  Status?: string | null;
 };
+
+const isExplorerAggregateTx = (value: unknown): value is ExplorerAggregateTx =>
+  isRecord(value) &&
+  typeof value.TxHash === "string" &&
+  value.TxHash.length > 0 &&
+  isNullishString(value.From) &&
+  isNullishString(value.To) &&
+  isNullishString(value.TimeStamp) &&
+  isNullishString(value.Amount) &&
+  (value.PaidFees === undefined || typeof value.PaidFees === "string") &&
+  isNullishString(value.BlockNumber) &&
+  isNullishString(value.Status);
 
 // One row of the aggregate's internal-transactions list: value moved by
 // contract code (nested call frames), indexed by the explorer since
 // zondscan #162. Field names are capitalized by the handler.
 type ExplorerAggregateInternalTx = {
-  Type?: string;
-  From?: string;
-  To?: string;
-  Hash?: string;
+  From?: string | null;
+  To?: string | null;
+  Hash: string;
   /** QRL units as a JSON number (the explorer's legacy float schema). */
-  Value?: number;
+  Value?: number | null;
   /** Block timestamp, hex seconds ("0x6a5275c4"). */
-  BlockTimestamp?: string;
+  BlockTimestamp?: string | null;
   TraceAddress?: number[] | null;
 };
 
-type ExplorerAggregateResponse = {
-  transactions_by_address?: ExplorerAggregateTx[] | null;
-  transactions_count?: number;
-  internal_transactions_by_address?: ExplorerAggregateInternalTx[] | null;
-  internal_transactions_count?: number;
-};
+const isExplorerAggregateInternalTx = (
+  value: unknown,
+): value is ExplorerAggregateInternalTx =>
+  isRecord(value) &&
+  typeof value.Hash === "string" &&
+  value.Hash.length > 0 &&
+  isNullishString(value.From) &&
+  isNullishString(value.To) &&
+  isNullishString(value.BlockTimestamp) &&
+  (value.Value === undefined ||
+    value.Value === null ||
+    typeof value.Value === "number") &&
+  (value.TraceAddress === undefined ||
+    value.TraceAddress === null ||
+    (isUnknownArray(value.TraceAddress) &&
+      value.TraceAddress.every(
+        (position) =>
+          typeof position === "number" &&
+          Number.isSafeInteger(position) &&
+          position >= 0,
+      )));
 
 const emptyPage = (failed = false): OnChainHistoryPage => ({
   entries: [],
@@ -73,7 +100,7 @@ const toEntry = (
   const amount =
     row.Amount && /^\d+(?:\.\d+)?$/.test(row.Amount) ? row.Amount : "0";
   const timestampSeconds = parseInt(row.TimeStamp ?? "", 16);
-  const txHash = row.TxHash ?? "";
+  const txHash = row.TxHash;
   return {
     id: txHash,
     from: row.From ?? "",
@@ -110,7 +137,7 @@ const toInternalEntry = (
   chainId: string,
 ): TransactionHistoryEntry => {
   const timestampSeconds = parseInt(row.BlockTimestamp ?? "", 16);
-  const txHash = ensureHexPrefix(row.Hash ?? "");
+  const txHash = ensureHexPrefix(row.Hash);
   const trace = Array.isArray(row.TraceAddress)
     ? row.TraceAddress.join(".")
     : "";
@@ -133,7 +160,7 @@ const toInternalEntry = (
     blockNumber: "",
     gasUsed: "",
     effectiveGasPrice: "",
-    // The fee lives on the outer transaction, not the payout frame.
+    // The outer transaction carries the fee.
     paidFeesQrl: "0",
     status: true,
     timestamp: Number.isFinite(timestampSeconds) ? timestampSeconds * 1000 : 0,
@@ -156,31 +183,34 @@ export async function fetchOnChainHistory(
     );
     if (!response.ok) return emptyPage(true);
 
-    const data = (await response.json()) as ExplorerAggregateResponse;
-    const rows = Array.isArray(data?.transactions_by_address)
+    const data: unknown = await response.json();
+    if (!isRecord(data)) return emptyPage(true);
+    const rows = isUnknownArray(data.transactions_by_address)
       ? data.transactions_by_address
       : [];
     const txEntries = rows
-      .filter((row) => !!row.TxHash)
+      .filter(isExplorerAggregateTx)
       .map((row) => toEntry(row, chainId));
 
     // Internal transactions ride along in the same response, one page of
     // each list per request. They surface value received via contract
     // code (HTLC claims, withdrawals) that the outer transaction hides.
-    const internalRows = Array.isArray(data?.internal_transactions_by_address)
+    const internalRows = isUnknownArray(data.internal_transactions_by_address)
       ? data.internal_transactions_by_address
       : [];
     const internalEntries = internalRows
-      .filter((row) => !!row.Hash)
+      .filter(isExplorerAggregateInternalTx)
       .map((row) => toInternalEntry(row, chainId));
 
     const countOr = (value: unknown, fallback: number): number =>
-      typeof value === "number" && value >= 0 ? value : fallback;
+      typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+        ? value
+        : fallback;
     // Both lists paginate together; keep fetching pages until the longer
     // one is exhausted.
     const totalCount = Math.max(
-      countOr(data?.transactions_count, txEntries.length),
-      countOr(data?.internal_transactions_count, internalEntries.length),
+      countOr(data.transactions_count, txEntries.length),
+      countOr(data.internal_transactions_count, internalEntries.length),
     );
     return {
       entries: [...txEntries, ...internalEntries],
