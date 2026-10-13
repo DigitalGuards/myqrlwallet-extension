@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createPort, type RuntimeMessageListener } from "@/test-utils/runtime";
+import { malformed } from "@/test-utils/malformed";
 
 /**
  * Chrome closes a page's extension ports when the page enters the
@@ -7,9 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * These tests load the real contentScript.ts with its stream plumbing
  * stubbed out, capture the listeners it registers and drive them by hand.
  *
- * The events are supplied as plain objects because jsdom defines isTrusted
- * as a non-configurable accessor, so a dispatched event can never claim to
- * come from the browser. e2e/bfcacheProvider.spec.ts covers the real
+ * Event proxies supply isTrusted because jsdom defines it as a
+ * non-configurable accessor. e2e/bfcacheProvider.spec.ts covers the real
  * wiring with an actual back/forward-cache round trip.
  */
 
@@ -20,13 +21,15 @@ const {
   mockOnMessageAddListener,
   markConnectionReady,
   attachExtensionChannel,
+  mockHandleSidePanelOpenRequest,
 } = vi.hoisted(() => ({
   mockConnect: vi.fn(),
   mockSendMessage: vi.fn(),
   mockGetURL: vi.fn(),
-  mockOnMessageAddListener: vi.fn(),
+  mockOnMessageAddListener: vi.fn<(listener: RuntimeMessageListener) => void>(),
   markConnectionReady: vi.fn(),
   attachExtensionChannel: vi.fn(() => vi.fn()),
+  mockHandleSidePanelOpenRequest: vi.fn(),
 }));
 
 vi.mock("webextension-polyfill", () => ({
@@ -54,9 +57,11 @@ vi.mock("@theqrl/qrl-wallet-provider/object-multiplex", () => ({
   },
 }));
 vi.mock("@theqrl/qrl-wallet-provider/post-message-stream", () => ({
-  WindowPostMessageStream: class {},
+  WindowPostMessageStream: vi.fn(function () {}),
 }));
-vi.mock("extension-port-stream", () => ({ ExtensionPortStream: class {} }));
+vi.mock("extension-port-stream", () => ({
+  ExtensionPortStream: vi.fn(function () {}),
+}));
 vi.mock("readable-stream", () => ({ pipeline: vi.fn() }));
 vi.mock("./utils/providerConnectionLifecycle", () => ({
   createProviderChannelBridge: () => ({
@@ -69,48 +74,35 @@ vi.mock("./utils/providerConnectionLifecycle", () => ({
   }),
 }));
 vi.mock("./utils/sidePanelContentBridge", () => ({
-  handleSidePanelOpenRequest: vi.fn(),
+  handleSidePanelOpenRequest: mockHandleSidePanelOpenRequest,
 }));
 
 import { EXTENSION_MESSAGES } from "./constants/streamConstants";
 
-type PortStub = {
-  onMessage: {
-    addListener: ReturnType<typeof vi.fn>;
-    removeListener: ReturnType<typeof vi.fn>;
-  };
-  onDisconnect: {
-    addListener: ReturnType<typeof vi.fn>;
-    removeListener: ReturnType<typeof vi.fn>;
-  };
-  disconnect: ReturnType<typeof vi.fn>;
-};
+type PortStub = ReturnType<typeof createPort>;
 
 type RestoreSignal = { isTrusted: boolean; persisted?: boolean };
 
 const openedPorts: PortStub[] = [];
-const listenersByType = new Map<
-  string,
-  Array<(event: RestoreSignal) => void>
->();
+const listenersByType = new Map<string, EventListenerOrEventListenerObject[]>();
 
-const captureListener = (type: string, listener: EventListener) => {
+const captureListener = (
+  type: string,
+  listener: EventListenerOrEventListenerObject | null,
+) => {
+  if (listener === null) return;
   const listeners = listenersByType.get(type) ?? [];
-  listeners.push(listener as unknown as (event: RestoreSignal) => void);
+  listeners.push(listener);
   listenersByType.set(type, listeners);
 };
 
 const loadContentScript = async () => {
   const onWindow = vi
     .spyOn(window, "addEventListener")
-    .mockImplementation(
-      captureListener as unknown as typeof window.addEventListener,
-    );
+    .mockImplementation(captureListener);
   const onDocument = vi
     .spyOn(document, "addEventListener")
-    .mockImplementation(
-      captureListener as unknown as typeof document.addEventListener,
-    );
+    .mockImplementation(captureListener);
   try {
     await import("./contentScript");
   } finally {
@@ -119,13 +111,34 @@ const loadContentScript = async () => {
   }
 };
 
-const fire = (type: string, event: RestoreSignal) =>
-  (listenersByType.get(type) ?? []).forEach((listener) => listener(event));
+const fire = (type: string, signal: RestoreSignal) => {
+  const event = new Proxy(new Event(type), {
+    get(target, property): unknown {
+      if (property === "isTrusted") return signal.isTrusted;
+      return Reflect.get(target, property);
+    },
+  });
+  if ("persisted" in signal) {
+    Object.defineProperty(event, "persisted", { value: signal.persisted });
+  }
+  for (const listener of listenersByType.get(type) ?? []) {
+    if (typeof listener === "function") listener(event);
+    else listener.handleEvent(event);
+  }
+};
 
-const firePageShow = (event: RestoreSignal) => fire("pageshow", event);
-const fireResume = (event: RestoreSignal) => fire("resume", event);
-const firePageHide = (event: RestoreSignal) => fire("pagehide", event);
-const fireFreeze = (event: RestoreSignal) => fire("freeze", event);
+const firePageShow = (event: RestoreSignal) => {
+  fire("pageshow", event);
+};
+const fireResume = (event: RestoreSignal) => {
+  fire("resume", event);
+};
+const firePageHide = (event: RestoreSignal) => {
+  fire("pagehide", event);
+};
+const fireFreeze = (event: RestoreSignal) => {
+  fire("freeze", event);
+};
 
 /** One genuine back/forward-cache round trip, as the browser fires it. */
 const fireCacheRoundTrip = () => {
@@ -136,8 +149,12 @@ const fireCacheRoundTrip = () => {
 
 const lastPort = () => openedPorts[openedPorts.length - 1];
 
-const retiredDisconnectOf = (port: PortStub) =>
-  port.onDisconnect.addListener.mock.calls[0][0] as () => void;
+const retiredDisconnectOf = (port: PortStub) => {
+  const listener = port.onDisconnect.addListener.mock.calls[0][0];
+  return () => {
+    listener(port);
+  };
+};
 
 describe("contentScript back/forward-cache restore", () => {
   beforeEach(() => {
@@ -148,12 +165,9 @@ describe("contentScript back/forward-cache restore", () => {
     attachExtensionChannel.mockClear().mockImplementation(() => vi.fn());
     markConnectionReady.mockClear();
     mockOnMessageAddListener.mockReset();
+    mockHandleSidePanelOpenRequest.mockReset();
     mockConnect.mockReset().mockImplementation(() => {
-      const port: PortStub = {
-        onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
-        onDisconnect: { addListener: vi.fn(), removeListener: vi.fn() },
-        disconnect: vi.fn(),
-      };
+      const port = createPort("myqrlwallet-content-script");
       openedPorts.push(port);
       return port;
     });
@@ -321,8 +335,7 @@ describe("contentScript back/forward-cache restore", () => {
 
   it("leaves the ready broadcast alone once the restore has rebuilt", async () => {
     await loadContentScript();
-    const onRuntimeMessage = mockOnMessageAddListener.mock
-      .calls[0][0] as (message: { name: string }) => Promise<string>;
+    const onRuntimeMessage = mockOnMessageAddListener.mock.calls[0][0];
 
     firePageShow({ isTrusted: true, persisted: true });
     expect(mockConnect).toHaveBeenCalledTimes(2);
@@ -340,12 +353,87 @@ describe("contentScript back/forward-cache restore", () => {
   it("lets the ready broadcast reconnect a tab with no stream", async () => {
     await loadContentScript();
     const retiredDisconnect = retiredDisconnectOf(lastPort());
-    const onRuntimeMessage = mockOnMessageAddListener.mock
-      .calls[0][0] as (message: { name: string }) => Promise<string>;
+    const onRuntimeMessage = mockOnMessageAddListener.mock.calls[0][0];
 
     retiredDisconnect();
     await onRuntimeMessage({ name: EXTENSION_MESSAGES.READY });
 
     expect(mockConnect).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([undefined, null, false, 42, "ready", [], {}, { name: 1 }])(
+    "ignores malformed port and runtime messages %j",
+    async (message) => {
+      await loadContentScript();
+      const port = lastPort();
+      const onPortMessage = port.onMessage.addListener.mock.calls[0][0];
+      const onRuntimeMessage = mockOnMessageAddListener.mock.calls[0][0];
+
+      expect(() => {
+        onPortMessage(message, port);
+      }).not.toThrow();
+      await expect(onRuntimeMessage(message)).resolves.toBe("");
+
+      expect(markConnectionReady).not.toHaveBeenCalled();
+      expect(mockHandleSidePanelOpenRequest).not.toHaveBeenCalled();
+      expect(mockConnect).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("marks only the current port ready", async () => {
+    await loadContentScript();
+    const oldPort = lastPort();
+    const onOldPortMessage = oldPort.onMessage.addListener.mock.calls[0][0];
+    fireCacheRoundTrip();
+    const port = lastPort();
+
+    onOldPortMessage({ name: EXTENSION_MESSAGES.CONNECTION_READY }, oldPort);
+    expect(markConnectionReady).not.toHaveBeenCalled();
+    port.onMessage.addListener.mock.calls[0][0](
+      { name: EXTENSION_MESSAGES.CONNECTION_READY },
+      port,
+    );
+    expect(markConnectionReady).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards a side-panel request synchronously and resolves the same reply", async () => {
+    await loadContentScript();
+    const onRuntimeMessage = mockOnMessageAddListener.mock.calls[0][0];
+    const message = {
+      name: EXTENSION_MESSAGES.REQUEST_OPEN_SIDE_PANEL,
+      nonce: "gesture",
+    };
+    const sender = { id: "mock-id" };
+
+    const reply = onRuntimeMessage(message, sender);
+
+    expect(mockHandleSidePanelOpenRequest).toHaveBeenCalledExactlyOnceWith(
+      message,
+      sender,
+    );
+    await expect(reply).resolves.toBe("");
+  });
+
+  it("keeps side-panel handler errors as rejected replies", async () => {
+    await loadContentScript();
+    const onRuntimeMessage = mockOnMessageAddListener.mock.calls[0][0];
+    const error = new Error("context invalidated");
+    mockHandleSidePanelOpenRequest.mockImplementationOnce(() => {
+      throw error;
+    });
+
+    await expect(
+      onRuntimeMessage({ name: EXTENSION_MESSAGES.REQUEST_OPEN_SIDE_PANEL }),
+    ).rejects.toBe(error);
+  });
+
+  it("ignores a non-boolean persisted flag", async () => {
+    await loadContentScript();
+
+    firePageShow(
+      malformed<RestoreSignal>({ isTrusted: true, persisted: "true" }),
+    );
+
+    expect(mockConnect).toHaveBeenCalledTimes(1);
   });
 });
