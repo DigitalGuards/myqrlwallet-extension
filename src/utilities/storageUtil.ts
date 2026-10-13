@@ -870,7 +870,10 @@ const StorageUtil = {
     await walletLocalStorage.set(storageData);
   },
 
-  async getDAppsConnectedAccountsData(urlOrigin: string = "") {
+  async getDAppsConnectedAccountsData(
+    urlOrigin: string = "",
+    validateStored?: (value: unknown) => boolean,
+  ) {
     const storageData = await readLocalStorage(DAPPS_IDENTIFIER);
     const storedData = getStoredValue(
       storageData,
@@ -878,7 +881,12 @@ const StorageUtil = {
       ALL_DAPPS_IDENTIFIER,
       urlOrigin,
     );
-    if (!isConnectedAccounts(storedData)) return undefined;
+    // Consumers can validate the raw grants before normalization filters entries.
+    if (
+      !isConnectedAccounts(storedData) ||
+      validateStored?.(storedData) === false
+    )
+      return undefined;
 
     const accounts = getStorageArray(storedData.accounts, "dApp accounts")
       .filter(isNormalizableQrlAddress)

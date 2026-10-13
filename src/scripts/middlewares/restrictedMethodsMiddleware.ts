@@ -1,4 +1,11 @@
 import StorageUtil from "@/utilities/storageUtil";
+import { isRecord } from "@/utilities/storageGuards";
+import {
+  isApprovalSender,
+  isStringArray,
+  isUnknownArray,
+  readApprovalParams,
+} from "@/utilities/approvalGuards";
 import { JsonRpcMiddleware } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
 import { v4 as uuid } from "uuid";
 import {
@@ -10,6 +17,7 @@ import {
   Json,
   JsonRpcParams,
   JsonRpcRequest,
+  isValidJson,
 } from "@theqrl/qrl-wallet-provider/utils";
 import browser from "webextension-polyfill";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
@@ -40,6 +48,65 @@ import {
 } from "../utils/restrictedMethodsMiddlewareUtils";
 import { DAppRequestType, DAppResponseType } from "./middlewareTypes";
 
+type RequestSender = NonNullable<JsonRpcRequest["senderData"]> & {
+  mainFrameOrigin?: string;
+};
+
+const isRequestSender = (value: unknown): value is RequestSender =>
+  isRecord(value) &&
+  (value.tabId === undefined || typeof value.tabId === "number") &&
+  isApprovalSender(value);
+
+const readRequestSender = (value: unknown): RequestSender | undefined =>
+  isRequestSender(value) ? value : undefined;
+
+type ConnectionGrants = Pick<
+  Parameters<typeof StorageUtil.setDAppsConnectedAccountsData>[0],
+  "accounts" | "blockchains"
+>;
+
+const isConnectionGrants = (value: unknown): value is ConnectionGrants => {
+  if (
+    !isRecord(value) ||
+    !isStringArray(value.accounts) ||
+    !isUnknownArray(value.blockchains)
+  )
+    return false;
+  for (const chain of value.blockchains) {
+    if (
+      !isRecord(chain) ||
+      typeof chain.chainId !== "string" ||
+      (chain.qrnsRegistryAddress !== undefined &&
+        typeof chain.qrnsRegistryAddress !== "string")
+    )
+      return false;
+  }
+  return true;
+};
+
+type ResponseError = {
+  code: number;
+  message: string;
+  stack?: string;
+  data?: Json;
+};
+
+const isResponseError = (value: unknown): value is ResponseError =>
+  isRecord(value) &&
+  typeof value.code === "number" &&
+  Number.isInteger(value.code) &&
+  typeof value.message === "string" &&
+  (value.stack === undefined || typeof value.stack === "string") &&
+  (value.data === undefined || isValidJson(value.data));
+
+const invalidApprovalResponse = () =>
+  rpcErrors.internal<Json>({
+    message: "The wallet cannot parse the approval response.",
+  });
+
+const toResponseError = (value: unknown): ResponseError =>
+  isResponseError(value) ? value : invalidApprovalResponse();
+
 /**
  * Turns the error an approval recorded into the one the dApp receives.
  *
@@ -53,21 +120,26 @@ import { DAppRequestType, DAppResponseType } from "./middlewareTypes";
  * An error that carries no code of its own keeps the caller's fallback.
  */
 const toRecordedApprovalError = (
-  recorded: { code?: unknown; message?: unknown } | undefined,
-  fallback: JsonRpcError<never> = providerErrors.unsupportedMethod({
-    message:
-      typeof recorded?.message === "string" ? recorded.message : undefined,
-    data: recorded,
-  }) as unknown as JsonRpcError<never>,
+  recorded: unknown,
+  fallback?: JsonRpcError<Json>,
   data: unknown = recorded,
-): JsonRpcError<never> => {
-  const code = recorded?.code;
-  if (typeof code !== "number" || !Number.isInteger(code)) return fallback;
+): ResponseError => {
+  if (data !== undefined && !isValidJson(data))
+    return invalidApprovalResponse();
+  const error = isRecord(recorded) ? recorded : undefined;
+  const fallbackError =
+    fallback ??
+    providerErrors.unsupportedMethod({
+      message: typeof error?.message === "string" ? error.message : undefined,
+      data,
+    });
+  const code = error?.code;
+  if (typeof code !== "number" || !Number.isInteger(code)) return fallbackError;
   const message =
-    typeof recorded?.message === "string" && recorded.message
-      ? recorded.message
-      : fallback.message;
-  return new JsonRpcError(code, message, data as never);
+    typeof error?.message === "string" && error.message
+      ? error.message
+      : fallbackError.message;
+  return new JsonRpcError(code, message, data);
 };
 
 const QRL_WALLET_DAPP_CONNECTION_REQUIRED_METHODS: string[] = [
@@ -77,13 +149,23 @@ const QRL_WALLET_DAPP_CONNECTION_REQUIRED_METHODS: string[] = [
 ];
 
 export const checkRequestCanCompleteSilently = async (req: JsonRpcRequest) => {
+  const params = readApprovalParams(req.params);
+  const senderData = readRequestSender(req.senderData);
   if (req.method === RESTRICTED_METHODS.WALLET_ADD_QRL_CHAIN) {
-    const [chainData] = req.params as unknown as { chainId: string }[];
-    const chainId = chainData?.chainId;
-    const blockchains = await StorageUtil.getAllBlockChains();
-    const chainFound = !!blockchains.find(
-      (chain) => chain.chainId.toLowerCase() === chainId.toLowerCase(),
-    );
+    const chainData = params?.[0];
+    if (!isRecord(chainData) || typeof chainData.chainId !== "string") {
+      return { hasCompleted: false };
+    }
+    const chainId = chainData.chainId;
+    const blockchains: unknown = await StorageUtil.getAllBlockChains();
+    const chainFound =
+      isUnknownArray(blockchains) &&
+      blockchains.some(
+        (chain) =>
+          isRecord(chain) &&
+          typeof chain.chainId === "string" &&
+          chain.chainId.toLowerCase() === chainId.toLowerCase(),
+      );
     if (chainFound) {
       // Chain is already known to the wallet. Acknowledge per EIP-3085 but do
       // NOT silently flip the globally-active chain. The dApp must call
@@ -97,12 +179,16 @@ export const checkRequestCanCompleteSilently = async (req: JsonRpcRequest) => {
       hasCompleted: false,
     };
   } else if (req.method === RESTRICTED_METHODS.WALLET_SWITCH_QRL_CHAIN) {
-    const [chainData] = req.params as unknown as { chainId: string }[];
-    const chainId = chainData?.chainId;
-
-    const currentChainId = (await StorageUtil.getActiveBlockChain())?.chainId;
+    const chainData = params?.[0];
+    if (!isRecord(chainData) || typeof chainData.chainId !== "string") {
+      return { hasCompleted: false };
+    }
+    const chainId = chainData.chainId;
+    const currentChain: unknown = await StorageUtil.getActiveBlockChain();
     const isAlreadyCurrentChain =
-      chainId?.toLowerCase() === currentChainId?.toLowerCase();
+      isRecord(currentChain) &&
+      typeof currentChain.chainId === "string" &&
+      chainId.toLowerCase() === currentChain.chainId.toLowerCase();
     if (isAlreadyCurrentChain) {
       // No-op switch: permitted per EIP-3326 / MetaMask. Any other target
       // (including a chain already in this dApp's permission list) must open
@@ -118,13 +204,15 @@ export const checkRequestCanCompleteSilently = async (req: JsonRpcRequest) => {
     };
   } else if (req.method === RESTRICTED_METHODS.WALLET_GET_CAPABILITIES) {
     try {
-      // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
-      const chains: string[] = req?.params?.[1] ?? [];
+      const chains = params?.[1] ?? [];
+      if (!isStringArray(chains)) {
+        throw rpcErrors.invalidParams();
+      }
       const capabilities: {
         [k: string]: { atomic: { status: "ready" | "supported" } };
       } = {};
       // EIP-5792 wallet_sendCalls is not implemented in this wallet; advertise
-      // atomic as "supported" (the weaker tier) rather than "ready" so dApps
+      // atomic as "supported" (the weaker tier) so dApps
       // do not dispatch wallet_sendCalls expecting it to succeed. Promote to
       // "ready" once the delegation system lands.
       chains.forEach((chain) => {
@@ -146,35 +234,37 @@ export const checkRequestCanCompleteSilently = async (req: JsonRpcRequest) => {
     }
   } else if (req.method === RESTRICTED_METHODS.QRL_REQUEST_ACCOUNTS) {
     // MetaMask parity: an origin the user already connected gets its
-    // permitted accounts back silently instead of a fresh approval popup on
-    // every reconnect. The permission escape hatches stay intact: dApps can
+    // permitted accounts back silently on every reconnect. The permission
+    // escape hatches stay intact: dApps can
     // force a re-prompt via wallet_requestPermissions, and the user can
     // revoke from the wallet's connectivity screen (or the dApp via
     // wallet_revokePermissions), after which this falls through to the
     // normal approval flow.
     try {
-      const urlOrigin = new URL(req?.senderData?.url ?? "").origin;
-      const stored = await StorageUtil.getDAppsConnectedAccountsData(urlOrigin);
-      const storedAccounts = stored?.accounts ?? [];
+      const urlOrigin = new URL(senderData?.url ?? "").origin;
+      const stored: unknown = await StorageUtil.getDAppsConnectedAccountsData(
+        urlOrigin,
+        isConnectionGrants,
+      );
+      if (!isConnectionGrants(stored)) return { hasCompleted: false };
+      const storedAccounts = stored.accounts;
       if (storedAccounts.length === 0) {
         return { hasCompleted: false };
       }
 
       // Locked wallets keep the popup flow: the surface shows the unlock
       // screen first, matching MetaMask's unlock-before-connect behavior.
-      const { isLocked } = await LockManager.isLocked();
-      if (isLocked) {
+      const lockState: unknown = await LockManager.isLocked();
+      if (!isRecord(lockState) || lockState.isLocked !== false) {
         return { hasCompleted: false };
       }
 
       // An origin that landed on the blocklist since it was approved must
       // still surface the phishing warning, so force the popup for it.
-      const settings = await StorageUtil.getSettings();
-      const phishingEnabled = settings.phishingDetectionEnabled !== false;
+      const settings: unknown = await StorageUtil.getSettings();
+      const phishingEnabled =
+        !isRecord(settings) || settings.phishingDetectionEnabled !== false;
       if (phishingEnabled) {
-        const senderData = req.senderData as
-          | { url?: string; mainFrameOrigin?: string }
-          | undefined;
         const isFlagged =
           checkDomain(senderData?.url ?? "").isDomainPhishing ||
           (senderData?.mainFrameOrigin
@@ -187,14 +277,20 @@ export const checkRequestCanCompleteSilently = async (req: JsonRpcRequest) => {
 
       // Drop permitted accounts that no longer exist in the wallet. Stored
       // order is preserved because dApps treat the first entry as active.
+      const accounts: unknown = await StorageUtil.getAllAccounts();
+      const ledgerAccounts: unknown = await StorageUtil.getLedgerAccounts();
+      if (!isStringArray(accounts) || !isUnknownArray(ledgerAccounts)) {
+        return { hasCompleted: false };
+      }
       const walletAccounts = new Set(
-        [
-          ...(await StorageUtil.getAllAccounts()),
-          ...(await StorageUtil.getLedgerAccounts()).map(
-            (account) => account.address,
-          ),
-        ].map((address) => address.toLowerCase()),
+        accounts.map((address) => address.toLowerCase()),
       );
+      for (const account of ledgerAccounts) {
+        if (!isRecord(account) || typeof account.address !== "string") {
+          return { hasCompleted: false };
+        }
+        walletAccounts.add(account.address.toLowerCase());
+      }
       const liveAccounts = storedAccounts.filter((address) =>
         walletAccounts.has(address.toLowerCase()),
       );
@@ -207,7 +303,7 @@ export const checkRequestCanCompleteSilently = async (req: JsonRpcRequest) => {
         await updateAccountsAndBlockchainsForUrlOrigin({
           urlOrigin,
           accounts: liveAccounts,
-          blockchains: stored?.blockchains ?? [],
+          blockchains: stored.blockchains,
         });
       }
       return {
@@ -227,13 +323,15 @@ export const checkRequestCanCompleteSilently = async (req: JsonRpcRequest) => {
 
 // a precheck to determine if the request can proceed
 const checkRequestCanProceed = async (req: JsonRpcRequest) => {
+  const params = readApprovalParams(req.params);
+  const senderData = readRequestSender(req.senderData);
   if (QRL_WALLET_DAPP_CONNECTION_REQUIRED_METHODS.includes(req.method)) {
     // refuseWhileLocked: a locked wallet answers these three the same way
     // for every origin. Without it, a connected origin and an unconnected
     // one get two different 4100s here, which tells the page whether it
     // holds a grant while the rest of the wallet reveals nothing.
     const originConnectResult = await checkUrlOriginHasBeenConnected(
-      req?.senderData?.url ?? "",
+      senderData?.url ?? "",
       true,
     );
     if (!originConnectResult.canProceed) {
@@ -242,17 +340,13 @@ const checkRequestCanProceed = async (req: JsonRpcRequest) => {
   }
   switch (req.method) {
     case RESTRICTED_METHODS.WALLET_ADD_QRL_CHAIN:
-      // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
-      return await checkWalletAddQrlChainParams(req?.params?.[0]);
+      return await checkWalletAddQrlChainParams(params?.[0]);
     case RESTRICTED_METHODS.WALLET_SWITCH_QRL_CHAIN:
-      // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
-      return await checkWalletSwitchQrlChainParams(req?.params?.[0]);
+      return await checkWalletSwitchQrlChainParams(params?.[0]);
     case RESTRICTED_METHODS.WALLET_WATCH_ASSET:
-      // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
-      return await checkWalletWatchAssetParams(req?.params?.[0]);
+      return await checkWalletWatchAssetParams(params?.[0]);
     case RESTRICTED_METHODS.WALLET_REQUEST_PERMISSIONS:
-      // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
-      return await checkWalletRequestPermissionParams(req?.params?.[0]);
+      return await checkWalletRequestPermissionParams(params?.[0]);
     case RESTRICTED_METHODS.WALLET_GET_CAPABILITIES:
       return await checkAccountHasBeenAuthorized(req);
     case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4:
@@ -307,7 +401,8 @@ export const APPROVAL_DISCONNECT_GRACE_MS = 20 * 1000;
  * telling a page its transaction was rejected while the broadcast may have
  * landed is what makes it retry into a second transfer.
  */
-type RestrictedMethodOutcome = DAppResponseType & {
+type RestrictedMethodOutcome = Omit<DAppResponseType, "response"> & {
+  response?: unknown;
   outcomeUnknown?: boolean;
   /** Set when the approval reported a hash before it lost its surface. */
   pendingTransactionHash?: string;
@@ -318,17 +413,13 @@ const getRestrictedMethodResult = async (
   req: JsonRpcRequest,
   authorizedChainId?: string,
 ): Promise<RestrictedMethodOutcome> => {
-  const settings = await StorageUtil.getSettings();
-  const phishingEnabled = settings.phishingDetectionEnabled !== false;
+  const settings: unknown = await StorageUtil.getSettings();
+  const phishingEnabled =
+    !isRecord(settings) || settings.phishingDetectionEnabled !== false;
   // Phishing is checked against both the requesting frame origin AND the
   // parent tab origin. A phishing top-level page hosting a connected dApp's
   // iframe is a real attack vector that frame-origin-only checking misses.
-  const senderData = req.senderData as
-    | {
-        url?: string;
-        mainFrameOrigin?: string;
-      }
-    | undefined;
+  const senderData = readRequestSender(req.senderData);
   const frameResult = phishingEnabled
     ? checkDomain(senderData?.url ?? "")
     : { isDomainPhishing: false };
@@ -377,6 +468,7 @@ const getRestrictedMethodResult = async (
   // the only thing that can name the transaction if the surface then dies.
   let pendingTransactionHash: string | undefined;
   let isSettled = false;
+  const hasSettled = () => isSettled;
   let timeoutHandle: ReturnType<typeof setTimeout>;
 
   const cleanup = () => {
@@ -402,14 +494,14 @@ const getRestrictedMethodResult = async (
   };
 
   const resolveOnce = (outcome: RestrictedMethodOutcome) => {
-    if (isSettled) return;
+    if (hasSettled()) return;
     isSettled = true;
     cleanup();
     settle(outcome);
   };
 
   const abandon = async (reason: string) => {
-    if (isSettled) return;
+    if (hasSettled()) return;
     console.warn(`QrlWeb3Wallet: dApp request abandoned (${reason})`);
     await clearStoredRequest();
     resolveOnce({
@@ -424,14 +516,19 @@ const getRestrictedMethodResult = async (
     });
   };
 
+  const reportApprovalFailure = (error: unknown) => {
+    console.error("QrlWeb3Wallet: Failed to handle dApp approval:", error);
+  };
+
   function handleMessage(
-    message: DAppResponseType,
+    message: unknown,
     sender?: browser.Runtime.MessageSender,
   ) {
     // Only this extension's own surfaces may resolve an approval. A content
     // script reports the page's origin here, so a dApp cannot answer its
     // own request by posting a runtime message.
     if (!isTrustedExtensionSender(sender)) return undefined;
+    if (!isRecord(message)) return undefined;
     // Every branch is keyed by requestId, so a message left over from an
     // approval that already ended cannot answer the current one.
     if (message.requestId !== requestId) return undefined;
@@ -439,7 +536,7 @@ const getRestrictedMethodResult = async (
     if (
       message.action === EXTENSION_MESSAGES.DAPP_REQUEST_PENDING_TRANSACTION
     ) {
-      const hash = (message as { transactionHash?: unknown }).transactionHash;
+      const hash = message.transactionHash;
       if (typeof hash === "string" && hash) pendingTransactionHash = hash;
       return undefined;
     }
@@ -449,24 +546,42 @@ const getRestrictedMethodResult = async (
       // or broadcasts anything. It is granted once per request: a second
       // surface showing the same request (a reopened panel beside the
       // popup) must be turned away, otherwise both would sign it.
-      if (isSettled || userHasActed) {
+      if (
+        hasSettled() ||
+        userHasActed ||
+        typeof message.hasApproved !== "boolean"
+      ) {
         return Promise.resolve({ accepted: false });
       }
       userHasActed = true;
-      userApproved = message.hasApproved === true;
+      userApproved = message.hasApproved;
       clearTimeout(timeoutHandle);
-      timeoutHandle = setTimeout(
-        () => void abandon("no response after the user acted"),
-        APPROVAL_IN_PROGRESS_TIMEOUT_MS,
-      );
+      timeoutHandle = setTimeout(() => {
+        abandon("no response after the user acted").catch(
+          reportApprovalFailure,
+        );
+      }, APPROVAL_IN_PROGRESS_TIMEOUT_MS);
       return Promise.resolve({ accepted: true });
     }
 
     if (message.action === EXTENSION_MESSAGES.DAPP_RESPONSE) {
-      void (async () => {
+      if (
+        message.method !== req.method ||
+        typeof message.hasApproved !== "boolean"
+      ) {
+        return undefined;
+      }
+      const outcome: RestrictedMethodOutcome = {
+        method: message.method,
+        action: message.action,
+        requestId,
+        hasApproved: message.hasApproved,
+        response: message.response,
+      };
+      (async () => {
         await clearStoredRequest();
-        resolveOnce(message);
-      })();
+        resolveOnce(outcome);
+      })().catch(reportApprovalFailure);
       return undefined;
     }
     return undefined;
@@ -479,8 +594,12 @@ const getRestrictedMethodResult = async (
     port.onDisconnect.addListener(handlePortDisconnect);
   }
 
-  async function handlePortDisconnect() {
-    if (isSettled) return;
+  function handlePortDisconnect() {
+    onPortDisconnect().catch(reportApprovalFailure);
+  }
+
+  async function onPortDisconnect() {
+    if (hasSettled()) return;
     if (!userHasActed) {
       // The user closed the approval surface without answering, which is a
       // rejection.
@@ -508,18 +627,18 @@ const getRestrictedMethodResult = async (
     // wallet cannot tell whether a broadcast landed. Saying so explicitly
     // beats reporting a rejection for a transaction that may be on chain.
     await clearStoredRequest();
-    if (isSettled) return;
+    if (hasSettled()) return;
     clearTimeout(timeoutHandle);
-    timeoutHandle = setTimeout(
-      () => void abandon("the approval surface closed after the click"),
-      APPROVAL_DISCONNECT_GRACE_MS,
-    );
+    timeoutHandle = setTimeout(() => {
+      abandon("the approval surface closed after the click").catch(
+        reportApprovalFailure,
+      );
+    }, APPROVAL_DISCONNECT_GRACE_MS);
   }
 
-  timeoutHandle = setTimeout(
-    () => void abandon("no user response"),
-    POPUP_RESPONSE_TIMEOUT_MS,
-  );
+  timeoutHandle = setTimeout(() => {
+    abandon("no user response").catch(reportApprovalFailure);
+  }, POPUP_RESPONSE_TIMEOUT_MS);
   // Listen for the approval/rejection from the UI, plus the surface's
   // lifecycle port so we can resolve immediately when it disconnects.
   browser.runtime.onMessage.addListener(handleMessage);
@@ -527,19 +646,33 @@ const getRestrictedMethodResult = async (
 
   // The request must be in session storage BEFORE the surface opens so a
   // freshly-created popup/window/panel finds it on mount.
-  await StorageUtil.setDAppsRequestData(request);
-  // The tab id lets the side-panel path ask that tab to forward the user
-  // gesture; it stays UI-only context and is no part of any trust decision.
-  await openApprovalSurface({ tabId: req.senderData?.tabId });
+  try {
+    await StorageUtil.setDAppsRequestData(request);
+    // The tab id lets the side-panel path ask that tab to forward the user
+    // gesture; it stays UI-only context and is no part of any trust decision.
+    await openApprovalSurface({ tabId: senderData?.tabId });
+  } catch (error) {
+    isSettled = true;
+    cleanup();
+    await clearStoredRequest();
+    throw error;
+  }
 
   return answered;
 };
 
-type RestrictedMethodValue =
-  (typeof RESTRICTED_METHODS)[keyof typeof RESTRICTED_METHODS];
+const restrictedMethodNames: ReadonlySet<string> = new Set(
+  Object.values(RESTRICTED_METHODS),
+);
 
+type MiddlewareArguments = Parameters<JsonRpcMiddleware<JsonRpcParams, Json>>;
+
+// JSON-RPC permits null error data, which the provider's response type omits.
 type RestrictedMethodsMiddleware = (
-  ...args: Parameters<JsonRpcMiddleware<JsonRpcParams, Json>>
+  req: MiddlewareArguments[0],
+  res: Omit<MiddlewareArguments[1], "error"> & { error?: ResponseError },
+  next: MiddlewareArguments[2],
+  end: MiddlewareArguments[3],
 ) => Promise<void>;
 
 export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
@@ -549,31 +682,30 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
   end,
 ) => {
   const requestedMethod = req.method;
-  if (
-    Object.values(RESTRICTED_METHODS).includes(
-      requestedMethod as RestrictedMethodValue,
-    )
-  ) {
+  if (restrictedMethodNames.has(requestedMethod)) {
+    const senderData = readRequestSender(req.senderData);
     const requesterOrigin = resolveTrustedSenderOrigin({
-      origin: req.senderData?.url,
+      origin: senderData?.url,
     });
     if (!requesterOrigin) {
       res.error = providerErrors.unauthorized({
         message: "The requesting origin is unavailable.",
       });
-      return end();
+      end();
+      return;
     }
     // check if the request can proceed
     const precheckResult = await checkRequestCanProceed(req);
     const { canProceed, proceedError } = precheckResult;
     const authorizedChainId =
-      "authorizedChainId" in precheckResult
-        ? (precheckResult.authorizedChainId as string | undefined)
+      "authorizedChainId" in precheckResult &&
+      typeof precheckResult.authorizedChainId === "string"
+        ? precheckResult.authorizedChainId
         : undefined;
     if (!canProceed) {
-      // @ts-expect-error - proceedError type from provider library is not assignable to res.error's narrow type
-      res.error = proceedError;
-      return end();
+      res.error = toResponseError(proceedError);
+      end();
+      return;
     }
 
     // check if the request can complete silently without user interaction
@@ -581,11 +713,12 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
       await checkRequestCanCompleteSilently(req);
     if (hasCompleted) {
       res.result = completionResult;
-      return end();
+      end();
+      return;
     } else if (completionError) {
-      // @ts-expect-error - completionError type from rpcErrors is not assignable to res.error's narrow type
-      res.error = completionError;
-      return end();
+      res.error = toResponseError(completionError);
+      end();
+      return;
     }
 
     // The slot is claimed here, once this request is certain to put a
@@ -599,10 +732,9 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
     const slotClaim = claimApprovalSlot({
       origin: requesterOrigin,
       topLevelOrigin: resolveTrustedSenderOrigin({
-        origin: (req.senderData as { mainFrameOrigin?: string } | undefined)
-          ?.mainFrameOrigin,
+        origin: senderData?.mainFrameOrigin,
       }),
-      tabId: req.senderData?.tabId,
+      tabId: senderData?.tabId,
     });
     if (!slotClaim.claimed) {
       if (slotClaim.reason === "cooldown") {
@@ -612,7 +744,8 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
           message:
             "The wallet is still dismissing this site's previous request. Try again in a moment.",
         });
-        return end();
+        end();
+        return;
       }
       try {
         // Raise the surface for the tab that owns the pending request. The
@@ -624,7 +757,8 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
           message: "A request is already pending",
         });
       }
-      return end();
+      end();
+      return;
     }
 
     // Only an approval the user actually saw and turned down (or left to
@@ -643,45 +777,63 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
           authorizedChainId,
         );
       } finally {
-        const hasApproved = restrictedMethodResult?.hasApproved;
+        const hasApproved = restrictedMethodResult.hasApproved;
         // An unknown outcome followed a real click, so it is no refusal and
         // must not count towards the origin's back-off streak.
         approvalWasRefused =
-          !hasApproved && !restrictedMethodResult?.outcomeUnknown;
+          !hasApproved && !restrictedMethodResult.outcomeUnknown;
         if (hasApproved) {
-          switch (restrictedMethodResult?.method) {
+          switch (restrictedMethodResult.method) {
             case RESTRICTED_METHODS.WALLET_ADD_QRL_CHAIN:
             case RESTRICTED_METHODS.WALLET_SWITCH_QRL_CHAIN: {
-              const switchApproved = !!restrictedMethodResult?.response?.result;
+              const response = restrictedMethodResult.response;
+              const switchApproved =
+                isRecord(response) && response.result === true;
               res.result = switchApproved ? null : false;
               break;
             }
             case RESTRICTED_METHODS.WALLET_WATCH_ASSET: {
-              const hasAddedAsset = !!restrictedMethodResult?.response?.result;
+              const response = restrictedMethodResult.response;
+              const hasAddedAsset =
+                isRecord(response) && response.result === true;
               res.result = hasAddedAsset;
               break;
             }
             case RESTRICTED_METHODS.QRL_REQUEST_ACCOUNTS: {
+              const response = restrictedMethodResult.response;
+              if (!isConnectionGrants(response)) {
+                res.error = invalidApprovalResponse();
+                break;
+              }
               const accounts = await updateAccountsAndBlockchainsForUrlOrigin({
-                urlOrigin: new URL(req?.senderData?.url ?? "").origin,
-                accounts: restrictedMethodResult?.response?.accounts,
-                blockchains: restrictedMethodResult?.response?.blockchains,
+                urlOrigin: requesterOrigin,
+                accounts: response.accounts,
+                blockchains: response.blockchains,
               });
               res.result = accounts;
               break;
             }
             case RESTRICTED_METHODS.WALLET_REQUEST_PERMISSIONS: {
-              const urlOrigin = new URL(req?.senderData?.url ?? "").origin;
+              const response = restrictedMethodResult.response;
+              if (!isConnectionGrants(response)) {
+                res.error = invalidApprovalResponse();
+                break;
+              }
+              const urlOrigin = requesterOrigin;
               res.result = await updatePermissionsForUrlOrigin({
                 urlOrigin,
-                accounts: restrictedMethodResult?.response?.accounts,
-                blockchains: restrictedMethodResult?.response?.blockchains,
+                accounts: response.accounts,
+                blockchains: response.blockchains,
               });
               break;
             }
             case RESTRICTED_METHODS.QRL_SEND_TRANSACTION: {
-              const response = restrictedMethodResult?.response;
-              const transactionHash = response?.transactionHash;
+              const response = restrictedMethodResult.response;
+              const transactionHash =
+                isRecord(response) &&
+                typeof response.transactionHash === "string"
+                  ? response.transactionHash
+                  : undefined;
               const pendingTransactionHash =
                 extractPendingDAppTransactionHash(response);
               if (transactionHash) {
@@ -699,14 +851,21 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
                 // locked wallet still answers 4100 and an approval that
                 // produced nothing still answers -32603. Everything else
                 // keeps -32003.
-                res.error = toRecordedApprovalError(
-                  response?.error,
-                  rpcErrors.transactionRejected({
-                    message: response?.error?.message,
-                    data: buildDAppSendTransactionErrorData(response),
-                  }) as unknown as JsonRpcError<never>,
-                  buildDAppSendTransactionErrorData(response),
-                );
+                const error = isRecord(response) ? response.error : undefined;
+                const errorData = buildDAppSendTransactionErrorData(response);
+                res.error = isValidJson(errorData)
+                  ? toRecordedApprovalError(
+                      error,
+                      rpcErrors.transactionRejected({
+                        message:
+                          isRecord(error) && typeof error.message === "string"
+                            ? error.message
+                            : undefined,
+                        data: errorData,
+                      }),
+                      errorData,
+                    )
+                  : invalidApprovalResponse();
               }
               // Registers the watch either way: on a result, for the hash
               // just answered; on a broadcast-timeout error, for the hash
@@ -726,20 +885,17 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
             case RESTRICTED_METHODS.QRL_SIGN_MESSAGE:
             case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA:
             case RESTRICTED_METHODS.PERSONAL_SIGN: {
-              const signedData = restrictedMethodResult?.response;
+              const signedData = restrictedMethodResult.response;
               // A rejected approval (e.g. the chain-authorization
               // revalidation guard) stores { error } here. Surface it as a
               // JSON-RPC error, otherwise the dApp resolves successfully with
               // an error-shaped object and never learns the request failed.
-              if (signedData?.error) {
+              if (isRecord(signedData) && signedData.error) {
                 res.error = toRecordedApprovalError(signedData.error);
-              } else if (signedData) {
+              } else if (signedData && isValidJson(signedData)) {
                 res.result = signedData;
               } else {
-                res.error = providerErrors.unsupportedMethod({
-                  message: restrictedMethodResult?.response?.error?.message,
-                  data: restrictedMethodResult?.response?.error,
-                });
+                res.error = providerErrors.unsupportedMethod();
               }
               break;
             }
@@ -747,13 +903,13 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
               res.error = providerErrors.unsupportedMethod();
               break;
           }
-        } else if (restrictedMethodResult?.outcomeUnknown) {
+        } else if (restrictedMethodResult.outcomeUnknown) {
           // The user approved and the wallet lost track of the work, so the
           // honest answer is that the outcome is unknown. Reporting a user
           // rejection here would invite a retry for something that may
           // already have happened.
           const lostTransactionHash =
-            restrictedMethodResult?.pendingTransactionHash;
+            restrictedMethodResult.pendingTransactionHash;
           res.error = rpcErrors.internal({
             message: lostTransactionHash
               ? "The wallet approved this request and then lost contact with the approval window. The transaction was signed and may have been broadcast. Check the hash in this error before sending it again."
@@ -776,7 +932,8 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
           res.error = providerErrors.userRejectedRequest();
         }
       }
-      return end();
+      end();
+      return;
     } finally {
       // An approval that ended without the user approving it is an outcome
       // a hostile page can produce on demand, so that origin backs off

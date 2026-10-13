@@ -354,27 +354,30 @@ describe("storage record guards", () => {
         rpcUrls: CHAIN.rpcUrls,
         nativeCurrency,
       };
-      // Exercise wire input against the validator's narrower static signature.
-      const result: unknown = await Reflect.apply(
-        checkWalletAddQrlChainParams,
-        undefined,
-        [payload],
-      );
+      const result = await checkWalletAddQrlChainParams(payload);
       expect(result).toMatchObject({ canProceed: true });
     },
   );
 
-  it("accepts the serialized decimals produced by a validator-approved watchAsset request", async () => {
+  it("accepts serialized decimals from legacy watchAsset writes", () => {
     const options = { ...TOKEN, decimals: "abc" };
-    const result: unknown = await Reflect.apply(
-      checkWalletWatchAssetParams,
-      undefined,
-      [{ type: "ZRC20", options }],
-    );
-    expect(result).toMatchObject({ canProceed: true });
     const stored: unknown = JSON.parse(
       JSON.stringify({ ...options, decimals: parseInt(options.decimals) }),
     );
     expect(isTokenContract(stored)).toBe(true);
   });
+
+  it.each(["abc", "18", NaN, Infinity])(
+    "rejects invalid decimals in a new watchAsset request (%s)",
+    async (decimals) => {
+      const result = await checkWalletWatchAssetParams({
+        type: "ZRC20",
+        options: { ...TOKEN, decimals },
+      });
+      expect(result).toMatchObject({
+        canProceed: false,
+        proceedError: { code: -32602 },
+      });
+    },
+  );
 });
