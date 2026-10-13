@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KeyStore } from "@theqrl/web3";
+import browser from "webextension-polyfill";
 import {
   DEFAULT_BLOCKCHAIN,
   QRL_BLOCKCHAINS,
@@ -22,6 +23,10 @@ import {
   includeChainForUrlOrigin,
   excludeChainForUrlOrigin,
 } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
+import { restrictedMethodsMiddleware } from "@/scripts/middlewares/restrictedMethodsMiddleware";
+import { EXTENSION_MESSAGES } from "@/scripts/constants/streamConstants";
+import { openApprovalSurface } from "@/scripts/utils/approvalSurface";
+import { resetApprovalSlot } from "@/scripts/utils/approvalSlot";
 
 const h = vi.hoisted(() => {
   const local: Record<string, unknown> = {};
@@ -54,6 +59,20 @@ const h = vi.hoisted(() => {
 vi.mock("@/utilities/profileStorage", () => ({
   walletLocalStorage: h.localArea,
   walletSessionStorage: h.sessionArea,
+}));
+vi.mock("@/scripts/lockManager/lockManager", () => ({
+  default: {
+    isLocked: () => Promise.resolve({ isLocked: false, hasPasswordSet: true }),
+  },
+}));
+vi.mock("@/scripts/phishing/phishingDetector", () => ({
+  checkDomain: () => ({ isDomainPhishing: false }),
+}));
+vi.mock("@/scripts/utils/approvalSurface", () => ({
+  openApprovalSurface: vi.fn(),
+}));
+vi.mock("@/scripts/utils/dAppTransactionWatcher", () => ({
+  registerDAppTransactionWatch: vi.fn(),
 }));
 
 const record = (value: unknown): Record<string, unknown> => {
@@ -822,29 +841,140 @@ const junkValues: unknown[] = [
   { future: true },
   { nested: [null, false, { address: "unreadable" }] },
   "unreadable",
+  [],
+  { invoker: origin, parentCapability: "future_capability", caveats: [] },
+  Object.fromEntries([["__proto__", { retain: true }]]),
   { address: "" },
   { address: null, chainId: {}, transactionHash: false },
 ];
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  resetApprovalSlot();
+  vi.restoreAllMocks();
+});
+
+const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+const canonical = (values: unknown[]) =>
+  values.flatMap((value) => {
+    try {
+      return [toCanonicalQrlAddress(value)];
+    } catch {
+      return [];
+    }
+  });
+
+// The read oracle applies the account migration to familiar permission fields.
+// The approval oracle below uses explicit grants from the fixture.
+const permissionRead = (permissions: unknown): unknown[] =>
+  list(permissions).map((permission) => {
+    if (
+      !isRecord(permission) ||
+      typeof permission.invoker !== "string" ||
+      !["qrl_accounts", "qrl_chains"].includes(
+        String(permission.parentCapability),
+      )
+    )
+      return permission;
+    return {
+      ...permission,
+      caveats: list(permission.caveats).map((caveat) => {
+        if (
+          !isRecord(caveat) ||
+          caveat.type !== "restrictReturnedAccounts" ||
+          !Array.isArray(caveat.value) ||
+          caveat.value.some((value: unknown) => typeof value !== "string")
+        )
+          return caveat;
+        return { ...caveat, value: canonical(caveat.value) };
+      }),
+    };
+  });
+
+const approvedChains = [CHAIN, { ...CHAIN, chainId: "0x43" }];
+const approvedCaveat = {
+  type: "restrictNetworkSwitching",
+  value: [CHAIN.chainId, "0x43"],
+};
+const approvedGrants = [
+  CONNECTION.permissions[0],
+  {
+    invoker: origin,
+    parentCapability: "qrl_chains",
+    caveats: [approvedCaveat],
+  },
+];
+
+const checkApprovedPermissions = async (expected: unknown[]) => {
+  resetApprovalSlot();
+  await StorageUtil.clearDAppsRequestData();
+  vi.mocked(openApprovalSurface).mockImplementation(async () => {
+    const requestId = getStoredValue(
+      h.session,
+      "DAPPS",
+      "DAPPS_REQUEST_DATA",
+      "requestId",
+    );
+    expect(requestId).toBeTypeOf("string");
+    const removed = new Set(
+      vi
+        .spyOn(browser.runtime.onMessage, "removeListener")
+        .mock.calls.map(([listener]) => listener),
+    );
+    const listeners = vi
+      .spyOn(browser.runtime.onMessage, "addListener")
+      .mock.calls.map(([listener]) => listener)
+      .filter((listener) => !removed.has(listener));
+    expect(listeners).toHaveLength(1);
+    for (const action of [
+      EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
+      EXTENSION_MESSAGES.DAPP_RESPONSE,
+    ]) {
+      for (const listener of listeners) {
+        const result: unknown = listener(
+          {
+            method: "wallet_requestPermissions",
+            action,
+            requestId,
+            hasApproved: true,
+            response: {
+              accounts: [ACCOUNT, OTHER_ACCOUNT],
+              blockchains: approvedChains,
+            },
+          },
+          { id: "mock-id", url: "chrome-extension://mock-id/index.html" },
+          vi.fn(),
+        );
+        await result;
+      }
+    }
+  });
+  const response: Parameters<typeof restrictedMethodsMiddleware>[1] = {
+    id: 1,
+    jsonrpc: "2.0",
+  };
+  await restrictedMethodsMiddleware(
+    {
+      id: 1,
+      jsonrpc: "2.0",
+      method: "wallet_requestPermissions",
+      params: [{ qrl_accounts: {} }],
+      senderData: { url: origin, tabId: 1 },
+    },
+    response,
+    vi.fn(),
+    vi.fn(),
+  );
+  expect(response.error).toBeUndefined();
+  expect(response.result).toEqual(expected);
+};
 
 // Every writer is followed by reads of all record types. Each reader must
 // expose usable siblings and leave the stored bytes unchanged.
 const checkReadableSiblings = async () => {
   const before = JSON.stringify({ local: h.local, session: h.session });
-  const list = (value: unknown): unknown[] =>
-    Array.isArray(value) ? value : [];
   const identifiable = (value: unknown, key: string) =>
     list(value).filter((item) => {
       const identity = getStoredValue(item, key);
       return typeof identity === "string" && identity.trim().length > 0;
-    });
-  const canonical = (values: unknown[]) =>
-    values.flatMap((value) => {
-      try {
-        return [toCanonicalQrlAddress(value)];
-      } catch {
-        return [];
-      }
     });
   const active = await StorageUtil.getActiveBlockChain();
   const chains = getStoredValue(h.local, "BLOCKCHAINS", "ALL_BLOCKCHAINS");
@@ -920,6 +1050,18 @@ const checkReadableSiblings = async () => {
       "address",
     ),
   );
+  for (const address of [ACCOUNT, OTHER_ACCOUNT, addedAccount]) {
+    const ledgerAccount = identifiable(
+      getStoredValue(h.local, "LEDGER", "LEDGER_ACCOUNTS"),
+      "address",
+    ).find((value) => getStoredValue(value, "address") === address);
+    expect(await StorageUtil.getLedgerAccountByAddress(address)).toEqual(
+      ledgerAccount,
+    );
+    expect(await StorageUtil.isLedgerAccount(address)).toBe(
+      ledgerAccount !== undefined,
+    );
+  }
   const contacts = list(
     getStoredValue(h.local, "CONTACTS", "ALL_CONTACTS"),
   ).flatMap((value) => {
@@ -951,9 +1093,21 @@ const checkReadableSiblings = async () => {
   );
   const connection = getStoredValue(h.local, ...grantPath);
   const accounts = canonical(list(getStoredValue(connection, "accounts")));
-  expect(
-    (await StorageUtil.getDAppsConnectedAccountsData(origin))?.accounts,
-  ).toEqual(accounts.length ? accounts : undefined);
+  expect(await StorageUtil.getDAppsConnectedAccountsData(origin)).toEqual(
+    accounts.length
+      ? {
+          ...record(connection),
+          accounts,
+          blockchains: identifiable(
+            getStoredValue(connection, "blockchains"),
+            "chainId",
+          ),
+          permissions: permissionRead(
+            getStoredValue(connection, "permissions"),
+          ),
+        }
+      : undefined,
+  );
   expect(await StorageUtil.getPriceCache()).toEqual(
     h.local.PRICE_CACHE ?? null,
   );
@@ -995,6 +1149,7 @@ for (const [name, scenario] of Object.entries<WriterCase>(cases)) {
           local: record(h.copy(f.local)),
           session: record(h.copy(f.session)),
         };
+        await checkReadableSiblings();
         scenario.edit(expected, f);
         const run = mixedMetadata
           ? (mixedRuns[name] ?? scenario.run)
@@ -1003,6 +1158,22 @@ for (const [name, scenario] of Object.entries<WriterCase>(cases)) {
         expect(JSON.stringify({ local: h.local, session: h.session })).toBe(
           JSON.stringify(expected),
         );
+        await checkReadableSiblings();
+        const expectedGrants = getStoredValue(expected.local, ...grantPath)
+          ? [
+              {
+                ...approvedGrants[1],
+                caveats: [{ ...approvedCaveat, future: junk }],
+                future: junk,
+              },
+            ]
+          : approvedGrants;
+        await checkApprovedPermissions(expectedGrants);
+        const saved = JSON.stringify(h.local);
+        await checkApprovedPermissions(expectedGrants);
+        expect(JSON.stringify(h.local)).toBe(saved);
+        await StorageUtil.removeAccountFromAllDApps(ACCOUNT);
+        expect(await authorized()).toBe(false);
         await checkReadableSiblings();
       },
     );
@@ -1313,9 +1484,9 @@ it.each(["0X2A", "0x002a", "42"])(
   },
 );
 
-it.each(junkValues)(
-  "adds a chain without changing opaque permission metadata %j",
-  async (permissions) => {
+it.each(junkValues.map((permissions, id) => ({ permissions, id })))(
+  "adds a chain while preserving opaque permission metadata $id",
+  async ({ permissions }) => {
     const f = fixture(permissions, 1);
     const raw = { ...CONNECTION, blockchains: [CHAIN, null], permissions };
     set(f.local, grantPath, raw);
@@ -1324,6 +1495,9 @@ it.each(junkValues)(
     expect(getStoredValue(h.local, ...grantPath)).toEqual({
       ...raw,
       blockchains: [CHAIN, null, f.otherChain],
+      permissions: Array.isArray(permissions)
+        ? [...list(permissions), ...approvedGrants]
+        : permissions,
     });
   },
 );

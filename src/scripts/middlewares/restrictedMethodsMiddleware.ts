@@ -1,4 +1,4 @@
-import { isArrayOf, isStoredPermission } from "@/utilities/storageGuards";
+import { isStoredPermission } from "@/utilities/storageGuards";
 import StorageUtil from "@/utilities/storageUtil";
 import { JsonRpcMiddleware } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
 import { v4 as uuid } from "uuid";
@@ -680,8 +680,8 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
               const dAppConnectedAccountsData =
                 await StorageUtil.getDAppsConnectedAccountsData(urlOrigin);
               const permissions = dAppConnectedAccountsData?.permissions;
-              res.result = isArrayOf(permissions, isStoredPermission)
-                ? permissions
+              res.result = Array.isArray(permissions)
+                ? permissions.filter(isStoredPermission)
                 : [];
               break;
             }
