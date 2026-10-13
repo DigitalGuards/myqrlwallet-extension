@@ -384,6 +384,17 @@ describe("keystore worker response guards", () => {
         },
       },
     })),
+    ...["m", "t", "p", "dklen"].flatMap((field) =>
+      [NaN, Infinity, -Infinity].map((parameter) => ({
+        label: `non-finite ${field} (${String(parameter)})`,
+        field: {
+          crypto: {
+            ...first.crypto,
+            kdfparams: { ...first.crypto.kdfparams, [field]: parameter },
+          },
+        },
+      })),
+    ),
   ])("rejects keystores with $label", ({ field }) => {
     const entries = [{ ...first, ...field }, second];
     expect(

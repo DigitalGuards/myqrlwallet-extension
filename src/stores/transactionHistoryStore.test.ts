@@ -1,5 +1,12 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import browser from "webextension-polyfill";
+import type StorageUtil from "@/utilities/storageUtil";
+import type {
+  fetchOnChainHistory,
+  OnChainHistoryPage,
+} from "@/services/onChainHistory";
+
+const mockedBrowser = vi.mocked(browser, true);
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 
 const {
@@ -8,36 +15,40 @@ const {
   mockClearTransactionHistory,
   mockUpdateTransactionHistoryEntry,
 } = vi.hoisted(() => ({
-  mockGetTransactionHistory: vi.fn().mockResolvedValue([]),
-  mockSetTransactionHistoryEntry: vi.fn().mockResolvedValue(undefined),
-  mockClearTransactionHistory: vi.fn().mockResolvedValue(undefined),
-  mockUpdateTransactionHistoryEntry: vi.fn().mockResolvedValue(undefined),
+  mockGetTransactionHistory: vi
+    .fn<typeof StorageUtil.getTransactionHistory>()
+    .mockResolvedValue([]),
+  mockSetTransactionHistoryEntry: vi
+    .fn<typeof StorageUtil.setTransactionHistoryEntry>()
+    .mockResolvedValue(undefined),
+  mockClearTransactionHistory: vi
+    .fn<typeof StorageUtil.clearTransactionHistory>()
+    .mockResolvedValue(undefined),
+  mockUpdateTransactionHistoryEntry: vi
+    .fn<typeof StorageUtil.updateTransactionHistoryEntry>()
+    .mockResolvedValue(undefined),
 }));
 
 vi.mock("@/utilities/storageUtil", () => ({
   __esModule: true,
   default: {
-    getTransactionHistory: (...args: any[]) =>
-      mockGetTransactionHistory(...args),
-    setTransactionHistoryEntry: (...args: any[]) =>
-      mockSetTransactionHistoryEntry(...args),
-    clearTransactionHistory: (...args: any[]) =>
-      mockClearTransactionHistory(...args),
-    updateTransactionHistoryEntry: (...args: any[]) =>
-      mockUpdateTransactionHistoryEntry(...args),
+    getTransactionHistory: mockGetTransactionHistory,
+    setTransactionHistoryEntry: mockSetTransactionHistoryEntry,
+    clearTransactionHistory: mockClearTransactionHistory,
+    updateTransactionHistoryEntry: mockUpdateTransactionHistoryEntry,
   },
 }));
 
 const { mockFetchOnChainHistory } = vi.hoisted(() => ({
   mockFetchOnChainHistory: vi
-    .fn()
+    .fn<typeof fetchOnChainHistory>()
     .mockResolvedValue({ entries: [], totalCount: 0, failed: false }),
 }));
 
 vi.mock("@/services/onChainHistory", () => ({
   __esModule: true,
   ON_CHAIN_PAGE_SIZE: 10,
-  fetchOnChainHistory: (...args: any[]) => mockFetchOnChainHistory(...args),
+  fetchOnChainHistory: mockFetchOnChainHistory,
 }));
 
 const makeSampleEntry = (
@@ -423,7 +434,7 @@ describe("TransactionHistoryStore", () => {
     mockGetTransactionHistory.mockResolvedValue([
       { ...pendingEntry, pendingStatus: "confirmed", status: true },
     ]);
-    vi.mocked(browser.runtime.sendMessage).mockClear();
+    mockedBrowser.runtime.sendMessage.mockClear();
 
     store.startPolling(
       "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
@@ -438,7 +449,7 @@ describe("TransactionHistoryStore", () => {
       "0xalreadyconfirmed",
       expect.objectContaining({ pendingStatus: "confirmed" }),
     );
-    expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
+    expect(mockedBrowser.runtime.sendMessage.mock.calls).toHaveLength(0);
 
     store.stopPolling();
   });
@@ -654,6 +665,7 @@ describe("TransactionHistoryStore", () => {
       mockFetchOnChainHistory.mockResolvedValue({
         entries: [],
         totalCount: 0,
+        failed: false,
       });
     });
 
@@ -678,6 +690,7 @@ describe("TransactionHistoryStore", () => {
       mockFetchOnChainHistory.mockResolvedValue({
         entries: [duplicate, explorerOnly],
         totalCount: 2,
+        failed: false,
       });
 
       const store = new TransactionHistoryStore();
@@ -703,6 +716,7 @@ describe("TransactionHistoryStore", () => {
       mockFetchOnChainHistory.mockResolvedValue({
         entries: page1,
         totalCount: 3,
+        failed: false,
       });
 
       const store = new TransactionHistoryStore();
@@ -716,6 +730,7 @@ describe("TransactionHistoryStore", () => {
           makeSampleEntry({ id: "0x3", transactionHash: "0x3", timestamp: 1 }),
         ],
         totalCount: 3,
+        failed: false,
       });
       await store.loadMoreOnChain(ADDRESS, CHAIN);
 
@@ -751,6 +766,7 @@ describe("TransactionHistoryStore", () => {
       mockFetchOnChainHistory.mockResolvedValue({
         entries: [internalPayout],
         totalCount: 1,
+        failed: false,
       });
 
       const store = new TransactionHistoryStore();
@@ -783,6 +799,7 @@ describe("TransactionHistoryStore", () => {
       mockFetchOnChainHistory.mockResolvedValue({
         entries: [outer, internal],
         totalCount: 12,
+        failed: false,
       });
 
       const store = new TransactionHistoryStore();
@@ -798,8 +815,8 @@ describe("TransactionHistoryStore", () => {
     });
 
     it("should ignore a stale response after the account switches", async () => {
-      let resolveFirst: (value: any) => void = () => {};
-      const firstCall = new Promise((resolve) => {
+      let resolveFirst: (value: OnChainHistoryPage) => void = () => {};
+      const firstCall = new Promise<OnChainHistoryPage>((resolve) => {
         resolveFirst = resolve;
       });
       mockFetchOnChainHistory.mockReturnValueOnce(firstCall);
@@ -810,12 +827,14 @@ describe("TransactionHistoryStore", () => {
       mockFetchOnChainHistory.mockResolvedValueOnce({
         entries: [makeSampleEntry({ id: "0xnew", transactionHash: "0xnew" })],
         totalCount: 1,
+        failed: false,
       });
       await store.loadOnChainHistory("Qnew", CHAIN);
 
       resolveFirst({
         entries: [makeSampleEntry({ id: "0xold", transactionHash: "0xold" })],
         totalCount: 1,
+        failed: false,
       });
       await first;
 
@@ -833,7 +852,7 @@ describe("TransactionHistoryStore", () => {
       await store.loadHistory("Qaccounta");
       expect(store.transactions.map((tx) => tx.id)).toEqual(["0xa"]);
 
-      let resolveSecond: (value: any) => void = () => {};
+      let resolveSecond: (value: TransactionHistoryEntry[]) => void = () => {};
       mockGetTransactionHistory.mockReturnValueOnce(
         new Promise((resolve) => {
           resolveSecond = resolve;
@@ -850,7 +869,7 @@ describe("TransactionHistoryStore", () => {
 
     it("ignores a slow read for a previously active account", async () => {
       const store = new TransactionHistoryStore();
-      let resolveFirst: (value: any) => void = () => {};
+      let resolveFirst: (value: TransactionHistoryEntry[]) => void = () => {};
       mockGetTransactionHistory.mockReturnValueOnce(
         new Promise((resolve) => {
           resolveFirst = resolve;
@@ -879,7 +898,7 @@ describe("TransactionHistoryStore", () => {
       await store.loadHistory("Qaccounta");
 
       const loadingStates: boolean[] = [];
-      let resolveRead: (value: any) => void = () => {};
+      let resolveRead: (value: TransactionHistoryEntry[]) => void = () => {};
       mockGetTransactionHistory.mockReturnValueOnce(
         new Promise((resolve) => {
           resolveRead = resolve;
@@ -902,7 +921,7 @@ describe("TransactionHistoryStore", () => {
 
     it("still reports loading for a read the user is waiting on", async () => {
       const store = new TransactionHistoryStore();
-      let resolveRead: (value: any) => void = () => {};
+      let resolveRead: (value: TransactionHistoryEntry[]) => void = () => {};
       mockGetTransactionHistory.mockReturnValueOnce(
         new Promise((resolve) => {
           resolveRead = resolve;
