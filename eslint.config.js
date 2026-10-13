@@ -1862,28 +1862,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/functions/pqSigning/pqSigning.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
-    files: ["src/functions/pqSigning/typedData.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-    },
-  },
-  {
-    files: ["src/functions/pqSigning/typedDataSecurity.test.ts"],
-    rules: {
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
     files: ["src/functions/transactionOutcome.test.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
@@ -2068,27 +2046,8 @@ export const lintRatchet = [
       "src/scripts/middlewares/restrictedMethodsMiddleware.approvalErrors.test.ts",
     ],
     rules: {
-      "@typescript-eslint/await-thenable": "off",
       "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-      "@typescript-eslint/require-await": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: [
-      "src/scripts/middlewares/restrictedMethodsMiddleware.approvalSlot.test.ts",
-    ],
-    rules: {
-      "@typescript-eslint/await-thenable": "off",
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-return": "off",
       "@typescript-eslint/require-await": "off",
       "@typescript-eslint/unbound-method": "off",
@@ -2097,9 +2056,7 @@ export const lintRatchet = [
   {
     files: ["src/scripts/middlewares/restrictedMethodsMiddleware.test.ts"],
     rules: {
-      "@typescript-eslint/await-thenable": "off",
       "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-return": "off",
