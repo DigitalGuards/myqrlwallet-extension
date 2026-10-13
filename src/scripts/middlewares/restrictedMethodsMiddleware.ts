@@ -6,7 +6,11 @@ import {
   providerErrors,
   rpcErrors,
 } from "@theqrl/qrl-wallet-provider/rpc-errors";
-import { Json, JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
+import {
+  Json,
+  JsonRpcParams,
+  JsonRpcRequest,
+} from "@theqrl/qrl-wallet-provider/utils";
 import browser from "webextension-polyfill";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import {
@@ -71,9 +75,7 @@ const QRL_WALLET_DAPP_CONNECTION_REQUIRED_METHODS: string[] = [
   RESTRICTED_METHODS.WALLET_SWITCH_QRL_CHAIN,
 ];
 
-export const checkRequestCanCompleteSilently = async (
-  req: JsonRpcRequest<JsonRpcRequest>,
-) => {
+export const checkRequestCanCompleteSilently = async (req: JsonRpcRequest) => {
   if (req.method === RESTRICTED_METHODS.WALLET_ADD_QRL_CHAIN) {
     const [chainData] = req.params as unknown as { chainId: string }[];
     const chainId = chainData?.chainId;
@@ -223,7 +225,7 @@ export const checkRequestCanCompleteSilently = async (
 };
 
 // a precheck to determine if the request can proceed
-const checkRequestCanProceed = async (req: JsonRpcRequest<JsonRpcRequest>) => {
+const checkRequestCanProceed = async (req: JsonRpcRequest) => {
   if (QRL_WALLET_DAPP_CONNECTION_REQUIRED_METHODS.includes(req.method)) {
     // refuseWhileLocked: a locked wallet answers these three the same way
     // for every origin. Without it, a connected origin and an unconnected
@@ -312,7 +314,7 @@ type RestrictedMethodOutcome = DAppResponseType & {
 
 // get the result of the user approval/rejection of the request
 const getRestrictedMethodResult = async (
-  req: JsonRpcRequest<JsonRpcRequest>,
+  req: JsonRpcRequest,
   authorizedChainId?: string,
 ): Promise<RestrictedMethodOutcome> => {
   const settings = await StorageUtil.getSettings();
@@ -535,10 +537,16 @@ const getRestrictedMethodResult = async (
 type RestrictedMethodValue =
   (typeof RESTRICTED_METHODS)[keyof typeof RESTRICTED_METHODS];
 
-export const restrictedMethodsMiddleware: JsonRpcMiddleware<
-  JsonRpcRequest,
-  Json
-> = async (req, res, next, end) => {
+type RestrictedMethodsMiddleware = (
+  ...args: Parameters<JsonRpcMiddleware<JsonRpcParams, Json>>
+) => Promise<void>;
+
+export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
+  req,
+  res,
+  next,
+  end,
+) => {
   const requestedMethod = req.method;
   if (
     Object.values(RESTRICTED_METHODS).includes(

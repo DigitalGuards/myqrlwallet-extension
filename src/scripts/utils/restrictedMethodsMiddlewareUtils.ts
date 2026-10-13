@@ -74,7 +74,7 @@ const shouldRefuseWhileLocked = async (
   }
 };
 
-const getFromAddress = (req: JsonRpcRequest<JsonRpcRequest>) => {
+const getFromAddress = (req: JsonRpcRequest) => {
   switch (req.method) {
     case RESTRICTED_METHODS.QRL_SEND_TRANSACTION:
       // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
@@ -92,7 +92,7 @@ const getFromAddress = (req: JsonRpcRequest<JsonRpcRequest>) => {
 };
 
 export const checkAccountHasBeenAuthorized = async (
-  req: JsonRpcRequest<JsonRpcRequest>,
+  req: JsonRpcRequest,
   enforceWhileLocked = false,
 ) => {
   // First, and before anything derived from the request is read, so the
@@ -135,7 +135,7 @@ export const normalizeChainId = (chainId: unknown): string | undefined => {
   }
 };
 
-const getTypedDataChainId = (req: JsonRpcRequest<JsonRpcRequest>) => {
+const getTypedDataChainId = (req: JsonRpcRequest) => {
   // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime
   const rawTypedData = req.params?.[1];
   if (typeof rawTypedData === "string") {
@@ -177,7 +177,7 @@ const hasPositiveTransactionValue = (value: unknown): boolean => {
  * Sensitive requests without a declared chain are bound to the active chain.
  */
 export const checkAccountAndChainHaveBeenAuthorized = async (
-  req: JsonRpcRequest<JsonRpcRequest>,
+  req: JsonRpcRequest,
   expectedChainId?: string,
   enforceWhileLocked = false,
 ) => {
@@ -1046,7 +1046,7 @@ export const buildDAppSendTransactionErrorData = (
  * otherwise-successful response.
  */
 export const registerDAppTransactionWatchIfApproved = async (
-  req: JsonRpcRequest<JsonRpcRequest>,
+  req: JsonRpcRequest,
   transactionHash: unknown,
   authorizedChainId?: string,
 ): Promise<void> => {
