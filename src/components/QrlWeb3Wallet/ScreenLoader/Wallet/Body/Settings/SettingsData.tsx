@@ -17,10 +17,12 @@ const SettingsData = observer(() => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
 
   const exportBackup = async () => {
     setExporting(true);
+    setExportError("");
     try {
       const keystores = await StorageUtil.getKeystores();
       const accounts = await StorageUtil.getAllAccounts();
@@ -46,6 +48,12 @@ const SettingsData = observer(() => {
       a.download = `qrl-wallet-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
+    } catch (error) {
+      setExportError(
+        error instanceof Error
+          ? error.message
+          : "The wallet backup could not be exported. Please try again.",
+      );
     } finally {
       setExporting(false);
     }
@@ -87,6 +95,11 @@ const SettingsData = observer(() => {
                 ? t("settings.data.exportingButton")
                 : t("settings.data.exportButton")}
             </Button>
+            {exportError && (
+              <p role="alert" className="mt-3 text-sm text-destructive">
+                {exportError}
+              </p>
+            )}
             <Separator className="my-5" />
             <p className="mb-3 text-xs text-muted-foreground">
               {t("settings.data.resetDescription")}

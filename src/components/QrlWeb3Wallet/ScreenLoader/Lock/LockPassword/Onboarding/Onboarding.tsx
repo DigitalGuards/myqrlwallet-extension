@@ -90,6 +90,7 @@ const Onboarding = observer(() => {
     );
 
   if (step === ONBOARDING_STEPS.COMPLETED) return <OnboardingCompleted />;
+  return undefined;
 });
 
 export default Onboarding;

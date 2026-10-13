@@ -69,6 +69,24 @@ describe("QrlStore.removeAccount", () => {
     return store;
   };
 
+  it("propagates corrupt keystores before any account removal writes", async () => {
+    const { KeystoreStorageCorruptError } = await vi.importActual<
+      typeof import("@/utilities/storageUtil")
+    >("@/utilities/storageUtil");
+    const error = new KeystoreStorageCorruptError();
+    const store = await createStore();
+    mockStorage.getKeystores.mockRejectedValueOnce(error);
+
+    await expect(store.removeAccount(SECOND)).rejects.toBe(error);
+
+    expect(mockStorage.setAllAccounts).not.toHaveBeenCalled();
+    expect(mockStorage.setKeystores).not.toHaveBeenCalled();
+    expect(mockStorage.removeAccountFromAllDApps).not.toHaveBeenCalled();
+    expect(mockStorage.clearAllAccountData).not.toHaveBeenCalled();
+    expect(mockStorage.setActiveAccount).not.toHaveBeenCalled();
+    expect(mockStorage.clearActiveAccount).not.toHaveBeenCalled();
+  });
+
   it("removes the keystore, the accounts entry, dApp grants and per-account data", async () => {
     mockStorage.getKeystores.mockResolvedValue([
       keystoreFor(SOFTWARE),

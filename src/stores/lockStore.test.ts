@@ -85,6 +85,7 @@ const clearStore = (store: Record<string, any>) => {
 import browser from "webextension-polyfill";
 import type { DecryptedKeyType } from "@/scripts/lockManager/lockManager";
 import { LEGACY_QRL_ADDRESS_MIGRATION_ERROR } from "@/utilities/addressUtil";
+import { KeystoreStorageCorruptError } from "@/utilities/storageUtil";
 
 describe("LockStore – readLockState reflects the SW directly", () => {
   // No client-side resend or timestamp comparison any more (F4): decrypted
@@ -688,6 +689,42 @@ describe("LockStore – unlock worker fan-out", () => {
       LEGACY_QRL_ADDRESS_MIGRATION_ERROR,
     );
     expect(spawned).toBe(0);
+  });
+
+  it.each([
+    "null",
+    "{}",
+    "[null]",
+    "[{}]",
+    "not JSON",
+    JSON.stringify([{ ...KEYSTORE_A, address: "Q123" }]),
+    JSON.stringify([{ address: KEYSTORE_A.address }]),
+    JSON.stringify([{ ...KEYSTORE_A, crypto: null }]),
+    JSON.stringify([KEYSTORE_A, null]),
+  ])("preserves corrupt storage %s during password checks", async (stored) => {
+    const store = await createLockStore();
+    mockSendMessage.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+    await store.readLockState();
+    localStore[profileStorageKey("KEYSTORES")] = stored;
+    vi.clearAllMocks();
+
+    await expect(store.unlock("pw")).rejects.toBeInstanceOf(
+      KeystoreStorageCorruptError,
+    );
+    await expect(store.changePassword("pw", "new-pw")).rejects.toBeInstanceOf(
+      KeystoreStorageCorruptError,
+    );
+
+    expect(store.isLocked).toBe(true);
+    expect(store.hasPasswordSet).toBe(true);
+    expect(spawned).toBe(0);
+    expect(mockSendMessage).not.toHaveBeenCalled();
+    expect(localStore[profileStorageKey("KEYSTORES")]).toBe(stored);
+    for (const area of [browser.storage.local, browser.storage.session]) {
+      expect(area.set).not.toHaveBeenCalled();
+      expect(area.remove).not.toHaveBeenCalled();
+      expect(area.clear).not.toHaveBeenCalled();
+    }
   });
 
   it("retries sequentially after an infrastructure failure and succeeds", async () => {

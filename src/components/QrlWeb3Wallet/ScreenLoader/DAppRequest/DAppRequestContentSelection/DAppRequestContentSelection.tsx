@@ -32,6 +32,7 @@ const DAppRequestContentSelection = observer(() => {
 
   if (PERMISSION_REQUIRED_METHODS.includes(method))
     return <PermissionRequiredContent />;
+  return undefined;
 });
 
 export default DAppRequestContentSelection;

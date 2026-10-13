@@ -2,6 +2,7 @@ import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
 const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
+import type { KeyStore } from "@theqrl/web3";
 import { toChecksumAddress } from "@theqrl/wallet.js";
 
 // In-memory mock of browser.storage.local and browser.storage.session
@@ -75,6 +76,18 @@ const clearStore = (store: Record<string, any>) => {
 const ACCOUNT = toChecksumAddress(`Q${"a".repeat(128)}`);
 const ACCOUNT_2 = toChecksumAddress(`Q${"b".repeat(128)}`);
 const LEGACY_ACCOUNT = `Q${"c".repeat(40)}`;
+const KEYSTORE = {
+  id: "keystore-test",
+  version: 1,
+  address: ACCOUNT,
+  crypto: {
+    cipher: "aes-256-gcm",
+    ciphertext: "00",
+    cipherparams: { iv: "00".repeat(12) },
+    kdf: "argon2id",
+    kdfparams: { m: 262144, t: 8, p: 1, dklen: 32, salt: "00".repeat(32) },
+  },
+} satisfies KeyStore;
 const WRONG_CHECKSUM_ACCOUNT = `${ACCOUNT.slice(0, 1)}${
   ACCOUNT[1] === ACCOUNT[1].toUpperCase()
     ? ACCOUNT[1].toLowerCase()
@@ -106,6 +119,7 @@ const makeTxEntry = (
 describe("StorageUtil", () => {
   let StorageUtil: typeof import("@/utilities/storageUtil").default;
   let LockState: typeof import("@/utilities/storageUtil").LockState;
+  let KeystoreStorageCorruptError: typeof import("@/utilities/storageUtil").KeystoreStorageCorruptError;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -114,13 +128,14 @@ describe("StorageUtil", () => {
     const module = await import("@/utilities/storageUtil");
     StorageUtil = module.default;
     LockState = module.LockState;
+    KeystoreStorageCorruptError = module.KeystoreStorageCorruptError;
   });
 
   // ── Keystores ──────────────────────────────────────────────
 
   describe("Keystores", () => {
     it("should store and retrieve keystores", async () => {
-      const keystores = [{ id: "ks1", address: ACCOUNT }] as any;
+      const keystores = [KEYSTORE];
       await StorageUtil.setKeystores(keystores);
       const result = await StorageUtil.getKeystores();
       expect(result).toEqual(keystores);
@@ -129,20 +144,108 @@ describe("StorageUtil", () => {
     it("should return empty array when no keystores stored", async () => {
       const result = await StorageUtil.getKeystores();
       expect(result).toEqual([]);
+      expect(mockLocal.set).not.toHaveBeenCalled();
+      expect(mockLocal.remove).not.toHaveBeenCalled();
+    });
+
+    it.each(["", "[]"])("reads %j as an empty list", async (stored) => {
+      localStore[profileStorageKey("KEYSTORES")] = stored;
+
+      expect(await StorageUtil.getKeystores()).toEqual([]);
+      expect(localStore[profileStorageKey("KEYSTORES")]).toBe(stored);
+      expect(mockLocal.set).not.toHaveBeenCalled();
+      expect(mockLocal.remove).not.toHaveBeenCalled();
+    });
+
+    it.each(
+      [
+        "null",
+        "{}",
+        "[null]",
+        "[{}]",
+        "[[]]",
+        "[1]",
+        '["keystore"]',
+        "false",
+        "0",
+        '""',
+        "not JSON",
+        " ",
+        JSON.stringify([{ ...KEYSTORE, address: "Q123" }]),
+        JSON.stringify([{ ...KEYSTORE, address: WRONG_CHECKSUM_ACCOUNT }]),
+        JSON.stringify([{ ...KEYSTORE, address: 123 }]),
+        JSON.stringify([{ address: ACCOUNT }]),
+        ...[null, [], "crypto", 1].map((crypto) =>
+          JSON.stringify([{ ...KEYSTORE, crypto }]),
+        ),
+        JSON.stringify([KEYSTORE, null]),
+        null,
+        false,
+        0,
+        {},
+        [],
+      ].map((stored) => ({ stored })),
+    )(
+      "rejects malformed storage $stored without writing",
+      async ({ stored }) => {
+        localStore[profileStorageKey("KEYSTORES")] = stored;
+        const read = StorageUtil.getKeystores();
+
+        await expect(read).rejects.toBeInstanceOf(KeystoreStorageCorruptError);
+        await expect(read).rejects.toMatchObject({
+          name: "KeystoreStorageCorruptError",
+          message: "The wallet data in this browser could not be read.",
+        });
+        expect(localStore[profileStorageKey("KEYSTORES")]).toBe(stored);
+        expect(mockLocal.set).not.toHaveBeenCalled();
+        expect(mockLocal.remove).not.toHaveBeenCalled();
+        expect(mockLocal.clear).not.toHaveBeenCalled();
+        expect(mockSession.set).not.toHaveBeenCalled();
+        expect(mockSession.remove).not.toHaveBeenCalled();
+        expect(mockSession.clear).not.toHaveBeenCalled();
+      },
+    );
+
+    it("leaves crypto parameter validation to decryption", async () => {
+      const keystores = [
+        { address: ACCOUNT, crypto: {} },
+        { ...KEYSTORE, crypto: { kdf: "unknown", kdfparams: null } },
+      ];
+      const stored = JSON.stringify(keystores);
+      localStore[profileStorageKey("KEYSTORES")] = stored;
+
+      expect(await StorageUtil.getKeystores()).toEqual(keystores);
+      expect(localStore[profileStorageKey("KEYSTORES")]).toBe(stored);
+      expect(mockLocal.set).not.toHaveBeenCalled();
+      expect(mockLocal.remove).not.toHaveBeenCalled();
     });
 
     it("should clear keystores", async () => {
-      await StorageUtil.setKeystores([{ id: "ks1", address: ACCOUNT }] as any);
+      await StorageUtil.setKeystores([KEYSTORE]);
       await StorageUtil.clearKeystores();
       const result = await StorageUtil.getKeystores();
       expect(result).toEqual([]);
     });
 
     it("preserves legacy keystores for explicit seed-aware migration", async () => {
-      const legacyKeystore = { id: "legacy", address: LEGACY_ACCOUNT } as any;
-      await StorageUtil.setKeystores([legacyKeystore]);
+      const legacyKeystore = {
+        ...KEYSTORE,
+        id: "legacy",
+        address: LEGACY_ACCOUNT,
+        crypto: {
+          ...KEYSTORE.crypto,
+          kdfparams: { ...KEYSTORE.crypto.kdfparams, m: 4096, t: 2 },
+        },
+      };
+      await StorageUtil.setKeystores([KEYSTORE, legacyKeystore]);
+      vi.clearAllMocks();
 
-      expect(await StorageUtil.getKeystores()).toEqual([legacyKeystore]);
+      expect(await StorageUtil.getKeystores()).toEqual([
+        KEYSTORE,
+        legacyKeystore,
+      ]);
+      expect(mockLocal.set).not.toHaveBeenCalled();
+      expect(mockLocal.remove).not.toHaveBeenCalled();
     });
 
     it("rejects malformed keystore addresses", async () => {

@@ -4,7 +4,7 @@ import Ajv from "ajv";
 import manifestV3Schema from "chrome-extension-manifest-json-schema/manifest/manifest.schema.v3.json" with { type: "json" };
 import path from "path";
 import nodePolyfills from "rollup-plugin-node-polyfills";
-import { Plugin, defineConfig } from "vite";
+import { type Plugin, defineConfig } from "vite";
 import webExtension from "vite-plugin-web-extension";
 import { version } from "./package.json";
 
