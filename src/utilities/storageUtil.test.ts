@@ -61,6 +61,12 @@ vi.mock("@/configuration/qrlBlockchainConfig", () => ({
       blockExplorerUrls: [""],
       nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
       iconUrls: [],
+      defaultRpcUrl: "https://rpc.example",
+      defaultBlockExplorerUrl: "",
+      defaultIconUrl: "",
+      defaultWsRpcUrl: "",
+      isTestnet: true,
+      isCustomChain: false,
     },
   ],
 }));
@@ -410,6 +416,12 @@ describe("StorageUtil", () => {
       blockExplorerUrls: [""],
       nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
       iconUrls: [],
+      defaultRpcUrl: "https://rpc.example",
+      defaultBlockExplorerUrl: "",
+      defaultIconUrl: "",
+      defaultWsRpcUrl: "",
+      isTestnet: true,
+      isCustomChain: false,
     };
     const chain2 = {
       chainId: "0x2",
@@ -418,6 +430,12 @@ describe("StorageUtil", () => {
       blockExplorerUrls: [""],
       nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
       iconUrls: [],
+      defaultRpcUrl: "https://rpc.example",
+      defaultBlockExplorerUrl: "",
+      defaultIconUrl: "",
+      defaultWsRpcUrl: "",
+      isTestnet: true,
+      isCustomChain: false,
     };
 
     it("should store and retrieve all blockchains", async () => {
@@ -740,6 +758,12 @@ describe("StorageUtil", () => {
       blockExplorerUrls: [],
       nativeCurrency: { name: "Quanta", symbol: "Quanta", decimals: 18 },
       iconUrls: [],
+      defaultRpcUrl: "https://rpc.example",
+      defaultBlockExplorerUrl: "",
+      defaultIconUrl: "",
+      defaultWsRpcUrl: "",
+      isTestnet: true,
+      isCustomChain: false,
     };
     const connectedData = {
       urlOrigin: "https://example.com",
@@ -1204,6 +1228,130 @@ describe("StorageUtil", () => {
   });
 
   // ── Price cache ──────────────────────────────────────────
+
+  describe("malformed storage", () => {
+    it.each([null, false, 123, "junk", [null], {}])(
+      "defaults malformed leaves without rewriting them (%j)",
+      async (junk) => {
+        const values = {
+          ACCOUNTS: { ALL_ACCOUNTS: junk, ACTIVE_ACCOUNT: junk },
+          ACTIVE_PAGE: junk,
+          LOCK_MANAGER_LOCKED_TIMESTAMP: junk,
+          "0x1_TRANSACTION_VALUES": junk,
+          TOKENS: { ALL_TOKENS: { [ACCOUNT]: { "0x1": { tokens: junk } } } },
+          NFT_COLLECTIONS: {
+            ALL_NFT_COLLECTIONS: {
+              [ACCOUNT]: { "0x1": { collections: junk } },
+            },
+          },
+          TX_HISTORY: {
+            ALL_TX_HISTORY: { [ACCOUNT]: { "0x1": { transactions: junk } } },
+          },
+          CONTACTS: { ALL_CONTACTS: junk },
+          ACCOUNT_LABELS: junk,
+          HIDDEN_ACCOUNTS: junk,
+          LEDGER: { LEDGER_ACCOUNTS: junk },
+          SETTINGS: junk,
+          PRICE_CACHE: junk,
+          DAPPS: { ALL_DAPPS: { "https://example.com": junk } },
+        };
+        for (const [key, value] of Object.entries(values))
+          localStore[profileStorageKey(key)] = value;
+        sessionStore[profileStorageKey("DAPPS")] = { DAPPS_REQUEST_DATA: junk };
+        expect(await StorageUtil.getStoredAccounts()).toEqual([]);
+        expect(await StorageUtil.getActiveAccount()).toBe("");
+        expect(await StorageUtil.getActivePage()).toBe(
+          typeof junk === "string" ? junk : "",
+        );
+        expect(await StorageUtil.getLockStateTimeStamp(LockState.LOCKED)).toBe(
+          typeof junk === "number" ? junk : 0,
+        );
+        expect(await StorageUtil.getTransactionValues()).toEqual({
+          receiverAddress: "",
+          amount: 0,
+        });
+        expect(await StorageUtil.getTokenContractsList(ACCOUNT)).toEqual([]);
+        expect(await StorageUtil.getNFTCollectionsList(ACCOUNT)).toEqual([]);
+        expect(await StorageUtil.getTransactionHistory(ACCOUNT)).toEqual([]);
+        expect(await StorageUtil.getContacts()).toEqual([]);
+        expect(await StorageUtil.getAccountLabels()).toEqual({});
+        expect(await StorageUtil.getHiddenAccounts()).toEqual({});
+        expect(await StorageUtil.getLedgerAccounts()).toEqual([]);
+        expect(await StorageUtil.getSettings()).toEqual({});
+        expect(await StorageUtil.getPriceCache()).toBeNull();
+        expect(
+          await StorageUtil.getDAppsConnectedAccountsData(
+            "https://example.com",
+          ),
+        ).toBeUndefined();
+        expect(await StorageUtil.getDAppsRequestData()).toBeUndefined();
+        expect(mockLocal.set).not.toHaveBeenCalled();
+        expect(mockSession.set).not.toHaveBeenCalled();
+        for (const [key, value] of Object.entries(values))
+          expect(localStore[profileStorageKey(key)]).toBe(value);
+      },
+    );
+
+    it.each([null, [], "junk", { ALL_BLOCKCHAINS: [null] }])(
+      "uses builtin chains for a corrupt chain envelope (%j)",
+      async (value) => {
+        localStore[profileStorageKey("BLOCKCHAINS")] = value;
+        const { QRL_BLOCKCHAINS } =
+          await import("@/configuration/qrlBlockchainConfig");
+        expect(await StorageUtil.getAllBlockChains()).toEqual(QRL_BLOCKCHAINS);
+        expect(await StorageUtil.getActiveBlockChain()).toEqual(
+          QRL_BLOCKCHAINS[0],
+        );
+        expect(mockLocal.set).not.toHaveBeenCalled();
+      },
+    );
+
+    it("repairs malformed paths on writes and retains other accounts", async () => {
+      const sibling = { "0x1": { tokens: [{ address: "retained" }] } };
+      localStore[profileStorageKey("TOKENS")] = {
+        ALL_TOKENS: { [ACCOUNT]: "junk", [ACCOUNT_2]: sibling },
+      };
+      const token = {
+        address: ACCOUNT,
+        symbol: "TOK",
+        decimals: 18,
+        image: "",
+      };
+      await StorageUtil.setTokenContractsList(ACCOUNT, token);
+      expect(await StorageUtil.getTokenContractsList(ACCOUNT)).toEqual([token]);
+      expect(
+        localStore[profileStorageKey("TOKENS")].ALL_TOKENS[ACCOUNT_2],
+      ).toEqual(sibling);
+      localStore[profileStorageKey("NFT_COLLECTIONS")] = "junk";
+      await StorageUtil.clearFromNFTCollectionsList(ACCOUNT, ACCOUNT_2);
+      expect(await StorageUtil.getNFTCollectionsList(ACCOUNT)).toEqual([]);
+      localStore[profileStorageKey("TX_HISTORY")] = { ALL_TX_HISTORY: false };
+      const entry = makeTxEntry();
+      await StorageUtil.setTransactionHistoryEntry(ACCOUNT, entry);
+      expect(await StorageUtil.getTransactionHistory(ACCOUNT)).toEqual([entry]);
+      localStore[profileStorageKey("ACCOUNTS")] = "junk";
+      await StorageUtil.setAllAccounts([ACCOUNT]);
+      expect(await StorageUtil.getAllAccounts()).toEqual([ACCOUNT]);
+    });
+
+    it("revokes malformed authorization records during account removal", async () => {
+      localStore[profileStorageKey("DAPPS")] = {
+        ALL_DAPPS: {
+          "https://example.com": {
+            urlOrigin: "https://example.com",
+            accounts: [ACCOUNT],
+            blockchains: [],
+            permissions: [{ caveats: [{ value: 123 }] }],
+          },
+        },
+      };
+      expect(
+        await StorageUtil.getDAppsConnectedAccountsData("https://example.com"),
+      ).toBeUndefined();
+      await StorageUtil.removeAccountFromAllDApps(ACCOUNT);
+      expect(localStore[profileStorageKey("DAPPS")].ALL_DAPPS).toEqual({});
+    });
+  });
 
   describe("Price cache", () => {
     it("should store and retrieve price cache", async () => {
