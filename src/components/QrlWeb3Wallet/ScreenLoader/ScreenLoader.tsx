@@ -75,6 +75,7 @@ const ScreenLoader = observer(() => {
     );
 
   if (screen === SCREENS.WALLET) return <Wallet />;
+  return undefined;
 });
 
 export default ScreenLoader;

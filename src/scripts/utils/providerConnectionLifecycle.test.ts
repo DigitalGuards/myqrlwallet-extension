@@ -18,9 +18,9 @@ class ProbeChannel extends Duplex {
     super({ objectMode: true });
   }
 
-  _read() {}
+  override _read() {}
 
-  _write(
+  override _write(
     chunk: unknown,
     _encoding: BufferEncoding,
     callback: (error?: Error | null) => void,

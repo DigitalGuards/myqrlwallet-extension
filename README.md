@@ -35,6 +35,8 @@ npm run build
 
 Load the generated `Extension/` directory in your browser. `npm run dev` rebuilds it when source files change.
 
+CI runs `node scripts/audit-gate.mjs` after `npm ci`. The gate checks production dependencies and blocks high or critical advisories unless a matching, unexpired exception is recorded in `audit-allowlist.json`.
+
 Browser tests exercise the built extension, including popup, side panel, expanded tab, account import, provider discovery, permission changes and service-worker restart recovery. The composition test uses the exact QuantaSwap revision pinned in CI.
 
 ## Capabilities

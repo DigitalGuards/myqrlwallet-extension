@@ -2,7 +2,9 @@ import { Button } from "@/components/UI/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { ROUTES } from "@/router/router";
 import { Separator } from "@/components/UI/Separator";
-import StorageUtil from "@/utilities/storageUtil";
+import StorageUtil, {
+  KeystoreStorageCorruptError,
+} from "@/utilities/storageUtil";
 import { Download, MoveLeft, Trash2 } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useState } from "react";
@@ -17,10 +19,12 @@ const SettingsData = observer(() => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
 
   const exportBackup = async () => {
     setExporting(true);
+    setExportError("");
     try {
       const keystores = await StorageUtil.getKeystores();
       const accounts = await StorageUtil.getAllAccounts();
@@ -46,6 +50,14 @@ const SettingsData = observer(() => {
       a.download = `qrl-wallet-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
+    } catch (error) {
+      // Only the corrupt-storage message is written for users; anything else
+      // gets a fixed message.
+      setExportError(
+        error instanceof KeystoreStorageCorruptError
+          ? error.message
+          : "The wallet backup could not be exported. Please try again.",
+      );
     } finally {
       setExporting(false);
     }
@@ -87,6 +99,11 @@ const SettingsData = observer(() => {
                 ? t("settings.data.exportingButton")
                 : t("settings.data.exportButton")}
             </Button>
+            {exportError && (
+              <p role="alert" className="mt-3 text-sm text-destructive">
+                {exportError}
+              </p>
+            )}
             <Separator className="my-5" />
             <p className="mb-3 text-xs text-muted-foreground">
               {t("settings.data.resetDescription")}

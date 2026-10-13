@@ -29,6 +29,23 @@ import {
 
 const KEYSTORES_IDENTIFIER = "KEYSTORES";
 
+export class KeystoreStorageCorruptError extends Error {
+  constructor() {
+    super("The wallet data in this browser could not be read.");
+    this.name = "KeystoreStorageCorruptError";
+  }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+// Validate the storage envelope here; decryption validates crypto parameters.
+const isStoredKeystore = (value: unknown): value is KeyStore =>
+  isRecord(value) &&
+  typeof value.address === "string" &&
+  (isQrlAddress(value.address) || isLegacyQrlAddress(value.address)) &&
+  isRecord(value.crypto);
+
 const ACCOUNTS_IDENTIFIER = "ACCOUNTS";
 const ALL_ACCOUNTS_IDENTIFIER = "ALL_ACCOUNTS";
 const ACTIVE_ACCOUNT_IDENTIFIER = "ACTIVE_ACCOUNT";
@@ -186,10 +203,22 @@ class StorageUtil {
     });
   }
 
-  static async getKeystores() {
+  static async getKeystores(): Promise<KeyStore[]> {
     const storageData = await walletLocalStorage.get(KEYSTORES_IDENTIFIER);
-    const keyStores = storageData?.[KEYSTORES_IDENTIFIER];
-    return (keyStores ? JSON.parse(keyStores) : []) as KeyStore[];
+    const stored: unknown = storageData?.[KEYSTORES_IDENTIFIER];
+    if (stored === undefined || stored === "") return [];
+    if (typeof stored !== "string") throw new KeystoreStorageCorruptError();
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stored);
+    } catch {
+      throw new KeystoreStorageCorruptError();
+    }
+    if (!Array.isArray(parsed) || !parsed.every(isStoredKeystore)) {
+      throw new KeystoreStorageCorruptError();
+    }
+    return parsed;
   }
 
   static async clearKeystores() {

@@ -599,6 +599,7 @@ class LockStore {
         await new Promise((r) => setTimeout(r, 500 * attempt));
       }
     }
+    return undefined;
   }
 
   /**

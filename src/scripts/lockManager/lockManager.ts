@@ -1,6 +1,9 @@
 import { walletSessionStorage } from "@/utilities/profileStorage";
-import StorageUtil, { LockState } from "@/utilities/storageUtil";
-import { Bytes } from "@theqrl/web3";
+import StorageUtil, {
+  KeystoreStorageCorruptError,
+  LockState,
+} from "@/utilities/storageUtil";
+import type { Bytes, KeyStore } from "@theqrl/web3";
 import { DEFAULT_AUTO_LOCK_MINUTES } from "@/configuration/autoLockConfig";
 import { encryptKeystore } from "@/crypto/keystoreCrypto";
 import { getMnemonicFromHexSeed } from "@/functions/getMnemonicFromHexSeed";
@@ -327,7 +330,16 @@ class LockManager {
     isLocked: boolean;
     hasPasswordSet: boolean;
   }> {
-    const keyStores = await StorageUtil.getKeystores();
+    let keyStores: KeyStore[];
+    try {
+      keyStores = await StorageUtil.getKeystores();
+    } catch (error) {
+      if (!(error instanceof KeystoreStorageCorruptError)) throw error;
+      // Keep the lock screen and its explicit recovery action reachable.
+      this.clearDecryptedKeys();
+      this.walletPassword = undefined;
+      return { isLocked: true, hasPasswordSet: true };
+    }
     const accounts = await StorageUtil.getStoredAccounts();
 
     // Onboarding.tsx (the only account-creation path that can ever run

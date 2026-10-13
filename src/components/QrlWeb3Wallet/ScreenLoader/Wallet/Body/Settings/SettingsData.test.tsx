@@ -4,6 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import StorageUtil, {
+  KeystoreStorageCorruptError,
+} from "@/utilities/storageUtil";
 import SettingsData from "./SettingsData";
 
 vi.mock("webextension-polyfill", () => ({
@@ -46,6 +49,52 @@ describe("SettingsData", () => {
     expect(
       screen.getByRole("button", { name: /Export Backup/i }),
     ).toBeInTheDocument();
+  });
+
+  it("shows a fixed message for other export failures", async () => {
+    const getKeystores = vi
+      .spyOn(StorageUtil, "getKeystores")
+      .mockRejectedValueOnce(new Error("QUOTA_BYTES quota exceeded"));
+    try {
+      renderComponent();
+      await userEvent.click(
+        screen.getByRole("button", { name: /Export Backup/i }),
+      );
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(
+        "The wallet backup could not be exported. Please try again.",
+      );
+      expect(alert).not.toHaveTextContent("QUOTA_BYTES");
+    } finally {
+      getKeystores.mockRestore();
+    }
+  });
+
+  it("shows corrupt wallet data without downloading a backup", async () => {
+    const getKeystores = vi
+      .spyOn(StorageUtil, "getKeystores")
+      .mockRejectedValueOnce(new KeystoreStorageCorruptError());
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click");
+    try {
+      renderComponent();
+      const exportButton = screen.getByRole("button", {
+        name: /Export Backup/i,
+      });
+      await userEvent.click(exportButton);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "The wallet data in this browser could not be read.",
+      );
+      expect(click).not.toHaveBeenCalled();
+      expect(exportButton).toBeEnabled();
+      expect(
+        screen.getByRole("button", { name: /Reset Wallet/i }),
+      ).toBeEnabled();
+    } finally {
+      getKeystores.mockRestore();
+      click.mockRestore();
+    }
   });
 
   it("should render the description text", () => {

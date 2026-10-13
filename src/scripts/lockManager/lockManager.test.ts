@@ -93,7 +93,9 @@ vi.mock("@/functions/getMnemonicFromHexSeed", () => ({
 import browser from "webextension-polyfill";
 import LockManager, { LOCK_MANAGER_MESSAGES } from "./lockManager";
 import type { DecryptedKeyType } from "./lockManager";
-import StorageUtil from "@/utilities/storageUtil";
+import StorageUtil, {
+  KeystoreStorageCorruptError,
+} from "@/utilities/storageUtil";
 
 const mockAlarms = browser.alarms as any;
 
@@ -122,8 +124,8 @@ const TRUSTED_SENDER = {
 
 const seedWallet = () => {
   localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
-    { address: MOCK_KEYS[0].address },
-    { address: KEY_B.address },
+    { address: MOCK_KEYS[0].address, crypto: {} },
+    { address: KEY_B.address, crypto: {} },
   ]);
   localStore[profileStorageKey("ACCOUNTS")] = {
     ALL_ACCOUNTS: [MOCK_KEYS[0].address, KEY_B.address],
@@ -179,6 +181,51 @@ describe("LockManager", () => {
   // ── Cold start: no keys in memory means locked ─────────────────
 
   describe("isLocked", () => {
+    it.each(["null", "{}", "[null]", "[{}]", "not JSON"])(
+      "keeps recovery reachable for corrupt storage %s without writing",
+      async (stored) => {
+        localStore[profileStorageKey("KEYSTORES")] = stored;
+        unlock();
+        vi.clearAllMocks();
+
+        await expect(
+          LockManager.lockManagerListener(
+            { name: LOCK_MANAGER_MESSAGES.IS_LOCKED },
+            TRUSTED_SENDER,
+          ),
+        ).resolves.toEqual({ isLocked: true, hasPasswordSet: true });
+        expect(LockManager.hasWalletPassword()).toBe(false);
+        expect(() => LockManager.getDecryptedKeys()).toThrow();
+        expect(localStore[profileStorageKey("KEYSTORES")]).toBe(stored);
+        for (const area of [browser.storage.local, browser.storage.session]) {
+          expect(area.set).not.toHaveBeenCalled();
+          expect(area.remove).not.toHaveBeenCalled();
+          expect(area.clear).not.toHaveBeenCalled();
+        }
+      },
+    );
+
+    it("propagates corrupt storage from account encryption before writing", async () => {
+      localStore[profileStorageKey("KEYSTORES")] = "null";
+      vi.clearAllMocks();
+
+      await expect(
+        LockManager.lockManagerListener(
+          {
+            name: LOCK_MANAGER_MESSAGES.ENCRYPT_ACCOUNT,
+            data: { seed: "unused-seed", password: "test-pw" },
+          },
+          TRUSTED_SENDER,
+        ),
+      ).rejects.toBeInstanceOf(KeystoreStorageCorruptError);
+      expect(localStore[profileStorageKey("KEYSTORES")]).toBe("null");
+      for (const area of [browser.storage.local, browser.storage.session]) {
+        expect(area.set).not.toHaveBeenCalled();
+        expect(area.remove).not.toHaveBeenCalled();
+        expect(area.clear).not.toHaveBeenCalled();
+      }
+    });
+
     it("reports locked with no restore path when decryptedKeys is undefined (F4)", async () => {
       seedWallet();
       // A cold worker: nothing was ever unlocked this session.

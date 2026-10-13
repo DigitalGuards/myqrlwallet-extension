@@ -5,6 +5,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
+import { KeystoreStorageCorruptError } from "@/utilities/storageUtil";
 import LockPasswordCheck from "./LockPasswordCheck";
 
 const {
@@ -91,6 +92,49 @@ describe("LockPasswordCheck", () => {
     await waitFor(() => {
       expect(screen.getByText("Enter your password")).toBeInTheDocument();
     });
+  });
+
+  it("shows corrupt wallet data and keeps the reset confirmation reachable", async () => {
+    const resetWallet = vi
+      .fn<() => Promise<void>>()
+      .mockResolvedValue(undefined);
+    renderComponent(
+      mockedStore({
+        lockStore: {
+          unlock: async () => {
+            throw new KeystoreStorageCorruptError();
+          },
+          resetWallet,
+        },
+      }),
+    );
+
+    await userEvent.type(
+      screen.getByLabelText("Enter password"),
+      "test-password",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Unlock" }));
+
+    expect(
+      await screen.findByText(
+        "The wallet data in this browser could not be read.",
+      ),
+    ).toBeInTheDocument();
+    expect(mockRecordFailedUnlockAttempt).not.toHaveBeenCalled();
+    expect(mockClearUnlockAttempts).not.toHaveBeenCalled();
+    const recovery = screen.getByRole("button", {
+      name: "Forgot password? Reset the wallet",
+    });
+    expect(recovery).toBeEnabled();
+    await userEvent.click(recovery);
+    const confirm = screen.getByRole("button", { name: "Reset wallet" });
+    expect(confirm).toBeDisabled();
+    await userEvent.type(
+      screen.getByLabelText("Type RESET to confirm"),
+      "RESET",
+    );
+    expect(confirm).toBeEnabled();
+    expect(resetWallet).not.toHaveBeenCalled();
   });
 
   it("should not display the field error if password validation succeeds", async () => {

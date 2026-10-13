@@ -148,9 +148,11 @@ const clearStore = (store: Record<string, any>) => {
 /** Seed mockLocalStore so isLocked() doesn't call clearAllData(). */
 const seedStorage = () => {
   mockLocalStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
-    { address: "0x123" },
+    { address: MOCK_KEYS[0].address, crypto: {} },
   ]);
-  mockLocalStore[profileStorageKey("ACCOUNTS")] = { ALL_ACCOUNTS: ["0x123"] };
+  mockLocalStore[profileStorageKey("ACCOUNTS")] = {
+    ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+  };
 };
 
 const minutes = (m: number) => m * 60_000;
