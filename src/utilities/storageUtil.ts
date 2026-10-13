@@ -706,7 +706,11 @@ class StorageUtil {
    * A function for storing the connected accounts info temporarily, which will be read by method like 'qrl_accounts'.
    * Call the getDAppsConnectedAccountsData function to retrieve the stored value, and clearDAppsConnectedAccountsData for clearing the stored value.
    */
-  static async setDAppsConnectedAccountsData(data: ConnectedAccountsDataType) {
+  static async setDAppsConnectedAccountsData(
+    data: Omit<ConnectedAccountsDataType, "blockchains"> & {
+      blockchains: Pick<BlockchainDataType, "chainId" | "qrnsRegistryAddress">[];
+    },
+  ) {
     const urlOrigin = data.urlOrigin;
     const accounts = data.accounts.map(toCanonicalQrlAddress);
     const blockchains = data.blockchains.map((chain) =>
