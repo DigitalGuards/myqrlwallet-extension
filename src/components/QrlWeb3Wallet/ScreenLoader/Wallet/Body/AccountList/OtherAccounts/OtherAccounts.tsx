@@ -42,10 +42,10 @@ import AccountId from "../AccountId/AccountId";
 
 type OtherAccountCardProps = {
   accountAddress: string;
-  onSwitch: (address: string) => void;
+  onSwitch: (address: string) => Promise<void>;
   onCopy: (address: string) => void;
   onReceive: (address: string) => void;
-  onHide: (address: string) => void;
+  onHide: (address: string) => Promise<void>;
   onRemove: (address: string) => Promise<void>;
 };
 
@@ -104,6 +104,12 @@ const OtherAccountCard = observer(
       setIsEditing(false);
     };
 
+    const onSaveEdit = () => {
+      saveEdit().catch((error: unknown) => {
+        console.error("Failed to save the account label:", error);
+      });
+    };
+
     return (
       <Card className="flex flex-col gap-2 p-3 font-bold text-foreground">
         {isEditing && (
@@ -115,9 +121,11 @@ const OtherAccountCard = observer(
               name={`accountLabel-${accountAddress}`}
               autoComplete="off"
               value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
+              onChange={(e) => {
+                setEditValue(e.target.value);
+              }}
               onKeyDown={(e) => {
-                if (e.key === "Enter") saveEdit();
+                if (e.key === "Enter") onSaveEdit();
                 if (e.key === "Escape") cancelEdit();
               }}
               className="h-6 w-32 text-xs"
@@ -129,7 +137,7 @@ const OtherAccountCard = observer(
               variant="ghost"
               size="icon"
               className="size-5"
-              onClick={saveEdit}
+              onClick={onSaveEdit}
               aria-label={t("home.saveLabel")}
             >
               <Check className="h-3 w-3" />
@@ -167,7 +175,14 @@ const OtherAccountCard = observer(
                 <DropdownMenuGroup>
                   <DropdownMenuItem
                     className="cursor-pointer data-[highlighted]:text-secondary"
-                    onClick={() => onSwitch(accountAddress)}
+                    onClick={() => {
+                      onSwitch(accountAddress).catch((error: unknown) => {
+                        console.error(
+                          "Failed to switch the active account:",
+                          error,
+                        );
+                      });
+                    }}
                   >
                     <div className="flex gap-2">
                       <ArrowRight size="16" />
@@ -176,7 +191,9 @@ const OtherAccountCard = observer(
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="cursor-pointer data-[highlighted]:text-secondary"
-                    onClick={() => onReceive(accountAddress)}
+                    onClick={() => {
+                      onReceive(accountAddress);
+                    }}
                   >
                     <div className="flex gap-2">
                       <Download size="16" />
@@ -185,7 +202,9 @@ const OtherAccountCard = observer(
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="cursor-pointer data-[highlighted]:text-secondary"
-                    onClick={() => onCopy(accountAddress)}
+                    onClick={() => {
+                      onCopy(accountAddress);
+                    }}
                   >
                     <div className="flex gap-2">
                       <Copy size="16" />
@@ -203,7 +222,11 @@ const OtherAccountCard = observer(
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="cursor-pointer data-[highlighted]:text-secondary"
-                    onClick={() => onHide(accountAddress)}
+                    onClick={() => {
+                      onHide(accountAddress).catch((error: unknown) => {
+                        console.error("Failed to hide the account:", error);
+                      });
+                    }}
                   >
                     <div className="flex gap-2">
                       <EyeOff size="16" />
@@ -212,7 +235,9 @@ const OtherAccountCard = observer(
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="cursor-pointer text-destructive data-[highlighted]:text-destructive"
-                    onClick={() => setRemoveDialogOpen(true)}
+                    onClick={() => {
+                      setRemoveDialogOpen(true);
+                    }}
                   >
                     <div className="flex gap-2">
                       <Trash2 size="16" />
@@ -266,7 +291,10 @@ const OtherAccountCard = observer(
                 type="button"
                 variant="destructive"
                 disabled={isRemoving}
-                onClick={confirmRemove}
+                onClick={() => {
+                  // confirmRemove reports failures and keeps the dialog open.
+                  void confirmRemove();
+                }}
               >
                 {isRemoving ? (
                   <Loader className="mr-2 h-4 w-4 shrink-0 animate-spin" />
@@ -293,7 +321,7 @@ const OtherAccounts = observer(() => {
     lockStore,
     accountLabelsStore,
   } = useStore();
-  const { qrlAccounts, activeAccount, setActiveAccount } = qrlStore;
+  const { qrlAccounts, activeAccount } = qrlStore;
   const { copy } = useCopy();
   const { accountAddress: activeAccountAddress } = activeAccount;
   const { accounts } = qrlAccounts;
@@ -315,13 +343,19 @@ const OtherAccounts = observer(() => {
   };
 
   const receiveAccount = (accountAddress: string) => {
-    navigate(ROUTES.RECEIVE, { state: { accountAddress } });
+    Promise.resolve(
+      navigate(ROUTES.RECEIVE, { state: { accountAddress } }),
+    ).catch((error: unknown) => {
+      console.error("Failed to open account receive:", error);
+    });
   };
 
   const onAccountSwitch = async (accountAddress: string) => {
     await StorageUtil.clearTransactionValues();
-    navigate(ROUTES.HOME);
-    await setActiveAccount(accountAddress);
+    Promise.resolve(navigate(ROUTES.HOME)).catch((error: unknown) => {
+      console.error("Failed to open the home page:", error);
+    });
+    await qrlStore.setActiveAccount(accountAddress);
   };
 
   const onHide = async (accountAddress: string) => {

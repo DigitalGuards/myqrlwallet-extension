@@ -69,7 +69,9 @@ const ChainIcon = ({ src, alt, chainIconSize }: ChainIconType) => {
         className={chainIconClasses({ shouldDisplayFallback, chainIconSize })}
         src={src}
         alt={alt}
-        onLoad={() => setIsLoading(false)}
+        onLoad={() => {
+          setIsLoading(false);
+        }}
         onError={() => {
           setIsLoading(false);
           setHasSrcError(true);

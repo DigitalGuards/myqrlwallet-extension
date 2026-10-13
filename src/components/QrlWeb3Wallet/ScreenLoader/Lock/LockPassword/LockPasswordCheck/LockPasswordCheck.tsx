@@ -32,7 +32,6 @@ const createFormSchema = (t: TFunction) =>
  */
 const LockPasswordCheck = observer(() => {
   const { lockStore } = useStore();
-  const { unlock } = lockStore;
   const { t } = useTranslation();
   const FormSchema = createFormSchema(t);
 
@@ -63,6 +62,12 @@ const LockPasswordCheck = observer(() => {
     setFocus,
   } = form;
 
+  const reportSubmitError = (error: unknown) => {
+    const message =
+      error instanceof Error ? error.message : t("lock.unlock.errorFailed");
+    setError("password", { message });
+  };
+
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     scrollShellToTop();
     // R2: re-read the persisted counter first, so this surface's own
@@ -76,7 +81,7 @@ const LockPasswordCheck = observer(() => {
       return;
     }
     try {
-      const result = await unlock(formData.password);
+      const result = await lockStore.unlock(formData.password);
       const waitUntil = await recordResult(result);
       if (result === "wrong-password") {
         setError("password", {
@@ -92,9 +97,7 @@ const LockPasswordCheck = observer(() => {
         setError("password", { message: t("lock.unlock.errorCouldNotVerify") });
       }
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : t("lock.unlock.errorFailed");
-      setError("password", { message });
+      reportSubmitError(error);
     }
     setUnlockAttempt((attempt) => attempt + 1);
   }
@@ -104,7 +107,9 @@ const LockPasswordCheck = observer(() => {
       <form
         name="accountUnlock"
         className="w-full"
-        onSubmit={handleSubmit(onSubmit)}
+        onSubmit={(event) => {
+          handleSubmit(onSubmit)(event).catch(reportSubmitError);
+        }}
       >
         <div className="page-enter flex w-full flex-col items-center gap-5 text-center">
           <FormField
@@ -137,7 +142,9 @@ const LockPasswordCheck = observer(() => {
                     aria-label={t("lock.unlock.togglePasswordVisibility")}
                     disabled={isSubmitting || isWaiting}
                     className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-2.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                    onClick={() => setShowPassword((show) => !show)}
+                    onClick={() => {
+                      setShowPassword((show) => !show);
+                    }}
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4" />
@@ -183,7 +190,9 @@ const LockPasswordCheck = observer(() => {
             type="button"
             disabled={isSubmitting}
             className="text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-50"
-            onClick={() => setResetDialogOpen(true)}
+            onClick={() => {
+              setResetDialogOpen(true);
+            }}
           >
             {t("lock.unlock.forgotPassword")}
           </button>
