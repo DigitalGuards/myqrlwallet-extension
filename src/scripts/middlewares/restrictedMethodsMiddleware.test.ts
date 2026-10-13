@@ -70,12 +70,7 @@ const setupStorage = ({
       case profileStorageKey("LEDGER"):
         return {
           [profileStorageKey("LEDGER")]: {
-            LEDGER_ACCOUNTS: ledgerAccounts.map((address, index) => ({
-              address,
-              derivationPath: `m/44'/238'/0'/0/${index}`,
-              publicKey: "",
-              index,
-            })),
+            LEDGER_ACCOUNTS: ledgerAccounts.map((address) => ({ address })),
           },
         };
       case profileStorageKey("SETTINGS"):

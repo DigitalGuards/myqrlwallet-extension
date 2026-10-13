@@ -1,5 +1,4 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
-import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
 import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { toChecksumAddress } from "@theqrl/wallet.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -184,7 +183,7 @@ describe("the dApp receives the code the approval recorded", () => {
                   [ORIGIN]: {
                     urlOrigin: ORIGIN,
                     accounts: [ACCOUNT],
-                    blockchains: [{ ...DEFAULT_BLOCKCHAIN, chainId: CHAIN_ID }],
+                    blockchains: [{ chainId: CHAIN_ID }],
                     permissions: [],
                   },
                 },
