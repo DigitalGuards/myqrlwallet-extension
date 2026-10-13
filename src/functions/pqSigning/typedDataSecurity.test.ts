@@ -7,6 +7,7 @@ import {
   hashStruct,
   TYPED_DATA_LIMITS,
   typedDataSchemeVersion,
+  typeHash,
   type TypedDataPayload,
 } from "./typedData";
 
@@ -45,6 +46,104 @@ describe("typed data base type names", () => {
   ])("preserves the suffix-stripping result for %j", (type, expected) => {
     expect(baseTypeName(type)).toBe(expected);
     expect(baseTypeName(type)).toBe(type.replace(/(\[\d*\])+$/, ""));
+  });
+});
+
+describe.each([
+  {
+    name: "encodeType",
+    encode: (types: unknown) => encodeType("Payload", types),
+  },
+  { name: "typeHash", encode: (types: unknown) => typeHash("Payload", types) },
+  {
+    name: "encodeField",
+    encode: (types: unknown) => encodeField("uint8", 1, types),
+  },
+  {
+    name: "hashStruct",
+    encode: (types: unknown) => hashStruct("Payload", { value: 1 }, types),
+  },
+])("$name type-map boundary", ({ encode }) => {
+  it.each([
+    { label: "null", types: null },
+    { label: "undefined", types: undefined },
+    { label: "string", types: "Payload" },
+    { label: "array", types: [] },
+    {
+      label: "array with a struct property",
+      types: Object.assign([], {
+        Payload: [{ name: "value", type: "uint8" }],
+      }),
+    },
+  ])("rejects a $label type map", ({ types }) => {
+    expect(() => encode(types)).toThrow(
+      "typed data types must be a struct map",
+    );
+  });
+
+  it.each([undefined, null, {}, [], "uint8"])(
+    "rejects an invalid struct definition: %j",
+    (definition) => {
+      expect(() => encode({ Payload: definition })).toThrow(
+        "empty or invalid struct: Payload",
+      );
+    },
+  );
+
+  it.each([
+    { label: "null", field: null },
+    { label: "undefined", field: undefined },
+    { label: "primitive", field: 1 },
+    { label: "missing name", field: { type: "uint8" } },
+    { label: "numeric name", field: { name: 1, type: "uint8" } },
+    { label: "empty name", field: { name: "", type: "uint8" } },
+    {
+      label: "array with field properties",
+      field: Object.assign([], { name: "value", type: "uint8" }),
+    },
+  ])("rejects a field with $label", ({ field }) => {
+    expect(() => encode({ Payload: [field] })).toThrow("bad field in Payload");
+  });
+
+  it.each([undefined, null, 1, ""])(
+    "rejects an invalid field type: %j",
+    (type) => {
+      expect(() => encode({ Payload: [{ name: "value", type }] })).toThrow(
+        "bad field type in Payload.value",
+      );
+    },
+  );
+
+  it("rejects a sparse struct definition", () => {
+    expect(() => encode({ Payload: new Array<unknown>(1) })).toThrow(
+      "bad field in Payload",
+    );
+  });
+});
+
+describe("typed data missing definitions and invalid field types", () => {
+  it("requires the domain and primary type definitions", () => {
+    const withoutDomain = payloadWith("uint8", 1);
+    delete withoutDomain.types["QRLDomain"];
+    expect(() => computeTypedDataDigest(withoutDomain)).toThrow(
+      "QRLDomain type is required",
+    );
+
+    const withoutPrimary = payloadWith("uint8", 1);
+    delete withoutPrimary.types["Payload"];
+    expect(() => computeTypedDataDigest(withoutPrimary)).toThrow(
+      "unknown primary type: Payload",
+    );
+  });
+
+  it.each([
+    ["Missing", "unknown type: Missing"],
+    ["uint7", "invalid int width: uint7"],
+    ["bytes0", "invalid bytesN width: bytes0"],
+    ["uint8[0]", "invalid array size: uint8[0]"],
+    ["uint8[257]", "invalid array size: uint8[257]"],
+  ])("rejects %s", (type, error) => {
+    expect(() => computeTypedDataDigest(payloadWith(type, 1))).toThrow(error);
   });
 });
 
@@ -163,7 +262,9 @@ describe("typed data deterministic resource limits", () => {
     );
 
     const payload = payloadWith("uint8", 1);
-    const field = payload.types["Payload"]?.[0];
+    const field = payload.types["Payload"]?.find(
+      (candidate) => candidate.name === "value",
+    );
     if (!field) throw new Error("test fixture is missing Payload.value");
     Object.assign(field, { displayType: "string" });
     expect(() => computeTypedDataDigest(payload)).toThrow(/struct map/);

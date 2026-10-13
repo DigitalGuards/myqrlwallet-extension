@@ -69,7 +69,7 @@ export interface TypedField {
   type: FieldType;
 }
 export type StructDef = readonly TypedField[];
-export type TypeMap = Record<string, StructDef>;
+export type TypeMap = Partial<Record<string, StructDef>>;
 export type Domain = Record<string, unknown>;
 export type Message = Record<string, unknown>;
 
@@ -89,6 +89,10 @@ type AtomicKind =
 
 function isMessageObject(value: unknown): value is Message {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
 }
 
 function hasExactOwnKeys(
@@ -120,7 +124,7 @@ function isTypeMap(value: unknown): value is TypeMap {
     if (typeCount > TYPED_DATA_LIMITS.maxTypes) return false;
     const definition = value[name];
     if (
-      !Array.isArray(definition) ||
+      !isUnknownArray(definition) ||
       definition.length > TYPED_DATA_LIMITS.maxFieldsPerType ||
       !definition.every(isTypedField)
     ) {
@@ -205,12 +209,18 @@ function parseFieldType(
   if (type.length > TYPED_DATA_LIMITS.maxFieldTypeLength) {
     throw new Error(`field type too long: ${inputPreview(type)}`);
   }
-  const m = ATOMIC_RE.exec(type);
+  const m: readonly (string | undefined)[] | null = ATOMIC_RE.exec(type);
   if (m) {
     const [, atomic, intKind, intWidthStr, bytesWidthStr, innerType, sizeStr] =
       m;
-    if (atomic)
-      return { kind: atomic as "address" | "bool" | "string" | "bytes" };
+    if (
+      atomic === "address" ||
+      atomic === "bool" ||
+      atomic === "string" ||
+      atomic === "bytes"
+    ) {
+      return { kind: atomic };
+    }
     if (intKind) {
       const width = Number(intWidthStr);
       if (
@@ -316,7 +326,10 @@ function collectDependencies(primary: string, types: TypeMap): Set<string> {
   return visited;
 }
 
-function validateTypeMap(types: TypeMap): void {
+function validateTypeMap(types: unknown): asserts types is TypeMap {
+  if (!isMessageObject(types)) {
+    throw new Error("typed data types must be a struct map");
+  }
   const entries = Object.entries(types);
   if (entries.length === 0 || entries.length > TYPED_DATA_LIMITS.maxTypes) {
     throw new Error(
@@ -332,7 +345,7 @@ function validateTypeMap(types: TypeMap): void {
       );
     }
     if (
-      !Array.isArray(def) ||
+      !isUnknownArray(def) ||
       def.length === 0 ||
       def.length > TYPED_DATA_LIMITS.maxFieldsPerType
     ) {
@@ -344,24 +357,24 @@ function validateTypeMap(types: TypeMap): void {
     }
     const seen = new Set<string>();
     for (const f of def) {
-      if (!f || typeof f.name !== "string" || !f.name) {
+      if (!isMessageObject(f) || typeof f["name"] !== "string" || !f["name"]) {
         throw new Error(`bad field in ${inputPreview(name)}`);
       }
-      if (typeof f.type !== "string" || !f.type) {
+      if (typeof f["type"] !== "string" || !f["type"]) {
         throw new Error(
-          `bad field type in ${inputPreview(name)}.${inputPreview(f.name)}`,
+          `bad field type in ${inputPreview(name)}.${inputPreview(f["name"])}`,
         );
       }
-      if (f.type.length > TYPED_DATA_LIMITS.maxFieldTypeLength) {
-        throw new Error(`field type too long: ${inputPreview(f.type)}`);
+      if (f["type"].length > TYPED_DATA_LIMITS.maxFieldTypeLength) {
+        throw new Error(`field type too long: ${inputPreview(f["type"])}`);
       }
-      assertIdentifier(f.name, `field name in ${inputPreview(name)}`);
-      if (seen.has(f.name)) {
+      assertIdentifier(f["name"], `field name in ${inputPreview(name)}`);
+      if (seen.has(f["name"])) {
         throw new Error(
-          `duplicate field "${inputPreview(f.name)}" in ${inputPreview(name)}`,
+          `duplicate field "${inputPreview(f["name"])}" in ${inputPreview(name)}`,
         );
       }
-      seen.add(f.name);
+      seen.add(f["name"]);
     }
   }
 }
@@ -374,7 +387,7 @@ function validateTypeMap(types: TypeMap): void {
  * rejection is a payload-level concern (the union of reachable sets across
  * QRLDomain + primaryType) and lives in `computeTypedDataDigest`.
  */
-export function encodeType(primary: string, types: TypeMap): string {
+export function encodeType(primary: string, types: unknown): string {
   validateTypeMap(types);
   const deps = collectDependencies(primary, types);
   const others = [...deps].filter((n) => n !== primary).sort();
@@ -382,9 +395,7 @@ export function encodeType(primary: string, types: TypeMap): string {
     .map((name) => {
       const fields = types[name];
       if (!fields) {
-        // Every dependency is collected from `types`, so this is unreachable;
-        // throw rather than silently emit a wrong encodeType (which would
-        // change the type hash and thus the signature).
+        // A missing definition must fail before computing the type hash.
         throw new Error(
           `encodeType: missing type definition for ${inputPreview(name)}`,
         );
@@ -395,7 +406,7 @@ export function encodeType(primary: string, types: TypeMap): string {
     .join("");
 }
 
-export function typeHash(primary: string, types: TypeMap): Uint8Array {
+export function typeHash(primary: string, types: unknown): Uint8Array {
   return shake256(new TextEncoder().encode(encodeType(primary, types)), {
     dkLen: DIGEST_LEN,
   });
@@ -580,7 +591,7 @@ function encodeFieldWithBudget(
     }
 
     case "array": {
-      if (!Array.isArray(value)) {
+      if (!isUnknownArray(value)) {
         throw new Error(`array field expects array: ${typeof value}`);
       }
       if (value.length > TYPED_DATA_LIMITS.maxArrayLength) {
@@ -607,7 +618,7 @@ function encodeFieldWithBudget(
 export function encodeField(
   type: FieldType,
   value: unknown,
-  types: TypeMap,
+  types: unknown,
   schemeVersion?: TypedDataSchemeVersion,
 ): Uint8Array {
   validateTypeMap(types);
@@ -660,7 +671,7 @@ function hashStructWithBudget(
 export function hashStruct(
   primary: string,
   data: Message,
-  types: TypeMap,
+  types: unknown,
   schemeVersion?: TypedDataSchemeVersion,
 ): Uint8Array {
   validateTypeMap(types);
@@ -741,7 +752,8 @@ function parseAndValidatePayload(payload: unknown): TypedDataPayload {
  * with 64-byte slots when the domain or another struct has an address.
  */
 function schemeVersionForTypes(types: TypeMap): TypedDataSchemeVersion {
-  for (const fields of Object.values(types)) {
+  for (const [name, fields] of Object.entries(types)) {
+    if (!fields) throw new Error(`unknown type: ${inputPreview(name)}`);
     if (fields.some((f) => baseTypeName(f.type) === "address")) {
       return SCHEME_VERSION_TYPED_V2;
     }
