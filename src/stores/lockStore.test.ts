@@ -1,7 +1,7 @@
 import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
 const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Web3BaseWalletAccount } from "@theqrl/web3";
+import type { KeyStore, Web3BaseWalletAccount } from "@theqrl/web3";
 
 type StorageListener = (
   changes: Record<string, unknown>,
@@ -817,9 +817,17 @@ describe("LockStore – unlock worker fan-out", () => {
 
   it("persists upgraded keystores index-aligned with the original list", async () => {
     const store = await createLockStore();
-    const upgradedB = {
+    const upgradedB: KeyStore = {
+      version: 1,
+      id: "upgraded-b",
       address: KEYSTORE_B.address,
-      crypto: { upgraded: true },
+      crypto: {
+        cipher: "aes-256-gcm",
+        ciphertext: "ab".repeat(67),
+        cipherparams: { iv: "ab".repeat(12) },
+        kdf: "argon2id",
+        kdfparams: { m: 262144, t: 4, p: 4, dklen: 32, salt: "ab".repeat(32) },
+      },
     };
     behaviors = [
       () => ({ success: true, keys: [KEY_A], upgraded: [null] }),
@@ -836,6 +844,105 @@ describe("LockStore – unlock worker fan-out", () => {
     const keystores: unknown = JSON.parse(storedKeystores);
     expect(keystores).toEqual([KEYSTORE_A, upgradedB]);
   });
+
+  it("persists complete password-change results and sends session keys in order", async () => {
+    const store = await createLockStore();
+    const replacement: KeyStore = {
+      version: 1,
+      id: "reencrypted-a",
+      address: KEYSTORE_A.address,
+      crypto: {
+        cipher: "aes-256-gcm",
+        ciphertext: "ab".repeat(67),
+        cipherparams: { iv: "ab".repeat(12) },
+        kdf: "argon2id",
+        kdfparams: { m: 262144, t: 4, p: 4, dklen: 32, salt: "ab".repeat(32) },
+      },
+    };
+    const second = {
+      ...replacement,
+      id: "reencrypted-b",
+      address: KEYSTORE_B.address,
+      extra: { retained: true },
+    };
+    behaviors = [
+      () => ({ success: true, newKeys: [KEY_A], newKeystores: [replacement] }),
+      () => ({ success: true, newKeys: [KEY_B], newKeystores: [second] }),
+    ];
+    const password = "néw-password".normalize("NFD");
+
+    expect(await store.changePassword("old-password", password)).toBe(
+      "success",
+    );
+
+    expect(localStore.get(profileStorageKey("KEYSTORES"))).toBe(
+      JSON.stringify([replacement, second]),
+    );
+    expect(
+      messagesSent().filter((message) => message.name === "SET_DECRYPTED_KEYS"),
+    ).toEqual([
+      {
+        name: "SET_DECRYPTED_KEYS",
+        data: {
+          keys: [KEY_A, KEY_B],
+          walletPassword: password.normalize("NFC"),
+        },
+      },
+    ]);
+  });
+
+  it.each([
+    { label: "missing fields", response: { success: true } },
+    {
+      label: "empty chunks",
+      response: {
+        success: true,
+        keys: [],
+        upgraded: [],
+        newKeys: [],
+        newKeystores: [],
+      },
+    },
+    {
+      label: "foreign address",
+      response: {
+        success: true,
+        keys: [KEY_B],
+        upgraded: [null],
+        newKeys: [KEY_B],
+        newKeystores: [KEYSTORE_B],
+      },
+    },
+    {
+      label: "malformed keystores",
+      response: {
+        success: true,
+        keys: [KEY_A],
+        upgraded: [KEYSTORE_A],
+        newKeys: [KEY_A],
+        newKeystores: [KEYSTORE_A],
+      },
+    },
+  ])(
+    "preserves stored keystores and session keys after $label worker replies",
+    async ({ response }) => {
+      const store = await createLockStore();
+      const stored = localStore.get(profileStorageKey("KEYSTORES"));
+      behaviors = [() => response];
+
+      await expect(store.unlock("pw")).rejects.toThrow(
+        "Unable to decrypt the wallet on this device right now.",
+      );
+      expect(await store.changePassword("pw", "new-pw")).toBe("failed");
+
+      expect(localStore.get(profileStorageKey("KEYSTORES"))).toBe(stored);
+      expect(
+        messagesSent().filter(
+          (message) => message.name === "SET_DECRYPTED_KEYS",
+        ),
+      ).toEqual([]);
+    },
+  );
 });
 
 describe("LockStore – keep-alive port only while unlocked (real-device regression fix)", () => {

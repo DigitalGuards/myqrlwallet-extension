@@ -232,7 +232,10 @@ export async function decryptBackupKeystore(
     }
   }
 
-  const response = await runWorkerJob<KeystoreImportWorkerRequest, unknown>(
+  const response = await runWorkerJob<
+    KeystoreImportWorkerRequest,
+    KeystoreImportWorkerResponse
+  >(
     () =>
       new Worker(
         new URL("../scripts/workers/keystoreImportWorker.ts", import.meta.url),
@@ -240,10 +243,8 @@ export async function decryptBackupKeystore(
       ),
     { keystore, password: normalised },
     { success: false, wrongPassword: false },
+    isKeystoreImportWorkerResponse,
   );
-  if (!isKeystoreImportWorkerResponse(response)) {
-    throw new Error("Keystore decryption failed");
-  }
   if (!response.success) {
     if (response.wrongPassword) {
       throw new WalletFileDecryptError();
