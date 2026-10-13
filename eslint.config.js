@@ -916,42 +916,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/scripts/middlewares/appendSenderDataMiddleware.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-    },
-  },
-  {
-    files: ["src/scripts/middlewares/blockUnSupportedMethodsMiddleware.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
-    files: [
-      "src/scripts/middlewares/restrictedMethodsMiddleware.approvalErrors.test.ts",
-    ],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-      "@typescript-eslint/require-await": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: ["src/scripts/middlewares/unrestrictedMethodsMiddleware.ts"],
-    rules: {
-      "@typescript-eslint/ban-ts-comment": "off",
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-misused-promises": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
     files: ["src/scripts/utils/approvalSlot.test.ts"],
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
@@ -1082,20 +1046,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/scripts/utils/restrictedMethodsMiddlewareUtils.ts"],
-    rules: {
-      "@typescript-eslint/ban-ts-comment": "off",
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-      "@typescript-eslint/require-await": "off",
-      "@typescript-eslint/restrict-template-expressions": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
     files: ["src/scripts/utils/scriptUtils.ts"],
     rules: {
       "@typescript-eslint/ban-ts-comment": "off",
@@ -1165,9 +1115,7 @@ export const lintRatchet = [
   {
     files: ["src/scripts/utils/unrestrictedMethodExecutor.test.ts"],
     rules: {
-      "@typescript-eslint/await-thenable": "off",
       "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-extraneous-class": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
