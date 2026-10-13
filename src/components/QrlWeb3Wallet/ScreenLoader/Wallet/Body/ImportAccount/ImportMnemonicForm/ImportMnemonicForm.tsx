@@ -60,23 +60,21 @@ const ImportMnemonicForm = observer(
       formState: { isSubmitting, isValid },
     } = form;
 
+    const reportSubmitError = (error: unknown) => {
+      control.setError("mnemonicPhrases", {
+        message: `${t("importAccount.readError")} ${String(error)}`,
+      });
+    };
+
     async function onSubmit(formData: z.infer<typeof FormSchema>) {
       try {
         const accounts = qrlInstance?.accounts ?? new Web3().qrl.accounts;
         const account = accounts.seedToAccount(
           getHexSeedFromMnemonic(formData.mnemonicPhrases.trim()),
         );
-        if (account) {
-          await onImported(account);
-        } else {
-          control.setError("mnemonicPhrases", {
-            message: t("importAccount.importFailed"),
-          });
-        }
+        await onImported(account);
       } catch (error) {
-        control.setError("mnemonicPhrases", {
-          message: `${t("importAccount.readError")} ${error}`,
-        });
+        reportSubmitError(error);
       }
     }
 
@@ -86,7 +84,9 @@ const ImportMnemonicForm = observer(
           name="importAccount"
           aria-label="importAccount"
           className="w-full"
-          onSubmit={handleSubmit(onSubmit)}
+          onSubmit={(event) => {
+            handleSubmit(onSubmit)(event).catch(reportSubmitError);
+          }}
         >
           <div className="space-y-4">
             <FormField
