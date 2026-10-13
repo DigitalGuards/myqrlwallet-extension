@@ -128,8 +128,9 @@ describe("v3 storage isolation", () => {
 
   it("reads only own prefixed properties", async () => {
     const inherited = { [profileStorageKey("RECORDS")]: ["inherited"] };
-    const result: unknown = Object.create(inherited);
-    vi.spyOn(browser.storage.local, "get").mockResolvedValue(malformed(result));
+    const result: Record<string, unknown> = {};
+    Object.setPrototypeOf(result, inherited);
+    vi.spyOn(browser.storage.local, "get").mockResolvedValue(result);
 
     expect(await walletLocalStorage.get("RECORDS")).toEqual({});
   });
