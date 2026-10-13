@@ -2325,13 +2325,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/services/assetDiscovery.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
     files: ["src/services/ledger/ledgerApdu.test.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
@@ -2390,19 +2383,6 @@ export const lintRatchet = [
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
-    files: ["src/services/onChainHistory.test.ts"],
-    rules: {
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
-    files: ["src/services/onChainHistory.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
     },
   },
   {
