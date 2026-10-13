@@ -27,8 +27,11 @@ Use Node.js 22 and npm.
 git clone https://github.com/DigitalGuards/myqrlwallet-extension.git
 cd myqrlwallet-extension
 npm ci
+node scripts/audit-gate.mjs
 npm run lint
+npm run lint:ratchet
 npx tsc --noEmit
+npx tsc --noEmit -p tsconfig.node.json
 npm test
 npm run build
 ```
@@ -36,6 +39,10 @@ npm run build
 Load the generated `Extension/` directory in your browser. `npm run dev` rebuilds it when source files change.
 
 CI runs `node scripts/audit-gate.mjs` after `npm ci`. The gate checks production dependencies and blocks high or critical advisories unless a matching, unexpired exception is recorded in `audit-allowlist.json`.
+
+Production TypeScript uses strict typed linting. Every linted TypeScript file belongs to a tsconfig project, including tests, browser integration tests and build tools. Unit tests and mocks retain the recommended rules with narrow fixture exceptions.
+
+The sorted block at the end of `eslint.config.js` records existing production debt by exact file and rule. Entries may only be removed. After completing a cleanup slice, run `npm run lint:ratchet:update`; regeneration refuses new pairs. CI runs `npm run lint:ratchet` after lint to catch stale entries. Rules disabled for an existing pair cover that entire file, so review new changes in those files for additional debt.
 
 Browser tests exercise the built extension, including popup, side panel, expanded tab, account import, provider discovery, permission changes and service-worker restart recovery. The composition test uses the exact QuantaSwap revision pinned in CI.
 

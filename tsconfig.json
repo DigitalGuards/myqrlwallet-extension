@@ -28,6 +28,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src", "public", "vitest.setup.ts"],
+  "include": ["src", "public", "vitest.setup.ts", "e2e"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
