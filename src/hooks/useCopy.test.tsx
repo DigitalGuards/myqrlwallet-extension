@@ -33,12 +33,10 @@ describe("useCopy", () => {
 
   it("reports copied only after the clipboard write resolves", async () => {
     let resolveWrite: () => void = () => {};
-    const writeText = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveWrite = resolve;
-        }),
-    );
+    const write = new Promise<void>((resolve) => {
+      resolveWrite = resolve;
+    });
+    const writeText = vi.fn(() => write);
     setClipboard(writeText);
 
     render(<Probe />);
@@ -50,6 +48,7 @@ describe("useCopy", () => {
 
     await act(async () => {
       resolveWrite();
+      await write;
     });
     expect(screen.getByTestId("state")).toHaveTextContent("copied");
   });

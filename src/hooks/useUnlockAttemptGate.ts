@@ -50,9 +50,13 @@ export function useUnlockAttemptGate(): UnlockAttemptGate {
 
   useEffect(() => {
     let cancelled = false;
-    getUnlockAttemptState().then((state) => {
-      if (!cancelled) setWaitUntil(state.waitUntil);
-    });
+    getUnlockAttemptState()
+      .then((state) => {
+        if (!cancelled) setWaitUntil(state.waitUntil);
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to load unlock attempts:", error);
+      });
     return () => {
       cancelled = true;
     };
@@ -66,8 +70,7 @@ export function useUnlockAttemptGate(): UnlockAttemptGate {
     if (waitUntil <= Date.now()) return;
 
     // Self-clearing: the interval cancels itself the moment the countdown
-    // reaches zero, instead of continuing to tick every 250ms until the
-    // component unmounts or waitUntil changes again (N10).
+    // reaches zero. Unmounting or changing waitUntil also clears it (N10).
     const interval = setInterval(() => {
       const remaining = computeRemaining();
       setRemainingSeconds(remaining);
@@ -75,7 +78,9 @@ export function useUnlockAttemptGate(): UnlockAttemptGate {
         clearInterval(interval);
       }
     }, 250);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+    };
   }, [waitUntil]);
 
   const recordResult = async (result: PasswordCheckResult): Promise<number> => {
