@@ -9,8 +9,14 @@ import {
   OTHER_ACCOUNT,
 } from "./storageFixtures";
 import { isRecord } from "../storageGuards";
+import type { Primitive } from "type-fest";
 
-export const storageMutationValues: Array<[string, unknown]> = [
+export type StorageJunkValue =
+  | Primitive
+  | readonly unknown[]
+  | Readonly<Record<string, unknown>>;
+
+export const storageMutationValues: Array<[string, StorageJunkValue]> = [
   ["undefined", undefined],
   ["null", null],
   ["empty string", ""],

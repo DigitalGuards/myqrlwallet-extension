@@ -9,6 +9,10 @@ import StorageUtil, { LockState } from "./storageUtil";
 import { getStoredValue, isRecord, isWalletSettings } from "./storageGuards";
 import { malformed } from "@/test-utils/malformed";
 import {
+  storageMutationValues,
+  type StorageJunkValue,
+} from "./__mocks__/storageGeneratedCases";
+import {
   ACCOUNT,
   OTHER_ACCOUNT,
   CHAIN,
@@ -127,7 +131,11 @@ const seed = (local: unknown, session: unknown) => {
 
 // Independent fixtures and expected field edits form the oracle. Every writer
 // runs against each interleaving, including opaque fields at every ancestor.
-const fixture = (junk: unknown, position: number, mixedMetadata = false) => {
+const fixture = (
+  junk: StorageJunkValue,
+  position: number,
+  mixedMetadata = false,
+) => {
   const weave = (values: unknown[]) => [
     ...values.slice(0, position),
     junk,
@@ -449,7 +457,9 @@ const cases = {
         e.local,
         ["BLOCKCHAINS", "ALL_BLOCKCHAINS"],
         f.lists.chains.map((v) =>
-          v === f.chain ? { ...f.chain, chainName: "Edited" } : v,
+          v === f.chain
+            ? { ...record(h.copy(f.chain)), chainName: "Edited" }
+            : v,
         ),
       );
     },
@@ -817,15 +827,12 @@ const mixedRuns: Record<string, WriterCase["run"] | undefined> = {
 
 import { toCanonicalQrlAddress } from "./addressUtil";
 const addedAccount = toCanonicalQrlAddress(`Q${"c".repeat(128)}`);
-const junkValues: unknown[] = [
-  null,
-  "",
-  false,
+const junkValues: StorageJunkValue[] = [
+  ...storageMutationValues.map(([, value]) => value),
   42,
   { future: true },
   { nested: [null, false, { address: "unreadable" }] },
   "unreadable",
-  [],
   { invoker: origin, parentCapability: "future_capability", caveats: [] },
   Object.fromEntries([["__proto__", { retain: true }]]),
   { address: "" },
@@ -1342,20 +1349,19 @@ describe("round 3 real grant callers", () => {
       set(f.local, grantPath, raw);
       seed(f.local, f.session);
       await includeChainForUrlOrigin({ urlOrigin: origin, chainId: "0x43" });
-      expect(getStoredValue(h.local, ...grantPath, "blockchains")).toEqual([
-        CHAIN,
-        junk,
-        f.otherChain,
-      ]);
+      expect(getStoredValue(h.local, ...grantPath, "blockchains")).toEqual(
+        h.copy([CHAIN, junk, f.otherChain]),
+      );
       await excludeChainForUrlOrigin({
         urlOrigin: origin,
         chainId: CHAIN.chainId,
       });
-      expect(getStoredValue(h.local, ...grantPath, "blockchains")).toEqual([
-        junk,
-        f.otherChain,
-      ]);
-      expect(getStoredValue(h.local, ...grantPath, "future")).toEqual(junk);
+      expect(getStoredValue(h.local, ...grantPath, "blockchains")).toEqual(
+        h.copy([junk, f.otherChain]),
+      );
+      expect(getStoredValue(h.local, ...grantPath, "future")).toEqual(
+        h.copy(junk),
+      );
     },
   );
 
@@ -1594,13 +1600,18 @@ it.each(junkValues.map((permissions, id) => ({ permissions, id })))(
     set(f.local, grantPath, raw);
     seed(f.local, f.session);
     await includeChainForUrlOrigin({ urlOrigin: origin, chainId: "0x43" });
-    expect(getStoredValue(h.local, ...grantPath)).toEqual({
-      ...raw,
-      blockchains: [CHAIN, null, f.otherChain],
-      permissions: Array.isArray(permissions)
-        ? [...list(permissions), ...approvedGrants]
-        : permissions,
-    });
+    expect(getStoredValue(h.local, ...grantPath)).toEqual(
+      h.copy({
+        ...raw,
+        blockchains: [CHAIN, null, f.otherChain],
+        permissions:
+          permissions === undefined
+            ? approvedGrants
+            : Array.isArray(permissions)
+              ? [...list(permissions), ...approvedGrants]
+              : permissions,
+      }),
+    );
   },
 );
 

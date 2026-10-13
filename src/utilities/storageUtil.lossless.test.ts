@@ -3,6 +3,10 @@ import { QRL_BLOCKCHAINS } from "@/configuration/qrlBlockchainConfig";
 import PriceStore from "@/stores/priceStore";
 import StorageUtil from "./storageUtil";
 import {
+  storageMutationValues,
+  type StorageJunkValue,
+} from "./__mocks__/storageGeneratedCases";
+import {
   ACCOUNT,
   OTHER_ACCOUNT,
   CHAIN,
@@ -68,7 +72,7 @@ const setList = (
   root: string,
   all: string,
   field: string,
-  records: unknown,
+  records: StorageJunkValue,
 ) => {
   h.store[root] = {
     metadata: "keep",
@@ -544,31 +548,39 @@ describe("storage writes preserve raw records", () => {
     expect(storedRecord("DAPPS", "ALL_DAPPS").unreadable).toBeUndefined();
   });
 
-  it("retains unreadable accounts, contacts and Ledger records across bulk saves", async () => {
-    const junk = { future: true };
-    const legacy = `Q${"d".repeat(40)}`;
-    h.store.ACCOUNTS = { ALL_ACCOUNTS: [ACCOUNT, junk, legacy] };
-    await StorageUtil.addLedgerAccountToAllAccounts(OTHER_ACCOUNT);
-    expect(storedRecord("ACCOUNTS").ALL_ACCOUNTS).toEqual([
-      ACCOUNT,
-      junk,
-      legacy,
-      OTHER_ACCOUNT,
-    ]);
-    await StorageUtil.removeLedgerAccountFromAllAccounts(ACCOUNT);
-    expect(storedRecord("ACCOUNTS").ALL_ACCOUNTS).toEqual([
-      junk,
-      legacy,
-      OTHER_ACCOUNT,
-    ]);
-    const contact = { name: "Known", address: ACCOUNT };
-    h.store.CONTACTS = { ALL_CONTACTS: [contact, junk] };
-    await StorageUtil.setContacts(await StorageUtil.getContacts());
-    expect(storedRecord("CONTACTS").ALL_CONTACTS).toEqual([contact, junk]);
-    h.store.LEDGER = { LEDGER_ACCOUNTS: [LEDGER, junk] };
-    await StorageUtil.setLedgerAccounts(await StorageUtil.getLedgerAccounts());
-    expect(storedRecord("LEDGER").LEDGER_ACCOUNTS).toEqual([LEDGER, junk]);
-  });
+  it.each([...storageMutationValues, ["future metadata", { future: true }]])(
+    "retains unreadable accounts, contacts and Ledger records across bulk saves: %s",
+    async (_label, junk) => {
+      const legacy = `Q${"d".repeat(40)}`;
+      h.store.ACCOUNTS = { ALL_ACCOUNTS: [ACCOUNT, junk, legacy] };
+      await StorageUtil.addLedgerAccountToAllAccounts(OTHER_ACCOUNT);
+      expect(storedRecord("ACCOUNTS").ALL_ACCOUNTS).toEqual(
+        h.roundTrip([ACCOUNT, junk, legacy, OTHER_ACCOUNT]),
+      );
+      await StorageUtil.removeLedgerAccountFromAllAccounts(ACCOUNT);
+      expect(storedRecord("ACCOUNTS").ALL_ACCOUNTS).toEqual(
+        h.roundTrip([junk, legacy, OTHER_ACCOUNT]),
+      );
+      const contact = { name: "Known", address: ACCOUNT };
+      h.store.CONTACTS = { ALL_CONTACTS: [contact, junk] };
+      await StorageUtil.setContacts(await StorageUtil.getContacts());
+      expect(storedRecord("CONTACTS").ALL_CONTACTS).toEqual(
+        h.roundTrip([contact, junk]),
+      );
+      h.store.LEDGER = { LEDGER_ACCOUNTS: [LEDGER, junk] };
+      await StorageUtil.setLedgerAccounts(
+        await StorageUtil.getLedgerAccounts(),
+      );
+      expect(storedRecord("LEDGER").LEDGER_ACCOUNTS).toEqual(
+        h.roundTrip([LEDGER, junk]),
+      );
+      const saved = bytes(h.store);
+      expect(await StorageUtil.getAllAccounts()).toEqual([OTHER_ACCOUNT]);
+      expect(await StorageUtil.getContacts()).toEqual([contact]);
+      expect(await StorageUtil.getLedgerAccounts()).toEqual([LEDGER]);
+      expect(bytes(h.store)).toBe(saved);
+    },
+  );
 
   it.each(["__proto__", "constructor"])(
     "treats %s as an own storage key",

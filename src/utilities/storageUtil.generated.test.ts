@@ -22,6 +22,7 @@ import {
   storageWriterBases,
   storageMutationValues,
   nestedFieldMutations,
+  type StorageJunkValue,
 } from "./__mocks__/storageGeneratedCases";
 import {
   ACCOUNT,
@@ -658,7 +659,7 @@ describe("mixed dApp account reader and real authorization", () => {
 const scalarWriters: Array<{
   name: string;
   accepts: (value: unknown) => boolean;
-  write: (value: unknown) => Promise<void>;
+  write: (value: StorageJunkValue) => Promise<void>;
   read: () => Promise<unknown>;
   expected?: (value: unknown) => unknown;
 }> = [
