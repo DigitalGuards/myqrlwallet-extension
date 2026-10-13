@@ -1,5 +1,5 @@
 /**
- * TODO: WORKAROUND — These functions (binToMnemonic, mnemonicToBin) are copied
+ * TODO: WORKAROUND: These functions (binToMnemonic, mnemonicToBin) are copied
  * from @theqrl/wallet.js because the npm package (v1.1.1) does not export them
  * from its top-level entry point.
  *
@@ -10,7 +10,7 @@
  *   These two functions exist inside the package at:
  *     @theqrl/wallet.js/src/wallet/misc/mnemonic.js
  *
- *   But Node.js (and bundlers) enforce the "exports" field — importing from a
+ *   But Node.js (and bundlers) enforce the "exports" field: importing from a
  *   path not listed in "exports" throws ERR_PACKAGE_PATH_NOT_EXPORTED.
  *   The functions ARE used internally by the MLDSA87 class (newWalletFromMnemonic,
  *   getMnemonic), but they are not re-exported at the top level.
@@ -26,13 +26,7 @@
 
 import { WordList } from "./qrlWordlist";
 
-const WORD_LOOKUP = WordList.reduce(
-  (acc: Record<string, number>, word: string, i: number) => {
-    acc[word] = i;
-    return acc;
-  },
-  Object.create(null),
-);
+const WORD_LOOKUP = new Map(WordList.map((word, index) => [word, index]));
 
 /**
  * Encode bytes to a spaced hex mnemonic string.
@@ -71,7 +65,7 @@ export function mnemonicToBin(mnemonic: string): Uint8Array {
 
   for (let i = 0; i < mnemonicWords.length; i += 1) {
     const w = mnemonicWords[i];
-    const value = WORD_LOOKUP[w];
+    const value = WORD_LOOKUP.get(w);
     if (value === undefined) throw new Error("invalid word in mnemonic");
 
     buffering += 3;

@@ -1,10 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { createInstance } from "i18next";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
   describeExtensionError,
   isWalletLockedError,
 } from "./describeExtensionError";
 
-const t = ((key: string) => key) as any;
+const i18n = createInstance();
+const t = i18n.getFixedT("cimode");
+
+beforeAll(async () => {
+  await i18n.init({ lng: "cimode", resources: {} });
+});
 
 describe("describeExtensionError", () => {
   it("maps the wallet-locked guard message to a translated key (L4)", () => {
