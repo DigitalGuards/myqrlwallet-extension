@@ -17,7 +17,6 @@ import {
   SCHEME_VERSION_MSG,
   SCHEME_VERSION_TYPED,
   SCHEME_VERSION_TYPED_V2,
-  type TypedDataSchemeVersion,
 } from "./ctx";
 import { computeMessageDigest } from "./messageDigest";
 import {
@@ -26,63 +25,19 @@ import {
   hashStruct,
   typedDataSchemeVersion,
   typeHash,
-  type TypedDataPayload,
 } from "./typedData";
 import { signMessage, signTypedData } from "./sign";
 
-interface MessageVector {
-  label: string;
-  messageHex: string;
-  digestHex: string;
-}
-
-interface TypedVector {
-  label: string;
-  payload: TypedDataPayload;
-  digestHex: string;
-}
-
-interface SignMessageVector {
-  label: string;
-  hexSeed: string;
-  messageHex: string;
-  signature: string;
-  publicKey: string;
-  signer: string;
-  digest: string;
-}
-
-interface SignTypedVector {
-  label: string;
-  hexSeed: string;
-  payload: TypedDataPayload;
-  signature: string;
-  publicKey: string;
-  signer: string;
-  digest: string;
-}
-
-interface SchemeVector {
-  label: string;
-  schemeVersion: TypedDataSchemeVersion;
-  payload: TypedDataPayload;
-  encodeTypeString: string;
-  typeHashHex: string;
-  domainHashHex: string;
-  messageHashHex: string;
-  digestHex: string;
-}
-
-interface SchemeSigningVector {
-  label: string;
-  hexSeed: string;
-  payload: TypedDataPayload;
-  schemeVersion: TypedDataSchemeVersion;
-  signature: string;
-  publicKey: string;
-  descriptor: string;
-  signer: string;
-  digest: string;
+function messageSigningVector() {
+  const vector = canonical.signingVectors.find(
+    (candidate) => candidate.messageHex !== undefined,
+  );
+  if (!vector || typeof vector.messageHex !== "string") {
+    throw new Error(
+      "canonical fixtures are missing the message signing vector",
+    );
+  }
+  return { ...vector, messageHex: vector.messageHex };
 }
 
 function signerFromDescriptorAndPublicKey(
@@ -103,7 +58,7 @@ describe("pqSigning parity with canonical fixtures", () => {
     expect(SCHEME_VERSION_TYPED_V2).toBe(canonical.schemeVersionTypedV2);
   });
 
-  it.each(canonical.messageVectors as MessageVector[])(
+  it.each(canonical.messageVectors)(
     "message digest: $label",
     ({ messageHex, digestHex }) => {
       expect(bytesToHex(computeMessageDigest(hexToBytes(messageHex)))).toBe(
@@ -112,55 +67,51 @@ describe("pqSigning parity with canonical fixtures", () => {
     },
   );
 
-  it.each(canonical.typedVectors as unknown as TypedVector[])(
+  it.each(canonical.typedVectors)(
     "rejects the 20-byte legacy address payload: $label",
     ({ payload }) => {
       expect(() => computeTypedDataDigest(payload)).toThrow(/address/i);
     },
   );
 
-  it.each(canonical.schemeVectors as unknown as SchemeVector[])(
-    "scheme vector: $label",
-    (v) => {
-      const { payload, schemeVersion } = v;
-      expect(typedDataSchemeVersion(payload)).toBe(schemeVersion);
-      expect(encodeType(payload.primaryType, payload.types)).toBe(
-        v.encodeTypeString,
-      );
-      expect(bytesToHex(typeHash(payload.primaryType, payload.types))).toBe(
-        v.typeHashHex,
-      );
-      expect(
-        bytesToHex(
-          hashStruct("QRLDomain", payload.domain, payload.types, schemeVersion),
+  it.each(canonical.schemeVectors)("scheme vector: $label", (v) => {
+    const { payload } = v;
+    const schemeVersion = typedDataSchemeVersion(payload);
+    expect(schemeVersion).toBe(v.schemeVersion);
+    expect(encodeType(payload.primaryType, payload.types)).toBe(
+      v.encodeTypeString,
+    );
+    expect(bytesToHex(typeHash(payload.primaryType, payload.types))).toBe(
+      v.typeHashHex,
+    );
+    expect(
+      bytesToHex(
+        hashStruct("QRLDomain", payload.domain, payload.types, schemeVersion),
+      ),
+    ).toBe(v.domainHashHex);
+    expect(
+      bytesToHex(
+        hashStruct(
+          payload.primaryType,
+          payload.message,
+          payload.types,
+          schemeVersion,
         ),
-      ).toBe(v.domainHashHex);
-      expect(
-        bytesToHex(
-          hashStruct(
-            payload.primaryType,
-            payload.message,
-            payload.types,
-            schemeVersion,
-          ),
-        ),
-      ).toBe(v.messageHashHex);
-      expect(bytesToHex(computeTypedDataDigest(payload))).toBe(v.digestHex);
-    },
-  );
+      ),
+    ).toBe(v.messageHashHex);
+    expect(bytesToHex(computeTypedDataDigest(payload))).toBe(v.digestHex);
+  });
 
   it("covers both typed-data schemes", () => {
     const schemes = new Set(
-      (canonical.schemeVectors as unknown as SchemeVector[]).map(
-        (v) => v.schemeVersion,
-      ),
+      canonical.schemeVectors.map((v) => v.schemeVersion),
     );
     expect(schemes).toEqual(
       new Set([SCHEME_VERSION_TYPED, SCHEME_VERSION_TYPED_V2]),
     );
   });
 
-  it.each(canonical.schemeSigningVectors as unknown as SchemeSigningVector[])(
+  it.each(canonical.schemeSigningVectors)(
     "deterministic typed-data signature reproduces byte for byte: $label",
     (v) => {
       const signed = signTypedData(v.payload, v.hexSeed, { randomized: false });
@@ -180,10 +131,7 @@ describe("pqSigning parity with canonical fixtures", () => {
   );
 
   it("reproduces the deterministic signMessage vector byte-for-byte", () => {
-    const [vector] = canonical.signingVectors as unknown as [
-      SignMessageVector,
-      SignTypedVector,
-    ];
+    const vector = messageSigningVector();
     const result = signMessage(vector.messageHex, vector.hexSeed, {
       randomized: false,
     });
@@ -199,10 +147,7 @@ describe("pqSigning parity with canonical fixtures", () => {
   });
 
   it("hedged signing (production default) still verifies structurally", () => {
-    const [vector] = canonical.signingVectors as unknown as [
-      SignMessageVector,
-      SignTypedVector,
-    ];
+    const vector = messageSigningVector();
     const a = signMessage(vector.messageHex, vector.hexSeed);
     const b = signMessage(vector.messageHex, vector.hexSeed);
     expect(a.digest).toBe(vector.digest);

@@ -1862,28 +1862,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/functions/pqSigning/pqSigning.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
-    files: ["src/functions/pqSigning/typedData.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-    },
-  },
-  {
-    files: ["src/functions/pqSigning/typedDataSecurity.test.ts"],
-    rules: {
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
     files: ["src/functions/transactionOutcome.test.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
