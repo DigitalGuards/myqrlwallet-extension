@@ -35,6 +35,14 @@ import type Transport from "@ledgerhq/hw-transport";
 import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
 import { speculosTransport, SpeculosTransportService } from "./speculosTransport";
 
+function isErrorWithMessage(error: unknown): error is Error {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message: unknown = error.message;
+  return typeof message === "string";
+}
+
 /**
  * Check if Speculos mode is enabled via environment variable.
  * In Vite, environment variables are accessed via import.meta.env
@@ -146,12 +154,12 @@ export class LedgerTransportService implements ILedgerTransport {
       console.error("[LedgerTransport] Connection error:", error);
 
       // Map errors to readable messages
-      if (error instanceof Error) {
-        if (error.message?.includes("No device selected")) {
+      if (isErrorWithMessage(error)) {
+        if (error.message.includes("No device selected")) {
           // User closed dialog without selecting device
           throw new Error(LEDGER_ERROR_MESSAGES.DEVICE_NOT_FOUND);
         }
-        if (error.message?.includes("Access denied")) {
+        if (error.message.includes("Access denied")) {
           // No permission to access device
           throw new Error(LEDGER_ERROR_MESSAGES.CONNECTION_FAILED);
         }
@@ -246,7 +254,7 @@ export class LedgerTransportService implements ILedgerTransport {
       return response;
     } catch (error: unknown) {
       // Check if device was disconnected
-      if (error instanceof Error && error.message?.includes("disconnected")) {
+      if (isErrorWithMessage(error) && error.message.includes("disconnected")) {
         this.transport = null;
         throw new Error(LEDGER_ERROR_MESSAGES.DEVICE_DISCONNECTED);
       }

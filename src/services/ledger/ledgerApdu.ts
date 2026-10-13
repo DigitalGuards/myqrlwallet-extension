@@ -225,15 +225,14 @@ export function extractResponseData(response: Buffer): Buffer {
 export function createLedgerError(
   statusCode: number,
   message: string,
-): LedgerError {
+): Error & LedgerError {
   // Determine if error can be fixed by retrying
   const retryable = isRetryableError(statusCode);
 
-  return {
+  return Object.assign(new Error(message), {
     statusCode,
-    message,
     retryable,
-  };
+  });
 }
 
 /**
