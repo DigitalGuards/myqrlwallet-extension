@@ -28,6 +28,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toChecksumAddress } from "@theqrl/wallet.js";
 import { assertV3Network } from "@/configuration/releaseProfile";
 import StorageUtil from "@/utilities/storageUtil";
+import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import {
   checkAccountHasBeenAuthorized,
@@ -66,9 +67,9 @@ describe("dApp chain authorization", () => {
       blockchains: [{ chainId: "0x301825" } as never],
       permissions: [],
     });
-    vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue({
-      chainId: "0x301825",
-    } as never);
+    vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue(
+      DEFAULT_BLOCKCHAIN,
+    );
   });
 
   it("canonicalizes supported decimal and hexadecimal chain IDs", () => {
@@ -359,9 +360,9 @@ describe("dApp chain authorization for PQ signing methods", () => {
       blockchains: [{ chainId: "0x301825" } as never],
       permissions: [],
     });
-    vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue({
-      chainId: "0x301825",
-    } as never);
+    vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue(
+      DEFAULT_BLOCKCHAIN,
+    );
   });
 
   it("rejects qrl_signTypedData whose declared chain differs from the active chain", async () => {
@@ -699,9 +700,9 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
       blockchains: [{ chainId: "0x301825" } as never],
       permissions: [],
     });
-    vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue({
-      chainId: "0x301825",
-    } as never);
+    vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue(
+      DEFAULT_BLOCKCHAIN,
+    );
   });
 
   afterEach(() => {
