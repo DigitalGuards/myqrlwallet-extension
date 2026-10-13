@@ -24,6 +24,7 @@ import type {
   KeystoreImportWorkerRequest,
   KeystoreImportWorkerResponse,
 } from "@/scripts/workers/keystoreImportWorker";
+import { isRecord } from "@/utilities/storageGuards";
 
 /** A structurally valid backup whose keystores array is empty. */
 export class WalletBackupEmptyError extends WalletFileFormatError {
@@ -72,18 +73,18 @@ const inBounds = (
 
 function validateKeystore(candidate: unknown, index: number): KeyStore {
   const label = `keystore #${index + 1}`;
-  if (!candidate || typeof candidate !== "object") {
+  if (!isRecord(candidate)) {
     throw new WalletFileFormatError(`Invalid ${label}: not an object`);
   }
-  const ks = candidate as Record<string, unknown>;
+  const ks = candidate;
   if (ks.version !== 1) {
     throw new WalletFileFormatError(`Unsupported ${label} version`);
   }
   const cryptoField = ks.crypto;
-  if (!cryptoField || typeof cryptoField !== "object") {
+  if (!isRecord(cryptoField)) {
     throw new WalletFileFormatError(`Invalid ${label}: missing crypto section`);
   }
-  const c = cryptoField as Record<string, unknown>;
+  const c = cryptoField;
   if (c.cipher !== "aes-256-gcm") {
     throw new WalletFileFormatError(`Unsupported cipher in ${label}`);
   }
@@ -91,10 +92,10 @@ function validateKeystore(candidate: unknown, index: number): KeyStore {
     throw new WalletFileFormatError(`Unsupported KDF in ${label}`);
   }
   const cipherparams = c.cipherparams;
-  if (!cipherparams || typeof cipherparams !== "object") {
+  if (!isRecord(cipherparams)) {
     throw new WalletFileFormatError(`Invalid ${label}: missing cipherparams`);
   }
-  const iv = (cipherparams as Record<string, unknown>).iv;
+  const iv = cipherparams.iv;
   if (!isHexString(iv) || iv.length !== IV_HEX_CHARS) {
     throw new WalletFileFormatError(`Invalid IV in ${label}`);
   }
@@ -103,10 +104,10 @@ function validateKeystore(candidate: unknown, index: number): KeyStore {
     throw new WalletFileFormatError(`Invalid ciphertext in ${label}`);
   }
   const kdfparams = c.kdfparams;
-  if (!kdfparams || typeof kdfparams !== "object") {
+  if (!isRecord(kdfparams)) {
     throw new WalletFileFormatError(`Invalid ${label}: missing kdfparams`);
   }
-  const kp = kdfparams as Record<string, unknown>;
+  const kp = kdfparams;
   if (
     !inBounds(kp.m, KDF_BOUNDS.m) ||
     !inBounds(kp.t, KDF_BOUNDS.t) ||
@@ -136,12 +137,11 @@ function validateKeystore(candidate: unknown, index: number): KeyStore {
 }
 
 /**
- * Cheap shape test for file-format routing: does this parsed JSON look like a
- * backup envelope (or a single bare keystore) rather than the v2 file?
+ * Cheap shape test for routing a backup envelope or a single bare keystore.
  */
 export function looksLikeKeystoreBackup(parsed: unknown): boolean {
-  if (!parsed || typeof parsed !== "object") return false;
-  const obj = parsed as Record<string, unknown>;
+  if (!isRecord(parsed)) return false;
+  const obj = parsed;
   if (Array.isArray(obj.keystores)) return true;
   return (
     obj.version === 1 && typeof obj.crypto === "object" && obj.crypto !== null
@@ -153,11 +153,13 @@ export function looksLikeKeystoreBackup(parsed: unknown): boolean {
  * its keystores. Throws WalletFileFormatError / WalletBackupEmptyError.
  */
 export function parseKeystoreBackup(parsed: unknown): KeyStore[] {
-  if (!parsed || typeof parsed !== "object") {
+  if (!isRecord(parsed)) {
     throw new WalletFileFormatError();
   }
-  const obj = parsed as Record<string, unknown>;
-  const rawList = Array.isArray(obj.keystores) ? obj.keystores : [obj];
+  const obj = parsed;
+  const rawList: unknown[] = Array.isArray(obj.keystores)
+    ? obj.keystores
+    : [obj];
   if (rawList.length === 0) {
     throw new WalletBackupEmptyError();
   }
@@ -186,6 +188,16 @@ export function parseWalletImportFile(text: string): ParsedWalletImportFile {
 const isWrongPasswordError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === "OperationError";
 
+function isKeystoreImportWorkerResponse(
+  value: unknown,
+): value is KeystoreImportWorkerResponse {
+  return (
+    isRecord(value) &&
+    ((value.success === true && typeof value.hexSeed === "string") ||
+      (value.success === false && typeof value.wrongPassword === "boolean"))
+  );
+}
+
 /**
  * Decrypt one backup keystore with the unlock password of the wallet that
  * exported it; resolves to the 0x-prefixed hex extended seed. Runs in a
@@ -200,13 +212,12 @@ export async function decryptBackupKeystore(
   password: string,
 ): Promise<string> {
   // dklen 16..64 passes the parity bounds, but AES-256 needs exactly 32 and
-  // every real writer emits 32. Fail up front as a format error instead of
-  // burning a multi-second KDF run into a generic key-length error.
+  // every real writer emits 32. Fail up front as a format error before
+  // running the KDF.
   if (keystore.crypto.kdfparams.dklen !== 32) {
     throw new WalletFileFormatError("Unsupported derived-key length");
   }
-  // Callers of decryptKeystore normalize, not the crypto itself; match the
-  // unlock path (unlockWorker) and the frontend importer.
+  // Normalize the password here to match the unlock path and frontend importer.
   const normalised = password.normalize("NFC");
 
   if (typeof Worker === "undefined") {
@@ -221,10 +232,7 @@ export async function decryptBackupKeystore(
     }
   }
 
-  const response = await runWorkerJob<
-    KeystoreImportWorkerRequest,
-    KeystoreImportWorkerResponse
-  >(
+  const response = await runWorkerJob<KeystoreImportWorkerRequest, unknown>(
     () =>
       new Worker(
         new URL("../scripts/workers/keystoreImportWorker.ts", import.meta.url),
@@ -233,6 +241,9 @@ export async function decryptBackupKeystore(
     { keystore, password: normalised },
     { success: false, wrongPassword: false },
   );
+  if (!isKeystoreImportWorkerResponse(response)) {
+    throw new Error("Keystore decryption failed");
+  }
   if (!response.success) {
     if (response.wrongPassword) {
       throw new WalletFileDecryptError();

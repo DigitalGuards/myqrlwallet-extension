@@ -1,5 +1,15 @@
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 
+const isReceiptQuantity = (value: unknown): value is string | number | bigint =>
+  typeof value === "string" ||
+  typeof value === "number" ||
+  typeof value === "bigint";
+
+const isReceiptStatus = (
+  value: unknown,
+): value is string | number | bigint | boolean =>
+  isReceiptQuantity(value) || typeof value === "boolean";
+
 function receiptHash(value: unknown): string {
   if (typeof value === "string") return value.toLowerCase();
   if (value instanceof Uint8Array) {
@@ -29,8 +39,12 @@ export function transactionFailureUpdate(
       receipt &&
       typeof receipt === "object" &&
       "status" in receipt &&
+      isReceiptStatus(receipt.status) &&
       "blockNumber" in receipt &&
-      receipt.blockNumber != null &&
+      isReceiptQuantity(receipt.blockNumber) &&
+      (!("gasUsed" in receipt) || isReceiptQuantity(receipt.gasUsed)) &&
+      (!("effectiveGasPrice" in receipt) ||
+        isReceiptQuantity(receipt.effectiveGasPrice)) &&
       transactionHash &&
       "transactionHash" in receipt &&
       receiptHash(receipt.transactionHash) === transactionHash.toLowerCase()
@@ -62,6 +76,8 @@ export function transactionFailureUpdate(
     // These JSON-RPC codes explicitly reject the request or transaction.
     if (
       "code" in rpcError &&
+      (typeof rpcError.code === "number" ||
+        typeof rpcError.code === "string") &&
       [-32600, -32601, -32602, -32003].includes(Number(rpcError.code))
     ) {
       return {

@@ -7,6 +7,20 @@ const exact = (amount: string | number | null | undefined) =>
   formatTransactionAmount(amount)?.exact;
 
 describe("formatTransactionAmount", () => {
+  it.each([
+    [".5", "0.5"],
+    ["-.5", "-0.5"],
+    ["+5", "5"],
+    ["5.", "5"],
+    [".5e1", "5"],
+    ["5.e-1", "0.5"],
+  ])("preserves optional decimal captures for %s", (amount, expected) => {
+    expect(formatTransactionAmount(amount)).toEqual({
+      compact: expected,
+      exact: expected,
+    });
+  });
+
   it("drops the padding zeros of a whole amount and groups thousands", () => {
     expect(compact("40500.000000000000000000")).toBe("40,500");
     expect(exact("40500.000000000000000000")).toBe("40500");
