@@ -106,7 +106,7 @@ const createFormSchema = (t: TFunction, decimals: number) =>
 type TransferTokenDetails = {
   isZrc20Token: boolean;
   tokenContractAddress: string;
-  tokenDecimals: number;
+  tokenDecimals: number | null;
   tokenImage: string;
   tokenBalance: string;
   tokenBalanceBaseUnits?: string;
@@ -461,7 +461,7 @@ const TokenTransfer = observer(() => {
           await resetForm();
           setIsZrc20Token(tokenDetailsFromState?.isZrc20Token);
           setTokenContractAddress(tokenDetailsFromState?.tokenContractAddress);
-          setTokenDecimals(tokenDetailsFromState?.tokenDecimals);
+          setTokenDecimals(tokenDetailsFromState?.tokenDecimals ?? Number.NaN);
           setTokenImage(tokenDetailsFromState?.tokenImage);
           setTokenBalance(tokenDetailsFromState?.tokenBalance);
           setTokenBalanceBaseUnits(
@@ -475,7 +475,9 @@ const TokenTransfer = observer(() => {
           setTokenContractAddress(
             tokenDetailsFromStorage?.tokenContractAddress,
           );
-          setTokenDecimals(tokenDetailsFromStorage?.tokenDecimals);
+          setTokenDecimals(
+            tokenDetailsFromStorage?.tokenDecimals ?? Number.NaN,
+          );
           setTokenImage(tokenDetailsFromStorage?.tokenImage);
           setTokenBalance(tokenDetailsFromStorage?.tokenBalance);
           setTokenBalanceBaseUnits(
@@ -654,6 +656,13 @@ const TokenTransfer = observer(() => {
   // native balance, so their full token balance is sendable.
   const maxSendable = useMemo(() => {
     if (isZrc20Token) {
+      if (
+        !Number.isInteger(tokenDecimals) ||
+        tokenDecimals < 0 ||
+        tokenDecimals > 255
+      ) {
+        return new BigNumber(0);
+      }
       // Exact, so Max spends the whole balance. The rounded display
       // value used to leave dust behind. shift moves the decimal point by
       // exact multiplication, which no rounding setting can truncate;

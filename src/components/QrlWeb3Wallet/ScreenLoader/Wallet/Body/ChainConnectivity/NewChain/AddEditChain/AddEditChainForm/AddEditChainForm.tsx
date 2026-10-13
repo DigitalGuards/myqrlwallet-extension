@@ -93,15 +93,15 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
       form.reset({
         chainName: chainToEdit.chainName,
         chainId: parseInt(chainToEdit.chainId, 16),
-        currencyName: chainToEdit.nativeCurrency.name,
-        currencySymbol: chainToEdit.nativeCurrency.symbol,
-        currencyDecimals: chainToEdit.nativeCurrency.decimals,
+        currencyName: chainToEdit.nativeCurrency?.name ?? "",
+        currencySymbol: chainToEdit.nativeCurrency?.symbol ?? "",
+        currencyDecimals: chainToEdit.nativeCurrency?.decimals,
       });
       setRpcUrls(chainToEdit.rpcUrls);
       setDefaultRpcUrl(chainToEdit.defaultRpcUrl);
-      setBlockExplorerUrls(chainToEdit.blockExplorerUrls);
+      setBlockExplorerUrls(chainToEdit.blockExplorerUrls ?? []);
       setDefaultBlockExplorerUrl(chainToEdit.defaultBlockExplorerUrl);
-      setIconUrls(chainToEdit.iconUrls);
+      setIconUrls(chainToEdit.iconUrls ?? []);
       setDefaultIconUrl(chainToEdit.defaultIconUrl);
       setQrnsRegistryAddress(chainToEdit.qrnsRegistryAddress ?? "");
     }

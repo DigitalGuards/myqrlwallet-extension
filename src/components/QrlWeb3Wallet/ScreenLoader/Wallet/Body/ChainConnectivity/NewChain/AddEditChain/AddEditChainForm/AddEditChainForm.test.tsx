@@ -17,6 +17,7 @@ import { MemoryRouter } from "react-router-dom";
 import StorageUtil from "@/utilities/storageUtil";
 import QrlStore from "@/stores/qrlStore";
 import AddEditChainForm from "./AddEditChainForm";
+import { CHAIN } from "@/utilities/__mocks__/storageFixtures";
 
 vi.mock("@/utilities/storageUtil", async () => {
   const originalModule = await vi.importActual<
@@ -50,6 +51,30 @@ describe("AddEditChainForm", () => {
         </MemoryRouter>
       </StoreProvider>,
     );
+
+  it.each([CHAIN.nativeCurrency, null])(
+    "opens a dApp chain with optional metadata and currency %j",
+    async (nativeCurrency) => {
+      renderComponent(mockedStore(), {
+        chainToEdit: { ...CHAIN, nativeCurrency },
+      });
+      expect(screen.getByRole("textbox", { name: "chainName" })).toHaveValue(
+        CHAIN.chainName,
+      );
+      expect(screen.getByRole("textbox", { name: "currencyName" })).toHaveValue(
+        "",
+      );
+      expect(
+        screen.getByRole("textbox", { name: "currencySymbol" }),
+      ).toHaveValue(nativeCurrency?.symbol ?? "");
+      expect(
+        screen.getByRole("spinbutton", { name: "currencyDecimals" }),
+      ).toHaveValue(nativeCurrency?.decimals ?? null);
+      expect(
+        screen.getByRole("button", { name: "Add/edit chain" }),
+      ).toBeDisabled();
+    },
+  );
 
   it("should render the add chain form component", () => {
     renderComponent();

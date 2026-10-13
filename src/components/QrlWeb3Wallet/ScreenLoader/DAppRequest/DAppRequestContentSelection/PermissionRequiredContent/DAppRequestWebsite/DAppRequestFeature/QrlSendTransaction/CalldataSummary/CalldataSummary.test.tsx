@@ -10,7 +10,7 @@ import {
   encodeParameters,
 } from "@theqrl/web3-qrl-abi";
 import { toChecksumAddress } from "@theqrl/wallet.js";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -133,6 +133,28 @@ describe("CalldataSummary", () => {
     expect(screen.getByText("Recipient")).toBeInTheDocument();
     expect(screen.getByText(toChecksumAddress(RECIPIENT))).toBeInTheDocument();
   });
+
+  it.each([null, Number.NaN, Infinity])(
+    "shows base units when stored decimals are %s",
+    async (decimals) => {
+      vi.spyOn(StorageUtil, "getTokenContractsList").mockResolvedValue([
+        { ...MQW_TOKEN, decimals },
+      ]);
+      await act(async () => {
+        renderSummary(
+          call(
+            "transfer(address,uint256)",
+            ["address", "uint256"],
+            [RECIPIENT, "1500000000000000000"],
+          ),
+        );
+      });
+      expect(
+        screen.getByText("1500000000000000000 base units"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("1.5 MQW")).not.toBeInTheDocument();
+    },
+  );
 
   it("falls back to base units when the token is unknown", async () => {
     renderSummary(

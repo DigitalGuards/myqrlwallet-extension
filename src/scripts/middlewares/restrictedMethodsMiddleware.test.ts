@@ -1,4 +1,5 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
+import { LEDGER } from "@/utilities/__mocks__/storageFixtures";
 import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
@@ -70,7 +71,10 @@ const setupStorage = ({
       case profileStorageKey("LEDGER"):
         return {
           [profileStorageKey("LEDGER")]: {
-            LEDGER_ACCOUNTS: ledgerAccounts.map((address) => ({ address })),
+            LEDGER_ACCOUNTS: ledgerAccounts.map((address) => ({
+              ...LEDGER,
+              address,
+            })),
           },
         };
       case profileStorageKey("SETTINGS"):

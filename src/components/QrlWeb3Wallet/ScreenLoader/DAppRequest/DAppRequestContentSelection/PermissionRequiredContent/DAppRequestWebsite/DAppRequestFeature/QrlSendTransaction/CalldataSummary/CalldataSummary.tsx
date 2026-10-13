@@ -227,7 +227,13 @@ const CalldataSummary = observer(
     };
 
     const renderAmount = (amount: bigint, labelKey: string) => {
-      if (token) {
+      if (
+        token &&
+        token.decimals !== null &&
+        Number.isInteger(token.decimals) &&
+        token.decimals >= 0 &&
+        token.decimals <= 255
+      ) {
         return (
           <DetailRow label={t(labelKey)}>
             {`${formatTokenBaseUnits(amount, token.decimals)} ${token.symbol}`}

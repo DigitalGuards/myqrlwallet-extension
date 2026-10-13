@@ -1423,16 +1423,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/utilities/storageUtil.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-extraneous-class": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-    },
-  },
-  {
     files: ["src/utilities/stringUtil.ts"],
     rules: {
       "@typescript-eslint/no-extraneous-class": "off",
