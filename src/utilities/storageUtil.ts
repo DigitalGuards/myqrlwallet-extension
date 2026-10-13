@@ -1,5 +1,4 @@
 import {
-  type BlockchainDataType,
   DEFAULT_BLOCKCHAIN,
   LEGACY_TESTNET_RPC,
   QRL_BLOCKCHAINS,
@@ -8,12 +7,8 @@ import {
 import type {
   ConnectedAccountsDataType,
   DAppRequestType,
-  TokenContractType,
 } from "@/scripts/middlewares/middlewareTypes";
-import type { LedgerAccount } from "@/services/ledger/ledgerTypes";
-import type { Contact } from "@/types/contact";
 import type { GasTier } from "@/types/gasFee";
-import type { NFTCollectionType } from "@/types/nft";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import {
   isLegacyQrlAddress,
@@ -41,6 +36,8 @@ import {
   isFiniteNumber,
   isLedgerAccount,
   isNFTCollection,
+  isNormalizableContact,
+  isNormalizableQrlAddress,
   isPriceCache,
   isRecord,
   isStoredBlockchain,
@@ -53,7 +50,15 @@ import {
   isWalletSettings,
   mergeStorageArray,
   mergeStorageRecord,
+  normalizeStoredPermissions,
+  isStorageIdentity,
+  isStoredPermission,
   type StoredBlockchain,
+  type StoredToken,
+  type StoredNFTCollection,
+  type StoredContact,
+  type StoredLedgerAccount,
+  type StoredHistoryEntry,
 } from "@/utilities/storageGuards";
 
 const readLocalStorage = async (
@@ -119,7 +124,7 @@ const HIDDEN_ACCOUNTS_IDENTIFIER = "HIDDEN_ACCOUNTS";
 const sanitizeQrnsRegistry = (
   chain: StoredBlockchain,
   rejectInvalid: boolean,
-): BlockchainDataType => {
+): StoredBlockchain => {
   if (hasCanonicalRegistry(chain)) return chain;
   const { qrnsRegistryAddress: registryAddress, ...withoutRegistry } = chain;
   if (
@@ -170,15 +175,10 @@ export type WalletSettings = {
 };
 
 export type PriceCache = {
-  prices: Record<string, number>;
-  change24h: Record<string, number>;
-  /**
-   * When each individual currency was last quoted. Optional: a cache
-   * written by an older build carries only `timestamp`, and every quote in
-   * it is dated to that instead.
-   */
-  updatedAt?: Record<string, number>;
-  timestamp: number;
+  prices?: unknown;
+  change24h?: unknown;
+  updatedAt?: unknown;
+  timestamp?: unknown;
 };
 
 export type TransactionValuesType = {
@@ -329,8 +329,8 @@ const StorageUtil = {
             ALL_ACCOUNTS_IDENTIFIER,
           ),
           canonicalAccounts,
-          isQrlAddress,
-          (address) => address.toLowerCase(),
+          isNormalizableQrlAddress,
+          toCanonicalQrlAddress,
         ),
       },
     });
@@ -411,7 +411,9 @@ const StorageUtil = {
    * A function for storing all the available blockchains.
    * Call the getAllBlockChains function to retrieve all the stored blockchains.
    */
-  async setAllBlockChains(blockchains: BlockchainDataType[]) {
+  async setAllBlockChains(blockchains: StoredBlockchain[]) {
+    if (!isArrayOf(blockchains, isStoredBlockchain))
+      throw new Error("Invalid stored chain identity");
     const canonicalBlockchains = blockchains.map((chain) =>
       sanitizeQrnsRegistry(chain, true),
     );
@@ -459,7 +461,8 @@ const StorageUtil = {
       let migrated = sanitizeQrnsRegistry(chain, false);
       if (
         !migrated.isCustomChain &&
-        migrated.rpcUrls?.[0] === LEGACY_TESTNET_RPC
+        Array.isArray(migrated.rpcUrls) &&
+        migrated.rpcUrls[0] === LEGACY_TESTNET_RPC
       ) {
         migrated = {
           ...migrated,
@@ -469,7 +472,8 @@ const StorageUtil = {
       }
       if (
         !migrated.isCustomChain &&
-        migrated.nativeCurrency?.symbol === "QRL"
+        isRecord(migrated.nativeCurrency) &&
+        migrated.nativeCurrency.symbol === "QRL"
       ) {
         migrated = {
           ...migrated,
@@ -553,8 +557,10 @@ const StorageUtil = {
    */
   async setTokenContractsList(
     accountAddress: string,
-    tokenContract: TokenContractType,
+    tokenContract: StoredToken,
   ) {
+    if (!isStorageIdentity(accountAddress) || !isTokenContract(tokenContract))
+      throw new Error("Invalid stored token identity");
     const { chainId } = await this.getActiveBlockChain();
 
     const storageData = await readLocalStorage(TOKENS_IDENTIFIER);
@@ -623,8 +629,10 @@ const StorageUtil = {
 
   async setNFTCollectionsList(
     accountAddress: string,
-    collection: NFTCollectionType,
+    collection: StoredNFTCollection,
   ) {
+    if (!isNFTCollection(collection))
+      throw new Error("Invalid stored NFT identity");
     const { chainId } = await this.getActiveBlockChain();
 
     const storageData = await readLocalStorage(NFT_COLLECTIONS_IDENTIFIER);
@@ -746,7 +754,13 @@ const StorageUtil = {
    * A function for storing the connected accounts info temporarily, which will be read by method like 'qrl_accounts'.
    * Call the getDAppsConnectedAccountsData function to retrieve the stored value, and clearDAppsConnectedAccountsData for clearing the stored value.
    */
-  async setDAppsConnectedAccountsData(data: ConnectedAccountsDataType) {
+  async setDAppsConnectedAccountsData(
+    data: Omit<ConnectedAccountsDataType, "blockchains"> & {
+      blockchains: StoredBlockchain[];
+    },
+  ) {
+    if (!isConnectedAccounts(data))
+      throw new Error("Invalid stored dApp identity");
     const urlOrigin = data.urlOrigin;
     const accounts = data.accounts.map(toCanonicalQrlAddress);
     const blockchains = data.blockchains.map((chain) =>
@@ -787,7 +801,8 @@ const StorageUtil = {
     );
     if (!isConnectedAccounts(storedData)) return undefined;
 
-    const accounts = (storedData.accounts ?? []).flatMap((address) => {
+    if (!isStringArray(storedData.accounts)) return undefined;
+    const accounts = storedData.accounts.flatMap((address) => {
       try {
         return [toCanonicalQrlAddress(address)];
       } catch {
@@ -796,27 +811,12 @@ const StorageUtil = {
     });
     if (accounts.length === 0) return undefined;
 
-    const permissions = (storedData.permissions ?? []).map((permission) => ({
-      ...permission,
-      caveats: (permission.caveats ?? []).map((caveat) =>
-        caveat.type === RESTRICT_RETURNED_ACCOUNTS_CAVEAT &&
-        isStringArray(caveat.value)
-          ? {
-              ...caveat,
-              value: caveat.value.flatMap((address) => {
-                try {
-                  return [toCanonicalQrlAddress(address)];
-                } catch {
-                  return [];
-                }
-              }),
-            }
-          : caveat,
-      ),
-    }));
-    const blockchains = (storedData.blockchains ?? []).map((chain) =>
-      sanitizeQrnsRegistry(chain, false),
-    );
+    const permissions = normalizeStoredPermissions(storedData.permissions);
+    const blockchains = (
+      Array.isArray(storedData.blockchains) ? storedData.blockchains : []
+    )
+      .filter(isStoredBlockchain)
+      .map((chain) => sanitizeQrnsRegistry(chain, false));
     return { ...storedData, accounts, blockchains, permissions };
   },
 
@@ -883,7 +883,15 @@ const StorageUtil = {
 
     let changed = false;
     for (const [origin, data] of Object.entries(allDApps)) {
-      if (!isConnectedAccounts(data)) continue;
+      if (
+        !isConnectedAccounts(data) ||
+        !isStringArray(data.accounts) ||
+        !(
+          data.permissions == null ||
+          isArrayOf(data.permissions, isStoredPermission)
+        )
+      )
+        continue;
       const accounts = data?.accounts ?? [];
       const remaining = accounts.filter(
         (address) => address?.toLowerCase() !== target,
@@ -916,7 +924,7 @@ const StorageUtil = {
     }
   },
 
-  async setContacts(contacts: Contact[]) {
+  async setContacts(contacts: StoredContact[]) {
     const canonicalContacts = contacts.map((contact) => ({
       ...contact,
       address: toCanonicalQrlAddress(contact.address),
@@ -932,15 +940,14 @@ const StorageUtil = {
         [ALL_CONTACTS_IDENTIFIER]: mergeStorageArray(
           getStorageArray(stored, ALL_CONTACTS_IDENTIFIER),
           canonicalContacts,
-          (value): value is Contact =>
-            isContact(value) && isQrlAddress(value.address),
-          (contact) => contact.address.toLowerCase(),
+          isNormalizableContact,
+          (contact) => toCanonicalQrlAddress(contact.address),
         ),
       },
     });
   },
 
-  async getContacts(): Promise<Contact[]> {
+  async getContacts(): Promise<StoredContact[]> {
     const storageData = await readLocalStorage(CONTACTS_IDENTIFIER);
     const storedContacts = getStoredValue(
       storageData,
@@ -1057,7 +1064,9 @@ const StorageUtil = {
    *   }
    * }
    */
-  async setLedgerAccounts(accounts: LedgerAccount[]) {
+  async setLedgerAccounts(accounts: StoredLedgerAccount[]) {
+    if (!isArrayOf(accounts, isLedgerAccount))
+      throw new Error("Invalid stored Ledger identity");
     const existing =
       (await readLocalStorage(LEDGER_IDENTIFIER))?.[LEDGER_IDENTIFIER] ?? {};
 
@@ -1082,7 +1091,7 @@ const StorageUtil = {
    *
    * @returns Array of Ledger accounts (empty array if none)
    */
-  async getLedgerAccounts(): Promise<LedgerAccount[]> {
+  async getLedgerAccounts(): Promise<StoredLedgerAccount[]> {
     const storedLedger = (await readLocalStorage(LEDGER_IDENTIFIER))?.[
       LEDGER_IDENTIFIER
     ];
@@ -1154,7 +1163,7 @@ const StorageUtil = {
    */
   async getLedgerAccountByAddress(
     address: string,
-  ): Promise<LedgerAccount | undefined> {
+  ): Promise<StoredLedgerAccount | undefined> {
     const ledgerAccounts = await this.getLedgerAccounts();
     return ledgerAccounts.find(
       (a) => a.address.toLowerCase() === address.toLowerCase(),
@@ -1163,8 +1172,10 @@ const StorageUtil = {
 
   async setTransactionHistoryEntry(
     accountAddress: string,
-    entry: TransactionHistoryEntry,
+    entry: StoredHistoryEntry,
   ) {
+    if (!isTransactionHistoryEntry(entry))
+      throw new Error("Invalid stored transaction identity");
     const { chainId } = await this.getActiveBlockChain();
 
     const storageData = await readLocalStorage(TX_HISTORY_IDENTIFIER);
@@ -1202,7 +1213,7 @@ const StorageUtil = {
 
   async getTransactionHistory(
     accountAddress: string,
-  ): Promise<TransactionHistoryEntry[]> {
+  ): Promise<StoredHistoryEntry[]> {
     const { chainId } = await this.getActiveBlockChain();
 
     const storageData = await readLocalStorage(TX_HISTORY_IDENTIFIER);
@@ -1242,10 +1253,7 @@ const StorageUtil = {
 
     // confirmed / failed are terminal states; refuse updates that would
     // revert a tx back to pending (or otherwise change a terminal status).
-    const TERMINAL: Array<TransactionHistoryEntry["pendingStatus"]> = [
-      "confirmed",
-      "failed",
-    ];
+    const TERMINAL: unknown[] = ["confirmed", "failed"];
     const updatedTransactions = transactions.map((tx) => {
       if (
         !isTransactionHistoryEntry(tx) ||
@@ -1279,7 +1287,7 @@ const StorageUtil = {
 
   async getPendingTransactions(
     accountAddress: string,
-  ): Promise<TransactionHistoryEntry[]> {
+  ): Promise<StoredHistoryEntry[]> {
     const history = await this.getTransactionHistory(accountAddress);
     return history.filter((tx) => tx.pendingStatus === "pending");
   },

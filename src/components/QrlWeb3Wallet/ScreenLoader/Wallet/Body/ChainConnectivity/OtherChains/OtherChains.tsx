@@ -1,3 +1,4 @@
+import { blockchainView } from "@/utilities/storageViews";
 import { Label } from "@/components/UI/Label";
 import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 import { useStore } from "@/stores/store";
@@ -19,7 +20,9 @@ const OtherChains = observer(() => {
 
   useEffect(() => {
     (async () => {
-      const blockchains = await StorageUtil.getAllBlockChains();
+      const blockchains = (await StorageUtil.getAllBlockChains()).map(
+        blockchainView,
+      );
       setOtherChains(blockchains.filter((chain) => chain.chainId !== chainId));
     })();
     // chainId belongs here: the list is "every chain except the active one",

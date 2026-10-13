@@ -1,6 +1,7 @@
+import { storedText } from "@/utilities/storageViews";
 import { Checkbox } from "@/components/UI/Checkbox";
 import ChainIcon from "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/ChainIcon/ChainIcon";
-import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
+import type { StoredBlockchain as BlockchainDataType } from "@/utilities/storageGuards";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 
@@ -53,16 +54,16 @@ const QrlRequestAccountBlockchainSelection = observer(
                 >
                   <div className="flex gap-3">
                     <ChainIcon
-                      src={blockchain.defaultIconUrl}
-                      alt={blockchain.chainName}
+                      src={storedText(blockchain.defaultIconUrl)}
+                      alt={storedText(blockchain.chainName)}
                     />
                     <div className="flex flex-col gap-1 break-all">
-                      <span className="font-bold">{blockchain.chainName}</span>
+                      <span className="font-bold">{storedText(blockchain.chainName)}</span>
                       <span className="text-xm opacity-80">
                         {t('dapp.chainId', { id: parseInt(blockchain.chainId, 16) })}
                       </span>
                       <span className="text-xm opacity-80">
-                        {blockchain.defaultRpcUrl}
+                        {storedText(blockchain.defaultRpcUrl)}
                       </span>
                     </div>
                   </div>

@@ -1,3 +1,4 @@
+import { nftCollectionView } from "@/utilities/storageViews";
 import { NFT_ITEMS_DISPLAY_LIMIT } from "@/constants/nftToken";
 import type { NFTCollectionType } from "@/types/nft";
 import { useStore } from "@/stores/store";
@@ -38,7 +39,7 @@ const NFTCollections = observer(
       (async () => {
         const stored =
           await StorageUtil.getNFTCollectionsList(accountAddress);
-        setCollections(stored);
+        setCollections(stored.map(nftCollectionView));
         onCountChange?.(stored.length);
       })();
     }, [blockchain, accountAddress, reRender]);

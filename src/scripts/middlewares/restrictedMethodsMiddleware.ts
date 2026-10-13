@@ -1,3 +1,4 @@
+import { isArrayOf, isStoredPermission } from "@/utilities/storageGuards";
 import StorageUtil from "@/utilities/storageUtil";
 import { JsonRpcMiddleware } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
 import { v4 as uuid } from "uuid";
@@ -670,7 +671,10 @@ export const restrictedMethodsMiddleware: JsonRpcMiddleware<
               });
               const dAppConnectedAccountsData =
                 await StorageUtil.getDAppsConnectedAccountsData(urlOrigin);
-              res.result = dAppConnectedAccountsData?.permissions ?? [];
+              const permissions = dAppConnectedAccountsData?.permissions;
+              res.result = isArrayOf(permissions, isStoredPermission)
+                ? permissions
+                : [];
               break;
             }
             case RESTRICTED_METHODS.QRL_SEND_TRANSACTION: {

@@ -1,3 +1,4 @@
+import { blockchainView } from "@/utilities/storageViews";
 import { Card } from "@/components/UI/Card";
 import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 import { useStore } from "@/stores/store";
@@ -24,7 +25,7 @@ const SwitchQrlChainInfo = () => {
     (async () => {
       const currentChainId = (await StorageUtil.getActiveBlockChain())?.chainId;
       const switchingChainId = paramObject?.chainId;
-      const allBlockchains = await StorageUtil.getAllBlockChains();
+      const allBlockchains = (await StorageUtil.getAllBlockChains()).map(blockchainView);
       setCurrentChain(
         allBlockchains.find(
           (chain) =>

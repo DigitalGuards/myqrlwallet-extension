@@ -9,6 +9,8 @@ import {
   isDAppRequest,
   isLedgerAccount,
   isNFTCollection,
+  isNormalizableContact,
+  isNormalizableQrlAddress,
   isPriceCache,
   isStoredBlockchain,
   isStoredKeystore,
@@ -50,80 +52,50 @@ const PRICE = {
 const PERMISSION = CONNECTION.permissions[0];
 
 describe("storage record guards", () => {
+  it.each([
+    ACCOUNT,
+    ACCOUNT.toLowerCase(),
+    `q${ACCOUNT.slice(1)}`,
+    `0x${ACCOUNT.slice(1)}`,
+    `0X${ACCOUNT.slice(1)}`,
+  ])("accepts normalizable account and contact addresses (%s)", (address) => {
+    expect(isNormalizableQrlAddress(address)).toBe(true);
+    expect(isNormalizableContact({ name: "Contact", address })).toBe(true);
+    expect(isNormalizableContact({ address })).toBe(true);
+    expect(isNormalizableContact({ name: null, address })).toBe(true);
+  });
+
+  it.each([
+    undefined,
+    null,
+    false,
+    1,
+    [],
+    {},
+    "junk",
+    `Q${"a".repeat(40)}`,
+    `Q${"a".repeat(127)}A`,
+  ])("rejects unusable account and contact addresses (%j)", (address) => {
+    expect(isNormalizableQrlAddress(address)).toBe(false);
+    expect(isNormalizableContact({ name: "Contact", address })).toBe(false);
+  });
+
   const cases: Array<
     [string, (value: unknown) => boolean, Record<string, unknown>, string[]]
   > = [
-    [
-      "chain",
-      isStoredBlockchain,
-      CHAIN,
-      [
-        "chainId",
-        "chainName",
-        "rpcUrls",
-        "nativeCurrency",
-        "defaultRpcUrl",
-        "defaultBlockExplorerUrl",
-        "defaultIconUrl",
-        "defaultWsRpcUrl",
-        "isTestnet",
-        "isCustomChain",
-      ],
-    ],
-    [
-      "token",
-      isTokenContract,
-      TOKEN,
-      ["address", "symbol", "decimals", "image"],
-    ],
-    [
-      "NFT",
-      isNFTCollection,
-      NFT,
-      ["address", "name", "symbol", "standard", "image"],
-    ],
-    [
-      "history",
-      isTransactionHistoryEntry,
-      HISTORY,
-      [
-        "id",
-        "from",
-        "to",
-        "amount",
-        "tokenSymbol",
-        "tokenName",
-        "isZrc20Token",
-        "tokenContractAddress",
-        "tokenDecimals",
-        "transactionHash",
-        "blockNumber",
-        "gasUsed",
-        "effectiveGasPrice",
-        "status",
-        "timestamp",
-        "chainId",
-      ],
-    ],
-    ["connection", isConnectedAccounts, CONNECTION, ["urlOrigin", "accounts"]],
+    ["chain", isStoredBlockchain, CHAIN, ["chainId"]],
+    ["token", isTokenContract, TOKEN, ["address"]],
+    ["NFT", isNFTCollection, NFT, ["address"]],
+    ["history", isTransactionHistoryEntry, HISTORY, ["transactionHash"]],
+    ["connection", isConnectedAccounts, CONNECTION, ["urlOrigin"]],
     [
       "permission",
       isStoredPermission,
       PERMISSION,
       ["invoker", "parentCapability"],
     ],
-    [
-      "Ledger",
-      isLedgerAccount,
-      LEDGER,
-      ["address", "derivationPath", "publicKey", "index"],
-    ],
-    [
-      "contact",
-      isContact,
-      { name: "Contact", address: ACCOUNT },
-      ["name", "address"],
-    ],
+    ["Ledger", isLedgerAccount, LEDGER, ["address"]],
+    ["contact", isContact, { name: "Contact", address: ACCOUNT }, ["address"]],
     ["request", isDAppRequest, { method: "qrl_accounts" }, ["method"]],
     [
       "keystore",
@@ -131,7 +103,6 @@ describe("storage record guards", () => {
       { address: ACCOUNT, crypto: {} },
       ["address", "crypto"],
     ],
-    ["price cache", isPriceCache, PRICE, ["prices", "change24h", "timestamp"]],
   ];
 
   it.each(cases)(
@@ -156,33 +127,38 @@ describe("storage record guards", () => {
     },
   );
 
-  it("accepts optional chain metadata and nullable currency without filling fields", () => {
-    expect(isStoredBlockchain(CHAIN)).toBe(true);
-    expect(isStoredBlockchain({ ...CHAIN, nativeCurrency: null })).toBe(true);
-    expect(
-      isStoredBlockchain({ ...CHAIN, blockExplorerUrls: null, iconUrls: null }),
-    ).toBe(true);
-    expect(
-      isStoredBlockchain({
-        ...CHAIN,
-        blockExplorerUrls: [],
-        iconUrls: [],
-        nativeCurrency: { name: null, symbol: "TOK", decimals: 18 },
-      }),
-    ).toBe(true);
-    for (const field of ["blockExplorerUrls", "iconUrls"]) {
-      for (const wrong of ["https://example.com", [7], {}, 1])
-        expect(isStoredBlockchain({ ...CHAIN, [field]: wrong })).toBe(false);
-    }
-    expect(
-      isStoredBlockchain({ ...CHAIN, nativeCurrency: { symbol: "TOK" } }),
-    ).toBe(false);
-    expect(
-      isStoredBlockchain({
-        ...CHAIN,
-        nativeCurrency: { name: 1, symbol: "TOK", decimals: 18 },
-      }),
-    ).toBe(false);
+  it.each(cases.slice(0, 5))(
+    "accepts every non-identity field in %s records",
+    (_name, guard, base, identity) => {
+      for (const key of Object.keys(base).filter(
+        (key) => !identity.includes(key),
+      )) {
+        for (const value of [
+          undefined,
+          null,
+          "",
+          false,
+          0,
+          [],
+          {},
+          "x".repeat(4096),
+        ]) {
+          expect(guard({ ...base, [key]: value }), key).toBe(true);
+        }
+      }
+    },
+  );
+
+  it("accepts price cache objects independently of their currency data", () => {
+    for (const cache of [
+      {},
+      PRICE,
+      { prices: { usd: 1.23, eur: null } },
+      { timestamp: false, prices: [] },
+    ])
+      expect(isPriceCache(cache)).toBe(true);
+    for (const junk of [undefined, null, false, 0, "", []])
+      expect(isPriceCache(junk)).toBe(false);
   });
 
   it.each([null, Number.NaN, Infinity, -Infinity, 0, 18])(
@@ -193,14 +169,11 @@ describe("storage record guards", () => {
       const transfer = {
         tokenDetails: { ...DETAILS, tokenDecimals: decimals },
       };
-      for (const [guard, record] of [
-        [isTokenContract, token],
-        [isTransactionHistoryEntry, history],
-        [isTransactionValues, transfer],
-      ] as const) {
-        expect(guard(record)).toBe(true);
-        expect(guard(JSON.parse(JSON.stringify(record)))).toBe(true);
-      }
+      expect(isTokenContract(token)).toBe(true);
+      expect(isTransactionHistoryEntry(history)).toBe(true);
+      expect(isTransactionValues(transfer)).toBe(true);
+      const serialized: unknown = JSON.parse(JSON.stringify(token));
+      expect(isTokenContract(serialized)).toBe(true);
     },
   );
 
@@ -222,12 +195,12 @@ describe("storage record guards", () => {
       true,
     );
     expect(isStoredPermission({ ...PERMISSION, caveats: null })).toBe(true);
-    expect(isConnectedAccounts({ ...CONNECTION, accounts: [3] })).toBe(false);
+    expect(isConnectedAccounts({ ...CONNECTION, accounts: [3] })).toBe(true);
     expect(isConnectedAccounts({ ...CONNECTION, blockchains: [null] })).toBe(
-      false,
+      true,
     );
     expect(isConnectedAccounts({ ...CONNECTION, permissions: [null] })).toBe(
-      false,
+      true,
     );
     expect(
       isStoredPermission({
@@ -303,10 +276,10 @@ describe("storage record guards", () => {
         }),
       ).toBe(true);
     }
-    expect(isTransactionHistoryEntry({ ...HISTORY, nonce: "1" })).toBe(false);
+    expect(isTransactionHistoryEntry({ ...HISTORY, nonce: "1" })).toBe(true);
     expect(
       isTransactionHistoryEntry({ ...HISTORY, pendingStatus: "junk" }),
-    ).toBe(false);
+    ).toBe(true);
     expect(isTransactionValues({})).toBe(true);
     expect(
       isTransactionValues({
@@ -349,7 +322,7 @@ describe("storage record guards", () => {
     expect(
       isPriceCache({ ...PRICE, updatedAt: { usd: PRICE.timestamp } }),
     ).toBe(true);
-    expect(isPriceCache({ ...PRICE, updatedAt: { usd: "wrong" } })).toBe(false);
+    expect(isPriceCache({ ...PRICE, updatedAt: { usd: "wrong" } })).toBe(true);
     expect(isStringRecord({ a: "label" })).toBe(true);
     expect(isStringRecord({ a: null })).toBe(false);
     expect(isBooleanRecord({ a: false })).toBe(true);
@@ -381,24 +354,24 @@ describe("storage record guards", () => {
         rpcUrls: CHAIN.rpcUrls,
         nativeCurrency,
       };
-      // The request validator's public signature also includes storage metadata.
-      expect(
-        (await checkWalletAddQrlChainParams(payload as typeof CHAIN))
-          .canProceed,
-      ).toBe(true);
+      // Exercise wire input against the validator's narrower static signature.
+      const result: unknown = await Reflect.apply(
+        checkWalletAddQrlChainParams,
+        undefined,
+        [payload],
+      );
+      expect(result).toMatchObject({ canProceed: true });
     },
   );
 
   it("accepts the serialized decimals produced by a validator-approved watchAsset request", async () => {
     const options = { ...TOKEN, decimals: "abc" };
-    expect(
-      (
-        await checkWalletWatchAssetParams({
-          type: "ZRC20",
-          options: options as unknown as typeof TOKEN & { decimals: number },
-        })
-      ).canProceed,
-    ).toBe(true);
+    const result: unknown = await Reflect.apply(
+      checkWalletWatchAssetParams,
+      undefined,
+      [{ type: "ZRC20", options }],
+    );
+    expect(result).toMatchObject({ canProceed: true });
     const stored: unknown = JSON.parse(
       JSON.stringify({ ...options, decimals: parseInt(options.decimals) }),
     );

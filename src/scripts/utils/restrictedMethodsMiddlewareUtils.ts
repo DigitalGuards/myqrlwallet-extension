@@ -1,3 +1,9 @@
+import { storedText } from "@/utilities/storageViews";
+import {
+  isRecord,
+  isStorageIdentity,
+  type StoredBlockchain,
+} from "@/utilities/storageGuards";
 import {
   JsonRpcRequest,
   providerErrors,
@@ -370,7 +376,7 @@ export const revalidateAuthorizedDAppRequest = async (
     if (chain.chainId.toLowerCase() !== V3_CHAIN_ID) {
       throw new Error("Select the v3 Private network.");
     }
-    await assertV3Network(chain.defaultRpcUrl);
+    await assertV3Network(storedText(chain.defaultRpcUrl));
     const currentChain = await StorageUtil.getActiveBlockChain();
     if (
       currentChain.chainId !== chain.chainId ||
@@ -678,7 +684,12 @@ export const checkWalletAddQrlChainParams = async (
 
   const blockchains = await StorageUtil.getAllBlockChains();
   const existingChain = blockchains.find((chain) => chain.chainId === chainId);
-  if (existingChain && existingChain?.nativeCurrency?.symbol !== ticker) {
+  if (
+    existingChain &&
+    (isRecord(existingChain.nativeCurrency)
+      ? existingChain.nativeCurrency.symbol
+      : undefined) !== ticker
+  ) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -830,7 +841,7 @@ export const checkWalletWatchAssetParams = async (paramObject: {
   }
 
   if (
-    !paramObject?.options?.address ||
+    !isStorageIdentity(paramObject?.options?.address) ||
     !paramObject?.options?.decimals ||
     !paramObject?.options?.symbol
   ) {
@@ -915,7 +926,7 @@ export const updateAccountsAndBlockchainsForUrlOrigin = async ({
 }: {
   urlOrigin: string;
   accounts: string[];
-  blockchains: BlockchainDataType[];
+  blockchains: StoredBlockchain[];
 }) => {
   const origin = new URL(urlOrigin ?? "").origin;
   // Do not silently force-switch the globally-active chain when granting

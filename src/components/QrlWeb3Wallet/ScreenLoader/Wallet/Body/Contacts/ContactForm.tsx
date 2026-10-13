@@ -1,3 +1,4 @@
+import { storedText } from "@/utilities/storageViews";
 import { Button } from "@/components/UI/Button";
 import {
   Form,
@@ -80,7 +81,7 @@ const ContactForm = ({
     resolver: zodResolver(schema),
     mode: "onChange",
     defaultValues: {
-      name: initialContact?.name ?? "",
+      name: storedText(initialContact?.name),
       address: initialContact?.address ?? "",
     },
   });

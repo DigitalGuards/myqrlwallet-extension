@@ -1,3 +1,4 @@
+import { storedText } from "@/utilities/storageViews";
 import StorageUtil from "@/utilities/storageUtil";
 import {
   providerNetworkIdentity,
@@ -36,7 +37,9 @@ import LockManager from "../lockManager/lockManager";
 // service-worker-only, CORS-exempt RPC access to poll receipts.
 export const getQrlProperties = async () => {
   const { defaultRpcUrl } = await StorageUtil.getActiveBlockChain();
-  const qrlHttpProvider = new Web3.providers.HttpProvider(defaultRpcUrl);
+  const qrlHttpProvider = new Web3.providers.HttpProvider(
+    storedText(defaultRpcUrl),
+  );
   const { provider, qrl } = new Web3({ provider: qrlHttpProvider });
   return { provider, qrl };
 };
@@ -65,7 +68,7 @@ export const executeUnrestrictedMethod = async (
     const chain = await StorageUtil.getActiveBlockChain();
     if (chain.chainId.toLowerCase() !== V3_CHAIN_ID)
       throw new Error("Select the v3 Private network.");
-    await assertV3Network(chain.defaultRpcUrl);
+    await assertV3Network(storedText(chain.defaultRpcUrl));
     const currentChain = await StorageUtil.getActiveBlockChain();
     if (
       currentChain.chainId !== chain.chainId ||
@@ -235,7 +238,7 @@ export const executeUnrestrictedMethod = async (
     return filterIdentifier;
   } else if (method === UNRESTRICTED_METHODS.QRL_SEND_RAW_TRANSACTION) {
     await assertV3Network(
-      (await StorageUtil.getActiveBlockChain()).defaultRpcUrl,
+      storedText((await StorageUtil.getActiveBlockChain()).defaultRpcUrl),
     );
     const [rawTransaction] = req?.params ?? [];
     const transactionHash = (await qrl.sendSignedTransaction(rawTransaction))

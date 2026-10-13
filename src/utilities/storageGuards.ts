@@ -18,6 +18,7 @@ import {
   isCanonicalQrlAddress,
   isLegacyQrlAddress,
   isQrlAddress,
+  toCanonicalQrlAddress,
 } from "@/utilities/addressUtil";
 import type { KeyStore } from "@theqrl/web3";
 
@@ -184,65 +185,61 @@ export const isStoredKeystore = (value: unknown): value is KeyStore =>
   (isQrlAddress(value.address) || isLegacyQrlAddress(value.address)) &&
   isRecord(value.crypto);
 
-// QRNS data is sanitized separately on read, preserving the existing migration.
-export type StoredBlockchain = Omit<
-  BlockchainDataType,
-  "qrnsRegistryAddress"
-> & {
-  qrnsRegistryAddress?: unknown;
+// Identity fields determine readability. Metadata stays unknown until a consumer
+// uses it, so an accepted import remains visible when optional data is unusual.
+export type StoredRecord<T, K extends keyof T> = Pick<T, K> & {
+  [P in Exclude<keyof T, K>]?: unknown;
 };
+export type StoredBlockchain = StoredRecord<BlockchainDataType, "chainId">;
+export type StoredToken = StoredRecord<TokenContractType, "address">;
+export type StoredNFTCollection = StoredRecord<NFTCollectionType, "address">;
+export type StoredContact = StoredRecord<Contact, "address">;
+export type StoredLedgerAccount = StoredRecord<LedgerAccount, "address">;
+export type StoredHistoryEntry = StoredRecord<
+  TransactionHistoryEntry,
+  "transactionHash"
+>;
+export type StoredConnectedAccounts = StoredRecord<
+  ConnectedAccountsDataType,
+  "urlOrigin"
+>;
+
+// Storage identities are opaque keys, including identifiers from legacy imports.
+export const isStorageIdentity = (value: unknown): value is string =>
+  isString(value) && value.trim().length > 0;
 
 export const hasCanonicalRegistry = (
   chain: StoredBlockchain,
-): chain is BlockchainDataType =>
+): chain is StoredBlockchain & { qrnsRegistryAddress?: string } =>
   chain.qrnsRegistryAddress === undefined ||
   isCanonicalQrlAddress(chain.qrnsRegistryAddress);
 
 export const isStoredBlockchain = (value: unknown): value is StoredBlockchain =>
-  isRecord(value) &&
-  isString(value.chainId) &&
-  isString(value.chainName) &&
-  isStringArray(value.rpcUrls) &&
-  (value.blockExplorerUrls === null ||
-    isOptional(value.blockExplorerUrls, isStringArray)) &&
-  (value.iconUrls === null || isOptional(value.iconUrls, isStringArray)) &&
-  (value.nativeCurrency === null ||
-    (isRecord(value.nativeCurrency) &&
-      (value.nativeCurrency.name === null ||
-        isOptional(value.nativeCurrency.name, isString)) &&
-      isString(value.nativeCurrency.symbol) &&
-      isFiniteNumber(value.nativeCurrency.decimals))) &&
-  isString(value.defaultRpcUrl) &&
-  isString(value.defaultBlockExplorerUrl) &&
-  isString(value.defaultIconUrl) &&
-  isString(value.defaultWsRpcUrl) &&
-  isBoolean(value.isTestnet) &&
-  isBoolean(value.isCustomChain);
+  isRecord(value) && isStorageIdentity(value.chainId);
 
-export const isTokenContract = (value: unknown): value is TokenContractType =>
-  isRecord(value) &&
-  isString(value.address) &&
-  isString(value.symbol) &&
-  isStoredNumber(value.decimals) &&
-  isString(value.image);
+export const isTokenContract = (value: unknown): value is StoredToken =>
+  isRecord(value) && isStorageIdentity(value.address);
 
-export const isNFTCollection = (value: unknown): value is NFTCollectionType =>
-  isRecord(value) &&
-  isString(value.address) &&
-  isString(value.name) &&
-  isString(value.symbol) &&
-  (value.standard === "ZRC721" || value.standard === "ZRC1155") &&
-  isString(value.image);
+export const isNFTCollection = (value: unknown): value is StoredNFTCollection =>
+  isRecord(value) && isStorageIdentity(value.address);
 
-export const isContact = (value: unknown): value is Contact =>
-  isRecord(value) && isString(value.name) && isString(value.address);
+// Account and contact readers accept every form the canonicalizer can use.
+export const isNormalizableQrlAddress = (value: unknown): value is string => {
+  if (!isString(value)) return false;
+  try {
+    toCanonicalQrlAddress(value);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
-export const isLedgerAccount = (value: unknown): value is LedgerAccount =>
-  isRecord(value) &&
-  isString(value.address) &&
-  isString(value.derivationPath) &&
-  isString(value.publicKey) &&
-  isFiniteNumber(value.index);
+export const isContact = (value: unknown): value is StoredContact =>
+  isRecord(value) && isNormalizableQrlAddress(value.address);
+export const isNormalizableContact = isContact;
+
+export const isLedgerAccount = (value: unknown): value is StoredLedgerAccount =>
+  isRecord(value) && isStorageIdentity(value.address);
 
 const isAmount = (value: unknown): value is string | number =>
   isString(value) || isFiniteNumber(value);
@@ -270,49 +267,8 @@ export const isTransactionValues = (
 
 export const isTransactionHistoryEntry = (
   value: unknown,
-): value is TransactionHistoryEntry =>
-  isRecord(value) &&
-  [
-    "id",
-    "from",
-    "to",
-    "tokenSymbol",
-    "tokenName",
-    "tokenContractAddress",
-    "transactionHash",
-    "blockNumber",
-    "gasUsed",
-    "effectiveGasPrice",
-    "chainId",
-  ].every((key) => isString(value[key])) &&
-  isAmount(value.amount) &&
-  isBoolean(value.isZrc20Token) &&
-  isBoolean(value.status) &&
-  isStoredNumber(value.tokenDecimals) &&
-  isFiniteNumber(value.timestamp) &&
-  [
-    "paidFeesQrl",
-    "maxFeePerGas",
-    "maxPriorityFeePerGas",
-    "data",
-    "replacementTransactionHash",
-  ].every((key) => isOptional(value[key], isString)) &&
-  ["receiptStatusVerified", "submissionRejected", "isInternal"].every((key) =>
-    isOptional(value[key], isBoolean),
-  ) &&
-  isOptional(value.nonce, isFiniteNumber) &&
-  isOptional(value.gasLimit, isFiniteNumber) &&
-  (value.pendingStatus === undefined ||
-    value.pendingStatus === "pending" ||
-    value.pendingStatus === "unknown" ||
-    value.pendingStatus === "confirmed" ||
-    value.pendingStatus === "failed" ||
-    value.pendingStatus === "replaced" ||
-    value.pendingStatus === "cancelled" ||
-    value.pendingStatus === "dropped") &&
-  (value.replacedByAction === undefined ||
-    value.replacedByAction === "speed-up" ||
-    value.replacedByAction === "cancel");
+): value is StoredHistoryEntry =>
+  isRecord(value) && isStorageIdentity(value.transactionHash);
 
 export const isWalletSettings = (value: unknown): value is WalletSettings =>
   isRecord(value) &&
@@ -341,12 +297,7 @@ export const isWalletSettings = (value: unknown): value is WalletSettings =>
   ].every((key) => isOptional(value[key], isBoolean));
 
 export const isPriceCache = (value: unknown): value is PriceCache =>
-  isRecord(value) &&
-  isRecordOf(value.prices, isFiniteNumber) &&
-  isRecordOf(value.change24h, isFiniteNumber) &&
-  (value.updatedAt === undefined ||
-    isRecordOf(value.updatedAt, isFiniteNumber)) &&
-  isFiniteNumber(value.timestamp);
+  isRecord(value);
 
 type StoredPermission = Omit<Permission, "caveats"> & {
   caveats?:
@@ -374,24 +325,43 @@ export const isStoredPermission = (value: unknown): value is StoredPermission =>
         isStringArray(caveat.value),
     ));
 
-export type StoredConnectedAccounts = Omit<
-  ConnectedAccountsDataType,
-  "blockchains" | "permissions"
-> & {
-  blockchains?: StoredBlockchain[] | null;
-  permissions?: StoredPermission[] | null;
-};
-
 export const isConnectedAccounts = (
   value: unknown,
 ): value is StoredConnectedAccounts =>
-  isRecord(value) &&
-  isString(value.urlOrigin) &&
-  isStringArray(value.accounts) &&
-  (value.blockchains == null ||
-    isArrayOf(value.blockchains, isStoredBlockchain)) &&
-  (value.permissions == null ||
-    isArrayOf(value.permissions, isStoredPermission));
+  isRecord(value) && isStorageIdentity(value.urlOrigin);
+
+// Preserve unfamiliar permission fields while applying the existing account
+// migration to recognizable caveats. Authorization narrows account grants.
+export const normalizeStoredPermissions = (value: unknown): unknown => {
+  if (value == null) return [];
+  if (!Array.isArray(value)) return value;
+  return value.map((permission: unknown) => {
+    if (!isRecord(permission)) return permission;
+    const caveats = permission.caveats;
+    if (caveats != null && !Array.isArray(caveats)) return permission;
+    return {
+      ...permission,
+      caveats: (caveats ?? []).map((caveat: unknown) => {
+        if (
+          !isRecord(caveat) ||
+          caveat.type !== "restrictReturnedAccounts" ||
+          !isStringArray(caveat.value)
+        )
+          return caveat;
+        return {
+          ...caveat,
+          value: caveat.value.flatMap((address) => {
+            try {
+              return [toCanonicalQrlAddress(address)];
+            } catch {
+              return [];
+            }
+          }),
+        };
+      }),
+    };
+  });
+};
 
 export const isDAppRequest = (value: unknown): value is DAppRequestType => {
   if (

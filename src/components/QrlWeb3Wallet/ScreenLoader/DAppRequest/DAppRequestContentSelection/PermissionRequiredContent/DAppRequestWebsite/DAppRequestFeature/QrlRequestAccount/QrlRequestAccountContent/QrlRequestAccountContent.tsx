@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import QrlRequestAccountAccountSelection from "./QrlRequestAccountAccountSelection/QrlRequestAccountAccountSelection";
 import QrlRequestAccountBlockchainSelection from "./QrlRequestAccountBlockchainSelection/QrlRequestAccountBlockchainSelection";
 import StorageUtil from "@/utilities/storageUtil";
-import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
+import type { StoredBlockchain as BlockchainDataType } from "@/utilities/storageGuards";
 
 const QrlRequestAccountContent = observer(() => {
   const { t } = useTranslation();

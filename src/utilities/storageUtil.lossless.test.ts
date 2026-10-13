@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QRL_BLOCKCHAINS } from "@/configuration/qrlBlockchainConfig";
+import PriceStore from "@/stores/priceStore";
 import StorageUtil from "./storageUtil";
 import {
   ACCOUNT,
@@ -14,8 +15,9 @@ import {
 
 // JSON serialization matches Chrome storage, including NaN becoming null.
 const h = vi.hoisted(() => {
-  const store: Record<string, any> = {};
-  const roundTrip = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const store: Record<string, unknown> = {};
+  const roundTrip = (value: unknown): unknown =>
+    JSON.parse(JSON.stringify(value));
   const local = {
     get: vi.fn(async (key: string) =>
       Object.prototype.hasOwnProperty.call(store, key)
@@ -39,6 +41,24 @@ vi.mock("@/utilities/profileStorage", () => ({
   walletSessionStorage: h.local,
 }));
 
+const isFixtureRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const storedRecord = (...keys: string[]): Record<string, unknown> => {
+  let record = h.store;
+  for (const key of keys) {
+    const value = record[key];
+    if (
+      !Object.prototype.hasOwnProperty.call(record, key) ||
+      !isFixtureRecord(value)
+    ) {
+      throw new Error(`Expected a stored record at ${keys.join(".")}`);
+    }
+    record = value;
+  }
+  return record;
+};
+
 const setList = (
   root: string,
   all: string,
@@ -56,9 +76,20 @@ const setList = (
     },
   };
 };
-const list = (root: string, all: string, field: string): unknown[] =>
-  h.store[root][all][ACCOUNT][CHAIN.chainId][field];
+const list = (root: string, all: string, field: string): unknown[] => {
+  const records = storedRecord(root, all, ACCOUNT, CHAIN.chainId)[field];
+  if (!Array.isArray(records))
+    throw new Error(`Expected a stored ${field} list`);
+  return records;
+};
 const bytes = (value: unknown) => JSON.stringify(value);
+const addressForms = [
+  ["Q", ACCOUNT],
+  ["lowercase q", ACCOUNT.toLowerCase()],
+  ["checksummed q", `q${ACCOUNT.slice(1)}`],
+  ["0x", `0x${ACCOUNT.slice(1)}`],
+  ["0X", `0X${ACCOUNT.slice(1)}`],
+];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -70,6 +101,143 @@ beforeEach(() => {
 });
 
 describe("storage writes preserve raw records", () => {
+  it.each(addressForms)(
+    "saves and removes %s accounts while retaining unreadable siblings in order",
+    async (_form, address) => {
+      const junk = { future: [null, false] };
+      const legacy = `Q${"d".repeat(40)}`;
+      h.store.ACCOUNTS = {
+        ALL_ACCOUNTS: [address, junk, OTHER_ACCOUNT, legacy, null],
+      };
+      const accounts = await StorageUtil.getAllAccounts();
+      expect(accounts).toEqual([ACCOUNT, OTHER_ACCOUNT]);
+      expect(h.local.set).not.toHaveBeenCalled();
+      await StorageUtil.setAllAccounts(accounts);
+      expect(bytes(storedRecord("ACCOUNTS").ALL_ACCOUNTS)).toBe(
+        bytes([ACCOUNT, junk, OTHER_ACCOUNT, legacy, null]),
+      );
+      // Remove directly from the original compatibility form as well.
+      h.store.ACCOUNTS = {
+        ALL_ACCOUNTS: [address, junk, OTHER_ACCOUNT, legacy, null],
+      };
+      await StorageUtil.setAllAccounts(
+        accounts.filter((item) => item !== ACCOUNT),
+      );
+      expect(bytes(storedRecord("ACCOUNTS").ALL_ACCOUNTS)).toBe(
+        bytes([junk, OTHER_ACCOUNT, legacy, null]),
+      );
+      expect(await StorageUtil.getAllAccounts()).toEqual([OTHER_ACCOUNT]);
+    },
+  );
+
+  it.each(addressForms)(
+    "removes the visible %s account together with its keystore",
+    async (_form, address) => {
+      h.store.ACCOUNTS = {
+        ALL_ACCOUNTS: [address, OTHER_ACCOUNT],
+        ACTIVE_ACCOUNT: OTHER_ACCOUNT,
+      };
+      h.store.KEYSTORES = JSON.stringify([
+        { address: ACCOUNT, crypto: {} },
+        { address: OTHER_ACCOUNT, crypto: {} },
+      ]);
+      const remainingAccounts = (await StorageUtil.getAllAccounts()).filter(
+        (item) => item !== ACCOUNT,
+      );
+      const remainingKeystores = (await StorageUtil.getKeystores()).filter(
+        (item) => item.address !== ACCOUNT,
+      );
+      // Persistence sequence used by QrlStore.removeAccount.
+      await StorageUtil.setAllAccounts(remainingAccounts);
+      await StorageUtil.removeAccountFromAllDApps(ACCOUNT);
+      await StorageUtil.clearAllAccountData(ACCOUNT);
+      await StorageUtil.setKeystores(remainingKeystores);
+      expect(await StorageUtil.getAllAccounts()).toEqual([OTHER_ACCOUNT]);
+      expect(
+        (await StorageUtil.getKeystores()).map((item) => item.address),
+      ).toEqual([OTHER_ACCOUNT]);
+      expect(storedRecord("ACCOUNTS").ACTIVE_ACCOUNT).toBe(OTHER_ACCOUNT);
+    },
+  );
+
+  it.each(addressForms)(
+    "edits and deletes %s contacts while retaining unreadable siblings in order",
+    async (_form, address) => {
+      const junk = { future: [null, false] };
+      const legacy = { name: "Legacy", address: `Q${"d".repeat(40)}` };
+      const other = { name: "Other", address: OTHER_ACCOUNT };
+      h.store.CONTACTS = {
+        ALL_CONTACTS: [{ name: "Old", address }, junk, other, legacy, null],
+      };
+      const contacts = await StorageUtil.getContacts();
+      expect(contacts).toEqual([{ name: "Old", address: ACCOUNT }, other]);
+      expect(h.local.set).not.toHaveBeenCalled();
+      await StorageUtil.setContacts(
+        contacts.map((contact) =>
+          contact.address === ACCOUNT
+            ? { ...contact, name: "Edited" }
+            : contact,
+        ),
+      );
+      expect(bytes(storedRecord("CONTACTS").ALL_CONTACTS)).toBe(
+        bytes([
+          { name: "Edited", address: ACCOUNT },
+          junk,
+          other,
+          legacy,
+          null,
+        ]),
+      );
+      expect(await StorageUtil.getContacts()).toEqual([
+        { name: "Edited", address: ACCOUNT },
+        other,
+      ]);
+      h.store.CONTACTS = {
+        ALL_CONTACTS: [{ name: "Old", address }, junk, other, legacy, null],
+      };
+      await StorageUtil.setContacts(
+        contacts.filter((contact) => contact.address !== ACCOUNT),
+      );
+      expect(bytes(storedRecord("CONTACTS").ALL_CONTACTS)).toBe(
+        bytes([junk, other, legacy, null]),
+      );
+      expect(await StorageUtil.getContacts()).toEqual([other]);
+    },
+  );
+
+  it.each([{}, { updatedAt: { usd: 1700000000000, eur: 1700000000000 } }])(
+    "loads usable prices with a null trend and preserves the cache (%j)",
+    async (timestamps) => {
+      const cache = {
+        prices: { usd: 1.23, eur: 1.1 },
+        change24h: { usd: null, eur: 0.5 },
+        timestamp: 1700000000000,
+        ...timestamps,
+      };
+      h.store.PRICE_CACHE = h.roundTrip(cache);
+      const cached = await StorageUtil.getPriceCache();
+      expect(cached).toEqual(cache);
+      const prices = new PriceStore();
+      await prices.initialize(false);
+      expect(prices.quoteFor("USD")).toEqual({
+        price: 1.23,
+        currency: "USD",
+        change24h: 0,
+      });
+      expect(prices.quoteFor("EUR")).toEqual({
+        price: 1.1,
+        currency: "EUR",
+        change24h: 0.5,
+      });
+      expect(h.local.set).not.toHaveBeenCalled();
+      expect(bytes(h.store.PRICE_CACHE)).toBe(bytes(cache));
+      if (cached === null) throw new Error("Expected the stored price cache");
+      await StorageUtil.setPriceCache(cached);
+      expect(bytes(h.store.PRICE_CACHE)).toBe(bytes(cache));
+      expect(await StorageUtil.getPriceCache()).toEqual(cache);
+    },
+  );
+
   it("preserves unreadable map entries when saving visible labels and hidden accounts", async () => {
     const opaque = { future: [null, false] };
     h.store.ACCOUNT_LABELS = { [ACCOUNT]: "First", opaque };
@@ -97,25 +265,30 @@ describe("storage writes preserve raw records", () => {
     "retains dApp chains through read, save, edit and delete (%j)",
     async (chain) => {
       const unusable = {
-        chainId: "future-chain",
+        chainId: null,
         future: [null, { keep: true }],
       };
       const second = { ...CHAIN, chainId: "0x2b", chainName: "Second" };
       const raw = [chain, unusable, second, null];
-      h.store.BLOCKCHAINS.ALL_BLOCKCHAINS = h.roundTrip(raw);
+      h.store.BLOCKCHAINS = {
+        ...storedRecord("BLOCKCHAINS"),
+        ALL_BLOCKCHAINS: h.roundTrip(raw),
+      };
       expect(await StorageUtil.getAllBlockChains()).toEqual([chain, second]);
       expect(await StorageUtil.getActiveBlockChain()).toEqual(chain);
       expect(h.local.set).not.toHaveBeenCalled();
       await StorageUtil.setAllBlockChains(
         await StorageUtil.getAllBlockChains(),
       );
-      expect(bytes(h.store.BLOCKCHAINS.ALL_BLOCKCHAINS)).toBe(bytes(raw));
+      expect(bytes(storedRecord("BLOCKCHAINS").ALL_BLOCKCHAINS)).toBe(
+        bytes(raw),
+      );
       await StorageUtil.setAllBlockChains(
         (await StorageUtil.getAllBlockChains()).map((c) =>
           c.chainId === second.chainId ? { ...c, chainName: "Edited" } : c,
         ),
       );
-      expect(h.store.BLOCKCHAINS.ALL_BLOCKCHAINS).toEqual([
+      expect(storedRecord("BLOCKCHAINS").ALL_BLOCKCHAINS).toEqual([
         chain,
         unusable,
         { ...second, chainName: "Edited" },
@@ -126,7 +299,7 @@ describe("storage writes preserve raw records", () => {
           (c) => c.chainId !== chain.chainId,
         ),
       );
-      expect(bytes(h.store.BLOCKCHAINS.ALL_BLOCKCHAINS)).toBe(
+      expect(bytes(storedRecord("BLOCKCHAINS").ALL_BLOCKCHAINS)).toBe(
         bytes([unusable, { ...second, chainName: "Edited" }, null]),
       );
       expect(await StorageUtil.getAllBlockChains()).toEqual([
@@ -137,22 +310,33 @@ describe("storage writes preserve raw records", () => {
 
   it("keeps arrays with zero usable chains as arrays through a save", async () => {
     const raw = [null, { future: "chain" }];
-    h.store.BLOCKCHAINS.ALL_BLOCKCHAINS = raw;
+    h.store.BLOCKCHAINS = {
+      ...storedRecord("BLOCKCHAINS"),
+      ALL_BLOCKCHAINS: raw,
+    };
     expect(await StorageUtil.getAllBlockChains()).toEqual([]);
     await StorageUtil.setAllBlockChains(await StorageUtil.getAllBlockChains());
-    expect(h.store.BLOCKCHAINS.ALL_BLOCKCHAINS).toEqual(raw);
+    expect(storedRecord("BLOCKCHAINS").ALL_BLOCKCHAINS).toEqual(raw);
     await StorageUtil.setAllBlockChains([CHAIN]);
-    expect(h.store.BLOCKCHAINS.ALL_BLOCKCHAINS).toEqual([...raw, CHAIN]);
+    expect(storedRecord("BLOCKCHAINS").ALL_BLOCKCHAINS).toEqual([
+      ...raw,
+      CHAIN,
+    ]);
     expect(await StorageUtil.getAllBlockChains()).toEqual([CHAIN]);
   });
 
   it("uses the chain default for a non-array, warns once and permits replacement", async () => {
     const warn = vi.spyOn(console, "warn");
-    h.store.BLOCKCHAINS.ALL_BLOCKCHAINS = { corrupt: true };
+    h.store.BLOCKCHAINS = {
+      ...storedRecord("BLOCKCHAINS"),
+      ALL_BLOCKCHAINS: { corrupt: true },
+    };
     expect(await StorageUtil.getAllBlockChains()).toEqual(QRL_BLOCKCHAINS);
     expect(await StorageUtil.getAllBlockChains()).toEqual(QRL_BLOCKCHAINS);
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(h.store.BLOCKCHAINS.ALL_BLOCKCHAINS).toEqual({ corrupt: true });
+    expect(storedRecord("BLOCKCHAINS").ALL_BLOCKCHAINS).toEqual({
+      corrupt: true,
+    });
     await StorageUtil.setAllBlockChains([CHAIN]);
     expect(await StorageUtil.getAllBlockChains()).toEqual([CHAIN]);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -160,9 +344,9 @@ describe("storage writes preserve raw records", () => {
 
   it("preserves tokens with serialized NaN decimals and unusable siblings on import, replacement and removal", async () => {
     const nullable = { ...TOKEN, address: "token-null", decimals: Number.NaN };
-    const junk = { address: "future-token", decimals: "future", future: true };
-    const raw = h.roundTrip([TOKEN, junk, nullable, null, 7]);
-    setList("TOKENS", "ALL_TOKENS", "tokens", raw);
+    const junk = { address: null, decimals: "future", future: true };
+    setList("TOKENS", "ALL_TOKENS", "tokens", [TOKEN, junk, nullable, null, 7]);
+    const raw = list("TOKENS", "ALL_TOKENS", "tokens");
     expect(await StorageUtil.getTokenContractsList(ACCOUNT)).toEqual([
       TOKEN,
       { ...nullable, decimals: null },
@@ -188,17 +372,19 @@ describe("storage writes preserve raw records", () => {
       { ...nullable, decimals: null },
       { ...TOKEN, symbol: "UPDATED" },
     ]);
-    expect(h.store.TOKENS.ALL_TOKENS[OTHER_ACCOUNT]).toEqual({ keep: true });
-    expect(h.store.TOKENS.ALL_TOKENS[ACCOUNT].otherChain).toEqual({
+    expect(storedRecord("TOKENS", "ALL_TOKENS")[OTHER_ACCOUNT]).toEqual({
       keep: true,
     });
-    expect(h.store.TOKENS.metadata).toBe("keep");
+    expect(storedRecord("TOKENS", "ALL_TOKENS", ACCOUNT).otherChain).toEqual({
+      keep: true,
+    });
+    expect(storedRecord("TOKENS").metadata).toBe("keep");
   });
 
   it("preserves unreadable NFT collections through import, replacement, removal and re-read", async () => {
     const junk = {
       ...NFT,
-      address: "nft-future",
+      address: null,
       standard: "future",
       future: { keep: true },
     };
@@ -206,7 +392,7 @@ describe("storage writes preserve raw records", () => {
     setList("NFT_COLLECTIONS", "ALL_NFT_COLLECTIONS", "collections", raw);
     expect(await StorageUtil.getNFTCollectionsList(ACCOUNT)).toEqual([NFT]);
     expect(h.local.set).not.toHaveBeenCalled();
-    const added = { ...NFT, address: "nft-new", standard: "ZRC1155" as const };
+    const added = { ...NFT, address: "nft-new", standard: "ZRC1155" };
     await StorageUtil.setNFTCollectionsList(ACCOUNT, added);
     expect(
       bytes(list("NFT_COLLECTIONS", "ALL_NFT_COLLECTIONS", "collections")),
@@ -235,7 +421,7 @@ describe("storage writes preserve raw records", () => {
       tokenDecimals: null,
     };
     const junk = {
-      transactionHash: "future",
+      transactionHash: null,
       pendingStatus: "future",
       extension: [1, 2],
     };
@@ -246,8 +432,10 @@ describe("storage writes preserve raw records", () => {
       nullable,
     ]);
     expect(h.local.set).not.toHaveBeenCalled();
-    const update = {
-      pendingStatus: "confirmed" as const,
+    const update: Partial<
+      import("@/types/transactionHistory").TransactionHistoryEntry
+    > = {
+      pendingStatus: "confirmed",
       status: true,
       blockNumber: "7",
       receiptStatusVerified: true,
@@ -307,7 +495,7 @@ describe("storage writes preserve raw records", () => {
       extension: { keep: [null] },
     };
     const invalid = { ...CONNECTION, permissions: [{ future: true }] };
-    const records = {
+    const records: Record<string, unknown> = {
       [CONNECTION.urlOrigin]: CONNECTION,
       unrelated: untouched,
       unreadable: invalid,
@@ -319,7 +507,10 @@ describe("storage writes preserve raw records", () => {
     ).toEqual(CONNECTION);
     expect(
       await StorageUtil.getDAppsConnectedAccountsData("unreadable"),
-    ).toBeUndefined();
+    ).toMatchObject({
+      ...invalid,
+      permissions: [{ future: true, caveats: [] }],
+    });
     const before = bytes(h.store.DAPPS);
     await StorageUtil.removeAccountFromAllDApps(`Q${"c".repeat(128)}`);
     expect(bytes(h.store.DAPPS)).toBe(before);
@@ -329,14 +520,21 @@ describe("storage writes preserve raw records", () => {
       CONNECTION.urlOrigin,
     );
     expect(changed?.accounts).toEqual([OTHER_ACCOUNT]);
-    expect(changed?.permissions[0].caveats[0].value).toEqual([OTHER_ACCOUNT]);
-    for (const key of ["unrelated", "unreadable", "junk"] as const)
-      expect(bytes(h.store.DAPPS.ALL_DAPPS[key])).toBe(bytes(records[key]));
+    expect(changed?.permissions).toMatchObject([
+      { caveats: [{ value: [OTHER_ACCOUNT] }] },
+      {},
+    ]);
+    for (const key of ["unrelated", "unreadable", "junk"])
+      expect(bytes(storedRecord("DAPPS", "ALL_DAPPS")[key])).toBe(
+        bytes(records[key]),
+      );
     await StorageUtil.removeAccountFromAllDApps(OTHER_ACCOUNT);
     expect(
       await StorageUtil.getDAppsConnectedAccountsData(CONNECTION.urlOrigin),
     ).toBeUndefined();
-    expect(bytes(h.store.DAPPS.ALL_DAPPS.unreadable)).toBe(bytes(invalid));
+    expect(bytes(storedRecord("DAPPS", "ALL_DAPPS").unreadable)).toBe(
+      bytes(invalid),
+    );
   });
 
   it("retains unreadable accounts, contacts and Ledger records across bulk saves", async () => {
@@ -344,14 +542,14 @@ describe("storage writes preserve raw records", () => {
     const legacy = `Q${"d".repeat(40)}`;
     h.store.ACCOUNTS = { ALL_ACCOUNTS: [ACCOUNT, junk, legacy] };
     await StorageUtil.addLedgerAccountToAllAccounts(OTHER_ACCOUNT);
-    expect(h.store.ACCOUNTS.ALL_ACCOUNTS).toEqual([
+    expect(storedRecord("ACCOUNTS").ALL_ACCOUNTS).toEqual([
       ACCOUNT,
       junk,
       legacy,
       OTHER_ACCOUNT,
     ]);
     await StorageUtil.removeLedgerAccountFromAllAccounts(ACCOUNT);
-    expect(h.store.ACCOUNTS.ALL_ACCOUNTS).toEqual([
+    expect(storedRecord("ACCOUNTS").ALL_ACCOUNTS).toEqual([
       junk,
       legacy,
       OTHER_ACCOUNT,
@@ -359,10 +557,10 @@ describe("storage writes preserve raw records", () => {
     const contact = { name: "Known", address: ACCOUNT };
     h.store.CONTACTS = { ALL_CONTACTS: [contact, junk] };
     await StorageUtil.setContacts(await StorageUtil.getContacts());
-    expect(h.store.CONTACTS.ALL_CONTACTS).toEqual([contact, junk]);
+    expect(storedRecord("CONTACTS").ALL_CONTACTS).toEqual([contact, junk]);
     h.store.LEDGER = { LEDGER_ACCOUNTS: [LEDGER, junk] };
     await StorageUtil.setLedgerAccounts(await StorageUtil.getLedgerAccounts());
-    expect(h.store.LEDGER.LEDGER_ACCOUNTS).toEqual([LEDGER, junk]);
+    expect(storedRecord("LEDGER").LEDGER_ACCOUNTS).toEqual([LEDGER, junk]);
   });
 
   it.each(["__proto__", "constructor"])(
@@ -373,7 +571,10 @@ describe("storage writes preserve raw records", () => {
       );
       await StorageUtil.setTokenContractsList(key, TOKEN);
       expect(
-        Object.prototype.hasOwnProperty.call(h.store.TOKENS.ALL_TOKENS, key),
+        Object.prototype.hasOwnProperty.call(
+          storedRecord("TOKENS", "ALL_TOKENS"),
+          key,
+        ),
       ).toBe(true);
       expect(await StorageUtil.getTokenContractsList(key)).toEqual([TOKEN]);
       await StorageUtil.clearFromTokenContractsList(key, TOKEN.address);
@@ -394,7 +595,10 @@ describe("storage writes preserve raw records", () => {
       ).toEqual([OTHER_ACCOUNT]);
       await StorageUtil.clearDAppsConnectedAccountsData(key);
       expect(
-        Object.prototype.hasOwnProperty.call(h.store.DAPPS.ALL_DAPPS, key),
+        Object.prototype.hasOwnProperty.call(
+          storedRecord("DAPPS", "ALL_DAPPS"),
+          key,
+        ),
       ).toBe(false);
       h.store.ACCOUNT_LABELS = { opaque: { keep: true } };
       await StorageUtil.setAccountLabel(key, "Label");
@@ -404,7 +608,7 @@ describe("storage writes preserve raw records", () => {
           key,
         ),
       ).toBe(true);
-      expect(h.store.ACCOUNT_LABELS.opaque).toEqual({ keep: true });
+      expect(storedRecord("ACCOUNT_LABELS").opaque).toEqual({ keep: true });
       expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(
         prototypeBefore,
       );
