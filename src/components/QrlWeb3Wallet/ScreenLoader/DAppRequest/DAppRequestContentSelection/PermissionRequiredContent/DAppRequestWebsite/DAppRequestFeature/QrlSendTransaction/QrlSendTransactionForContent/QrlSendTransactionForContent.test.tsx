@@ -1,4 +1,7 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
+import * as releaseProfile from "@/configuration/releaseProfile";
+import { NATIVE_TOKEN } from "@/constants/nativeToken";
+import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { StoreProvider } from "@/stores/store";
 import type { StoreType } from "@/stores/store";
 import type { ResponseRecorder } from "@/stores/dAppRequestStore";
@@ -12,14 +15,18 @@ import { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import StringUtil from "@/utilities/stringUtil";
+import StorageUtil from "@/utilities/storageUtil";
 import { ContractExecutionError } from "@theqrl/web3-errors";
 import {
   FeeMarketEIP1559Transaction,
+  TransactionFactory,
   signTransaction,
 } from "@theqrl/web3-qrl-accounts";
-import { sha3Raw } from "@theqrl/web3-utils";
+import { bytesToHex, hexToBytes, sha3Raw } from "@theqrl/web3-utils";
 import QrlSendTransactionForContent from "./QrlSendTransactionForContent";
-import { SEND_TRANSACTION_TYPES } from "../QrlSendTransaction";
+import QrlSendTransaction, {
+  SEND_TRANSACTION_TYPES,
+} from "../QrlSendTransaction";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 
 const SENDER_ADDRESS = `Q${"a".repeat(128)}`;
@@ -1670,7 +1677,672 @@ describe("QrlSendTransactionForContent", () => {
     );
   });
 
+  describe("approval boundaries", () => {
+    it.each([
+      undefined,
+      null,
+      "transaction",
+      [],
+      [null],
+      [{ ...zndTransferRequest, from: 1 }],
+      [{ ...zndTransferRequest, to: {} }],
+      [{ ...zndTransferRequest, data: [] }],
+      [{ ...zndTransferRequest, type: {} }],
+      [{ ...zndTransferRequest, gas: "invalid" }],
+      [{ ...zndTransferRequest, gas: -1 }],
+      [{ ...zndTransferRequest, value: {} }],
+      [{ ...zndTransferRequest, value: true }],
+      [{ ...zndTransferRequest, value: [] }],
+      [{ ...zndTransferRequest, value: 1.5 }],
+      [{ ...zndTransferRequest, value: "1.5" }],
+      [{ ...zndTransferRequest, value: "-1" }],
+      [{ ...zndTransferRequest, value: "0b102" }],
+      [{ ...zndTransferRequest, value: NaN }],
+      [{ ...zndTransferRequest, value: Infinity }],
+      [{ ...zndTransferRequest, value: -Infinity }],
+    ])(
+      "refuses malformed transaction parameters: %j",
+      async (params: unknown) => {
+        const record = vi.fn<ResponseRecorder>();
+        const setCanProceed =
+          vi.fn<StoreType["dAppRequestStore"]["setCanProceed"]>();
+        const getMnemonicPhrases =
+          vi.fn<StoreType["lockStore"]["getMnemonicPhrases"]>();
+        const store = createStoreWithCallback({
+          addToResponseData: record,
+          dAppRequestStore: { setCanProceed },
+          lockStore: { getMnemonicPhrases },
+        });
+        store.dAppRequestStore.dAppRequestData = {
+          method: "qrl_sendTransaction",
+          params,
+        };
+        renderComponent(store, {
+          transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+        });
+
+        await act(async () => {
+          await invokePermissionCallback(true);
+        });
+        expect(setCanProceed).toHaveBeenLastCalledWith(false);
+        expect(record).toHaveBeenCalledWith({
+          error: objectContaining({ code: -32602 }),
+        });
+        expect(getMnemonicPhrases).not.toHaveBeenCalled();
+        expect(
+          store.qrlStore.qrlInstance?.accounts.signTransaction,
+        ).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["0x30", 48, 48n])(
+      "preserves transaction quantities from indexed parameters: %s",
+      async (value) => {
+        const record = vi.fn<ResponseRecorder>();
+        const store = createStoreWithCallback({ addToResponseData: record });
+        store.dAppRequestStore.dAppRequestData = {
+          method: "qrl_sendTransaction",
+          params: { 0: { ...zndTransferRequest, value } },
+        };
+        renderComponent(store, {
+          transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+        });
+        await act(async () => {
+          await invokePermissionCallback(true);
+        });
+
+        expect(
+          store.qrlStore.qrlInstance?.accounts.signTransaction,
+        ).toHaveBeenCalledWith(
+          objectContaining({ value, gas: zndTransferRequest.gas }),
+          "0xhexseed",
+        );
+        expect(record).toHaveBeenCalledWith({ transactionHash: "0xtxhash" });
+      },
+    );
+
+    it.each([0, 2, 0n, 2n])(
+      "preserves legacy pricing for a numeric transaction type: %s",
+      async (type) => {
+        const record = vi.fn<ResponseRecorder>();
+        const store = createStoreWithCallback({
+          requestParams: { ...zndTransferRequest, type },
+          addToResponseData: record,
+        });
+        renderComponent(store, {
+          transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+        });
+        await act(async () => {
+          await invokePermissionCallback(true);
+        });
+        expect(
+          store.qrlStore.qrlInstance?.accounts.signTransaction,
+        ).toHaveBeenCalledWith(
+          objectContaining({ gasPrice: 1000n }),
+          "0xhexseed",
+        );
+        expect(record).toHaveBeenCalledWith({ transactionHash: "0xtxhash" });
+      },
+    );
+
+    it.each([{ gas: undefined }, { value: undefined }])(
+      "preserves omitted contract transaction fields: %j",
+      async (optionalFields) => {
+        const record = vi.fn<ResponseRecorder>();
+        const store = createStoreWithCallback({
+          requestParams: { ...contractDeploymentRequest, ...optionalFields },
+          addToResponseData: record,
+        });
+        renderComponent(store, {
+          transactionType: SEND_TRANSACTION_TYPES.CONTRACT_DEPLOYMENT,
+        });
+        await act(async () => {
+          await invokePermissionCallback(true);
+        });
+        expect(
+          store.qrlStore.qrlInstance?.accounts.signTransaction,
+        ).toHaveBeenCalledWith(objectContaining(optionalFields), "0xhexseed");
+        expect(record).toHaveBeenCalledWith({ transactionHash: "0xtxhash" });
+      },
+    );
+
+    it.each([{ from: undefined }, { from: null }, { from: "" }])(
+      "refuses invalid contract transaction fields before signing: %j",
+      async (invalidFields) => {
+        const record = vi.fn<ResponseRecorder>();
+        const store = createStoreWithCallback({
+          requestParams: { ...contractDeploymentRequest, ...invalidFields },
+          addToResponseData: record,
+        });
+        renderComponent(store, {
+          transactionType: SEND_TRANSACTION_TYPES.CONTRACT_DEPLOYMENT,
+        });
+        await act(async () => {
+          await invokePermissionCallback(true);
+        });
+        expect(record).toHaveBeenCalledWith({
+          error: objectContaining({ code: -32602 }),
+        });
+        expect(
+          store.qrlStore.qrlInstance?.accounts.signTransaction,
+        ).not.toHaveBeenCalled();
+      },
+    );
+
+    describe("Web3 transaction formatting", () => {
+      beforeEach(async () => {
+        const authorization = await vi.importActual<
+          typeof import("@/scripts/utils/restrictedMethodsMiddlewareUtils")
+        >("@/scripts/utils/restrictedMethodsMiddlewareUtils");
+        vi.mocked(revalidateAuthorizedDAppRequest).mockImplementation(
+          authorization.revalidateAuthorizedDAppRequest,
+        );
+        vi.mocked(getHexSeedFromMnemonic).mockReturnValue(EXTENDED_SEED);
+        vi.spyOn(releaseProfile, "assertV3Network").mockResolvedValue(
+          undefined,
+        );
+      });
+
+      afterEach(() => {
+        vi.restoreAllMocks();
+        vi.mocked(getHexSeedFromMnemonic).mockReturnValue("0xhexseed");
+        vi.mocked(revalidateAuthorizedDAppRequest).mockResolvedValue({
+          canProceed: true,
+          proceedError: undefined,
+          authorizedChainId: "0x301825",
+        });
+      });
+
+      it.each([
+        {
+          label: "interaction with explicit zero value",
+          requestParams: contractInteractionRequest,
+          expectedAmount: 0,
+        },
+        {
+          label: "interaction with null value",
+          requestParams: { ...contractInteractionRequest, value: null },
+          expectedAmount: 0,
+        },
+        {
+          label: "interaction with empty value",
+          requestParams: { ...contractInteractionRequest, value: "" },
+          expectedAmount: 0,
+        },
+        {
+          label: "interaction with null gas",
+          requestParams: { ...contractInteractionRequest, gas: null },
+          expectedAmount: 0,
+        },
+        {
+          label: "deployment with null value",
+          requestParams: { ...contractDeploymentRequest, value: null },
+          expectedAmount: 0,
+        },
+        {
+          label: "deployment with empty value",
+          requestParams: { ...contractDeploymentRequest, value: "" },
+          expectedAmount: 0,
+        },
+        {
+          label: "deployment with null gas",
+          requestParams: { ...contractDeploymentRequest, gas: null },
+          expectedAmount: 0,
+        },
+        {
+          label: "transfer with null data",
+          requestParams: { ...zndTransferRequest, data: null },
+          expectedAmount: "0.000000000000000048",
+        },
+        {
+          label: "transfer with hexadecimal quantities",
+          requestParams: zndTransferRequest,
+          expectedAmount: "0.000000000000000048",
+        },
+        {
+          label: "transfer with binary gas",
+          requestParams: {
+            ...zndTransferRequest,
+            gas: "0b11000011010100000",
+          },
+          expectedAmount: "0.000000000000000048",
+        },
+        {
+          label: "transfer with binary value",
+          requestParams: { ...zndTransferRequest, value: "0b110000" },
+          expectedAmount: "0.000000000000000048",
+        },
+        {
+          label: "transfer with negative zero value",
+          requestParams: { ...zndTransferRequest, value: "-0" },
+          expectedAmount: "0.",
+        },
+        {
+          label: "transfer with a large exactly representable value",
+          requestParams: {
+            ...zndTransferRequest,
+            value: 1_000_000_000_000_000_000,
+          },
+          expectedAmount: "1",
+        },
+        {
+          label: "transfer with a value above the safe integer range",
+          requestParams: {
+            ...zndTransferRequest,
+            value: Number.MAX_SAFE_INTEGER + 1,
+          },
+          expectedAmount: "0.009007199254740992",
+        },
+        {
+          label: "transfer with uppercase binary quantities",
+          requestParams: {
+            ...zndTransferRequest,
+            gas: "0B11000011010100000",
+            value: "0B110000",
+          },
+          expectedAmount: "0.000000000000000048",
+        },
+        {
+          label: "transfer with leading zeroes in its value",
+          requestParams: { ...zndTransferRequest, value: "0048" },
+          expectedAmount: "0.000000000000000048",
+        },
+        {
+          label: "plain call with empty value",
+          requestParams: {
+            ...contractInteractionRequest,
+            data: undefined,
+            value: "",
+          },
+          expectedAmount: 0,
+        },
+      ])(
+        "authorizes, formats, signs and records $label",
+        async ({ requestParams, expectedAmount }) => {
+          const instance = new Web3().qrl;
+          instance.defaultNetworkId = 3151909;
+          const account = instance.accounts.seedToAccount(EXTENDED_SEED);
+          const signer = vi.spyOn(instance.accounts, "signTransaction");
+          const send = vi
+            .spyOn(instance.requestManager, "send")
+            .mockImplementation(({ method, params }) => {
+              if (method === "qrl_call") return Promise.resolve("0x");
+              if (method === "qrl_estimateGas")
+                return Promise.resolve("0x186a0");
+              if (method === "qrl_getTransactionCount")
+                return Promise.resolve("0x0");
+              if (method === "qrl_chainId") return Promise.resolve("0x301825");
+              if (method === "net_version") return Promise.resolve("3151909");
+              if (
+                method === "qrl_sendRawTransaction" &&
+                Array.isArray(params) &&
+                typeof params[0] === "string"
+              ) {
+                return Promise.resolve(sha3Raw(params[0]));
+              }
+              throw new Error(`Unexpected RPC call: ${method}`);
+            });
+          vi.spyOn(instance, "getGasPrice").mockResolvedValue(1000n);
+          const record = vi.fn<ResponseRecorder>();
+          const setCanProceed =
+            vi.fn<StoreType["dAppRequestStore"]["setCanProceed"]>();
+          const addTransaction = vi
+            .fn<AddTransaction>()
+            .mockResolvedValue(undefined);
+          const request = { ...requestParams, from: account.address };
+          const originalRequest = { ...request };
+          const store = createStoreWithCallback({
+            addToResponseData: record,
+            qrlStore: { qrlInstance: instance },
+            dAppRequestStore: {
+              dAppRequestData: {
+                method: "qrl_sendTransaction",
+                params: [request],
+                authorizedChainId: "0x301825",
+                requestData: {
+                  senderData: { url: "https://dapp.example" },
+                },
+              },
+              setCanProceed,
+            },
+            transactionHistoryStore: { addTransaction },
+          });
+          const chain = store.qrlStore.qrlConnection.blockchain;
+          vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue(chain);
+          vi.spyOn(
+            StorageUtil,
+            "getDAppsConnectedAccountsData",
+          ).mockResolvedValue({
+            accounts: [account.address],
+            blockchains: [chain],
+            permissions: [],
+            urlOrigin: "https://dapp.example",
+          });
+          render(
+            <StoreProvider value={store}>
+              <MemoryRouter>
+                <TooltipProvider>
+                  <QrlSendTransaction />
+                </TooltipProvider>
+              </MemoryRouter>
+            </StoreProvider>,
+          );
+          await waitFor(() => {
+            expect(setCanProceed).toHaveBeenLastCalledWith(true);
+          });
+          await act(async () => invokePermissionCallback(true));
+
+          expect(signer).toHaveBeenCalledTimes(1);
+          expect(signer).toHaveBeenCalledWith(
+            objectContaining({
+              value: requestParams.value ?? undefined,
+              gas: requestParams.gas ?? undefined,
+            }),
+            EXTENDED_SEED,
+          );
+          const simulations = send.mock.calls.filter(
+            ([rpc]) => rpc.method === "qrl_call",
+          );
+          expect(simulations).toHaveLength(1);
+          const expectedSimulation: Record<string, unknown> = {};
+          if (requestParams.value != null) {
+            expectedSimulation.value =
+              requestParams.value === ""
+                ? ""
+                : `0x${BigInt(requestParams.value).toString(16)}`;
+          }
+          if (requestParams.gas != null) {
+            expectedSimulation.gas = `0x${BigInt(requestParams.gas).toString(16)}`;
+          }
+          expect(simulations[0]?.[0].params).toEqual([
+            objectContaining(expectedSimulation),
+            "pending",
+          ]);
+          const broadcasts = send.mock.calls.filter(
+            ([rpc]) => rpc.method === "qrl_sendRawTransaction",
+          );
+          expect(broadcasts).toHaveLength(1);
+          const broadcastParams: unknown = broadcasts[0]?.[0].params;
+          if (
+            !Array.isArray(broadcastParams) ||
+            typeof broadcastParams[0] !== "string"
+          ) {
+            throw new Error("Missing signed transaction");
+          }
+          const rawTransaction = broadcastParams[0];
+          const decoded = TransactionFactory.fromSerializedData(
+            hexToBytes(rawTransaction),
+          );
+          expect(decoded.verifySignature()).toBe(true);
+          expect(decoded.gasLimit).toBe(BigInt(requestParams.gas ?? 100_000));
+          expect(decoded.value).toBe(BigInt(requestParams.value ?? 0));
+          expect(bytesToHex(decoded.data)).toBe(
+            "data" in requestParams ? (requestParams.data ?? "0x") : "0x",
+          );
+          expect(record).toHaveBeenCalledExactlyOnceWith({
+            transactionHash: sha3Raw(rawTransaction),
+          });
+          expect(addTransaction).toHaveBeenCalledExactlyOnceWith(
+            account.address,
+            objectContaining({
+              transactionHash: sha3Raw(rawTransaction),
+              pendingStatus: "pending",
+              amount: expectedAmount,
+            }),
+          );
+          expect(store.dAppRequestStore.dAppRequestData?.params).toEqual([
+            originalRequest,
+          ]);
+          expect(request).toEqual(originalRequest);
+        },
+      );
+    });
+
+    it("simulates a deployment through the library formatter with no recipient", async () => {
+      const send = vi
+        .fn<SendRequest>()
+        .mockImplementation(({ method }) =>
+          Promise.resolve(method === "qrl_call" ? "0x" : "0xtxhash"),
+        );
+      const record = vi.fn<ResponseRecorder>();
+      const store = createStoreWithCallback({
+        requestParams: contractDeploymentRequest,
+        addToResponseData: record,
+      });
+      const instance = store.qrlStore.qrlInstance;
+      if (!instance) throw new Error("Missing test provider");
+      vi.spyOn(instance, "call").mockRestore();
+      vi.spyOn(instance.requestManager, "send").mockImplementation(send);
+      renderComponent(store, {
+        transactionType: SEND_TRANSACTION_TYPES.CONTRACT_DEPLOYMENT,
+      });
+      await act(async () => {
+        await invokePermissionCallback(true);
+      });
+
+      const simulation = send.mock.calls.find(
+        ([request]) => request.method === "qrl_call",
+      )?.[0];
+      expect(simulation?.params).toEqual([
+        objectContaining({
+          from: SENDER_ADDRESS,
+          data: contractDeploymentRequest.data,
+        }),
+        "pending",
+      ]);
+      const simulationParams: unknown = simulation?.params;
+      if (!Array.isArray(simulationParams))
+        throw new Error("Missing simulation parameters");
+      const simulatedTransaction: unknown = simulationParams[0];
+      expect(simulatedTransaction).not.toHaveProperty("to");
+      expect(send.mock.calls.map(([request]) => request.method)).toEqual([
+        "qrl_call",
+        "qrl_sendRawTransaction",
+      ]);
+      expect(record).toHaveBeenCalledWith({ transactionHash: "0xtxhash" });
+    });
+
+    it.each([undefined, null, {}, -1, 1.5])(
+      "refuses a malformed nonce before signing: %j",
+      async (nonce) => {
+        const record = vi.fn<ResponseRecorder>();
+        const store = createStoreWithCallback({ addToResponseData: record });
+        const instance = store.qrlStore.qrlInstance;
+        if (!instance) throw new Error("Missing test provider");
+        vi.spyOn(instance, "getTransactionCount").mockResolvedValue(
+          malformed<bigint>(nonce),
+        );
+        renderComponent(store, {
+          transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+        });
+        await act(async () => {
+          await invokePermissionCallback(true);
+        });
+
+        expect(record).toHaveBeenCalledWith({
+          error: new Error("Invalid transaction quantity"),
+        });
+        expect(instance.accounts.signTransaction).not.toHaveBeenCalled();
+        expect(
+          vi.spyOn(instance.requestManager, "send"),
+        ).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([null, {}, { address: 1 }])(
+      "refuses a malformed signing account: %j",
+      async (account) => {
+        const record = vi.fn<ResponseRecorder>();
+        const store = createStoreWithCallback({ addToResponseData: record });
+        const instance = store.qrlStore.qrlInstance;
+        if (!instance) throw new Error("Missing test provider");
+        vi.mocked(instance.accounts.seedToAccount).mockReturnValue(
+          malformed<ReturnType<QrlInstance["accounts"]["seedToAccount"]>>(
+            account,
+          ),
+        );
+        renderComponent(store, {
+          transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+        });
+        await act(async () => {
+          await invokePermissionCallback(true);
+        });
+        expect(record).toHaveBeenCalledWith({
+          error: new Error(
+            "Signing account does not match the requested sender",
+          ),
+        });
+        expect(instance.accounts.signTransaction).not.toHaveBeenCalled();
+      },
+    );
+
+    it("reports an authorization failure when its error is missing", async () => {
+      const record = vi.fn<ResponseRecorder>();
+      const authorization = vi.mocked(revalidateAuthorizedDAppRequest);
+      authorization
+        .mockResolvedValueOnce({
+          canProceed: true,
+          proceedError: undefined,
+          authorizedChainId: zndTransferRequest.chainId,
+        })
+        .mockResolvedValueOnce({
+          canProceed: false,
+          proceedError: undefined,
+          authorizedChainId: zndTransferRequest.chainId,
+        });
+      const store = createStoreWithCallback({ addToResponseData: record });
+      renderComponent(store, {
+        transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+      });
+      await act(async () => {
+        await invokePermissionCallback(true);
+      });
+      expect(record).toHaveBeenCalledWith({
+        error: new Error("The request is no longer authorized."),
+      });
+      expect(
+        store.qrlStore.qrlInstance?.accounts.signTransaction,
+      ).not.toHaveBeenCalled();
+    });
+
+    it.each([null, {}, -1, "invalid"])(
+      "refuses a malformed legacy gas price: %j",
+      async (gasPrice) => {
+        const record = vi.fn<ResponseRecorder>();
+        const setCanProceed =
+          vi.fn<StoreType["dAppRequestStore"]["setCanProceed"]>();
+        const store = createStoreWithCallback({
+          requestParams: { ...zndTransferRequest, type: "0x0" },
+          addToResponseData: record,
+          dAppRequestStore: { setCanProceed },
+        });
+        const instance = store.qrlStore.qrlInstance;
+        if (!instance) throw new Error("Missing test provider");
+        vi.spyOn(instance, "getGasPrice").mockResolvedValue(
+          malformed<bigint>(gasPrice),
+        );
+        renderComponent(store, {
+          transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+        });
+        await act(async () => {
+          await invokePermissionCallback(true);
+        });
+        expect(setCanProceed).toHaveBeenLastCalledWith(false);
+        expect(record).toHaveBeenCalledWith({
+          error: new Error("Invalid transaction quantity"),
+        });
+        expect(instance.accounts.signTransaction).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([undefined, null, { symbol: 1, name: [] }])(
+      "keeps history metadata fallbacks for an older stored chain: %j",
+      async (nativeCurrency) => {
+        const addTransaction = vi
+          .fn<AddTransaction>()
+          .mockResolvedValue(undefined);
+        const store = createStoreWithCallback({
+          transactionHistoryStore: { addTransaction },
+        });
+        store.qrlStore.qrlConnection.blockchain = malformed<
+          StoreType["qrlStore"]["qrlConnection"]["blockchain"]
+        >({
+          ...store.qrlStore.qrlConnection.blockchain,
+          nativeCurrency,
+        });
+        renderComponent(store, {
+          transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+        });
+        await act(async () => {
+          await invokePermissionCallback(true);
+        });
+        expect(addTransaction).toHaveBeenCalledWith(
+          SENDER_ADDRESS,
+          objectContaining({
+            tokenSymbol: NATIVE_TOKEN.symbol,
+            tokenName: NATIVE_TOKEN.symbol,
+            chainId: zndTransferRequest.chainId,
+          }),
+        );
+      },
+    );
+
+    it.each([
+      null,
+      { rawTransaction: 1, transactionHash: "0xhash" },
+      { rawTransaction: "0xraw", transactionHash: {} },
+    ])("refuses malformed signed transaction data: %j", async (result) => {
+      const record = vi.fn<ResponseRecorder>();
+      const store = createStoreWithCallback({ addToResponseData: record });
+      const instance = store.qrlStore.qrlInstance;
+      if (!instance) throw new Error("Missing test provider");
+      vi.mocked(instance.accounts.signTransaction).mockResolvedValue(
+        malformed<SignedTransaction>(result),
+      );
+      renderComponent(store, {
+        transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+      });
+      await act(async () => {
+        await invokePermissionCallback(true);
+      });
+
+      expect(record).toHaveBeenCalledWith({
+        error: new Error("QRL Transfer transaction could not be signed"),
+      });
+      expect(vi.spyOn(instance.requestManager, "send")).not.toHaveBeenCalled();
+    });
+  });
+
   describe("copyData", () => {
+    it("reports a clipboard rejection", async () => {
+      const failure = new Error("Clipboard permission denied");
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      const writeText = vi
+        .fn<Clipboard["writeText"]>()
+        .mockRejectedValue(failure);
+      Object.assign(navigator, { clipboard: { writeText } });
+      try {
+        renderComponent(
+          createApprovalStore({
+            dAppRequestStore: {
+              dAppRequestData: { params: [contractInteractionRequest] },
+            },
+          }),
+          { transactionType: SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION },
+        );
+        await userEvent.click(screen.getByRole("tab", { name: "Data" }));
+        await userEvent.click(screen.getByRole("button"));
+        await waitFor(() => {
+          expect(report).toHaveBeenCalledWith(
+            "Failed to copy transaction data:",
+            failure,
+          );
+        });
+      } finally {
+        report.mockRestore();
+      }
+    });
+
     it("should copy data to clipboard when copy button is clicked", async () => {
       const mockWriteText = vi
         .fn<Clipboard["writeText"]>()

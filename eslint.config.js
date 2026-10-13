@@ -126,48 +126,6 @@ export const baseConfig = [
 export const lintRatchet = [
   {
     files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSendTransaction/QrlSendTransactionForContent/QrlSendTransactionForContent.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-floating-promises": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unnecessary-type-conversion": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/only-throw-error": "off",
-      "@typescript-eslint/unbound-method": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
-    files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSignTypedDataV4/PersonalSign/PersonalSign.test.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-non-null-assertion": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
-    files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSignTypedDataV4/PersonalSign/PersonalSign.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/no-floating-promises": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSignTypedDataV4/QrlSignTypedDataV4Content/QrlSignTypedDataV4Content.test.tsx",
     ],
     rules: {
