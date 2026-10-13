@@ -40,16 +40,21 @@ const h = vi.hoisted(() => {
   const roundTrip = (value: unknown): unknown =>
     value === undefined ? undefined : JSON.parse(JSON.stringify(value));
   const local = {
-    get: vi.fn(async (key: string) => ({ [key]: roundTrip(store[key]) })),
-    set: vi.fn(async (data: Record<string, unknown>) => {
+    get: vi.fn((key: string) =>
+      Promise.resolve({ [key]: roundTrip(store[key]) }),
+    ),
+    set: vi.fn((data: Record<string, unknown>) => {
       for (const [key, value] of Object.entries(data))
         store[key] = roundTrip(value);
+      return Promise.resolve();
     }),
-    remove: vi.fn(async (key: string) => {
-      delete store[key];
+    remove: vi.fn((key: string) => {
+      Reflect.deleteProperty(store, key);
+      return Promise.resolve();
     }),
-    clear: vi.fn(async () => {
-      for (const key of Object.keys(store)) delete store[key];
+    clear: vi.fn(() => {
+      for (const key of Object.keys(store)) Reflect.deleteProperty(store, key);
+      return Promise.resolve();
     }),
   };
   return { store, local, roundTrip };
@@ -63,7 +68,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 beforeEach(() => {
   vi.clearAllMocks();
-  for (const key of Object.keys(h.store)) delete h.store[key];
+  for (const key of Object.keys(h.store)) Reflect.deleteProperty(h.store, key);
   h.store.BLOCKCHAINS = {
     ALL_BLOCKCHAINS: [CHAIN],
     ACTIVE_BLOCKCHAIN: CHAIN.chainId,
@@ -139,12 +144,11 @@ const cases: WriterCase[] = [
     read: () => StorageUtil.getTransactionHistory(ACCOUNT),
     raw: () => {
       const list = nestedList("TX_HISTORY", "ALL_TX_HISTORY", "transactions");
-      return Array.isArray(list)
-        ? list.find(
-            (entry: unknown) =>
-              getStoredValue(entry, "transactionHash") !== "unrelated",
-          )
-        : undefined;
+      const entries: unknown[] = Array.isArray(list) ? list : [];
+      return entries.find(
+        (entry: unknown) =>
+          getStoredValue(entry, "transactionHash") !== "unrelated",
+      );
     },
     unrelated: () =>
       StorageUtil.setTransactionHistoryEntry(ACCOUNT, {
@@ -287,10 +291,10 @@ for (const internal of [false, true]) {
         );
         if (getStoredValue(verdict, "canProceed") !== true) return;
         const rpcUrls = input.rpcUrls;
-        const explorer = Array.isArray(input.blockExplorerUrls)
+        const explorer: unknown = Array.isArray(input.blockExplorerUrls)
           ? input.blockExplorerUrls[0]
           : undefined;
-        const icon = Array.isArray(input.iconUrls)
+        const icon: unknown = Array.isArray(input.iconUrls)
           ? input.iconUrls[0]
           : undefined;
         const stored = internal
@@ -420,11 +424,12 @@ describe("current price fetch writer matrix", () => {
   )("$label", async ({ input }) => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(
-        async () =>
+      vi.fn(() =>
+        Promise.resolve(
           new Response(JSON.stringify({ "quantum-resistant-ledger": input }), {
             status: 200,
           }),
+        ),
       ),
     );
     const prices = new PriceStore();

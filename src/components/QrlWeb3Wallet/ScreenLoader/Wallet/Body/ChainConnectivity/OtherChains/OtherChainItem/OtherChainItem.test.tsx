@@ -39,6 +39,8 @@ vi.mock("@/utilities/storageUtil", async () => {
       setActiveBlockChain: vi.fn(async () => {}),
       getDAppsConnectedAccountsData: vi.fn(async () => {}),
       setDAppsConnectedAccountsData: vi.fn(async () => {}),
+      addDAppChain: vi.fn().mockResolvedValue(undefined),
+      removeDAppChain: vi.fn().mockResolvedValue(undefined),
     },
   };
 });

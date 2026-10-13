@@ -19,19 +19,24 @@ const h = vi.hoisted(() => {
   const roundTrip = (value: unknown): unknown =>
     JSON.parse(JSON.stringify(value));
   const local = {
-    get: vi.fn(async (key: string) =>
-      Object.prototype.hasOwnProperty.call(store, key)
-        ? { [key]: roundTrip(store[key]) }
-        : {},
+    get: vi.fn((key: string) =>
+      Promise.resolve(
+        Object.prototype.hasOwnProperty.call(store, key)
+          ? { [key]: roundTrip(store[key]) }
+          : {},
+      ),
     ),
-    set: vi.fn(async (value: Record<string, unknown>) => {
+    set: vi.fn((value: Record<string, unknown>) => {
       Object.assign(store, roundTrip(value));
+      return Promise.resolve();
     }),
-    remove: vi.fn(async (key: string) => {
-      delete store[key];
+    remove: vi.fn((key: string) => {
+      Reflect.deleteProperty(store, key);
+      return Promise.resolve();
     }),
-    clear: vi.fn(async () => {
-      for (const key of Object.keys(store)) delete store[key];
+    clear: vi.fn(() => {
+      for (const key of Object.keys(store)) Reflect.deleteProperty(store, key);
+      return Promise.resolve();
     }),
   };
   return { store, local, roundTrip };
@@ -93,7 +98,7 @@ const addressForms = [
 
 beforeEach(() => {
   vi.clearAllMocks();
-  for (const key of Object.keys(h.store)) delete h.store[key];
+  for (const key of Object.keys(h.store)) Reflect.deleteProperty(h.store, key);
   h.store.BLOCKCHAINS = {
     ALL_BLOCKCHAINS: [CHAIN],
     ACTIVE_BLOCKCHAIN: CHAIN.chainId,
@@ -488,10 +493,11 @@ describe("storage writes preserve raw records", () => {
     );
   });
 
-  it("changes only parseable dApp records containing the removed account", async () => {
+  it("revokes readable accounts while preserving unfamiliar dApp metadata", async () => {
     const untouched = {
       ...CONNECTION,
       accounts: [OTHER_ACCOUNT],
+      permissions: [],
       extension: { keep: [null] },
     };
     const invalid = { ...CONNECTION, permissions: [{ future: true }] };
@@ -509,7 +515,7 @@ describe("storage writes preserve raw records", () => {
       await StorageUtil.getDAppsConnectedAccountsData("unreadable"),
     ).toMatchObject({
       ...invalid,
-      permissions: [{ future: true, caveats: [] }],
+      permissions: [{ future: true }],
     });
     const before = bytes(h.store.DAPPS);
     await StorageUtil.removeAccountFromAllDApps(`Q${"c".repeat(128)}`);
@@ -524,17 +530,18 @@ describe("storage writes preserve raw records", () => {
       { caveats: [{ value: [OTHER_ACCOUNT] }] },
       {},
     ]);
-    for (const key of ["unrelated", "unreadable", "junk"])
+    for (const key of ["unrelated", "junk"])
       expect(bytes(storedRecord("DAPPS", "ALL_DAPPS")[key])).toBe(
         bytes(records[key]),
       );
+    expect(bytes(storedRecord("DAPPS", "ALL_DAPPS").unreadable)).toBe(
+      bytes({ ...invalid, accounts: [OTHER_ACCOUNT] }),
+    );
     await StorageUtil.removeAccountFromAllDApps(OTHER_ACCOUNT);
     expect(
       await StorageUtil.getDAppsConnectedAccountsData(CONNECTION.urlOrigin),
     ).toBeUndefined();
-    expect(bytes(storedRecord("DAPPS", "ALL_DAPPS").unreadable)).toBe(
-      bytes(invalid),
-    );
+    expect(storedRecord("DAPPS", "ALL_DAPPS").unreadable).toBeUndefined();
   });
 
   it("retains unreadable accounts, contacts and Ledger records across bulk saves", async () => {

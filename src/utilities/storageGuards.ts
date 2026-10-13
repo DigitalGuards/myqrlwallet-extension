@@ -66,15 +66,119 @@ export const getStorageArray = (
   return fallback;
 };
 
-// Bulk setters receive the visible list. Retain unreadable records at their
-// original positions relative to surviving records, including duplicate keys.
+// Apply supplied fields to the raw object, including nested metadata. Explicit
+// undefined values clear a field when Chrome serializes the result.
+export const mergeStorageFields = (
+  stored: unknown,
+  changes: unknown,
+): unknown => {
+  if (!isRecord(stored) || !isRecord(changes)) return changes;
+  const result = Object.keys(stored).every((key) =>
+    Object.prototype.hasOwnProperty.call(changes, key),
+  )
+    ? { ...changes }
+    : { ...stored };
+  for (const [key, value] of Object.entries(changes)) {
+    Object.defineProperty(result, key, {
+      value: mergeStorageFields(getStoredValue(stored, key), value),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return result;
+};
+
+// Whole-value setters replace their documented fields, including omitted
+// optional fields. Fields from other versions stay attached to the raw record.
+export const replaceStorageFields = (
+  stored: unknown,
+  changes: Record<string, unknown>,
+  fields: readonly string[],
+): Record<string, unknown> => {
+  const raw = getStorageRecord(stored);
+  if (Object.keys(raw).every((key) => fields.includes(key)))
+    return { ...changes };
+  const result = { ...raw };
+  for (const key of fields) {
+    if (!Object.prototype.hasOwnProperty.call(changes, key))
+      Reflect.deleteProperty(result, key);
+  }
+  for (const [key, value] of Object.entries(changes)) {
+    Object.defineProperty(result, key, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return result;
+};
+
+export const replaceStoredSettings = (
+  stored: unknown,
+  settings: WalletSettings,
+): unknown => replaceStorageShape(stored, settings, storageShapes.settings);
+
+export const replaceStoredRequest = (
+  stored: unknown,
+  request: DAppRequestType,
+) => {
+  const result = replaceStorageFields(stored, request, [
+    "method",
+    "params",
+    "requestData",
+    "phishingResult",
+    "requestId",
+    "authorizedChainId",
+  ] satisfies Array<keyof DAppRequestType>);
+  const requestData: unknown = request.requestData;
+  if (isRecord(requestData)) {
+    const rawData = getStoredValue(stored, "requestData");
+    const data = replaceStorageFields(rawData, requestData, ["senderData"]);
+    if (isRecord(requestData.senderData))
+      data.senderData = replaceStorageFields(
+        getStoredValue(rawData, "senderData"),
+        requestData.senderData,
+        ["tabId", "title", "url", "favIconUrl", "mainFrameOrigin"],
+      );
+    result.requestData = data;
+  }
+  const phishing: unknown = request.phishingResult;
+  if (isRecord(phishing))
+    result.phishingResult = replaceStorageFields(
+      getStoredValue(stored, "phishingResult"),
+      phishing,
+      ["isDomainPhishing", "matchType", "matchedDomain", "detectorStatus"],
+    );
+  return result;
+};
+
+export const replaceStoredPriceCache = (
+  stored: unknown,
+  cache: PriceCache,
+): unknown => replaceStorageShape(stored, cache, storageShapes.price);
+
+// Bulk setters reconcile identities against the raw list. Unreadable siblings
+// retain their positions; matching objects retain fields absent from the input.
 export const mergeStorageArray = <T>(
   stored: unknown[],
   replacements: T[],
   guard: Guard<T>,
   key: (record: T) => string,
+  merge: (stored: T, replacement: T) => unknown = mergeStorageFields,
 ): unknown[] => {
-  if (stored.every(guard)) return replacements;
+  if (stored.every(guard)) {
+    const remaining = [...stored];
+    return replacements.map((replacement) => {
+      const index = remaining.findIndex(
+        (item) => key(item) === key(replacement),
+      );
+      if (index < 0) return replacement;
+      const [original] = remaining.splice(index, 1);
+      return guard(original) ? merge(original, replacement) : replacement;
+    });
+  }
   const remaining = [...replacements];
   const merged: unknown[] = [];
   for (const record of stored) {
@@ -83,7 +187,10 @@ export const mergeStorageArray = <T>(
       continue;
     }
     const index = remaining.findIndex((item) => key(item) === key(record));
-    if (index >= 0) merged.push(...remaining.splice(index, 1));
+    if (index >= 0) {
+      const [replacement] = remaining.splice(index, 1);
+      if (guard(replacement)) merged.push(merge(record, replacement));
+    }
   }
   return [...merged, ...remaining];
 };
@@ -110,14 +217,16 @@ export const mergeStorageRecord = <T>(
   value: unknown,
   replacements: Record<string, T>,
   guard: Guard<T>,
+  isKey: (key: string) => boolean = () => true,
 ): Record<string, unknown> => {
   const stored = getStorageRecord(value);
-  if (Object.values(stored).every(guard)) return replacements;
+  if (Object.entries(stored).every(([key, item]) => isKey(key) && guard(item)))
+    return replacements;
   const entries: Array<[string, unknown]> = [];
   for (const [key, item] of Object.entries(stored)) {
     if (Object.prototype.hasOwnProperty.call(replacements, key)) {
       entries.push([key, replacements[key]]);
-    } else if (!guard(item)) {
+    } else if (!isKey(key) || !guard(item)) {
       entries.push([key, item]);
     }
   }
@@ -251,7 +360,8 @@ const isTokenDetails = (
   isBoolean(value.isZrc20Token) &&
   isString(value.tokenContractAddress) &&
   isStoredNumber(value.tokenDecimals) &&
-  isString(value.tokenImage) &&
+  // watchAsset historically persisted arbitrary optional image metadata.
+  // The transfer screen narrows it only when rendering an image.
   isString(value.tokenBalance) &&
   isOptional(value.tokenBalanceBaseUnits, isString) &&
   isString(value.tokenName) &&
@@ -330,13 +440,210 @@ export const isConnectedAccounts = (
 ): value is StoredConnectedAccounts =>
   isRecord(value) && isStorageIdentity(value.urlOrigin);
 
+const permissionKey = (value: unknown): string | undefined =>
+  isRecord(value) &&
+  isString(value.invoker) &&
+  (value.parentCapability === "qrl_accounts" ||
+    value.parentCapability === "qrl_chains")
+    ? `${value.invoker}:${value.parentCapability}`
+    : undefined;
+const caveatKey = (value: unknown): string | undefined =>
+  isRecord(value) &&
+  (value.type === "restrictReturnedAccounts" ||
+    value.type === "restrictNetworkSwitching")
+    ? value.type
+    : undefined;
+
+// Permission identities and caveat identities are independent of their optional
+// metadata. Preserve opaque entries even when a caller rebuilt the known grants.
+const mergeGrantArray = (
+  stored: unknown,
+  changes: unknown,
+  key: (value: unknown) => string | undefined,
+  merge: (stored: unknown, changes: unknown) => unknown,
+): unknown => {
+  if (!Array.isArray(changes)) return changes;
+  const replacementList: unknown[] = changes;
+  const originals = getStorageArray(stored, "dApp grants");
+  if (originals.every((item) => key(item) !== undefined)) {
+    const unmatched = [...originals];
+    return replacementList.map((replacement) => {
+      const identity = key(replacement);
+      const index =
+        identity === undefined
+          ? -1
+          : unmatched.findIndex((item) => key(item) === identity);
+      if (index < 0) return replacement;
+      const [original] = unmatched.splice(index, 1);
+      return merge(original, replacement);
+    });
+  }
+  const remaining = [...replacementList];
+  const result: unknown[] = [];
+  for (const original of originals) {
+    const identity = key(original);
+    const index = remaining.findIndex((item) =>
+      identity === undefined
+        ? JSON.stringify(item) === JSON.stringify(original)
+        : key(item) === identity,
+    );
+    if (identity === undefined) {
+      result.push(original);
+      if (index >= 0) remaining.splice(index, 1);
+    } else if (index >= 0) {
+      const [replacement] = remaining.splice(index, 1);
+      result.push(merge(original, replacement));
+    }
+  }
+  return [...result, ...remaining];
+};
+
+export const mergeStoredPermissions = (
+  stored: unknown,
+  changes: unknown,
+): unknown =>
+  mergeGrantArray(stored, changes, permissionKey, (original, replacement) => {
+    const merged = mergeStorageFields(original, replacement);
+    if (!isRecord(merged) || !isRecord(replacement)) return merged;
+    merged.caveats = mergeGrantArray(
+      getStoredValue(original, "caveats"),
+      replacement.caveats,
+      caveatKey,
+      (oldCaveat, newCaveat) => {
+        const caveat = mergeStorageFields(oldCaveat, newCaveat);
+        if (!isRecord(caveat) || !isRecord(newCaveat)) return caveat;
+        const accountCaveat = caveat.type === "restrictReturnedAccounts";
+        caveat.value = mergeGrantArray(
+          getStoredValue(oldCaveat, "value"),
+          newCaveat.value,
+          (value) =>
+            accountCaveat
+              ? isNormalizableQrlAddress(value)
+                ? toCanonicalQrlAddress(value)
+                : undefined
+              : isStorageIdentity(value)
+                ? value.toLowerCase()
+                : undefined,
+          (_old, value) => value,
+        );
+        return caveat;
+      },
+    );
+    return merged;
+  });
+
+export const matchesStoredAccount = (
+  value: unknown,
+  target: string,
+): boolean => {
+  if (!isString(value)) return false;
+  if (isNormalizableQrlAddress(value) && isNormalizableQrlAddress(target))
+    return toCanonicalQrlAddress(value) === toCanonicalQrlAddress(target);
+  return value.toLowerCase() === target.toLowerCase();
+};
+
+// Revoke each readable value without parsing its surrounding permission.
+export const revokeStoredCaveats = (
+  permissions: unknown,
+  type: string,
+  matches: (value: unknown) => boolean,
+): boolean => {
+  if (!Array.isArray(permissions)) return false;
+  let changed = false;
+  for (const permission of permissions) {
+    if (!isRecord(permission) || !Array.isArray(permission.caveats)) continue;
+    for (const caveat of permission.caveats) {
+      if (
+        !isRecord(caveat) ||
+        caveat.type !== type ||
+        !Array.isArray(caveat.value)
+      )
+        continue;
+      const remaining: unknown[] = caveat.value.filter(
+        (value: unknown) => !matches(value),
+      );
+      if (remaining.length === caveat.value.length) continue;
+      caveat.value = remaining;
+      changed = true;
+    }
+  }
+  return changed;
+};
+
+export const matchesStoredChain = (
+  value: unknown,
+  chainId: string,
+): boolean => {
+  if (!isStorageIdentity(value)) return false;
+  if (value.toLowerCase() === chainId.toLowerCase()) return true;
+  try {
+    return BigInt(value) === BigInt(chainId);
+  } catch {
+    return false;
+  }
+};
+
+export const addStoredChainPermission = (
+  stored: unknown,
+  urlOrigin: string,
+  accounts: unknown,
+  chainIds: string[],
+  addedChainId: string,
+): unknown => {
+  if (stored !== undefined && !Array.isArray(stored)) return stored;
+  const permissions = getStorageArray(stored, "dApp permissions");
+  if (
+    !permissions.some(
+      (value) => isRecord(value) && value.parentCapability === "qrl_accounts",
+    )
+  ) {
+    const rawAccounts = getStorageArray(accounts, "dApp accounts");
+    permissions.push({
+      invoker: urlOrigin,
+      parentCapability: "qrl_accounts",
+      caveats: [
+        {
+          type: "restrictReturnedAccounts",
+          value: rawAccounts
+            .filter(isNormalizableQrlAddress)
+            .map(toCanonicalQrlAddress),
+        },
+      ],
+    });
+  }
+  let found = false;
+  for (const permission of permissions) {
+    if (!isRecord(permission) || !Array.isArray(permission.caveats)) continue;
+    for (const caveat of permission.caveats) {
+      if (
+        !isRecord(caveat) ||
+        caveat.type !== "restrictNetworkSwitching" ||
+        !Array.isArray(caveat.value)
+      )
+        continue;
+      const values: unknown[] = caveat.value;
+      if (!values.some((value) => matchesStoredChain(value, addedChainId)))
+        values.push(addedChainId);
+      found = true;
+    }
+  }
+  if (!found)
+    permissions.push({
+      invoker: urlOrigin,
+      parentCapability: "qrl_chains",
+      caveats: [{ type: "restrictNetworkSwitching", value: chainIds }],
+    });
+  return permissions;
+};
+
 // Preserve unfamiliar permission fields while applying the existing account
 // migration to recognizable caveats. Authorization narrows account grants.
 export const normalizeStoredPermissions = (value: unknown): unknown => {
   if (value == null) return [];
   if (!Array.isArray(value)) return value;
   return value.map((permission: unknown) => {
-    if (!isRecord(permission)) return permission;
+    if (!isRecord(permission) || permissionKey(permission) === undefined)
+      return permission;
     const caveats = permission.caveats;
     if (caveats != null && !Array.isArray(caveats)) return permission;
     return {
@@ -401,3 +708,216 @@ export const isDAppRequest = (value: unknown): value is DAppRequestType => {
   // Each method validates its own params at the approval boundary.
   return true;
 };
+
+// Replacement setters own the documented fields of their target record. This
+// keeps valid replacements (including omitted optional fields) compatible while
+// carrying unfamiliar keys and unreadable metadata through from raw storage.
+type StorageField =
+  | ((value: unknown) => boolean)
+  | { fields: StorageShape; nullable?: boolean };
+type StorageShape = Record<string, StorageField>;
+const isKnownStorageField = (value: unknown, field: StorageField): boolean => {
+  if (value === undefined) return true;
+  if (typeof field === "function") return field(value);
+  if (value === null && field.nullable) return true;
+  return (
+    isRecord(value) &&
+    Object.entries(value).every(
+      ([key, item]) =>
+        Object.prototype.hasOwnProperty.call(field.fields, key) &&
+        isKnownStorageField(item, field.fields[key]),
+    )
+  );
+};
+const replaceStorageShape = (
+  stored: unknown,
+  changes: unknown,
+  shape: StorageShape,
+): unknown => {
+  if (!isRecord(changes)) return changes;
+  const fields = Object.entries(shape)
+    .filter(([key, field]) =>
+      isKnownStorageField(getStoredValue(stored, key), field),
+    )
+    .map(([key]) => key);
+  const result = replaceStorageFields(stored, changes, fields);
+  for (const [key, field] of Object.entries(shape)) {
+    if (
+      typeof field !== "function" &&
+      Object.prototype.hasOwnProperty.call(changes, key)
+    )
+      result[key] = replaceStorageShape(
+        getStoredValue(stored, key),
+        changes[key],
+        field.fields,
+      );
+  }
+  return result;
+};
+const nullableStrings = (value: unknown) =>
+  value === null || isStringArray(value);
+const stringOrNull = (value: unknown) => value === null || isString(value);
+// Currency keys emitted by the current price fetcher. Unknown currencies and
+// malformed quote metadata survive a refresh that does not supply them.
+const priceQuoteShape: StorageShape = {
+  usd: isStoredNumber,
+  eur: isStoredNumber,
+  pln: isStoredNumber,
+  gbp: isStoredNumber,
+  chf: isStoredNumber,
+  jpy: isStoredNumber,
+};
+const storageShapes = {
+  settings: {
+    themePreference: (value) =>
+      value === "system" || value === "light" || value === "dark",
+    autoLockMinutes: isFiniteNumber,
+    currency: isString,
+    language: isString,
+    defaultGasTier: (value) =>
+      isString(value) &&
+      ["low", "market", "aggressive", "advanced"].includes(value),
+    showBalanceAndPrice: isBoolean,
+    sidePanelPreferred: isBoolean,
+    sidePanelSurface: (value) => value === "panel" || value === "popup",
+    sidePanelNoticePending: isBoolean,
+    sidePanelNoticeSeen: isBoolean,
+    notificationsEnabled: isBoolean,
+    phishingDetectionEnabled: isBoolean,
+  } satisfies Record<keyof WalletSettings, StorageField>,
+  price: {
+    prices: { fields: priceQuoteShape },
+    change24h: { fields: priceQuoteShape },
+    updatedAt: { fields: priceQuoteShape },
+    timestamp: isStoredNumber,
+  } satisfies Record<keyof PriceCache, StorageField>,
+
+  chain: {
+    chainId: isString,
+    chainName: isString,
+    rpcUrls: isStringArray,
+    blockExplorerUrls: nullableStrings,
+    iconUrls: nullableStrings,
+    nativeCurrency: {
+      nullable: true,
+      fields: {
+        name: stringOrNull,
+        symbol: isString,
+        decimals: isFiniteNumber,
+      },
+    },
+    defaultRpcUrl: isString,
+    defaultBlockExplorerUrl: isString,
+    defaultIconUrl: isString,
+    defaultWsRpcUrl: isString,
+    isTestnet: isBoolean,
+    isCustomChain: isBoolean,
+    qrnsRegistryAddress: isCanonicalQrlAddress,
+  } satisfies Record<keyof BlockchainDataType, StorageField>,
+  token: {
+    address: isString,
+    symbol: isString,
+    decimals: isStoredNumber,
+    image: isString,
+  } satisfies Record<keyof TokenContractType, StorageField>,
+  nft: {
+    address: isString,
+    name: isString,
+    symbol: isString,
+    standard: isString,
+    image: isString,
+  } satisfies Record<keyof NFTCollectionType, StorageField>,
+  contact: { address: isString, name: isString } satisfies Record<
+    keyof Contact,
+    StorageField
+  >,
+  ledger: {
+    address: isString,
+    derivationPath: isString,
+    publicKey: isString,
+    index: isFiniteNumber,
+  } satisfies Record<keyof LedgerAccount, StorageField>,
+  history: {
+    id: isString,
+    from: isString,
+    to: isString,
+    amount: isAmount,
+    tokenSymbol: isString,
+    tokenName: isString,
+    isZrc20Token: isBoolean,
+    tokenContractAddress: isString,
+    tokenDecimals: isStoredNumber,
+    transactionHash: isString,
+    blockNumber: isString,
+    gasUsed: isString,
+    effectiveGasPrice: isString,
+    status: isBoolean,
+    timestamp: isFiniteNumber,
+    chainId: isString,
+    paidFeesQrl: isString,
+    receiptStatusVerified: isBoolean,
+    submissionRejected: isBoolean,
+    isInternal: isBoolean,
+    pendingStatus: (value) =>
+      isString(value) &&
+      [
+        "pending",
+        "unknown",
+        "confirmed",
+        "failed",
+        "replaced",
+        "cancelled",
+        "dropped",
+      ].includes(value),
+    nonce: isFiniteNumber,
+    maxFeePerGas: isString,
+    maxPriorityFeePerGas: isString,
+    gasLimit: isFiniteNumber,
+    data: isString,
+    replacementTransactionHash: isString,
+    replacedByAction: (value) => value === "speed-up" || value === "cancel",
+  } satisfies Record<keyof TransactionHistoryEntry, StorageField>,
+  keystore: {
+    address: isString,
+    id: isString,
+    version: isFiniteNumber,
+    crypto: {
+      fields: {
+        cipher: isString,
+        ciphertext: isString,
+        kdf: isString,
+        cipherparams: { fields: { iv: isString } },
+        kdfparams: {
+          fields: {
+            dklen: isFiniteNumber,
+            t: isFiniteNumber,
+            m: isFiniteNumber,
+            p: isFiniteNumber,
+            salt: (value) => isString(value) || value instanceof Uint8Array,
+          },
+        },
+      },
+    },
+  } satisfies Record<keyof KeyStore, StorageField>,
+  draft: {
+    receiverAddress: isString,
+    amount: isAmount,
+    tokenDetails: {
+      fields: {
+        isZrc20Token: isBoolean,
+        tokenContractAddress: isString,
+        tokenDecimals: isStoredNumber,
+        tokenImage: () => true,
+        tokenBalance: isString,
+        tokenBalanceBaseUnits: isString,
+        tokenName: isString,
+        tokenSymbol: isString,
+      },
+    },
+  } satisfies Record<keyof TransactionValuesType, StorageField>,
+};
+export const replaceStoredEntry = (
+  kind: keyof typeof storageShapes,
+  stored: unknown,
+  changes: unknown,
+): unknown => replaceStorageShape(stored, changes, storageShapes[kind]);

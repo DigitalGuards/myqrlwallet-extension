@@ -555,7 +555,6 @@ export const lintRatchet = [
       "src/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/SwitchQrlChainContent/SwitchQrlChainInfo/SwitchQrlChainInfo.test.tsx",
     ],
     rules: {
-      "@typescript-eslint/no-misused-spread": "off",
       "@typescript-eslint/require-await": "off",
     },
   },
@@ -894,7 +893,6 @@ export const lintRatchet = [
     ],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-misused-spread": "off",
       "@typescript-eslint/require-await": "off",
       "@typescript-eslint/unbound-method": "off",
     },
@@ -932,7 +930,6 @@ export const lintRatchet = [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/OtherChains/OtherChainItem/OtherChainItem.test.tsx",
     ],
     rules: {
-      "@typescript-eslint/no-misused-spread": "off",
       "@typescript-eslint/require-await": "off",
     },
   },
@@ -1176,14 +1173,6 @@ export const lintRatchet = [
   },
   {
     files: [
-      "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/TokenListItem/TokenListItem.test.tsx",
-    ],
-    rules: {
-      "@typescript-eslint/no-misused-spread": "off",
-    },
-  },
-  {
-    files: [
       "src/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/TokenListItem/TokenListItem.tsx",
     ],
     rules: {
@@ -1225,7 +1214,6 @@ export const lintRatchet = [
     ],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-misused-spread": "off",
       "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/require-await": "off",
     },
@@ -2867,17 +2855,6 @@ export const lintRatchet = [
       "@typescript-eslint/no-unsafe-call": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: ["src/utilities/storageUtil.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-extraneous-class": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
     },
   },
   {

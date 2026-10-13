@@ -973,26 +973,11 @@ export const includeChainForUrlOrigin = async ({
   chainId: string;
 }) => {
   const origin = new URL(urlOrigin ?? "").origin;
-  const dAppConnectedData =
-    await StorageUtil.getDAppsConnectedAccountsData(origin);
   const allBlockchains = await StorageUtil.getAllBlockChains();
   const blockchain = allBlockchains.find(
-    (chain) => chain?.chainId?.toLowerCase() === chainId?.toLowerCase(),
+    (chain) => chain.chainId.toLowerCase() === chainId.toLowerCase(),
   );
-  const isAdditionRequired = !(dAppConnectedData?.blockchains ?? []).find(
-    (chain) =>
-      chain.chainId?.toLowerCase() === blockchain?.chainId?.toLowerCase(),
-  );
-  const updatedBlockchains = [
-    ...(dAppConnectedData?.blockchains ?? []),
-    ...(isAdditionRequired && blockchain ? [blockchain] : []),
-  ];
-
-  await updateAccountsAndBlockchainsForUrlOrigin({
-    urlOrigin: origin,
-    accounts: dAppConnectedData?.accounts ?? [],
-    blockchains: updatedBlockchains,
-  });
+  if (blockchain) await StorageUtil.addDAppChain(origin, blockchain);
 };
 
 /**
@@ -1086,16 +1071,5 @@ export const excludeChainForUrlOrigin = async ({
   chainId: string;
 }) => {
   const origin = new URL(urlOrigin ?? "").origin;
-  const dAppConnectedData =
-    await StorageUtil.getDAppsConnectedAccountsData(origin);
-  const updatedBlockchains =
-    dAppConnectedData?.blockchains?.filter(
-      (chain) => chain?.chainId?.toLowerCase() !== chainId.toLowerCase(),
-    ) ?? [];
-
-  await updateAccountsAndBlockchainsForUrlOrigin({
-    urlOrigin: origin,
-    accounts: dAppConnectedData?.accounts ?? [],
-    blockchains: updatedBlockchains,
-  });
+  await StorageUtil.removeDAppChain(origin, chainId);
 };

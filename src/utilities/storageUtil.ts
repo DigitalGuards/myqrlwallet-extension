@@ -52,7 +52,15 @@ import {
   mergeStorageRecord,
   normalizeStoredPermissions,
   isStorageIdentity,
-  isStoredPermission,
+  matchesStoredAccount,
+  replaceStoredEntry,
+  mergeStoredPermissions,
+  revokeStoredCaveats,
+  replaceStoredRequest,
+  replaceStoredSettings,
+  replaceStoredPriceCache,
+  addStoredChainPermission,
+  matchesStoredChain,
   type StoredBlockchain,
   type StoredToken,
   type StoredNFTCollection,
@@ -132,7 +140,9 @@ const sanitizeQrnsRegistry = (
     registryAddress === null ||
     registryAddress === ""
   ) {
-    return withoutRegistry;
+    return rejectInvalid
+      ? { ...withoutRegistry, qrnsRegistryAddress: undefined }
+      : withoutRegistry;
   }
   if (rejectInvalid) {
     throw new Error(
@@ -188,7 +198,7 @@ export type TransactionValuesType = {
     isZrc20Token: boolean;
     tokenContractAddress: string;
     tokenDecimals: number | null;
-    tokenImage: string;
+    tokenImage: unknown;
     tokenBalance: string;
     tokenBalanceBaseUnits?: string;
     tokenName: string;
@@ -225,14 +235,33 @@ const StorageUtil = {
     ) {
       throw new Error("Cannot persist a keystore with an invalid QRL address");
     }
+    const storageData = await readLocalStorage(KEYSTORES_IDENTIFIER);
+    const stored = storageData[KEYSTORES_IDENTIFIER];
+    let raw: unknown = stored;
+    if (typeof stored === "string" && stored !== "") {
+      try {
+        raw = JSON.parse(stored);
+      } catch {
+        throw new KeystoreStorageCorruptError();
+      }
+    }
     await walletLocalStorage.set({
-      [KEYSTORES_IDENTIFIER]: JSON.stringify(keystores),
+      [KEYSTORES_IDENTIFIER]: JSON.stringify(
+        mergeStorageArray(
+          getStorageArray(raw === "" ? undefined : raw, KEYSTORES_IDENTIFIER),
+          keystores,
+          isStoredKeystore,
+          (keystore) => keystore.address.toLowerCase(),
+          (raw, replacement) =>
+            replaceStoredEntry("keystore", raw, replacement),
+        ),
+      ),
     });
   },
 
   async getKeystores(): Promise<KeyStore[]> {
     const storageData = await readLocalStorage(KEYSTORES_IDENTIFIER);
-    const stored: unknown = storageData?.[KEYSTORES_IDENTIFIER];
+    const stored: unknown = storageData[KEYSTORES_IDENTIFIER];
     if (stored === undefined || stored === "") return [];
     if (typeof stored !== "string") throw new KeystoreStorageCorruptError();
 
@@ -278,8 +307,13 @@ const StorageUtil = {
       amount: transactionValues.amount ?? 0,
       tokenDetails: transactionValues.tokenDetails,
     };
+    const storageData = await readLocalStorage(transactionValuesIdentifier);
     await walletLocalStorage.set({
-      [transactionValuesIdentifier]: transactionValuesWithDefaultValues,
+      [transactionValuesIdentifier]: replaceStoredEntry(
+        "draft",
+        storageData[transactionValuesIdentifier],
+        transactionValuesWithDefaultValues,
+      ),
     });
   },
 
@@ -317,7 +351,7 @@ const StorageUtil = {
    */
   async setAllAccounts(accountList: string[]) {
     const canonicalAccounts = accountList.map(toCanonicalQrlAddress);
-    const existing = (await readLocalStorage(ACCOUNTS_IDENTIFIER))?.[
+    const existing = (await readLocalStorage(ACCOUNTS_IDENTIFIER))[
       ACCOUNTS_IDENTIFIER
     ];
     await walletLocalStorage.set({
@@ -337,7 +371,7 @@ const StorageUtil = {
   },
 
   async getStoredAccounts() {
-    const storedAllAccounts = (await readLocalStorage(ACCOUNTS_IDENTIFIER))?.[
+    const storedAllAccounts = (await readLocalStorage(ACCOUNTS_IDENTIFIER))[
       ACCOUNTS_IDENTIFIER
     ];
     const accounts = getStoredValue(storedAllAccounts, ALL_ACCOUNTS_IDENTIFIER);
@@ -367,7 +401,7 @@ const StorageUtil = {
   async setActiveAccount(activeAccount?: string) {
     if (activeAccount) {
       const canonicalAddress = toCanonicalQrlAddress(activeAccount);
-      const existing = (await readLocalStorage(ACCOUNTS_IDENTIFIER))?.[
+      const existing = (await readLocalStorage(ACCOUNTS_IDENTIFIER))[
         ACCOUNTS_IDENTIFIER
       ];
       await walletLocalStorage.set({
@@ -382,7 +416,7 @@ const StorageUtil = {
   },
 
   async getActiveAccount() {
-    const storedAccounts = (await readLocalStorage(ACCOUNTS_IDENTIFIER))?.[
+    const storedAccounts = (await readLocalStorage(ACCOUNTS_IDENTIFIER))[
       ACCOUNTS_IDENTIFIER
     ];
     const storedAddress = getStoredValue(
@@ -398,8 +432,7 @@ const StorageUtil = {
 
   async clearActiveAccount() {
     const storedAccounts =
-      (await readLocalStorage(ACCOUNTS_IDENTIFIER))?.[ACCOUNTS_IDENTIFIER] ??
-      {};
+      (await readLocalStorage(ACCOUNTS_IDENTIFIER))[ACCOUNTS_IDENTIFIER] ?? {};
     const accounts = getStorageRecord(storedAccounts);
     Reflect.deleteProperty(accounts, ACTIVE_ACCOUNT_IDENTIFIER);
     await walletLocalStorage.set({
@@ -417,7 +450,7 @@ const StorageUtil = {
     const canonicalBlockchains = blockchains.map((chain) =>
       sanitizeQrnsRegistry(chain, true),
     );
-    const existing = (await readLocalStorage(BLOCKCHAINS_IDENTIFIER))?.[
+    const existing = (await readLocalStorage(BLOCKCHAINS_IDENTIFIER))[
       BLOCKCHAINS_IDENTIFIER
     ];
     await walletLocalStorage.set({
@@ -431,15 +464,16 @@ const StorageUtil = {
           canonicalBlockchains,
           isStoredBlockchain,
           (chain) => chain.chainId,
+          (raw, replacement) => replaceStoredEntry("chain", raw, replacement),
         ),
       },
     });
   },
 
   async getAllBlockChains() {
-    const storedBlockchains = (
-      await readLocalStorage(BLOCKCHAINS_IDENTIFIER)
-    )?.[BLOCKCHAINS_IDENTIFIER];
+    const storedBlockchains = (await readLocalStorage(BLOCKCHAINS_IDENTIFIER))[
+      BLOCKCHAINS_IDENTIFIER
+    ];
     const storedChains = getStoredValue(
       storedBlockchains,
       ALL_BLOCKCHAINS_IDENTIFIER,
@@ -493,7 +527,7 @@ const StorageUtil = {
    * Call the getActiveBlockChain function to retrieve the stored value.
    */
   async setActiveBlockChain(selectedBlockchainId: string) {
-    const existing = (await readLocalStorage(BLOCKCHAINS_IDENTIFIER))?.[
+    const existing = (await readLocalStorage(BLOCKCHAINS_IDENTIFIER))[
       BLOCKCHAINS_IDENTIFIER
     ];
     await walletLocalStorage.set({
@@ -505,9 +539,9 @@ const StorageUtil = {
   },
 
   async getActiveBlockChain() {
-    const storedBlockchains = (
-      await readLocalStorage(BLOCKCHAINS_IDENTIFIER)
-    )?.[BLOCKCHAINS_IDENTIFIER];
+    const storedBlockchains = (await readLocalStorage(BLOCKCHAINS_IDENTIFIER))[
+      BLOCKCHAINS_IDENTIFIER
+    ];
     const blockchains = await this.getAllBlockChains();
     const storedActiveChainId: unknown = getStoredValue(
       storedBlockchains,
@@ -580,7 +614,14 @@ const StorageUtil = {
         (token) =>
           !isTokenContract(token) || token.address !== tokenContract.address,
       ),
-      tokenContract,
+      replaceStoredEntry(
+        "token",
+        storedTokenContracts.find(
+          (token) =>
+            isTokenContract(token) && token.address === tokenContract.address,
+        ),
+        tokenContract,
+      ),
     ];
 
     await walletLocalStorage.set(storageData);
@@ -651,7 +692,14 @@ const StorageUtil = {
       ...storedCollections.filter(
         (c) => !isNFTCollection(c) || c.address !== collection.address,
       ),
-      collection,
+      replaceStoredEntry(
+        "nft",
+        storedCollections.find(
+          (item) =>
+            isNFTCollection(item) && item.address === collection.address,
+        ),
+        collection,
+      ),
     ];
 
     await walletLocalStorage.set(storageData);
@@ -702,17 +750,19 @@ const StorageUtil = {
    * Call the getDAppsRequestData function to retrieve the stored value, and clearDAppsRequestData for clearing the stored value.
    */
   async setDAppsRequestData(dAppsRequestData: DAppRequestType) {
-    await walletSessionStorage.set({
-      [DAPPS_IDENTIFIER]: {
-        [DAPPS_REQUEST_DATA_IDENTIFIER]: dAppsRequestData,
-      },
-    });
+    const storageData = await readSessionStorage(DAPPS_IDENTIFIER);
+    const dApps = ensureStorageRecord(storageData, DAPPS_IDENTIFIER);
+    dApps[DAPPS_REQUEST_DATA_IDENTIFIER] = replaceStoredRequest(
+      dApps[DAPPS_REQUEST_DATA_IDENTIFIER],
+      dAppsRequestData,
+    );
+    await walletSessionStorage.set(storageData);
   },
 
   async getDAppsRequestData() {
-    const storedDAppsRequestData = (
-      await readSessionStorage(DAPPS_IDENTIFIER)
-    )?.[DAPPS_IDENTIFIER];
+    const storedDAppsRequestData = (await readSessionStorage(DAPPS_IDENTIFIER))[
+      DAPPS_IDENTIFIER
+    ];
     const request = getStoredValue(
       storedDAppsRequestData,
       DAPPS_REQUEST_DATA_IDENTIFIER,
@@ -735,14 +785,20 @@ const StorageUtil = {
       await this.clearDAppsRequestData();
       return;
     }
-    const storedDAppsRequestData = await this.getDAppsRequestData();
-    if (storedDAppsRequestData?.requestId !== requestId) return;
-    await this.clearDAppsRequestData();
+    const storageData = await readSessionStorage(DAPPS_IDENTIFIER);
+    const dApps = getStorageRecord(storageData, DAPPS_IDENTIFIER);
+    if (
+      getStoredValue(dApps, DAPPS_REQUEST_DATA_IDENTIFIER, "requestId") !==
+      requestId
+    )
+      return;
+    Reflect.deleteProperty(dApps, DAPPS_REQUEST_DATA_IDENTIFIER);
+    await walletSessionStorage.set(storageData);
   },
 
   async clearDAppsRequestData() {
     const storedDAppsRequestData =
-      (await readSessionStorage(DAPPS_IDENTIFIER))?.[DAPPS_IDENTIFIER] ?? {};
+      (await readSessionStorage(DAPPS_IDENTIFIER))[DAPPS_IDENTIFIER] ?? {};
     const dApps = getStorageRecord(storedDAppsRequestData);
     Reflect.deleteProperty(dApps, DAPPS_REQUEST_DATA_IDENTIFIER);
     await walletSessionStorage.set({
@@ -766,18 +822,10 @@ const StorageUtil = {
     const blockchains = data.blockchains.map((chain) =>
       sanitizeQrnsRegistry(chain, true),
     );
-    const permissions = (data.permissions ?? []).map((permission) => ({
-      ...permission,
-      caveats: (permission.caveats ?? []).map((caveat) =>
-        caveat.type === RESTRICT_RETURNED_ACCOUNTS_CAVEAT &&
-        isStringArray(caveat.value)
-          ? {
-              ...caveat,
-              value: caveat.value.map(toCanonicalQrlAddress),
-            }
-          : caveat,
-      ),
-    }));
+    const rawPermissions: unknown = data.permissions;
+    if (rawPermissions != null && !Array.isArray(rawPermissions))
+      throw new Error("Invalid stored dApp permissions");
+    const permissions = normalizeStoredPermissions(rawPermissions);
 
     const storageData = await readLocalStorage(DAPPS_IDENTIFIER);
     const dApp = ensureStorageRecord(
@@ -786,7 +834,23 @@ const StorageUtil = {
       ALL_DAPPS_IDENTIFIER,
       urlOrigin,
     );
-    Object.assign(dApp, { urlOrigin, accounts, blockchains, permissions });
+    Object.assign(dApp, {
+      urlOrigin,
+      accounts: mergeStorageArray(
+        getStorageArray(dApp.accounts, "dApp accounts"),
+        accounts,
+        isNormalizableQrlAddress,
+        toCanonicalQrlAddress,
+      ),
+      blockchains: mergeStorageArray(
+        getStorageArray(dApp.blockchains, "dApp blockchains"),
+        blockchains,
+        isStoredBlockchain,
+        (chain) => chain.chainId.toLowerCase(),
+        (raw, replacement) => replaceStoredEntry("chain", raw, replacement),
+      ),
+      permissions: mergeStoredPermissions(dApp.permissions, permissions),
+    });
 
     await walletLocalStorage.set(storageData);
   },
@@ -820,6 +884,78 @@ const StorageUtil = {
     return { ...storedData, accounts, blockchains, permissions };
   },
 
+  async addDAppChain(urlOrigin: string, chain: StoredBlockchain) {
+    if (!isStorageIdentity(urlOrigin) || !isStoredBlockchain(chain))
+      throw new Error("Invalid stored dApp chain identity");
+    const blockchain = sanitizeQrnsRegistry(chain, true);
+    const storageData = await readLocalStorage(DAPPS_IDENTIFIER);
+    const dApp = ensureStorageRecord(
+      storageData,
+      DAPPS_IDENTIFIER,
+      ALL_DAPPS_IDENTIFIER,
+      urlOrigin,
+    );
+    if (!Object.prototype.hasOwnProperty.call(dApp, "urlOrigin"))
+      dApp.urlOrigin = urlOrigin;
+    if (!Object.prototype.hasOwnProperty.call(dApp, "accounts"))
+      dApp.accounts = [];
+    const chains = getStorageArray(dApp.blockchains, "dApp blockchains");
+    if (
+      !chains.some((value) =>
+        matchesStoredChain(
+          getStoredValue(value, "chainId"),
+          blockchain.chainId,
+        ),
+      )
+    )
+      chains.push(blockchain);
+    dApp.blockchains = chains;
+    dApp.permissions = addStoredChainPermission(
+      dApp.permissions,
+      urlOrigin,
+      dApp.accounts,
+      chains.filter(isStoredBlockchain).map((value) => value.chainId),
+      blockchain.chainId,
+    );
+    await walletLocalStorage.set(storageData);
+  },
+
+  async removeDAppChain(urlOrigin: string, chainId: string) {
+    const storageData = await readLocalStorage(DAPPS_IDENTIFIER);
+    const allDApps = getStorageRecord(
+      storageData,
+      DAPPS_IDENTIFIER,
+      ALL_DAPPS_IDENTIFIER,
+    );
+    let changed = false;
+    for (const [origin, data] of Object.entries(allDApps)) {
+      if (
+        !isRecord(data) ||
+        (origin !== urlOrigin && data.urlOrigin !== urlOrigin)
+      )
+        continue;
+      if (Array.isArray(data.blockchains)) {
+        const remaining: unknown[] = data.blockchains.filter(
+          (value: unknown) =>
+            !matchesStoredChain(getStoredValue(value, "chainId"), chainId),
+        );
+        if (remaining.length !== data.blockchains.length) {
+          data.blockchains = remaining;
+          changed = true;
+        }
+      }
+      if (
+        revokeStoredCaveats(
+          data.permissions,
+          "restrictNetworkSwitching",
+          (value) => matchesStoredChain(value, chainId),
+        )
+      )
+        changed = true;
+    }
+    if (changed) await walletLocalStorage.set(storageData);
+  },
+
   async clearDAppsConnectedAccountsData(urlOrigin: string = "") {
     const storageData = await readLocalStorage(DAPPS_IDENTIFIER);
     const allDApps = getStorageRecord(
@@ -827,7 +963,13 @@ const StorageUtil = {
       DAPPS_IDENTIFIER,
       ALL_DAPPS_IDENTIFIER,
     );
-    Reflect.deleteProperty(allDApps, urlOrigin);
+    for (const [origin, data] of Object.entries(allDApps)) {
+      if (
+        origin === urlOrigin ||
+        getStoredValue(data, "urlOrigin") === urlOrigin
+      )
+        Reflect.deleteProperty(allDApps, origin);
+    }
     await walletLocalStorage.set(storageData);
   },
 
@@ -854,11 +996,11 @@ const StorageUtil = {
         identifier,
         allIdentifier,
       );
-      const match = Object.keys(byAccount).find(
-        (address) => address.toLowerCase() === accountAddress.toLowerCase(),
+      const matches = Object.keys(byAccount).filter((address) =>
+        matchesStoredAccount(address, accountAddress),
       );
-      if (!match) continue;
-      Reflect.deleteProperty(byAccount, match);
+      if (matches.length === 0) continue;
+      for (const match of matches) Reflect.deleteProperty(byAccount, match);
       await walletLocalStorage.set(storageData);
     }
   },
@@ -873,55 +1015,40 @@ const StorageUtil = {
    * the authorization check and opens a full approval screen.
    */
   async removeAccountFromAllDApps(accountAddress: string) {
-    const target = accountAddress.toLowerCase();
     const storageData = await readLocalStorage(DAPPS_IDENTIFIER);
     const allDApps = getStorageRecord(
       storageData,
       DAPPS_IDENTIFIER,
       ALL_DAPPS_IDENTIFIER,
     );
-
+    const matches = (value: unknown) =>
+      matchesStoredAccount(value, accountAddress);
     let changed = false;
     for (const [origin, data] of Object.entries(allDApps)) {
+      if (!isRecord(data)) continue;
+      if (Array.isArray(data.accounts)) {
+        const remaining: unknown[] = data.accounts.filter(
+          (value: unknown) => !matches(value),
+        );
+        if (remaining.length !== data.accounts.length) {
+          changed = true;
+          if (remaining.length === 0) {
+            Reflect.deleteProperty(allDApps, origin);
+            continue;
+          }
+          data.accounts = remaining;
+        }
+      }
       if (
-        !isConnectedAccounts(data) ||
-        !isStringArray(data.accounts) ||
-        !(
-          data.permissions == null ||
-          isArrayOf(data.permissions, isStoredPermission)
+        revokeStoredCaveats(
+          data.permissions,
+          RESTRICT_RETURNED_ACCOUNTS_CAVEAT,
+          matches,
         )
       )
-        continue;
-      const accounts = data?.accounts ?? [];
-      const remaining = accounts.filter(
-        (address) => address?.toLowerCase() !== target,
-      );
-      if (remaining.length === accounts.length) continue;
-      changed = true;
-      if (remaining.length === 0) {
-        Reflect.deleteProperty(allDApps, origin);
-        continue;
-      }
-      data.accounts = remaining;
-      data.permissions = (data.permissions ?? []).map((permission) => ({
-        ...permission,
-        caveats: (permission.caveats ?? []).map((caveat) =>
-          caveat.type === RESTRICT_RETURNED_ACCOUNTS_CAVEAT &&
-          isStringArray(caveat.value)
-            ? {
-                ...caveat,
-                value: caveat.value.filter(
-                  (address) => address?.toLowerCase() !== target,
-                ),
-              }
-            : caveat,
-        ),
-      }));
+        changed = true;
     }
-
-    if (changed) {
-      await walletLocalStorage.set(storageData);
-    }
+    if (changed) await walletLocalStorage.set(storageData);
   },
 
   async setContacts(contacts: StoredContact[]) {
@@ -937,11 +1064,13 @@ const StorageUtil = {
     );
     await walletLocalStorage.set({
       [CONTACTS_IDENTIFIER]: {
+        ...getStorageRecord(storageData, CONTACTS_IDENTIFIER),
         [ALL_CONTACTS_IDENTIFIER]: mergeStorageArray(
           getStorageArray(stored, ALL_CONTACTS_IDENTIFIER),
           canonicalContacts,
           isNormalizableContact,
           (contact) => toCanonicalQrlAddress(contact.address),
+          (raw, replacement) => replaceStoredEntry("contact", raw, replacement),
         ),
       },
     });
@@ -986,6 +1115,8 @@ const StorageUtil = {
         storageData[ACCOUNT_LABELS_IDENTIFIER],
         labels,
         isString,
+        (address) =>
+          isNormalizableQrlAddress(address) || isLegacyQrlAddress(address),
       ),
     });
   },
@@ -1015,6 +1146,8 @@ const StorageUtil = {
         storageData[HIDDEN_ACCOUNTS_IDENTIFIER],
         hidden,
         isBoolean,
+        (address) =>
+          isNormalizableQrlAddress(address) || isLegacyQrlAddress(address),
       ),
     });
   },
@@ -1030,8 +1163,12 @@ const StorageUtil = {
   },
 
   async setSettings(settings: WalletSettings) {
+    const storageData = await readLocalStorage(SETTINGS_IDENTIFIER);
     await walletLocalStorage.set({
-      [SETTINGS_IDENTIFIER]: settings,
+      [SETTINGS_IDENTIFIER]: replaceStoredSettings(
+        storageData[SETTINGS_IDENTIFIER],
+        settings,
+      ),
     });
   },
 
@@ -1068,7 +1205,7 @@ const StorageUtil = {
     if (!isArrayOf(accounts, isLedgerAccount))
       throw new Error("Invalid stored Ledger identity");
     const existing =
-      (await readLocalStorage(LEDGER_IDENTIFIER))?.[LEDGER_IDENTIFIER] ?? {};
+      (await readLocalStorage(LEDGER_IDENTIFIER))[LEDGER_IDENTIFIER] ?? {};
 
     await walletLocalStorage.set({
       [LEDGER_IDENTIFIER]: {
@@ -1081,6 +1218,7 @@ const StorageUtil = {
           accounts,
           isLedgerAccount,
           (account) => account.address.toLowerCase(),
+          (raw, replacement) => replaceStoredEntry("ledger", raw, replacement),
         ),
       },
     });
@@ -1092,7 +1230,7 @@ const StorageUtil = {
    * @returns Array of Ledger accounts (empty array if none)
    */
   async getLedgerAccounts(): Promise<StoredLedgerAccount[]> {
-    const storedLedger = (await readLocalStorage(LEDGER_IDENTIFIER))?.[
+    const storedLedger = (await readLocalStorage(LEDGER_IDENTIFIER))[
       LEDGER_IDENTIFIER
     ];
     const accounts = getStoredValue(storedLedger, LEDGER_ACCOUNTS_IDENTIFIER);
@@ -1107,7 +1245,7 @@ const StorageUtil = {
    */
   async clearLedgerAccounts() {
     const storedLedger =
-      (await readLocalStorage(LEDGER_IDENTIFIER))?.[LEDGER_IDENTIFIER] ?? {};
+      (await readLocalStorage(LEDGER_IDENTIFIER))[LEDGER_IDENTIFIER] ?? {};
     const ledger = getStorageRecord(storedLedger);
     Reflect.deleteProperty(ledger, LEDGER_ACCOUNTS_IDENTIFIER);
     await walletLocalStorage.set({
@@ -1121,25 +1259,35 @@ const StorageUtil = {
    * @param address - Ledger account address to add
    */
   async addLedgerAccountToAllAccounts(address: string) {
-    const allAccounts = await this.getAllAccounts();
-
-    // Avoid duplicates
-    if (!allAccounts.some((a) => a.toLowerCase() === address.toLowerCase())) {
-      await this.setAllAccounts([...allAccounts, address]);
-    }
+    const storageData = await readLocalStorage(ACCOUNTS_IDENTIFIER);
+    const accounts = ensureStorageRecord(storageData, ACCOUNTS_IDENTIFIER);
+    const raw = getStorageArray(
+      accounts[ALL_ACCOUNTS_IDENTIFIER],
+      ALL_ACCOUNTS_IDENTIFIER,
+    );
+    if (raw.some((item) => matchesStoredAccount(item, address))) return;
+    accounts[ALL_ACCOUNTS_IDENTIFIER] = [
+      ...raw.map((item) =>
+        isNormalizableQrlAddress(item) ? toCanonicalQrlAddress(item) : item,
+      ),
+      toCanonicalQrlAddress(address),
+    ];
+    await walletLocalStorage.set(storageData);
   },
 
-  /**
-   * Removes a Ledger account address from the global accounts list.
-   *
-   * @param address - Ledger account address to remove
-   */
+  /** Remove only the matching address from the raw global account list. */
   async removeLedgerAccountFromAllAccounts(address: string) {
-    const allAccounts = await this.getAllAccounts();
-    const filteredAccounts = allAccounts.filter(
-      (a) => a.toLowerCase() !== address.toLowerCase(),
-    );
-    await this.setAllAccounts(filteredAccounts);
+    const storageData = await readLocalStorage(ACCOUNTS_IDENTIFIER);
+    const accounts = ensureStorageRecord(storageData, ACCOUNTS_IDENTIFIER);
+    accounts[ALL_ACCOUNTS_IDENTIFIER] = getStorageArray(
+      accounts[ALL_ACCOUNTS_IDENTIFIER],
+      ALL_ACCOUNTS_IDENTIFIER,
+    )
+      .filter((item) => !matchesStoredAccount(item, address))
+      .map((item) =>
+        isNormalizableQrlAddress(item) ? toCanonicalQrlAddress(item) : item,
+      );
+    await walletLocalStorage.set(storageData);
   },
 
   /**
@@ -1191,7 +1339,15 @@ const StorageUtil = {
       ALL_TX_HISTORY_IDENTIFIER,
     );
     const merged = [
-      entry,
+      replaceStoredEntry(
+        "history",
+        existing.find(
+          (tx) =>
+            isTransactionHistoryEntry(tx) &&
+            tx.transactionHash === entry.transactionHash,
+        ),
+        entry,
+      ),
       ...existing.filter(
         (tx) =>
           !isTransactionHistoryEntry(tx) ||
@@ -1310,8 +1466,12 @@ const StorageUtil = {
   },
 
   async setPriceCache(cache: PriceCache) {
+    const storageData = await readLocalStorage(PRICE_CACHE_IDENTIFIER);
     await walletLocalStorage.set({
-      [PRICE_CACHE_IDENTIFIER]: cache,
+      [PRICE_CACHE_IDENTIFIER]: replaceStoredPriceCache(
+        storageData[PRICE_CACHE_IDENTIFIER],
+        cache,
+      ),
     });
   },
 

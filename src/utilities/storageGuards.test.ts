@@ -112,7 +112,7 @@ describe("storage record guards", () => {
       expect(guard({ ...valid, extensionField: { keep: true } })).toBe(true);
       for (const key of required) {
         const missing = { ...valid };
-        delete missing[key];
+        Reflect.deleteProperty(missing, key);
         expect(guard(missing), `missing ${key}`).toBe(false);
         expect(
           guard({
@@ -315,7 +315,7 @@ describe("storage record guards", () => {
     for (const key of Object.keys(settings)) {
       expect(isWalletSettings({ [key]: { junk: true } })).toBe(false);
       const missing: Record<string, unknown> = { ...settings };
-      delete missing[key];
+      Reflect.deleteProperty(missing, key);
       expect(isWalletSettings(missing)).toBe(true);
     }
     expect(isPriceCache(PRICE)).toBe(true);
