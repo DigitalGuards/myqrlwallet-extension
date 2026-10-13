@@ -64,7 +64,7 @@ const AddUrlItem = ({ addUrl }: AddUrlItemProps) => {
     formState: { isSubmitting, isValid },
   } = form;
 
-  async function onSubmit(formData: z.infer<typeof FormSchema>) {
+  function onSubmit(formData: z.infer<typeof FormSchema>) {
     addUrl(formData.url);
     setOpen(false);
     form.reset();
@@ -139,7 +139,11 @@ const AddUrlItem = ({ addUrl }: AddUrlItemProps) => {
                   type="button"
                   disabled={isSubmitting || !isValid}
                   aria-label={t("common.add")}
-                  onClick={handleSubmit(onSubmit)}
+                  onClick={(event) => {
+                    handleSubmit(onSubmit)(event).catch((error: unknown) => {
+                      console.error("Failed to add URL:", error);
+                    });
+                  }}
                 >
                   <Plus className="mr-2 h-4 w-4" />
                   {t("common.add")}

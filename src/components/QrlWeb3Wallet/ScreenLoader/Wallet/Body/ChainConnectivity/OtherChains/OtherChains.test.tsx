@@ -1,3 +1,4 @@
+import StorageUtil from "@/utilities/storageUtil";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,17 +13,24 @@ vi.mock("@/utilities/storageUtil", async () => {
   return {
     ...originalModule,
     default: {
-      getAllBlockChains: vi.fn(async () => [
-        {
-          chainId: "0x123",
-          defaultRpcUrl: "http://testDefaultRpcUrl",
-          defaultBlockExplorerUrl: "http://testDefaultExplorerUrl",
-          defaultIconUrl: "http://testDefaultIconUrl",
-          isTestnet: false,
-          defaultWsRpcUrl: "http://testDefaultRpcUrl",
-          isCustomChain: true,
-        },
-      ]),
+      getAllBlockChains: vi.fn<typeof StorageUtil.getAllBlockChains>(() =>
+        Promise.resolve([
+          {
+            chainId: "0x123",
+            chainName: "Test",
+            rpcUrls: [],
+            blockExplorerUrls: [],
+            iconUrls: [],
+            nativeCurrency: { name: "Test", symbol: "TST", decimals: 18 },
+            defaultRpcUrl: "http://testDefaultRpcUrl",
+            defaultBlockExplorerUrl: "http://testDefaultExplorerUrl",
+            defaultIconUrl: "http://testDefaultIconUrl",
+            isTestnet: false,
+            defaultWsRpcUrl: "http://testDefaultRpcUrl",
+            isCustomChain: true,
+          },
+        ]),
+      ),
     },
   };
 });
@@ -36,7 +44,10 @@ vi.mock(
 );
 
 describe("OtherChains", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -51,7 +62,7 @@ describe("OtherChains", () => {
     renderComponent();
 
     expect(screen.getByText("Other chains")).toBeInTheDocument();
-    await waitFor(async () => {
+    await waitFor(() => {
       expect(screen.getByText(/Mocked Other Chain Item/)).toBeInTheDocument();
     });
   });
@@ -95,6 +106,19 @@ describe("OtherChains", () => {
       expect(
         screen.queryByText(/Mocked Other Chain Item/),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  it("reports a rejected storage read", async () => {
+    const error = new Error("Storage unavailable");
+    vi.spyOn(StorageUtil, "getAllBlockChains").mockRejectedValueOnce(error);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComponent();
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "Failed to load other chains:",
+        error,
+      );
     });
   });
 });

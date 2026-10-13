@@ -50,7 +50,6 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { qrlStore } = useStore();
-  const { initializeBlockchain, addChain, editChain } = qrlStore;
 
   const [rpcUrls, setRpcUrls] = useState<string[]>([]);
   const [defaultRpcUrl, setDefaultRpcUrl] = useState("");
@@ -156,7 +155,8 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
   };
 
   const addBlockchain = async (blockchainData: BlockchainDataType) => {
-    const { chainFound, updatedChainList } = await addChain(blockchainData);
+    const { chainFound, updatedChainList } =
+      await qrlStore.addChain(blockchainData);
     if (chainFound) {
       setError(
         t("chain.errorChainIdExists", { chainId: blockchainData.chainId }),
@@ -164,14 +164,22 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
       return;
     }
     await StorageUtil.setAllBlockChains(updatedChainList);
-    navigate(ROUTES.CHAIN_CONNECTIVITY);
+    Promise.resolve(navigate(ROUTES.CHAIN_CONNECTIVITY)).catch(
+      (error: unknown) => {
+        console.error("Failed to return to chain connectivity:", error);
+      },
+    );
   };
 
   const editBlockchain = async (blockchainData: BlockchainDataType) => {
-    const { updatedChainList } = await editChain(blockchainData);
+    const { updatedChainList } = await qrlStore.editChain(blockchainData);
     await StorageUtil.setAllBlockChains(updatedChainList);
-    navigate(ROUTES.CHAIN_CONNECTIVITY);
-    await initializeBlockchain();
+    Promise.resolve(navigate(ROUTES.CHAIN_CONNECTIVITY)).catch(
+      (error: unknown) => {
+        console.error("Failed to return to chain connectivity:", error);
+      },
+    );
+    await qrlStore.initializeBlockchain();
   };
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
@@ -194,7 +202,16 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
 
   return (
     <Form {...form}>
-      <form className="w-full" onSubmit={handleSubmit(onSubmit)}>
+      <form
+        className="w-full"
+        onSubmit={(event) => {
+          handleSubmit(onSubmit)(event).catch((error: unknown) => {
+            setError(
+              error instanceof Error ? error.message : "Failed to save chain",
+            );
+          });
+        }}
+      >
         <Card>
           <CardHeader className="flex-row items-end justify-between">
             <CardTitle>{labelText}</CardTitle>
@@ -280,7 +297,9 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
                 id="qrnsRegistryAddress"
                 name="qrnsRegistryAddress"
                 value={qrnsRegistryAddress}
-                onChange={(e) => setQrnsRegistryAddress(e.target.value)}
+                onChange={(e) => {
+                  setQrnsRegistryAddress(e.target.value);
+                }}
                 autoComplete="off"
                 autoCorrect="off"
                 autoCapitalize="off"
@@ -374,7 +393,14 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
               type="button"
               variant="outline"
               onClick={() => {
-                navigate(ROUTES.CHAIN_CONNECTIVITY);
+                Promise.resolve(navigate(ROUTES.CHAIN_CONNECTIVITY)).catch(
+                  (error: unknown) => {
+                    console.error(
+                      "Failed to return to chain connectivity:",
+                      error,
+                    );
+                  },
+                );
               }}
             >
               <X className="mr-2 h-4 w-4" />

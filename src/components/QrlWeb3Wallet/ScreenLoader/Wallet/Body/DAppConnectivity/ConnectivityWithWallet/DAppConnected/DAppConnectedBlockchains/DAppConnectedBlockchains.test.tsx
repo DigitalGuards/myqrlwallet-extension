@@ -50,7 +50,7 @@ describe("DAppConnectedBlockchains", () => {
       </StoreProvider>,
     );
 
-  it("should render the dapp connected blockchains component", async () => {
+  it("should render the dapp connected blockchains component", () => {
     renderComponent();
 
     expect(

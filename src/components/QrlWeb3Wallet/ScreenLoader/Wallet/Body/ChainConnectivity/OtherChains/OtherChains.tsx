@@ -24,7 +24,9 @@ const OtherChains = observer(() => {
         blockchainView,
       );
       setOtherChains(blockchains.filter((chain) => chain.chainId !== chainId));
-    })();
+    })().catch((error: unknown) => {
+      console.error("Failed to load other chains:", error);
+    });
     // chainId belongs here: the list is "every chain except the active one",
     // so switching chains has to re-filter it. Without it the newly active
     // chain stayed listed under Other chains and the one just left vanished.

@@ -27,7 +27,9 @@ const ContactItem = ({ contact, onEdit, onDelete }: ContactItemProps) => {
           type="button"
           aria-label={t("contacts.editButton")}
           className="rounded p-1 text-muted-foreground transition-colors hover:text-secondary"
-          onClick={() => onEdit(contact)}
+          onClick={() => {
+            onEdit(contact);
+          }}
         >
           <Pencil size={14} />
         </button>
@@ -35,7 +37,9 @@ const ContactItem = ({ contact, onEdit, onDelete }: ContactItemProps) => {
           type="button"
           aria-label={t("contacts.deleteButton")}
           className="rounded p-1 text-muted-foreground transition-colors hover:text-destructive"
-          onClick={() => onDelete(contact.address)}
+          onClick={() => {
+            onDelete(contact.address);
+          }}
         >
           <Trash2 size={14} />
         </button>

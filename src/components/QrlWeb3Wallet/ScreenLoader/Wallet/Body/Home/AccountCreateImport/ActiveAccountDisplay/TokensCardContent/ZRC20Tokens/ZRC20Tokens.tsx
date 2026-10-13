@@ -40,7 +40,9 @@ const ZRC20Tokens = observer(
           await StorageUtil.getTokenContractsList(accountAddress);
         setTokenContractsList(storedTokens.map(tokenView));
         onCountChange?.(storedTokens.length);
-      })();
+      })().catch((error: unknown) => {
+        console.error("Failed to load tokens:", error);
+      });
     }, [blockchain, accountAddress, reRender]);
 
     const triggerReRender = () => {

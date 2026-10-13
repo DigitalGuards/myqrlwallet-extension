@@ -29,8 +29,6 @@ const SeedBackup = withSuspense(
 const CreateAccount = observer(() => {
   const { t } = useTranslation();
   const { lockStore, qrlStore, accountLabelsStore } = useStore();
-  const { encryptAccount, ensureWalletPassword } = lockStore;
-  const { setActiveAccount } = qrlStore;
 
   const [account, setAccount] = useState<Web3BaseWalletAccount>();
   const [isPersisted, setIsPersisted] = useState(false);
@@ -59,7 +57,7 @@ const CreateAccount = observer(() => {
     // this function runs again with the same generated account, which
     // keeps it in play for the backup step that follows.
     try {
-      await ensureWalletPassword();
+      await lockStore.ensureWalletPassword();
     } catch {
       setNeedsReArmOnStart(true);
       setStartError(t("account.sessionPasswordExpired"));
@@ -80,7 +78,7 @@ const CreateAccount = observer(() => {
   const onBackupConfirmed = async () => {
     if (!account) return;
     try {
-      await ensureWalletPassword();
+      await lockStore.ensureWalletPassword();
     } catch {
       setNeedsReArmOnPersist(true);
       setNeedsRetryOnPersist(false);
@@ -90,7 +88,7 @@ const CreateAccount = observer(() => {
     try {
       // No password on the wire: the service worker encrypts with the one
       // its unlock session already holds.
-      await encryptAccount(account);
+      await lockStore.encryptAccount(account);
     } catch (error) {
       // ensureWalletPassword() already confirmed a usable password moments
       // ago (N11): a failure here has some other cause, so this shows the
@@ -111,7 +109,7 @@ const CreateAccount = observer(() => {
     // label later.
     await accountLabelsStore.ensureLabel(account.address).catch(() => {});
     try {
-      await setActiveAccount(account.address);
+      await qrlStore.setActiveAccount(account.address);
     } catch (error) {
       setNeedsRetryOnPersist(true);
       setPersistError(
@@ -155,7 +153,17 @@ const CreateAccount = observer(() => {
                   variant="outline"
                   size="sm"
                   className="mt-3 w-full"
-                  onClick={onBackupConfirmed}
+                  onClick={() => {
+                    onBackupConfirmed().catch((error: unknown) => {
+                      setPersistError(
+                        describeExtensionError(
+                          error,
+                          t,
+                          t("onboarding.account.persistError"),
+                        ),
+                      );
+                    });
+                  }}
                 >
                   {t("account.retryButton")}
                 </Button>
@@ -174,7 +182,19 @@ const CreateAccount = observer(() => {
                 </AlertDescription>
               </Alert>
             )}
-            <StartAccountCreation onAccountCreated={onAccountCreated} />
+            <StartAccountCreation
+              onAccountCreated={(created) => {
+                onAccountCreated(created).catch((error: unknown) => {
+                  setStartError(
+                    describeExtensionError(
+                      error,
+                      t,
+                      t("onboarding.account.persistError"),
+                    ),
+                  );
+                });
+              }}
+            />
           </>
         )}
       </div>
