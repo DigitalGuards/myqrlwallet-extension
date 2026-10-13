@@ -5,9 +5,10 @@ import {
 } from "@theqrl/qrl-wallet-provider";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import StorageUtil from "@/utilities/storageUtil";
+import { isRecord } from "@/utilities/storageGuards";
+import { isUnknownArray } from "@/utilities/approvalGuards";
 import { assertV3Network, V3_CHAIN_ID } from "@/configuration/releaseProfile";
 import { MAX_SAFE_CHAIN_ID } from "@/constants/blockchain";
-import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 import {
   areAddressesEquivalent,
   isCanonicalQrlAddress,
@@ -520,10 +521,10 @@ export const pickDefaultRpcUrl = (
 };
 
 export const checkWalletAddQrlChainParams = async (
-  chainData: BlockchainDataType,
+  chainData: unknown,
   hasInternalKeys: boolean = false,
 ) => {
-  if (!chainData || typeof chainData !== "object") {
+  if (!isRecord(chainData)) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -607,9 +608,12 @@ export const checkWalletAddQrlChainParams = async (
   // beside a presentable https one.
   if (
     !rpcUrls ||
-    !Array.isArray(rpcUrls) ||
+    !isUnknownArray(rpcUrls) ||
     rpcUrls.length === 0 ||
-    !rpcUrls.every((rpcUrl) => isAcceptableUrl(rpcUrl, hasInternalKeys))
+    !rpcUrls.every(
+      (rpcUrl) =>
+        typeof rpcUrl === "string" && isAcceptableUrl(rpcUrl, hasInternalKeys),
+    )
   ) {
     return {
       canProceed: false,
@@ -621,11 +625,11 @@ export const checkWalletAddQrlChainParams = async (
 
   const nativeCurrency = chainData?.nativeCurrency;
   if (nativeCurrency !== null) {
-    if (typeof nativeCurrency !== "object" || Array.isArray(nativeCurrency)) {
+    if (!isRecord(nativeCurrency)) {
       return {
         canProceed: false,
         proceedError: rpcErrors.invalidParams({
-          message: `Expected null or object 'nativeCurrency'. Received: ${nativeCurrency}`,
+          message: `Expected null or object 'nativeCurrency'. Received: ${JSON.stringify(nativeCurrency)}`,
         }),
       };
     }
@@ -646,11 +650,11 @@ export const checkWalletAddQrlChainParams = async (
       };
     }
   }
-  const ticker = nativeCurrency?.symbol;
-  if (
-    ticker &&
-    (typeof ticker !== "string" || ticker.length < 1 || ticker.length > 6)
-  ) {
+  const ticker =
+    typeof nativeCurrency?.symbol === "string"
+      ? nativeCurrency.symbol
+      : undefined;
+  if (ticker && (ticker.length < 1 || ticker.length > 6)) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -659,7 +663,7 @@ export const checkWalletAddQrlChainParams = async (
     };
   }
 
-  const qrnsRegistryAddress = chainData.qrnsRegistryAddress as unknown;
+  const qrnsRegistryAddress = chainData.qrnsRegistryAddress;
   if (
     hasInternalKeys &&
     qrnsRegistryAddress !== undefined &&
@@ -727,10 +731,8 @@ export const checkUrlOriginHasBeenConnected = async (
   };
 };
 
-export const checkWalletSwitchQrlChainParams = async (paramObject: {
-  chainId: string;
-}) => {
-  if (!paramObject || typeof paramObject !== "object") {
+export const checkWalletSwitchQrlChainParams = async (paramObject: unknown) => {
+  if (!isRecord(paramObject)) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -800,16 +802,8 @@ export const checkWalletSwitchQrlChainParams = async (paramObject: {
   };
 };
 
-export const checkWalletWatchAssetParams = async (paramObject: {
-  type: string;
-  options: {
-    address: string;
-    symbol: string;
-    decimals: number;
-    image: string;
-  };
-}) => {
-  if (!paramObject || typeof paramObject !== "object") {
+export const checkWalletWatchAssetParams = async (paramObject: unknown) => {
+  if (!isRecord(paramObject)) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -820,7 +814,10 @@ export const checkWalletWatchAssetParams = async (paramObject: {
     };
   }
 
-  if (!paramObject?.type || paramObject?.type?.toLowerCase() !== "zrc20") {
+  if (
+    typeof paramObject.type !== "string" ||
+    paramObject.type.toLowerCase() !== "zrc20"
+  ) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -829,10 +826,12 @@ export const checkWalletWatchAssetParams = async (paramObject: {
     };
   }
 
+  const options = paramObject.options;
   if (
-    !paramObject?.options?.address ||
-    !paramObject?.options?.decimals ||
-    !paramObject?.options?.symbol
+    !isRecord(options) ||
+    !options.address ||
+    !options.decimals ||
+    !options.symbol
   ) {
     return {
       canProceed: false,
@@ -842,7 +841,16 @@ export const checkWalletWatchAssetParams = async (paramObject: {
     };
   }
 
-  if (typeof paramObject?.options?.symbol !== "string") {
+  if (typeof options.address !== "string") {
+    return {
+      canProceed: false,
+      proceedError: rpcErrors.invalidParams({
+        message: "Invalid address: not a string.",
+      }),
+    };
+  }
+
+  if (typeof options.symbol !== "string") {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -851,7 +859,7 @@ export const checkWalletWatchAssetParams = async (paramObject: {
     };
   }
 
-  if (paramObject?.options?.symbol?.length > 11) {
+  if (options.symbol.length > 11) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -861,8 +869,10 @@ export const checkWalletWatchAssetParams = async (paramObject: {
   }
 
   if (
-    paramObject?.options?.decimals < 0 ||
-    paramObject?.options?.decimals > 36
+    typeof options.decimals !== "number" ||
+    !Number.isFinite(options.decimals) ||
+    options.decimals < 0 ||
+    options.decimals > 36
   ) {
     return {
       canProceed: false,
@@ -878,14 +888,10 @@ export const checkWalletWatchAssetParams = async (paramObject: {
   };
 };
 
-export const checkWalletRequestPermissionParams = async (paramObject: {
-  [k: string]: unknown;
-}) => {
-  const isAnObject =
-    Boolean(paramObject) &&
-    typeof paramObject === "object" &&
-    !Array.isArray(paramObject);
-  if (!isAnObject) {
+export const checkWalletRequestPermissionParams = async (
+  paramObject: unknown,
+) => {
+  if (!isRecord(paramObject)) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams(),
@@ -915,7 +921,9 @@ export const updateAccountsAndBlockchainsForUrlOrigin = async ({
 }: {
   urlOrigin: string;
   accounts: string[];
-  blockchains: BlockchainDataType[];
+  blockchains: Parameters<
+    typeof StorageUtil.setDAppsConnectedAccountsData
+  >[0]["blockchains"];
 }) => {
   const origin = new URL(urlOrigin ?? "").origin;
   // Do not silently force-switch the globally-active chain when granting
