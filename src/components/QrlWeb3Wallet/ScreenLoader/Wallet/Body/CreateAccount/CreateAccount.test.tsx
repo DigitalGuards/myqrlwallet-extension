@@ -1,3 +1,4 @@
+import * as scrollRegion from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -39,14 +40,15 @@ const createdAccount = () => ({
   address: ADDRESS,
   seed: "",
   sign: () => ({ messageHash: "", signature: "", message: "" }),
-  signTransaction: async () => ({
-    messageHash: "",
-    rawTransaction: "",
-    signature: "",
-    transactionHash: "",
-  }),
-  encrypt: async () => {
-    throw new Error("Not implemented");
+  signTransaction: () =>
+    Promise.resolve({
+      messageHash: "",
+      rawTransaction: "",
+      signature: "",
+      transactionHash: "",
+    }),
+  encrypt: () => {
+    return Promise.reject(new Error("Not implemented"));
   },
 });
 const storeWithCreate = (overrides = {}) =>
@@ -56,7 +58,10 @@ const storeWithCreate = (overrides = {}) =>
   });
 
 describe("CreateAccount", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -113,8 +118,8 @@ describe("CreateAccount", () => {
     renderComponent(
       storeWithCreate({
         lockStore: {
-          ensureWalletPassword: async () => {
-            throw new Error("WALLET_PASSWORD_UNAVAILABLE");
+          ensureWalletPassword: () => {
+            return Promise.reject(new Error("WALLET_PASSWORD_UNAVAILABLE"));
           },
         },
       }),
@@ -221,7 +226,7 @@ describe("CreateAccount", () => {
         .fn()
         .mockRejectedValueOnce(new Error("WALLET_PASSWORD_UNAVAILABLE"))
         .mockResolvedValue(undefined);
-      const unlock = vi.fn(async () => "success" as const);
+      const unlock = vi.fn(() => Promise.resolve("success" as const));
       renderComponent(
         storeWithCreate({ lockStore: { ensureWalletPassword, unlock } }),
       );
@@ -252,7 +257,7 @@ describe("CreateAccount", () => {
       const ensureWalletPassword = vi
         .fn()
         .mockRejectedValue(new Error("WALLET_PASSWORD_UNAVAILABLE"));
-      const unlock = vi.fn(async () => "wrong-password" as const);
+      const unlock = vi.fn(() => Promise.resolve("wrong-password" as const));
       renderComponent(
         storeWithCreate({ lockStore: { ensureWalletPassword, unlock } }),
       );
@@ -279,7 +284,7 @@ describe("CreateAccount", () => {
         .mockResolvedValue(undefined);
       const encryptAccount = vi.fn(async () => {});
       const setActiveAccount = vi.fn(async () => {});
-      const unlock = vi.fn(async () => "success" as const);
+      const unlock = vi.fn(() => Promise.resolve("success" as const));
       renderComponent(
         storeWithCreate({
           lockStore: { ensureWalletPassword, encryptAccount, unlock },
@@ -318,7 +323,7 @@ describe("CreateAccount", () => {
         .mockResolvedValueOnce(undefined)
         .mockRejectedValueOnce(new Error("WALLET_PASSWORD_UNAVAILABLE"));
       const encryptAccount = vi.fn(async () => {});
-      const unlock = vi.fn(async () => "failed" as const);
+      const unlock = vi.fn(() => Promise.resolve("failed" as const));
       renderComponent(
         storeWithCreate({
           lockStore: { ensureWalletPassword, encryptAccount, unlock },
@@ -353,9 +358,9 @@ describe("CreateAccount", () => {
 
   describe("a non-password-availability encryptAccount failure (N11)", () => {
     it("shows the real error and does not offer a re-arm prompt", async () => {
-      const encryptAccount = vi.fn(async () => {
-        throw new Error(
-          "The wallet contains a keystore with an invalid address",
+      const encryptAccount = vi.fn(() => {
+        return Promise.reject(
+          new Error("The wallet contains a keystore with an invalid address"),
         );
       });
       const setActiveAccount = vi.fn(async () => {});
@@ -391,5 +396,40 @@ describe("CreateAccount", () => {
       expect(screen.queryByLabelText("Enter password")).not.toBeInTheDocument();
       expect(setActiveAccount).not.toHaveBeenCalled();
     });
+  });
+  it("reports an unexpected creation callback rejection before revealing the backup", async () => {
+    const error = new Error("Could not scroll the account screen");
+    vi.spyOn(scrollRegion, "scrollShellToTop").mockImplementationOnce(() => {
+      throw error;
+    });
+    const encryptAccount = vi
+      .fn<() => Promise<void>>()
+      .mockResolvedValue(undefined);
+    renderComponent(storeWithCreate({ lockStore: { encryptAccount } }));
+    await clickCreate();
+    expect(await screen.findByText(error.message)).toBeInTheDocument();
+    expect(screen.queryByText("Mocked Seed Backup")).not.toBeInTheDocument();
+    expect(encryptAccount).not.toHaveBeenCalled();
+  });
+
+  it("reports an unexpected retry rejection on the existing backup screen", async () => {
+    const encryptAccount = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("Encryption failed"))
+      .mockResolvedValue(undefined);
+    renderComponent(storeWithCreate({ lockStore: { encryptAccount } }));
+    await clickCreate();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Confirm backup" }),
+    );
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    const error = new Error("Could not scroll the account screen");
+    vi.spyOn(scrollRegion, "scrollShellToTop").mockImplementationOnce(() => {
+      throw error;
+    });
+    await userEvent.click(retry);
+    expect(await screen.findByText(error.message)).toBeInTheDocument();
+    expect(screen.getByText("Mocked Seed Backup")).toBeInTheDocument();
+    expect(encryptAccount).toHaveBeenCalledTimes(2);
   });
 });

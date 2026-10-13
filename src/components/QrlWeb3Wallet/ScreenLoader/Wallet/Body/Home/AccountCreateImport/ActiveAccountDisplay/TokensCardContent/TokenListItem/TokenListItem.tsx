@@ -37,7 +37,7 @@ type TokenListItemProps = {
   isZrc20Token?: boolean;
   contractAddress?: string;
   decimals?: number;
-  image: string;
+  image?: string;
   balance: string;
   /** Exact on-chain integer balance, carried to the send form so its guard
    *  and Max work in base units. The 4-decimal display string is for
@@ -79,19 +79,23 @@ const TokenListItem = observer(
     }, []);
 
     const onSend = () => {
-      navigate(ROUTES.TOKEN_TRANSFER, {
-        state: {
-          tokenDetails: {
-            isZrc20Token,
-            tokenContractAddress: contractAddress,
-            tokenDecimals: decimals,
-            tokenImage: image,
-            tokenBalance: balance,
-            tokenBalanceBaseUnits: balanceBaseUnits,
-            tokenName: name,
-            tokenSymbol: symbol,
+      Promise.resolve(
+        navigate(ROUTES.TOKEN_TRANSFER, {
+          state: {
+            tokenDetails: {
+              isZrc20Token,
+              tokenContractAddress: contractAddress,
+              tokenDecimals: decimals,
+              tokenImage: image,
+              tokenBalance: balance,
+              tokenBalanceBaseUnits: balanceBaseUnits,
+              tokenName: name,
+              tokenSymbol: symbol,
+            },
           },
-        },
+        }),
+      ).catch((error: unknown) => {
+        console.error("Failed to open token transfer:", error);
       });
     };
 
@@ -102,7 +106,9 @@ const TokenListItem = observer(
         if (!mountedRef.current) return;
         setCopied(true);
         clearTimeout(copiedResetRef.current);
-        copiedResetRef.current = setTimeout(() => setCopied(false), 1500);
+        copiedResetRef.current = setTimeout(() => {
+          setCopied(false);
+        }, 1500);
       } catch {
         setCopied(false);
       }
@@ -143,7 +149,12 @@ const TokenListItem = observer(
             </span>
           </button>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+            <DropdownMenuTrigger
+              asChild
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
+            >
               <Button
                 className="size-7 hover:bg-accent hover:text-secondary"
                 variant="outline"
@@ -159,7 +170,9 @@ const TokenListItem = observer(
                 would also open the send page. */}
             <DropdownMenuContent
               align="start"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
             >
               <DropdownMenuGroup>
                 <DropdownMenuItem
@@ -195,7 +208,9 @@ const TokenListItem = observer(
                 <DropdownMenuItem
                   disabled={!isZrc20Token}
                   className="cursor-pointer data-[highlighted]:text-secondary"
-                  onClick={() => setHideDialogOpen(true)}
+                  onClick={() => {
+                    setHideDialogOpen(true);
+                  }}
                 >
                   <div className="flex gap-2">
                     <CircleMinus size="16" />
@@ -238,7 +253,11 @@ const TokenListItem = observer(
                 className="w-full"
                 type="button"
                 aria-label={t("tokens.confirmHide")}
-                onClick={onHide}
+                onClick={() => {
+                  onHide().catch((error: unknown) => {
+                    console.error("Failed to hide token:", error);
+                  });
+                }}
               >
                 <Check className="mr-2 h-4 w-4" />
                 {t("common.yes")}
