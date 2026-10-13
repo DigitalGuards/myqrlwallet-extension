@@ -1957,14 +1957,6 @@ export const lintRatchet = [
       "@typescript-eslint/no-unsafe-member-access": "off",
     },
   },
-  {
-    files: ["vitest.setup.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-    },
-  },
 ];
 // END LINT RATCHET
 

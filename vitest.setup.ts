@@ -1,20 +1,25 @@
 import { vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
-(globalThis as Record<string, any>).IS_REACT_ACT_ENVIRONMENT = true;
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 // Guarded so test files that opt into the node environment (e.g. the
 // keystore crypto suite) can share this setup file without a jsdom window.
 if (typeof window !== "undefined") {
   Object.defineProperty(window, "matchMedia", {
-    value: vi.fn().mockImplementation((query) => ({
+    value: vi.fn().mockImplementation((query: string) => ({
       matches: true,
       query,
     })),
   });
 
   Object.defineProperty(window, "scrollTo", {
-    value: vi.fn().mockImplementation((x, y) => ({ x, y })),
+    value: vi
+      .fn()
+      .mockImplementation((x?: number | ScrollToOptions, y?: number) => ({
+        x,
+        y,
+      })),
   });
 }
 
