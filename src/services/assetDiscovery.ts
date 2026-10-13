@@ -1,6 +1,7 @@
 import { getExplorerApiBase } from "@/configuration/assetDiscoveryConfig";
 import type { NFTStandard } from "@/types/nft";
 import { toCanonicalQrlAddress } from "@/utilities/addressUtil";
+import { isNullishString, isRecord, isUnknownArray } from "./explorerGuards";
 
 /**
  * Explorer-side asset discovery, ported from myqrlwallet-frontend
@@ -43,16 +44,22 @@ export const MAX_DISCOVERED_COLLECTIONS = 50;
 // to the fields the extension consumes.
 type ExplorerToken = {
   contractAddress: string;
-  name: string;
-  symbol: string;
-  decimals: number;
+  name?: string | null;
+  symbol?: string | null;
+  decimals?: number | null;
 };
 
-type ExplorerTokenResponse = {
-  address: string;
-  tokens: ExplorerToken[];
-  count: number;
-};
+const isExplorerToken = (value: unknown): value is ExplorerToken =>
+  isRecord(value) &&
+  typeof value.contractAddress === "string" &&
+  isNullishString(value.name) &&
+  isNullishString(value.symbol) &&
+  (value.decimals === undefined ||
+    value.decimals === null ||
+    (typeof value.decimals === "number" &&
+      Number.isInteger(value.decimals) &&
+      value.decimals >= 0 &&
+      value.decimals <= 255));
 
 // One row of the zondscan /api/address/:addr/nfts response. The endpoint
 // returns per-(contract, tokenID) rows joined with collection-level
@@ -62,17 +69,20 @@ type ExplorerNFT = {
   contractAddress: string;
   tokenID: string;
   tokenStandard: string;
-  collectionName?: string;
-  collectionSymbol?: string;
+  collectionName?: string | null;
+  collectionSymbol?: string | null;
   // ERC-1155 per-id holding as a decimal string; absent for ERC-721.
   balance?: string;
 };
 
-type ExplorerNFTResponse = {
-  address: string;
-  nfts: ExplorerNFT[];
-  count: number;
-};
+const isExplorerNft = (value: unknown): value is ExplorerNFT =>
+  isRecord(value) &&
+  typeof value.contractAddress === "string" &&
+  typeof value.tokenID === "string" &&
+  typeof value.tokenStandard === "string" &&
+  isNullishString(value.collectionName) &&
+  isNullishString(value.collectionSymbol) &&
+  (value.balance === undefined || typeof value.balance === "string");
 
 // The explorer may return contract addresses as Q, q, or 0x. Normalize only
 // full QIP-55 addresses and discard malformed indexer rows.
@@ -112,10 +122,11 @@ export async function discoverTokens(
       return [];
     }
 
-    const data = (await response.json()) as ExplorerTokenResponse;
-    if (!data || !Array.isArray(data.tokens)) return [];
+    const data: unknown = await response.json();
+    if (!isRecord(data) || !isUnknownArray(data.tokens)) return [];
 
     return data.tokens
+      .filter(isExplorerToken)
       .flatMap((token) => {
         const contractAddress = token.contractAddress
           ? toQAddress(token.contractAddress)
@@ -150,9 +161,9 @@ async function fetchExplorerNfts(
     const response = await fetch(`${apiBase}/api/address/${address}/nfts`);
     if (!response.ok) return [];
 
-    const data = (await response.json()) as ExplorerNFTResponse;
-    if (!data || !Array.isArray(data.nfts)) return [];
-    return data.nfts;
+    const data: unknown = await response.json();
+    if (!isRecord(data) || !isUnknownArray(data.nfts)) return [];
+    return data.nfts.filter(isExplorerNft);
   } catch {
     return [];
   }

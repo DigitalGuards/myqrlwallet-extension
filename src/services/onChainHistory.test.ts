@@ -43,7 +43,7 @@ const mockFetch = vi.fn();
 
 const okResponse = (body: unknown) => ({
   ok: true,
-  json: async () => body,
+  json: () => Promise.resolve(body),
 });
 
 describe("fetchOnChainHistory", () => {
@@ -193,6 +193,246 @@ describe("fetchOnChainHistory", () => {
 
     const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
     expect(page).toEqual({ entries: [], totalCount: 0, failed: false });
+  });
+
+  it.each([null, undefined, false, 42, "invalid", []])(
+    "flags a malformed response envelope as failed: %j",
+    async (body) => {
+      mockFetch.mockResolvedValue(okResponse(body));
+
+      expect(await fetchOnChainHistory(ADDRESS, CHAIN, 1)).toEqual({
+        entries: [],
+        totalCount: 0,
+        failed: true,
+      });
+    },
+  );
+
+  it.each([undefined, null, {}, "invalid"])(
+    "keeps the empty-list fallback for unavailable lists: %j",
+    async (rows) => {
+      mockFetch.mockResolvedValue(
+        okResponse({
+          transactions_by_address: rows,
+          internal_transactions_by_address: rows,
+        }),
+      );
+
+      expect(await fetchOnChainHistory(ADDRESS, CHAIN, 1)).toEqual({
+        entries: [],
+        totalCount: 0,
+        failed: false,
+      });
+    },
+  );
+
+  it.each([
+    null,
+    42,
+    "invalid",
+    [],
+    {},
+    { ...sampleRow, TxHash: 42 },
+    { ...sampleRow, From: {} },
+    { ...sampleRow, To: false },
+    { ...sampleRow, TimeStamp: 42 },
+    { ...sampleRow, Amount: 750 },
+    { ...sampleRow, PaidFees: 0.01 },
+    { ...sampleRow, PaidFees: null },
+    { ...sampleRow, BlockNumber: 143412 },
+    { ...sampleRow, Status: true },
+  ])(
+    "skips malformed transactions and preserves valid entries: %j",
+    async (row) => {
+      mockFetch.mockResolvedValue(
+        okResponse({
+          transactions_by_address: [
+            sampleRow,
+            row,
+            { ...sampleRow, TxHash: "0xsecond" },
+          ],
+          transactions_count: 8,
+          internal_transactions_by_address: [sampleInternalRow],
+          internal_transactions_count: 4,
+        }),
+      );
+
+      const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
+
+      expect(page.failed).toBe(false);
+      expect(page.totalCount).toBe(8);
+      expect(page.entries.map((entry) => entry.id)).toEqual([
+        sampleRow.TxHash,
+        "0xsecond",
+        `${sampleInternalRow.Hash}-internal-1`,
+      ]);
+    },
+  );
+
+  it.each([
+    null,
+    42,
+    "invalid",
+    [],
+    {},
+    { ...sampleInternalRow, Hash: 42 },
+    { ...sampleInternalRow, Hash: "" },
+    { ...sampleInternalRow, From: {} },
+    { ...sampleInternalRow, To: false },
+    { ...sampleInternalRow, BlockTimestamp: 42 },
+    { ...sampleInternalRow, Value: "43.05396" },
+    { ...sampleInternalRow, TraceAddress: {} },
+    { ...sampleInternalRow, TraceAddress: "1" },
+    { ...sampleInternalRow, TraceAddress: [0, "1"] },
+    { ...sampleInternalRow, TraceAddress: [null] },
+    { ...sampleInternalRow, TraceAddress: [{}] },
+    { ...sampleInternalRow, TraceAddress: [-1] },
+    { ...sampleInternalRow, TraceAddress: [1.5] },
+    { ...sampleInternalRow, TraceAddress: [Number.POSITIVE_INFINITY] },
+    { ...sampleInternalRow, TraceAddress: [Number.MAX_SAFE_INTEGER + 1] },
+  ])(
+    "skips malformed internal transactions and keeps valid entries: %j",
+    async (row) => {
+      mockFetch.mockResolvedValue(
+        okResponse({
+          transactions_by_address: [sampleRow],
+          internal_transactions_by_address: [
+            sampleInternalRow,
+            row,
+            { ...sampleInternalRow, TraceAddress: [0, 2] },
+          ],
+        }),
+      );
+
+      const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
+
+      expect(page.failed).toBe(false);
+      expect(page.totalCount).toBe(2);
+      expect(page.entries.map((entry) => entry.id)).toEqual([
+        sampleRow.TxHash,
+        `${sampleInternalRow.Hash}-internal-1`,
+        `${sampleInternalRow.Hash}-internal-0.2`,
+      ]);
+    },
+  );
+
+  it.each([undefined, null])(
+    "keeps defaults for missing optional transaction fields: %s",
+    async (missing) => {
+      mockFetch.mockResolvedValue(
+        okResponse({
+          transactions_by_address: [
+            {
+              TxHash: sampleRow.TxHash,
+              From: missing,
+              To: missing,
+              TimeStamp: missing,
+              Amount: missing,
+              BlockNumber: missing,
+              Status: missing,
+            },
+          ],
+          internal_transactions_by_address: [
+            {
+              Hash: sampleInternalRow.Hash.slice(2),
+              From: missing,
+              To: missing,
+              BlockTimestamp: missing,
+              Value: missing,
+              TraceAddress: missing,
+            },
+          ],
+        }),
+      );
+
+      const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
+
+      expect(page.entries).toHaveLength(2);
+      expect(page.entries[0]).toMatchObject({
+        id: sampleRow.TxHash,
+        from: "",
+        to: "",
+        timestamp: 0,
+        amount: "0",
+        blockNumber: "",
+        status: false,
+        pendingStatus: "unknown",
+        receiptStatusVerified: false,
+      });
+      expect(page.entries[0].paidFeesQrl).toBeUndefined();
+      expect(page.entries[1]).toMatchObject({
+        id: `${sampleInternalRow.Hash}-internal-`,
+        transactionHash: sampleInternalRow.Hash,
+        from: "",
+        to: "",
+        timestamp: 0,
+        amount: 0,
+        paidFeesQrl: "0",
+        isInternal: true,
+      });
+    },
+  );
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    "keeps the zero-value fallback for non-finite internal amounts: %s",
+    async (Value) => {
+      mockFetch.mockResolvedValue(
+        okResponse({
+          internal_transactions_by_address: [{ ...sampleInternalRow, Value }],
+        }),
+      );
+
+      const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
+
+      expect(page.failed).toBe(false);
+      expect(page.entries).toHaveLength(1);
+      expect(page.entries[0].amount).toBe(0);
+    },
+  );
+
+  it.each([
+    undefined,
+    null,
+    {},
+    "82",
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])(
+    "uses the retained row counts for invalid pagination counts: %j",
+    async (count) => {
+      mockFetch.mockResolvedValue(
+        okResponse({
+          transactions_by_address: [sampleRow],
+          transactions_count: count,
+          internal_transactions_by_address: [
+            sampleInternalRow,
+            { ...sampleInternalRow, TraceAddress: [0, 2] },
+          ],
+          internal_transactions_count: count,
+        }),
+      );
+
+      const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
+
+      expect(page.totalCount).toBe(2);
+      expect(page.entries).toHaveLength(3);
+    },
+  );
+
+  it("flags a JSON parsing failure as failed", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.reject(new SyntaxError("Invalid JSON")),
+    });
+
+    expect(await fetchOnChainHistory(ADDRESS, CHAIN, 1)).toEqual({
+      entries: [],
+      totalCount: 0,
+      failed: true,
+    });
   });
 
   it("returns an empty page for chains without an explorer", async () => {
