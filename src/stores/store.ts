@@ -46,6 +46,25 @@ class Store {
   disposeDataLifecycle: () => void;
 }
 
+type DataLifecycleStores = {
+  lockStore: Pick<LockStore, "isLocked">;
+  settingsStore: Pick<
+    SettingsStore,
+    "showBalanceAndPrice" | "whenSettingsLoaded"
+  >;
+  qrlStore: Pick<
+    QrlStore,
+    "setPollingAllowed" | "pollBalancesAndConnection" | "probeConnectionNow"
+  > & {
+    qrlInstance?: object;
+    qrlConnection: Pick<
+      QrlStore["qrlConnection"],
+      "isConnected" | "areBalancesStale"
+    >;
+  };
+  priceStore: Pick<PriceStore, "setRefreshEnabled">;
+};
+
 /**
  * Ties the polling loops to the state that justifies them.
  *
@@ -56,7 +75,7 @@ class Store {
  * reading showBalanceAndPrice at construction time always read the `true`
  * default, so the fetch ran even with the setting off.
  */
-export function wireDataLifecycle(store: Store) {
+export function wireDataLifecycle(store: DataLifecycleStores) {
   const { lockStore, priceStore, qrlStore, settingsStore } = store;
   const disposers: Array<() => void> = [];
   let disposed = false;

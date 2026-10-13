@@ -1,6 +1,11 @@
 import { observable, runInAction } from "mobx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { deferred } from "@/test-utils/deferred";
 import { wireDataLifecycle } from "./store";
+import PriceStore from "./priceStore";
+import TransactionHistoryStore from "./transactionHistoryStore";
+import StorageUtil from "@/utilities/storageUtil";
+import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 
 /**
  * The balance poll and the price poll are tied to lock state, and the price
@@ -29,14 +34,16 @@ const makeStores = (options?: {
   );
   const qrlStore = observable(
     {
-      qrlInstance: {} as unknown,
+      qrlInstance: {},
       qrlConnection: {
         isConnected: options?.isConnected ?? false,
         areBalancesStale: options?.areBalancesStale ?? false,
       },
       setPollingAllowed: vi.fn(),
       pollBalancesAndConnection: vi.fn().mockResolvedValue(undefined),
-      probeConnectionNow: vi.fn().mockResolvedValue(true),
+      probeConnectionNow: vi
+        .fn<LifecycleStores["qrlStore"]["probeConnectionNow"]>()
+        .mockResolvedValue({ probed: true, isConnected: true }),
     },
     {
       setPollingAllowed: false,
@@ -60,7 +67,7 @@ const makeStores = (options?: {
     // Every wiring is registered for teardown: leaked reactions would keep
     // reacting to the next case's stores.
     wire: () => {
-      const dispose = wireDataLifecycle(stores as unknown as LifecycleStores);
+      const dispose = wireDataLifecycle(stores);
       activeDisposers.push(dispose);
       return dispose.priceWiring.then(() => dispose);
     },
@@ -112,10 +119,8 @@ describe("data lifecycle wiring", () => {
   });
 
   it("never fetches prices when the setting is off, even before settings load", async () => {
-    let releaseSettings!: () => void;
-    const settingsLoad = new Promise<void>((resolve) => {
-      releaseSettings = resolve;
-    });
+    const { promise: settingsLoad, resolve: releaseSettings } =
+      deferred<undefined>();
     const { wire, settingsStore, priceStore } = makeStores({
       isLocked: false,
       // The store default is true; the stored value says otherwise and
@@ -132,7 +137,7 @@ describe("data lifecycle wiring", () => {
     runInAction(() => {
       settingsStore.showBalanceAndPrice = false;
     });
-    releaseSettings();
+    releaseSettings(undefined);
     await wired;
 
     expect(priceStore.setRefreshEnabled).toHaveBeenCalledWith(false);
@@ -307,5 +312,126 @@ describe("data lifecycle wiring", () => {
 
       expect(qrlStore.probeConnectionNow).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("store response and polling boundaries", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it.each([null, [], "unavailable", { "quantum-resistant-ledger": [1, 2] }])(
+    "uses the explorer fallback for a malformed CoinGecko record: %j",
+    async (data) => {
+      const fetch = vi
+        .fn<typeof globalThis.fetch>()
+        .mockResolvedValueOnce(Response.json(data))
+        .mockResolvedValueOnce(
+          Response.json({ currentPrice: 2, priceChange24h: -3 }),
+        );
+      vi.stubGlobal("fetch", fetch);
+      const persist = vi
+        .spyOn(StorageUtil, "setPriceCache")
+        .mockResolvedValue();
+      const prices = new PriceStore();
+
+      await prices.fetchPrices();
+
+      expect(prices.prices).toEqual({ usd: 2 });
+      expect(prices.change24h).toEqual({ usd: -3 });
+      expect(prices.hasError).toBe(false);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(persist).toHaveBeenCalledTimes(1);
+      expect(persist).toHaveBeenCalledWith(
+        expect.objectContaining({ prices: { usd: 2 } }),
+      );
+    },
+  );
+
+  it.each([null, [], "unavailable", { currentPrice: "2" }])(
+    "retains quotes and storage when the fallback record is malformed: %j",
+    async (data) => {
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn<typeof fetch>()
+          .mockResolvedValueOnce(new Response(null, { status: 503 }))
+          .mockResolvedValueOnce(Response.json(data)),
+      );
+      const persist = vi
+        .spyOn(StorageUtil, "setPriceCache")
+        .mockResolvedValue();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const prices = new PriceStore();
+      prices.prices = { usd: 1.5, eur: 1.2 };
+      prices.change24h = { eur: 2 };
+      prices.lastUpdated = 123;
+
+      await prices.fetchPrices();
+
+      expect(prices.prices).toEqual({ usd: 1.5, eur: 1.2 });
+      expect(prices.change24h).toEqual({ eur: 2 });
+      expect(prices.lastUpdated).toBe(123);
+      expect(prices.hasError).toBe(true);
+      expect(prices.isLoading).toBe(false);
+      expect(persist).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports a reconciliation rejection and continues the next polling tick", async () => {
+    const error = new Error("history storage unavailable");
+    const reconcile = vi
+      .spyOn(TransactionHistoryStore.prototype, "reconcileReplacedTransactions")
+      .mockRejectedValueOnce(error)
+      .mockResolvedValue();
+    const history = new TransactionHistoryStore();
+    const pending: TransactionHistoryEntry = {
+      id: "pending",
+      from: `Q${"a".repeat(128)}`,
+      to: `Q${"b".repeat(128)}`,
+      amount: "1",
+      tokenSymbol: "Quanta",
+      tokenName: "Quanta",
+      isZrc20Token: false,
+      tokenContractAddress: "",
+      tokenDecimals: 18,
+      transactionHash: "0xpending",
+      blockNumber: "",
+      gasUsed: "",
+      effectiveGasPrice: "",
+      status: false,
+      timestamp: 1,
+      chainId: "0x1",
+      pendingStatus: "pending",
+    };
+    history.transactions = [pending];
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const receipts = {
+      getTransactionReceipt: vi
+        .fn<() => Promise<undefined>>()
+        .mockResolvedValue(undefined),
+    };
+    history.startPolling(pending.from, receipts);
+
+    await vi.advanceTimersByTimeAsync(10000);
+
+    expect(report).toHaveBeenCalledWith(
+      "Failed to poll transaction history:",
+      error,
+    );
+    expect(history.transactions).toEqual([pending]);
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(reconcile).toHaveBeenCalledTimes(2);
+    expect(receipts.getTransactionReceipt).toHaveBeenCalledTimes(2);
+    history.stopPolling();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(reconcile).toHaveBeenCalledTimes(2);
   });
 });

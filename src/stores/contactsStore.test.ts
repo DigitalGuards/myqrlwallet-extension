@@ -6,7 +6,7 @@ const ALICE_ADDRESS = toChecksumAddress(`Q${"a".repeat(128)}`);
 const BOB_ADDRESS = toChecksumAddress(`Q${"b".repeat(128)}`);
 
 // In-memory storage mock
-const localStore: Record<string, any> = {};
+const localStore: Record<string, unknown> = {};
 vi.mock("webextension-polyfill", () => ({
   __esModule: true,
   default: {
@@ -15,16 +15,17 @@ vi.mock("webextension-polyfill", () => ({
         get: vi.fn((key: string) =>
           Promise.resolve(key in localStore ? { [key]: localStore[key] } : {}),
         ),
-        set: vi.fn((data: Record<string, any>) => {
+        set: vi.fn((data: Record<string, unknown>) => {
           Object.assign(localStore, data);
           return Promise.resolve();
         }),
         remove: vi.fn((key: string) => {
-          delete localStore[key];
+          Reflect.deleteProperty(localStore, key);
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
-          for (const k of Object.keys(localStore)) delete localStore[k];
+          for (const k of Object.keys(localStore))
+            Reflect.deleteProperty(localStore, k);
           return Promise.resolve();
         }),
       },
@@ -44,7 +45,8 @@ describe("ContactsStore", () => {
   let store: ContactsStore;
 
   beforeEach(() => {
-    for (const k of Object.keys(localStore)) delete localStore[k];
+    for (const k of Object.keys(localStore))
+      Reflect.deleteProperty(localStore, k);
     store = new ContactsStore();
   });
 

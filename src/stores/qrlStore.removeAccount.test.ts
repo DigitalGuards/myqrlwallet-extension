@@ -8,9 +8,8 @@ const { mockGetBalance, mockIsListening } = vi.hoisted(() => ({
 
 vi.mock("@theqrl/web3", () => {
   class MockWeb3 {
-    static providers = { HttpProvider: class {} };
+    static providers = { HttpProvider: vi.fn() };
     qrl = { getBalance: mockGetBalance, net: { isListening: mockIsListening } };
-    constructor(_opts: unknown) {}
   }
   return {
     __esModule: true,
@@ -56,7 +55,7 @@ const flush = async () => {
 };
 
 describe("QrlStore.removeAccount", () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
     mockStorage.getAllBlockChains.mockResolvedValue([]);
     mockStorage.getActiveBlockChain.mockResolvedValue("");
@@ -117,11 +116,13 @@ describe("QrlStore.removeAccount", () => {
     mockStorage.getActiveAccount.mockResolvedValue(SOFTWARE);
 
     const order: string[] = [];
-    mockStorage.setAllAccounts.mockImplementation(async () => {
+    mockStorage.setAllAccounts.mockImplementation(() => {
       order.push("accounts");
+      return Promise.resolve();
     });
-    mockStorage.setKeystores.mockImplementation(async () => {
+    mockStorage.setKeystores.mockImplementation(() => {
       order.push("keystores");
+      return Promise.resolve();
     });
 
     const store = await createStore();
