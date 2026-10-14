@@ -1,3 +1,4 @@
+import { deferred } from "@/test-utils/deferred";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Plain object stores (hoisting-safe) ────────────────────────────
@@ -24,7 +25,7 @@ vi.mock("webextension-polyfill", () => ({
         }),
         remove: vi.fn((key: string | string[]) => {
           for (const item of Array.isArray(key) ? key : [key])
-            delete sessionStore[item];
+            Reflect.deleteProperty(sessionStore, item);
           return Promise.resolve();
         }),
       },
@@ -35,7 +36,7 @@ vi.mock("webextension-polyfill", () => ({
         return Promise.resolve();
       }),
       clear: vi.fn((name: string) => {
-        delete alarmsStore[name];
+        Reflect.deleteProperty(alarmsStore, name);
         return Promise.resolve(true);
       }),
       get: vi.fn((name: string) => Promise.resolve(alarmsStore[name] ?? null)),
@@ -77,8 +78,7 @@ const { mockShowTransactionNotification } = vi.hoisted(() => ({
 // The watcher runs in the service worker, so it calls the notification
 // helper directly. Mocked here to observe that call.
 vi.mock("./transactionNotification", () => ({
-  showTransactionNotification: (...args: unknown[]) =>
-    mockShowTransactionNotification(...args),
+  showTransactionNotification: mockShowTransactionNotification,
 }));
 
 const { mockIsLocked } = vi.hoisted(() => ({
@@ -90,7 +90,7 @@ const { mockIsLocked } = vi.hoisted(() => ({
 // (F7), the same narrow surface restrictedMethodsMiddleware.test.ts mocks.
 vi.mock("../lockManager/lockManager", () => ({
   __esModule: true,
-  default: { isLocked: (...args: unknown[]) => mockIsLocked(...args) },
+  default: { isLocked: mockIsLocked },
   LOCK_MANAGER_MESSAGES: { SEND_TX_NOTIFICATION: "SEND_TX_NOTIFICATION" },
 }));
 
@@ -101,12 +101,12 @@ import {
   registerDAppTransactionWatch,
 } from "./dAppTransactionWatcher";
 
-const mockAlarms = browser.alarms as unknown as {
-  create: ReturnType<typeof vi.fn>;
-  clear: ReturnType<typeof vi.fn>;
-  get: ReturnType<typeof vi.fn>;
+const mockAlarms = {
+  create: vi.spyOn(browser.alarms, "create"),
+  clear: vi.spyOn(browser.alarms, "clear"),
+  get: vi.spyOn(browser.alarms, "get"),
 };
-const mockSendMessage = browser.runtime.sendMessage as ReturnType<typeof vi.fn>;
+const mockSendMessage = vi.spyOn(browser.runtime, "sendMessage");
 
 const HASH = "0xabc123";
 const HASH_2 = "0xdef456";
@@ -114,18 +114,8 @@ const ACCOUNT = `Q${"a".repeat(128)}`;
 const CHAIN_ID = "0x301825";
 
 const clearStore = (store: Record<string, unknown>) => {
-  for (const key of Object.keys(store)) delete store[key];
+  for (const key of Object.keys(store)) Reflect.deleteProperty(store, key);
 };
-
-/** A promise plus its own resolve, for controlling exactly when a mocked
- *  async call settles across an await boundary inside the code under test. */
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
-  });
-  return { promise, resolve };
-}
 
 const minedReceipt = (hash: string) => ({
   status: 1n,
@@ -161,7 +151,7 @@ describe("dAppTransactionWatcher", () => {
       expect(mockAlarms.create).toHaveBeenCalledTimes(1);
       expect(mockAlarms.create).toHaveBeenCalledWith(
         DAPP_TX_WATCH_ALARM_NAME,
-        expect.objectContaining({ periodInMinutes: expect.any(Number) }),
+        expect.objectContaining({ periodInMinutes: 0.5 }),
       );
     });
 

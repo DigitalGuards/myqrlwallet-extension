@@ -3,6 +3,10 @@ import StorageUtil from "@/utilities/storageUtil";
 import { resolveSidePanelPreferred } from "./sidePanelPreference";
 import { requestSidePanelOpen } from "./sidePanelSurface";
 
+const extensionGlobals: {
+  chrome?: { runtime?: Partial<(typeof globalThis)["chrome"]["runtime"]> };
+} = globalThis;
+
 // Chrome lets the user dock ANY extension in the side panel manually,
 // without the wallet's own surface preference ever being flipped. When a
 // panel context is live, opening another surface would spawn a second,
@@ -11,13 +15,14 @@ import { requestSidePanelOpen } from "./sidePanelSurface";
 // 116+, so this is feature-detected and fails open to the popup path.
 export const isSidePanelOpen = async (): Promise<boolean> => {
   try {
-    if (typeof chrome === "undefined" || !chrome.runtime?.getContexts) {
+    const runtime = extensionGlobals.chrome?.runtime;
+    if (!runtime?.getContexts || !runtime.ContextType) {
       return false;
     }
-    const contexts = await chrome.runtime.getContexts({
-      contextTypes: [chrome.runtime.ContextType.SIDE_PANEL],
+    const contexts: unknown = await runtime.getContexts({
+      contextTypes: [runtime.ContextType.SIDE_PANEL],
     });
-    return contexts.length > 0;
+    return Array.isArray(contexts) && contexts.length > 0;
   } catch {
     return false;
   }
@@ -28,13 +33,14 @@ export const isSidePanelOpen = async (): Promise<boolean> => {
 // window as well would give the user two competing approval surfaces.
 const isActionPopupOpen = async (): Promise<boolean> => {
   try {
-    if (typeof chrome === "undefined" || !chrome.runtime?.getContexts) {
+    const runtime = extensionGlobals.chrome?.runtime;
+    if (!runtime?.getContexts || !runtime.ContextType) {
       return false;
     }
-    const contexts = await chrome.runtime.getContexts({
-      contextTypes: [chrome.runtime.ContextType.POPUP],
+    const contexts: unknown = await runtime.getContexts({
+      contextTypes: [runtime.ContextType.POPUP],
     });
-    return contexts.length > 0;
+    return Array.isArray(contexts) && contexts.length > 0;
   } catch {
     return false;
   }
@@ -56,7 +62,7 @@ export const handleApprovalWindowRemoved = (windowId: number) => {
   }
 };
 
-// Registered lazily on first use rather than at import time: the listener is
+// Registered lazily on first use: the listener is
 // only meaningful once a notification window can exist.
 let windowTrackingRegistered = false;
 const ensureWindowTracking = () => {
@@ -126,9 +132,11 @@ export const openApprovalSurface = async ({
   }
 
   try {
-    const anchor = await browser.windows.getLastFocused().catch(() => undefined);
+    const anchor = await browser.windows
+      .getLastFocused()
+      .catch(() => undefined);
     const left =
-      anchor?.left !== undefined && anchor?.width !== undefined
+      anchor?.left !== undefined && anchor.width !== undefined
         ? Math.max(anchor.left + anchor.width - WINDOW_WIDTH - 16, 0)
         : undefined;
     const top = anchor?.top !== undefined ? anchor.top + 76 : undefined;
