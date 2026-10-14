@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import AddressDisclosure from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressDisclosure";
 import { useStore } from "@/stores/store";
+import { isRecord, isString } from "@/utilities/storageGuards";
 import { observer } from "mobx-react-lite";
 import { QRCodeSVG } from "qrcode.react";
 import { useLocation } from "react-router-dom";
@@ -12,8 +13,11 @@ const Receive = observer(() => {
   const { t } = useTranslation();
   const { qrlStore } = useStore();
   const { activeAccount } = qrlStore;
-  const { state } = useLocation();
-  const accountAddress = state?.accountAddress ?? activeAccount.accountAddress;
+  const state: unknown = useLocation().state;
+  const accountAddress =
+    isRecord(state) && isString(state.accountAddress)
+      ? state.accountAddress
+      : activeAccount.accountAddress;
 
   return (
     <div className="w-full">

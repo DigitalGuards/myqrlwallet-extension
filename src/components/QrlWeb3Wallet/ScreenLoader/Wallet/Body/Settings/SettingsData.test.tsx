@@ -3,11 +3,26 @@ import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, type NavigateFunction } from "react-router-dom";
 import StorageUtil, {
   KeystoreStorageCorruptError,
 } from "@/utilities/storageUtil";
 import SettingsData from "./SettingsData";
+import Settings from "./Settings";
+import SettingsAbout from "./SettingsAbout";
+import SettingsAppearance from "./SettingsAppearance";
+import SettingsPreferences from "./SettingsPreferences";
+import SettingsSecurity from "./SettingsSecurity";
+
+const { navigate } = vi.hoisted(() => ({
+  navigate: vi.fn<NavigateFunction>(),
+}));
+vi.mock("react-router-dom", async () => ({
+  ...(await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom",
+  )),
+  useNavigate: () => navigate,
+}));
 
 vi.mock("webextension-polyfill", () => ({
   __esModule: true,
@@ -26,7 +41,11 @@ vi.mock("webextension-polyfill", () => ({
 }));
 
 describe("SettingsData", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    navigate.mockReset();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -100,9 +119,7 @@ describe("SettingsData", () => {
   it("should render the description text", () => {
     renderComponent();
 
-    expect(
-      screen.getByText(/Export encrypted keystores/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Export encrypted keystores/)).toBeInTheDocument();
   });
 
   it("should render the Reset Wallet button", () => {
@@ -126,10 +143,7 @@ describe("SettingsData", () => {
     });
     expect(confirmButton).toBeDisabled();
 
-    await userEvent.type(
-      screen.getByPlaceholderText("RESET"),
-      "RESET",
-    );
+    await userEvent.type(screen.getByPlaceholderText("RESET"), "RESET");
     expect(confirmButton).toBeEnabled();
 
     await userEvent.click(confirmButton);
@@ -159,7 +173,7 @@ describe("SettingsData", () => {
     const originalLocation = window.location;
     Object.defineProperty(window, "location", {
       configurable: true,
-      value: { ...originalLocation, reload },
+      value: { reload },
     });
 
     try {
@@ -189,7 +203,7 @@ describe("SettingsData", () => {
     const originalLocation = window.location;
     Object.defineProperty(window, "location", {
       configurable: true,
-      value: { ...originalLocation, reload },
+      value: { reload },
     });
 
     try {
@@ -217,4 +231,29 @@ describe("SettingsData", () => {
       });
     }
   });
+
+  it.each([
+    { Component: Settings, name: "Appearance" },
+    { Component: SettingsAbout, name: "Back" },
+    { Component: SettingsAppearance, name: "Back" },
+    { Component: SettingsData, name: "Back" },
+    { Component: SettingsPreferences, name: "Back" },
+    { Component: SettingsSecurity, name: "Back" },
+  ])(
+    "reports rejected navigation from $Component",
+    async ({ Component, name }) => {
+      const error = new Error("navigation failed");
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      navigate.mockRejectedValueOnce(error);
+      render(
+        <StoreProvider value={mockedStore()}>
+          <MemoryRouter>
+            <Component />
+          </MemoryRouter>
+        </StoreProvider>,
+      );
+      await userEvent.click(screen.getByRole("button", { name }));
+      expect(report).toHaveBeenCalledWith("Failed to open settings:", error);
+    },
+  );
 });
