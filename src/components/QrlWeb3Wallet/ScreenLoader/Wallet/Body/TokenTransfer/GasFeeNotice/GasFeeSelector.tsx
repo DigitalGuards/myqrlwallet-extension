@@ -52,20 +52,20 @@ export const GasFeeSelector = observer(
     const { t } = useTranslation();
     const { settingsStore, qrlStore, priceStore } = useStore();
 
-    const TIERS: TierConfig[] = useMemo(
+    const TIERS: TierConfig[] = useMemo<TierConfig[]>(
       () => [
         {
-          value: "low" as GasTier,
+          value: "low",
           label: t("gasFee.tierLow"),
           description: t("gasFee.tierLowDescription"),
         },
         {
-          value: "market" as GasTier,
+          value: "market",
           label: t("gasFee.tierMarket"),
           description: t("gasFee.tierMarketDescription"),
         },
         {
-          value: "aggressive" as GasTier,
+          value: "aggressive",
           label: t("gasFee.tierAggressive"),
           description: t("gasFee.tierAggressiveDescription"),
         },
@@ -75,7 +75,6 @@ export const GasFeeSelector = observer(
     const { defaultGasTier, showBalanceAndPrice, currency } = settingsStore;
     const { price: qrlPrice, currency: quoteCurrency } =
       priceStore.quoteFor(currency);
-    const { getNativeTokenGas, getZrc20TokenGas } = qrlStore;
 
     // The stored "advanced" preference has no preset values behind it, so it
     // starts the form on Market with the advanced panel closed.
@@ -120,7 +119,7 @@ export const GasFeeSelector = observer(
     const calculateGas = useCallback(
       async (overrides: GasFeeOverrides): Promise<string> => {
         if (isZrc20Token) {
-          return await getZrc20TokenGas(
+          return await qrlStore.getZrc20TokenGas(
             from,
             to,
             value,
@@ -129,7 +128,7 @@ export const GasFeeSelector = observer(
             overrides,
           );
         }
-        return await getNativeTokenGas(overrides);
+        return await qrlStore.getNativeTokenGas(overrides);
       },
       [
         from,
@@ -138,8 +137,7 @@ export const GasFeeSelector = observer(
         isZrc20Token,
         tokenContractAddress,
         tokenDecimals,
-        getNativeTokenGas,
-        getZrc20TokenGas,
+        qrlStore,
       ],
     );
 
@@ -184,7 +182,7 @@ export const GasFeeSelector = observer(
         return;
       }
 
-      let cancelled = false;
+      const lifecycle = { cancelled: false };
       setIsLoadingCosts(true);
 
       (async () => {
@@ -195,7 +193,7 @@ export const GasFeeSelector = observer(
         const results = await Promise.allSettled(
           TIERS.map((tier) => calculateGas({ tier: tier.value })),
         );
-        if (cancelled) return;
+        if (lifecycle.cancelled) return;
 
         const costs: Record<string, string> = {};
         // Only a thrown estimate is a failure worth blocking the send on: an
@@ -223,10 +221,12 @@ export const GasFeeSelector = observer(
           reportEstimateFailure(anyFailed);
           onGasFeeCalculated?.(costs[selectedTierRef.current] ?? "");
         }
-      })();
+      })().catch((error: unknown) => {
+        console.error("[GasFeeSelector] Failed to report gas estimate:", error);
+      });
 
       return () => {
-        cancelled = true;
+        lifecycle.cancelled = true;
       };
     }, [
       from,
@@ -243,18 +243,18 @@ export const GasFeeSelector = observer(
     useEffect(() => {
       if (!showAdvanced || !hasValuesForGasCalculation) return;
 
-      let cancelled = false;
+      const lifecycle = { cancelled: false };
       (async () => {
         try {
           const cost = await calculateGas(
             buildOverrides("advanced", advancedValues),
           );
-          if (cancelled) return;
+          if (lifecycle.cancelled) return;
           setAdvancedCost(cost);
           onGasFeeCalculated?.(cost);
           reportEstimateFailure(false);
         } catch (error) {
-          if (cancelled) return;
+          if (lifecycle.cancelled) return;
           console.error(
             "[GasFeeSelector] Advanced gas estimate failed:",
             error,
@@ -263,10 +263,12 @@ export const GasFeeSelector = observer(
           onGasFeeCalculated?.("");
           reportEstimateFailure(true);
         }
-      })();
+      })().catch((error: unknown) => {
+        console.error("[GasFeeSelector] Failed to report gas estimate:", error);
+      });
 
       return () => {
-        cancelled = true;
+        lifecycle.cancelled = true;
       };
     }, [
       showAdvanced,
@@ -345,7 +347,9 @@ export const GasFeeSelector = observer(
                   key={tier.value}
                   type="button"
                   disabled={disabled}
-                  onClick={() => selectTier(tier.value)}
+                  onClick={() => {
+                    selectTier(tier.value);
+                  }}
                   className={cn(
                     "flex items-center justify-between rounded-md border px-3 py-2 text-left transition-all",
                     "hover:border-secondary/50",
@@ -398,7 +402,14 @@ export const GasFeeSelector = observer(
             <button
               type="button"
               disabled={disabled}
-              onClick={toggleAdvanced}
+              onClick={() => {
+                toggleAdvanced().catch((error: unknown) => {
+                  console.error(
+                    "[GasFeeSelector] Failed to change gas tier:",
+                    error,
+                  );
+                });
+              }}
               className={cn(
                 "flex items-center justify-between rounded-md border px-3 py-2 text-left transition-all",
                 "hover:border-secondary/50",
@@ -464,12 +475,12 @@ export const GasFeeSelector = observer(
                     autoComplete="off"
                     placeholder={t("gasFee.placeholderAuto")}
                     value={advancedValues.maxPriorityFeePerGas}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       handleAdvancedChange(
                         "maxPriorityFeePerGas",
                         e.target.value,
-                      )
-                    }
+                      );
+                    }}
                     disabled={disabled}
                     className="h-8 text-xs"
                   />
@@ -486,9 +497,9 @@ export const GasFeeSelector = observer(
                     autoComplete="off"
                     placeholder={t("gasFee.placeholderAuto")}
                     value={advancedValues.maxFeePerGas}
-                    onChange={(e) =>
-                      handleAdvancedChange("maxFeePerGas", e.target.value)
-                    }
+                    onChange={(e) => {
+                      handleAdvancedChange("maxFeePerGas", e.target.value);
+                    }}
                     disabled={disabled}
                     className="h-8 text-xs"
                   />
@@ -505,9 +516,9 @@ export const GasFeeSelector = observer(
                     autoComplete="off"
                     placeholder={t("gasFee.placeholderAuto")}
                     value={advancedValues.gasLimit}
-                    onChange={(e) =>
-                      handleAdvancedChange("gasLimit", e.target.value)
-                    }
+                    onChange={(e) => {
+                      handleAdvancedChange("gasLimit", e.target.value);
+                    }}
                     disabled={disabled}
                     className="h-8 text-xs"
                   />

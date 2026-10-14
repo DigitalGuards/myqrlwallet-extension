@@ -1,7 +1,7 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { GasFeeNotice } from "./GasFeeNotice";
@@ -40,8 +40,9 @@ describe("GasFeeNotice", () => {
       value: 0.45,
     });
 
-    await act(async () => {
-      expect(screen.getByText("Estimating gas fee")).toBeInTheDocument();
+    expect(screen.getByText("Estimating gas fee")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("Estimating gas fee")).not.toBeInTheDocument();
     });
     expect(
       screen.getByText("Estimated gas fee is 0.0 Quanta"),
@@ -61,9 +62,7 @@ describe("GasFeeNotice", () => {
     renderComponent(
       mockedStore({
         qrlStore: {
-          getNativeTokenGas: vi.fn(async () => {
-            return "2.64";
-          }),
+          getNativeTokenGas: vi.fn().mockResolvedValue("2.64"),
         },
       }),
       {
@@ -77,8 +76,9 @@ describe("GasFeeNotice", () => {
       },
     );
 
-    await act(async () => {
-      expect(screen.getByText("Estimating gas fee")).toBeInTheDocument();
+    expect(screen.getByText("Estimating gas fee")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("Estimating gas fee")).not.toBeInTheDocument();
     });
     expect(
       screen.getByText("Estimated gas fee is 2.64 Quanta"),
@@ -90,9 +90,7 @@ describe("GasFeeNotice", () => {
     renderComponent(
       mockedStore({
         qrlStore: {
-          getNativeTokenGas: vi.fn(async () => {
-            return "2.64";
-          }),
+          getNativeTokenGas: vi.fn().mockResolvedValue("2.64"),
         },
       }),
       {
@@ -107,8 +105,9 @@ describe("GasFeeNotice", () => {
       },
     );
 
-    await act(async () => {
-      expect(screen.getByText("Estimating gas fee")).toBeInTheDocument();
+    expect(screen.getByText("Estimating gas fee")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("Estimating gas fee")).not.toBeInTheDocument();
     });
     expect(onGasFeeCalculated).toHaveBeenCalledWith("2.64");
   });
@@ -117,17 +116,7 @@ describe("GasFeeNotice", () => {
     renderComponent(
       mockedStore({
         qrlStore: {
-          getZrc20TokenGas: vi.fn(
-            async (
-              _from: string,
-              _to: string,
-              _value: number,
-              _contractAddress: string,
-              _decimals: number,
-            ) => {
-              return "5.2564854";
-            },
-          ),
+          getZrc20TokenGas: vi.fn().mockResolvedValue("5.2564854"),
         },
       }),
       {
@@ -141,11 +130,69 @@ describe("GasFeeNotice", () => {
       },
     );
 
-    await act(async () => {
-      expect(screen.getByText("Estimating gas fee")).toBeInTheDocument();
+    expect(screen.getByText("Estimating gas fee")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("Estimating gas fee")).not.toBeInTheDocument();
     });
     expect(
       screen.getByText("Estimated gas fee is 5.2564 Quanta"),
     ).toBeInTheDocument();
+  });
+
+  it.each([false, true])(
+    "reports a rejected estimate for token mode %s",
+    async (isZrc20Token) => {
+      const failure = new Error("RPC unavailable");
+      const onGasFeeCalculated = vi.fn();
+      renderComponent(
+        mockedStore({
+          qrlStore: {
+            getNativeTokenGas: vi.fn().mockRejectedValue(failure),
+            getZrc20TokenGas: vi.fn().mockRejectedValue(failure),
+          },
+        }),
+        {
+          isZrc20Token,
+          tokenContractAddress: "token",
+          tokenDecimals: 18,
+          from: "sender",
+          to: "recipient",
+          value: 1,
+          isSubmitting: false,
+          onGasFeeCalculated,
+        },
+      );
+      expect(
+        await screen.findByText("Error: RPC unavailable"),
+      ).toBeInTheDocument();
+      expect(onGasFeeCalculated).toHaveBeenCalledWith("");
+    },
+  );
+
+  it("reports a callback failure after estimating gas", async () => {
+    const failure = new Error("Fee callback failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderComponent(undefined, {
+        isZrc20Token: false,
+        tokenContractAddress: "",
+        tokenDecimals: 18,
+        from: "sender",
+        to: "recipient",
+        value: 1,
+        isSubmitting: false,
+        onGasFeeCalculated: () => {
+          throw failure;
+        },
+      });
+      await waitFor(() => {
+        expect(report).toHaveBeenCalledWith(
+          "[GasFeeNotice] Failed to report gas estimate:",
+          failure,
+        );
+      });
+    } finally {
+      report.mockRestore();
+    }
   });
 });

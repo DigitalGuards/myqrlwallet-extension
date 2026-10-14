@@ -41,7 +41,7 @@ function getStatusColor(displayStatus: PendingStatus): string {
   }
 }
 
-const STATUS_LABEL_KEYS: Record<string, string> = {
+const STATUS_LABEL_KEYS: Record<string, string | undefined> = {
   pending: "txDetail.statusPending",
   confirmed: "txDetail.statusConfirmed",
   failed: "txDetail.statusFailed",
@@ -61,12 +61,11 @@ const TransactionHistoryItem = observer(
 
     // Explorer-sourced entries include transfers TO this account; local
     // entries are always sends. Self-sends render as sends.
-    const accountAddress =
-      qrlStore.activeAccount.accountAddress?.toLowerCase() ?? "";
+    const accountAddress = qrlStore.activeAccount.accountAddress.toLowerCase();
     const isIncoming =
       !!accountAddress &&
-      transaction.to?.toLowerCase() === accountAddress &&
-      transaction.from?.toLowerCase() !== accountAddress;
+      transaction.to.toLowerCase() === accountAddress &&
+      transaction.from.toLowerCase() !== accountAddress;
     const counterpartyAddress = isIncoming ? transaction.from : transaction.to;
 
     // The list shows the compact form and keeps the exact value on hover.
@@ -87,8 +86,12 @@ const TransactionHistoryItem = observer(
       action: "speed-up" | "cancel",
     ) => {
       e.preventDefault();
-      navigate(ROUTES.TRANSACTION_DETAIL, {
-        state: { transaction, action },
+      Promise.resolve(
+        navigate(ROUTES.TRANSACTION_DETAIL, {
+          state: { transaction, action },
+        }),
+      ).catch((error: unknown) => {
+        console.error("Failed to open transaction details:", error);
       });
     };
 
@@ -143,13 +146,17 @@ const TransactionHistoryItem = observer(
             {isPending && transaction.nonce !== undefined && (
               <div className="mt-1 flex justify-end gap-1">
                 <button
-                  onClick={(e) => handleAction(e, "speed-up")}
+                  onClick={(e) => {
+                    handleAction(e, "speed-up");
+                  }}
                   className="rounded bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-500 hover:bg-amber-500/20"
                 >
                   {t("txHistory.speedUp")}
                 </button>
                 <button
-                  onClick={(e) => handleAction(e, "cancel")}
+                  onClick={(e) => {
+                    handleAction(e, "cancel");
+                  }}
                   className="rounded bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive hover:bg-destructive/20"
                 >
                   {t("txHistory.cancel")}

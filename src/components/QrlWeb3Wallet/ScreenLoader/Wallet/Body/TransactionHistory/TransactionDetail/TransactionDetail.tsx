@@ -14,6 +14,8 @@ import type {
   TransactionHistoryEntry,
 } from "@/types/transactionHistory";
 import StorageUtil from "@/utilities/storageUtil";
+import { getStoredValue } from "@/utilities/storageGuards";
+import { isTransactionDetailEntry } from "@/utilities/transactionHistoryGuards";
 import { utils } from "@theqrl/web3";
 import { BigNumber } from "bignumber.js";
 import {
@@ -74,7 +76,7 @@ function getDisplayStatus(
 
 const STATUS_BADGE_CONFIG: Record<
   string,
-  { className: string; labelKey: string }
+  { className: string; labelKey: string } | undefined
 > = {
   pending: {
     className: "bg-amber-500/10 text-amber-500",
@@ -118,13 +120,12 @@ const TransactionDetail = observer(() => {
   } = useStore();
   const location = useLocation();
   const navigate = useNavigate();
-  const transaction = location.state?.transaction as
-    | TransactionHistoryEntry
-    | undefined;
-  const initialAction = location.state?.action as
-    | "speed-up"
-    | "cancel"
-    | undefined;
+  const routeState: unknown = location.state;
+  const routeTransaction = getStoredValue(routeState, "transaction");
+  const transaction = isTransactionDetailEntry(routeTransaction)
+    ? routeTransaction
+    : undefined;
+  const initialAction = getStoredValue(routeState, "action");
 
   const [speedUpDialogOpen, setSpeedUpDialogOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
@@ -152,8 +153,7 @@ const TransactionDetail = observer(() => {
         const networkEstimate = gasLimit * (baseFeePerGas + networkPriorityFee);
 
         // Original cost + 10% minimum bump
-        const origCost =
-          BigInt(tx.gasUsed ?? "0") * BigInt(tx.effectiveGasPrice ?? "0");
+        const origCost = BigInt(tx.gasUsed) * BigInt(tx.effectiveGasPrice);
         const minBumpedCost = origCost + (origCost * BigInt(10)) / BigInt(100);
 
         // Use whichever is higher
@@ -171,9 +171,9 @@ const TransactionDetail = observer(() => {
 
   useEffect(() => {
     if (speedUpDialogOpen && transaction) {
-      estimateReplacementGas(transaction, false);
+      void estimateReplacementGas(transaction, false);
     } else if (cancelDialogOpen && transaction) {
-      estimateReplacementGas(transaction, true);
+      void estimateReplacementGas(transaction, true);
     }
   }, [
     speedUpDialogOpen,
@@ -228,6 +228,8 @@ const TransactionDetail = observer(() => {
         return;
       }
 
+      const replacementHash = result.transactionHash;
+
       // The broadcast handler below marks the original, once the node has
       // actually taken the replacement. At this point the replacement has
       // only been signed, and a broadcast the node rejects (an underpriced
@@ -240,7 +242,7 @@ const TransactionDetail = observer(() => {
           transaction.transactionHash,
           {
             pendingStatus: action === "speed-up" ? "replaced" : "cancelled",
-            replacementTransactionHash: result.transactionHash,
+            replacementTransactionHash: replacementHash,
             replacedByAction: action,
           },
         );
@@ -251,7 +253,7 @@ const TransactionDetail = observer(() => {
       if (action === "speed-up") {
         const { chainId } = await StorageUtil.getActiveBlockChain();
         const replacementEntry: TransactionHistoryEntry = {
-          id: result.transactionHash,
+          id: replacementHash,
           from: transaction.from,
           to: transaction.to,
           amount: transaction.amount,
@@ -260,7 +262,7 @@ const TransactionDetail = observer(() => {
           isZrc20Token: transaction.isZrc20Token,
           tokenContractAddress: transaction.tokenContractAddress,
           tokenDecimals: transaction.tokenDecimals,
-          transactionHash: result.transactionHash,
+          transactionHash: replacementHash,
           blockNumber: "",
           gasUsed: "",
           effectiveGasPrice: "",
@@ -296,7 +298,12 @@ const TransactionDetail = observer(() => {
         .sendRawTransaction(result.rawTransaction, () => {
           // The node accepted the broadcast: from here the original is
           // genuinely superseded, whatever the replacement's own fate.
-          void markOriginalOnce();
+          markOriginalOnce().catch((error: unknown) => {
+            console.error(
+              "[handleReplacement] Failed to update original transaction:",
+              error,
+            );
+          });
         })
         .then(
           async (receipt) => {
@@ -306,34 +313,40 @@ const TransactionDetail = observer(() => {
             if (action === "speed-up") {
               const update = transactionFailureUpdate(
                 { receipt },
-                result.transactionHash,
+                replacementHash,
               );
               if (update.receiptStatusVerified) {
                 await transactionHistoryStore.updateTransaction(
                   transaction.from,
-                  result.transactionHash!,
+                  replacementHash,
                   update,
                 );
               }
             }
           },
-          async (err) => {
+          async (err: unknown) => {
             console.error("[handleReplacement] sendRawTransaction error:", err);
             if (action === "speed-up") {
               await transactionHistoryStore.updateTransaction(
                 transaction.from,
-                result.transactionHash!,
-                transactionFailureUpdate(err, result.transactionHash),
+                replacementHash,
+                transactionFailureUpdate(err, replacementHash),
               );
             }
           },
-        );
+        )
+        .catch((error: unknown) => {
+          console.error(
+            "[handleReplacement] Failed to update transaction history:",
+            error,
+          );
+        });
 
       // Navigate back to history immediately
-      navigate(-1);
+      await navigate(-1);
     } catch (error) {
       setActionError(
-        `${action === "speed-up" ? "Speed up" : "Cancel"} failed: ${error}`,
+        `${action === "speed-up" ? "Speed up" : "Cancel"} failed: ${String(error)}`,
       );
       setIsProcessing(false);
     }
@@ -374,12 +387,11 @@ const TransactionDetail = observer(() => {
 
   // Received transfers (explorer-sourced) carry a fee the SENDER paid;
   // presenting amount + fee as "total cost" would misstate them.
-  const activeAddress =
-    qrlStore.activeAccount.accountAddress?.toLowerCase() ?? "";
+  const activeAddress = qrlStore.activeAccount.accountAddress.toLowerCase();
   const isIncoming =
     !!activeAddress &&
-    to?.toLowerCase() === activeAddress &&
-    from?.toLowerCase() !== activeAddress;
+    to.toLowerCase() === activeAddress &&
+    from.toLowerCase() !== activeAddress;
 
   const displayStatus = getDisplayStatus(pendingStatus, status);
   const badgeConfig =
@@ -441,7 +453,9 @@ const TransactionDetail = observer(() => {
 
   const openInExplorer = () => {
     if (explorerTxUrl) {
-      browser.tabs.create({ url: explorerTxUrl });
+      browser.tabs.create({ url: explorerTxUrl }).catch((error: unknown) => {
+        console.error("Failed to open block explorer:", error);
+      });
     }
   };
 
@@ -474,7 +488,9 @@ const TransactionDetail = observer(() => {
                   <Button
                     variant="outline"
                     className="flex-1 border-amber-500/50 text-amber-500 hover:bg-amber-500/10"
-                    onClick={() => setSpeedUpDialogOpen(true)}
+                    onClick={() => {
+                      setSpeedUpDialogOpen(true);
+                    }}
                   >
                     <Zap className="mr-2 h-4 w-4" />
                     {t("txDetail.speedUp")}
@@ -482,7 +498,9 @@ const TransactionDetail = observer(() => {
                   <Button
                     variant="outline"
                     className="flex-1 border-destructive/50 text-destructive hover:bg-destructive/10"
-                    onClick={() => setCancelDialogOpen(true)}
+                    onClick={() => {
+                      setCancelDialogOpen(true);
+                    }}
                   >
                     <Ban className="mr-2 h-4 w-4" />
                     {t("txDetail.cancel")}
@@ -648,7 +666,9 @@ const TransactionDetail = observer(() => {
         estimatedNewGasFee={estimatedNewGasFee}
         isProcessing={isProcessing}
         error={actionError}
-        onConfirm={() => handleReplacement("speed-up")}
+        onConfirm={() => {
+          void handleReplacement("speed-up");
+        }}
       />
       <ReplacementConfirmationDialog
         open={cancelDialogOpen}
@@ -658,7 +678,9 @@ const TransactionDetail = observer(() => {
         estimatedNewGasFee={estimatedNewGasFee}
         isProcessing={isProcessing}
         error={actionError}
-        onConfirm={() => handleReplacement("cancel")}
+        onConfirm={() => {
+          void handleReplacement("cancel");
+        }}
       />
     </div>
   );
