@@ -162,7 +162,7 @@ class AccountLabelsStore {
   async removeLabel(address: string) {
     if (!(address in this.labels)) return;
     const updated = { ...this.labels };
-    delete updated[address];
+    Reflect.deleteProperty(updated, address);
     await StorageUtil.setAccountLabels(updated);
     runInAction(() => {
       this.labels = updated;

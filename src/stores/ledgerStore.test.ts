@@ -1,4 +1,11 @@
+// @vitest-environment node
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import {
+  Common,
+  type FeeMarketEIP1559Transaction,
+} from "@theqrl/web3-qrl-accounts";
+import { deferred } from "@/test-utils/deferred";
+import { malformed } from "@/test-utils/malformed";
 import { LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
 import type {
   LedgerAccount,
@@ -6,12 +13,11 @@ import type {
 } from "@/services/ledger/ledgerTypes";
 
 describe("LedgerStore", () => {
-  // Mock functions - using 'any' to avoid complex generic typing issues with Jest mocks
   // Transport mocks
   const mockConnect = vi.fn(); // Used for both transport and service connect
   const mockDisconnect = vi.fn();
   const mockIsConnected = vi.fn();
-  const mockOnDisconnect = vi.fn();
+  const mockOnDisconnect = vi.fn<(callback: () => void) => void>();
 
   // Service mocks
   const mockGetAccounts = vi.fn();
@@ -28,10 +34,15 @@ describe("LedgerStore", () => {
 
   // FeeMarketEIP1559Transaction mocks
   const mockSerialize = vi.fn();
-  const mockRaw = vi.fn();
+  const mockRaw = vi.fn<FeeMarketEIP1559Transaction["raw"]>();
   const mockGetMessageToSign = vi.fn();
   const mockFromTxData = vi.fn();
-  const mockFromValuesArray = vi.fn();
+  const mockFromValuesArray =
+    vi.fn<
+      (
+        ...args: Parameters<typeof FeeMarketEIP1559Transaction.fromValuesArray>
+      ) => Pick<FeeMarketEIP1559Transaction, "serialize">
+    >();
 
   // Store instance will be dynamically imported
   let LedgerStore: typeof import("./ledgerStore").default;
@@ -131,6 +142,7 @@ describe("LedgerStore", () => {
     });
 
     vi.doMock("@theqrl/web3-qrl-accounts", () => ({
+      Common,
       FeeMarketEIP1559Transaction: {
         fromTxData: mockFromTxData,
         fromValuesArray: mockFromValuesArray,
@@ -254,18 +266,13 @@ describe("LedgerStore", () => {
     });
 
     it("should set connecting state during connection", async () => {
-      let resolveConnect: () => void;
-      mockConnect.mockReturnValue(
-        new Promise<void>((resolve) => {
-          resolveConnect = resolve;
-        }),
-      );
-      mockConnect.mockResolvedValue(mockDeviceInfo);
+      const { promise, resolve: resolveConnect } = deferred<LedgerDeviceInfo>();
+      mockConnect.mockReturnValue(promise);
 
       const connectPromise = store.connect();
       expect(store.connectionState).toBe("connecting");
 
-      resolveConnect!();
+      resolveConnect(mockDeviceInfo);
       await connectPromise;
     });
 
@@ -281,18 +288,13 @@ describe("LedgerStore", () => {
     });
 
     it("should not connect twice if already connecting", async () => {
-      let resolveConnect: () => void;
-      mockConnect.mockReturnValue(
-        new Promise<void>((resolve) => {
-          resolveConnect = resolve;
-        }),
-      );
-      mockConnect.mockResolvedValue(mockDeviceInfo);
+      const { promise, resolve: resolveConnect } = deferred<LedgerDeviceInfo>();
+      mockConnect.mockReturnValue(promise);
 
       const promise1 = store.connect();
       const promise2 = store.connect();
 
-      resolveConnect!();
+      resolveConnect(mockDeviceInfo);
       await Promise.all([promise1, promise2]);
 
       expect(mockConnect).toHaveBeenCalledTimes(1);
@@ -331,9 +333,7 @@ describe("LedgerStore", () => {
       // onDisconnect is called once per store construction in beforeEach,
       // but clearAllMocks resets call history. The last call is from current store.
       const lastCallIdx = mockOnDisconnect.mock.calls.length - 1;
-      const disconnectCallback = mockOnDisconnect.mock.calls[
-        lastCallIdx
-      ][0] as () => void;
+      const disconnectCallback = mockOnDisconnect.mock.calls[lastCallIdx][0];
 
       store.connectionState = "connected";
       store.deviceInfo = mockDeviceInfo;
@@ -346,9 +346,7 @@ describe("LedgerStore", () => {
 
     it("should set signing error if disconnected during signing", () => {
       const lastCallIdx = mockOnDisconnect.mock.calls.length - 1;
-      const disconnectCallback = mockOnDisconnect.mock.calls[
-        lastCallIdx
-      ][0] as () => void;
+      const disconnectCallback = mockOnDisconnect.mock.calls[lastCallIdx][0];
 
       store.connectionState = "connected";
       store.signingState = "signing";
@@ -398,17 +396,14 @@ describe("LedgerStore", () => {
     });
 
     it("should set loading state during fetch", async () => {
-      let resolveGetAccounts: (accounts: LedgerAccount[]) => void;
-      mockGetAccounts.mockReturnValue(
-        new Promise((resolve) => {
-          resolveGetAccounts = resolve;
-        }),
-      );
+      const { promise, resolve: resolveGetAccounts } =
+        deferred<LedgerAccount[]>();
+      mockGetAccounts.mockReturnValue(promise);
 
       const loadPromise = store.loadAccounts();
       expect(store.isLoadingAccounts).toBe(true);
 
-      resolveGetAccounts!(mockAccounts);
+      resolveGetAccounts(mockAccounts);
       await loadPromise;
 
       expect(store.isLoadingAccounts).toBe(false);
@@ -455,17 +450,14 @@ describe("LedgerStore", () => {
     });
 
     it("should set and clear loading state", async () => {
-      let resolveGetAccounts: (accounts: LedgerAccount[]) => void;
-      mockGetAccounts.mockReturnValue(
-        new Promise((resolve) => {
-          resolveGetAccounts = resolve;
-        }),
-      );
+      const { promise, resolve: resolveGetAccounts } =
+        deferred<LedgerAccount[]>();
+      mockGetAccounts.mockReturnValue(promise);
 
       const fetchPromise = store.fetchPageAccounts();
       expect(store.isLoadingAccounts).toBe(true);
 
-      resolveGetAccounts!(mockAccounts);
+      resolveGetAccounts(mockAccounts);
       await fetchPromise;
 
       expect(store.isLoadingAccounts).toBe(false);
@@ -709,12 +701,11 @@ describe("LedgerStore", () => {
     });
 
     it("should set awaiting_confirmation state", async () => {
-      let resolveSign: (sig: string) => void;
-      mockSignTransaction.mockReturnValue(
-        new Promise((resolve) => {
-          resolveSign = resolve;
-        }),
-      );
+      const { promise, resolve: resolveSign } = deferred<{
+        signature: string;
+        rawTransaction: string;
+      }>();
+      mockSignTransaction.mockReturnValue(promise);
 
       const signPromise = store.signTransaction(
         mockAccounts[0].address,
@@ -724,7 +715,7 @@ describe("LedgerStore", () => {
       // Check intermediate states
       expect(store.isSigning).toBe(true);
 
-      resolveSign!("0xsig");
+      resolveSign({ signature: "0xsig", rawTransaction: "0xraw" });
       await signPromise;
 
       expect(store.signingState).toBe("completed");
@@ -787,7 +778,7 @@ describe("LedgerStore", () => {
   });
 
   describe("loadAccountsFromStorage", () => {
-    it("should load accounts from storage on initialization", async () => {
+    it("should load accounts from storage on initialization", () => {
       // This test verifies the mock was called during store construction
       expect(mockGetLedgerAccounts).toHaveBeenCalled();
     });
@@ -1001,7 +992,7 @@ describe("LedgerStore", () => {
       value: "0x1000",
       data: "0x",
     };
-    const mockCommon = { chainId: 1 };
+    const mockCommon = Common.custom({ chainId: 1 });
 
     beforeEach(() => {
       store.connectionState = "connected";
@@ -1034,6 +1025,96 @@ describe("LedgerStore", () => {
       expect(mockSerialize).toHaveBeenCalled();
       expect(result).toMatch(/^0x/);
     });
+
+    it.each([
+      { nonce: {} },
+      { maxFeePerGas: false },
+      { chainId: [] },
+      { type: {} },
+      { to: {} },
+      { data: {} },
+      { data: ["0x01"] },
+      { accessList: [{}] },
+      { accessList: [{ address: "Qrecipient", storageKeys: [7] }] },
+      { accessList: [[new Uint8Array(), ["key"]]] },
+    ])(
+      "rejects malformed transaction fields before signing: %j",
+      async (invalid) => {
+        await expect(
+          store.signAndSerializeTransaction(
+            mockAccounts[0].address,
+            { ...mockTxData, ...invalid },
+            mockCommon,
+          ),
+        ).rejects.toThrow("Invalid Ledger transaction data");
+        expect(mockFromTxData).not.toHaveBeenCalled();
+        expect(mockSignTransaction).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([null, [], "transaction"])(
+      "rejects a malformed transaction container: %j",
+      async (invalid) => {
+        await expect(
+          store.signAndSerializeTransaction(
+            mockAccounts[0].address,
+            malformed<Record<string, unknown>>(invalid),
+            mockCommon,
+          ),
+        ).rejects.toThrow("Invalid Ledger transaction data");
+        expect(mockFromTxData).not.toHaveBeenCalled();
+      },
+    );
+
+    it("rejects an invalid chain configuration before signing", async () => {
+      await expect(
+        store.signAndSerializeTransaction(mockAccounts[0].address, mockTxData, {
+          chainId: 1,
+        }),
+      ).rejects.toThrow("Invalid Ledger transaction configuration");
+      expect(mockFromTxData).not.toHaveBeenCalled();
+      expect(mockSignTransaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { nonce: 0n, gasLimit: new Uint8Array([1]), value: 1, data: [0, 1] },
+      { accessList: null },
+      { accessList: [{ address: "Qrecipient", storageKeys: ["0x01"] }] },
+      { accessList: [[new Uint8Array([1]), [new Uint8Array([2])]]] },
+    ])(
+      "passes valid transaction data and extra fields through unchanged: %o",
+      async (fields) => {
+        const txData = { ...mockTxData, ...fields, future: { version: 2 } };
+        await store.signAndSerializeTransaction(
+          mockAccounts[0].address,
+          txData,
+          mockCommon,
+        );
+        expect(mockFromTxData.mock.calls[0][0]).toBe(txData);
+        expect(mockFromTxData).toHaveBeenCalledWith(txData, {
+          common: mockCommon,
+        });
+      },
+    );
+
+    it.each([undefined, null, 42])(
+      "rejects an unusable signature before serialization: %j",
+      async (signature) => {
+        mockSignTransaction.mockResolvedValue({
+          signature,
+          rawTransaction: "0xraw",
+        });
+        await expect(
+          store.signAndSerializeTransaction(
+            mockAccounts[0].address,
+            mockTxData,
+            mockCommon,
+          ),
+        ).rejects.toThrow("Ledger signing returned no usable signature");
+        expect(mockFromValuesArray).not.toHaveBeenCalled();
+        expect(mockSerialize).not.toHaveBeenCalled();
+      },
+    );
 
     it("should use existing public key from account", async () => {
       await store.signAndSerializeTransaction(
@@ -1086,10 +1167,10 @@ describe("LedgerStore", () => {
 
     it("should throw if account not found after signing", async () => {
       // Sign succeeds but then we remove accounts
-      mockSignTransaction.mockImplementation(async () => {
+      mockSignTransaction.mockImplementation(() => {
         // Clear accounts to simulate race condition
         store.accounts = [];
-        return { signature: "0xsig", rawTransaction: "0xraw" };
+        return Promise.resolve({ signature: "0xsig", rawTransaction: "0xraw" });
       });
 
       await expect(
@@ -1126,7 +1207,7 @@ describe("LedgerStore", () => {
       ).rejects.toThrow("Failed to fetch public key from Ledger");
     });
 
-    it("should pass correct values to fromValuesArray with publicKey before signature", async () => {
+    it("preserves transaction fields and orders signing fields for the library", async () => {
       await store.signAndSerializeTransaction(
         mockAccounts[0].address,
         mockTxData,
@@ -1134,16 +1215,72 @@ describe("LedgerStore", () => {
       );
 
       const callArgs = mockFromValuesArray.mock.calls[0];
-      const valuesArray = callArgs[0] as any[];
+      const valuesArray = callArgs[0];
 
-      // Should have 12 elements: 9 tx fields + publicKey + signature + descriptor
-      expect(valuesArray).toHaveLength(12);
+      // Nine transaction fields plus descriptor, extra params, signature and public key.
+      expect(valuesArray).toHaveLength(13);
+      const rawResult = mockRaw.mock.results[0];
+      if (rawResult.type !== "return")
+        throw new Error("Expected raw transaction values");
+      expect(valuesArray.slice(0, 9)).toEqual(rawResult.value.slice(0, 9));
       // publicKey and signature should be Buffer instances
-      expect(Buffer.isBuffer(valuesArray[9])).toBe(true); // publicKey
-      expect(Buffer.isBuffer(valuesArray[10])).toBe(true); // signature
+      expect(Buffer.isBuffer(valuesArray[12])).toBe(true); // publicKey
+      expect(Buffer.isBuffer(valuesArray[11])).toBe(true); // signature
       // descriptor should be Uint8Array (3 bytes: [1, 0, 0] for ML-DSA-87)
-      expect(valuesArray[11]).toBeInstanceOf(Uint8Array);
-      expect(valuesArray[11]).toHaveLength(3);
+      expect(valuesArray[9]).toBeInstanceOf(Uint8Array);
+      expect(valuesArray[9]).toHaveLength(3);
+      expect(valuesArray[10]).toEqual(new Uint8Array());
+    });
+
+    it("round-trips a signed transaction through the installed serializer", async () => {
+      const actual = await vi.importActual<
+        typeof import("@theqrl/web3-qrl-accounts")
+      >("@theqrl/web3-qrl-accounts");
+      mockFromTxData.mockImplementation(
+        (...args: Parameters<typeof FeeMarketEIP1559Transaction.fromTxData>) =>
+          actual.FeeMarketEIP1559Transaction.fromTxData(...args),
+      );
+      mockFromValuesArray.mockImplementation((...args) =>
+        actual.FeeMarketEIP1559Transaction.fromValuesArray(...args),
+      );
+      const publicKey = Buffer.alloc(2592, 1);
+      const signature = Buffer.alloc(4627, 2);
+      store.accounts = [
+        { ...mockAccounts[0], publicKey: `0x${publicKey.toString("hex")}` },
+      ];
+      mockSignTransaction.mockResolvedValue({
+        signature: `0x${signature.toString("hex")}`,
+        rawTransaction: "0xraw",
+      });
+      const txData = {
+        nonce: 7n,
+        maxPriorityFeePerGas: 1n,
+        maxFeePerGas: 2n,
+        gasLimit: 21000n,
+        to: `Q${"a".repeat(128)}`,
+        value: 3n,
+        data: "0x",
+      };
+
+      const serialized = await store.signAndSerializeTransaction(
+        mockAccounts[0].address,
+        txData,
+        mockCommon,
+      );
+      const decoded = actual.FeeMarketEIP1559Transaction.fromSerializedTx(
+          new Uint8Array(Buffer.from(serialized.slice(2), "hex")),
+        { common: mockCommon },
+      );
+      const unsigned = actual.FeeMarketEIP1559Transaction.fromTxData(txData, {
+        common: mockCommon,
+      });
+      const fields = decoded.raw();
+      expect(fields).toHaveLength(13);
+      expect(fields.slice(0, 9)).toEqual(unsigned.raw().slice(0, 9));
+      expect(fields[9]).toEqual(new Uint8Array([1, 0, 0]));
+      expect(fields[10]).toEqual(new Uint8Array());
+      expect(fields[11]).toEqual(new Uint8Array(signature));
+      expect(fields[12]).toEqual(new Uint8Array(publicKey));
     });
   });
 });
