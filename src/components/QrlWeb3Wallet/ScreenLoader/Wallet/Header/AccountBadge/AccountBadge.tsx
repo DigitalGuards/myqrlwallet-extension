@@ -44,7 +44,9 @@ const AccountBadge = observer(() => {
   // began after the account was already on screen, so the chip was
   // guaranteed at least one render with no name to show.
   useEffect(() => {
-    accountLabelsStore.loadLabels();
+    accountLabelsStore.loadLabels().catch((error: unknown) => {
+      console.error("Failed to load account labels:", error);
+    });
   }, []);
 
   // Positional name while the stored one is still in flight, so the chip
