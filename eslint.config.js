@@ -302,20 +302,6 @@ export const lintRatchet = [
       "@typescript-eslint/no-unsafe-argument": "off",
     },
   },
-  {
-    files: ["src/utilities/storageUtil.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-extraneous-class": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
 ];
 // END LINT RATCHET
 
