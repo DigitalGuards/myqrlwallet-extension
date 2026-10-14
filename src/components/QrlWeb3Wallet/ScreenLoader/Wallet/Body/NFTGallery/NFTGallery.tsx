@@ -2,6 +2,7 @@ import { Button } from "@/components/UI/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { useStore } from "@/stores/store";
 import type { OwnedNftToken } from "@/types/nft";
+import { isNFTGalleryState } from "@/utilities/nftGuards";
 import { Image } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
@@ -13,15 +14,17 @@ import NFTGalleryItem from "./NFTGalleryItem";
 
 const NFTGallery = observer(() => {
   const { t } = useTranslation();
-  const { state } = useLocation();
+  const state: unknown = useLocation().state;
   const { qrlStore } = useStore();
-  const { getOwnedNftTokens, activeAccount, qrlConnection } = qrlStore;
+  const { activeAccount, qrlConnection } = qrlStore;
   const { accountAddress } = activeAccount;
   const { blockchain } = qrlConnection;
 
-  const contractAddress = state?.contractAddress ?? "";
-  const collectionName = state?.collectionName ?? "";
-  const standard = state?.standard ?? "ZRC721";
+  const routeState = isNFTGalleryState(state) ? state : undefined;
+  const validRoute = routeState !== undefined;
+  const contractAddress = routeState?.contractAddress ?? "";
+  const collectionName = routeState?.collectionName ?? "";
+  const standard = routeState?.standard ?? "ZRC721";
 
   const [tokens, setTokens] = useState<OwnedNftToken[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -30,9 +33,14 @@ const NFTGallery = observer(() => {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const loadTokens = async () => {
       setIsLoading(true);
-      const owned = await getOwnedNftTokens(contractAddress, standard);
+      if (!validRoute) {
+        setLoadFailed(true);
+        setIsLoading(false);
+        return;
+      }
+      const owned = await qrlStore.getOwnedNftTokens(contractAddress, standard);
       if (cancelled) return;
       // An unreadable chain is not an empty collection. Reporting the
       // failure keeps "you own nothing here" from standing in for "the
@@ -40,11 +48,25 @@ const NFTGallery = observer(() => {
       setLoadFailed(owned.failed);
       setTokens(owned.tokens);
       setIsLoading(false);
-    })();
+    };
+    loadTokens().catch((error: unknown) => {
+      console.error("Failed to load NFT gallery:", error);
+      if (cancelled) return;
+      setLoadFailed(true);
+      setIsLoading(false);
+    });
     return () => {
       cancelled = true;
     };
-  }, [contractAddress, standard, accountAddress, blockchain, reloadKey]);
+  }, [
+    contractAddress,
+    standard,
+    accountAddress,
+    blockchain,
+    reloadKey,
+    validRoute,
+    qrlStore,
+  ]);
 
   return (
     <>
@@ -75,7 +97,9 @@ const NFTGallery = observer(() => {
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setReloadKey((key) => key + 1)}
+                  onClick={() => {
+                    setReloadKey((key) => key + 1);
+                  }}
                 >
                   {t("common.retry")}
                 </Button>

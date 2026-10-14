@@ -1,6 +1,6 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
 import { approvalProducedNothingProviderError } from "@/functions/describeExtensionError";
-import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
+import type { StoredBlockchain as BlockchainDataType } from "@/utilities/storageGuards";
 import { EXTENSION_MESSAGES } from "@/scripts/constants/streamConstants";
 import {
   DAppRequestType,
@@ -8,6 +8,8 @@ import {
 } from "@/scripts/middlewares/middlewareTypes";
 import { getSerializableObject } from "@/scripts/utils/scriptUtils";
 import StorageUtil from "@/utilities/storageUtil";
+import { isRecord } from "@/utilities/storageGuards";
+import { isDAppRequest } from "@/utilities/approvalGuards";
 import { action, makeAutoObservable, observable } from "mobx";
 import browser from "webextension-polyfill";
 
@@ -54,7 +56,7 @@ class DAppRequestStore {
   onPermissionCallBack: (
     hasApproved: boolean,
     record: ResponseRecorder,
-  ) => Promise<void> = async () => undefined;
+  ) => Promise<void> = () => Promise.resolve();
   approvalProcessingStatus = {
     isProcessing: false,
     hasApproved: false,
@@ -75,22 +77,28 @@ class DAppRequestStore {
       fetchCurrentTabData: action.bound,
       disconnectFromCurrentTab: action.bound,
     });
-    this.fetchCurrentTabData();
+    this.refreshCurrentTab();
     this.subscribeToRequestStorage();
     this.subscribeToActiveTab();
+  }
+
+  private refreshCurrentTab() {
+    this.fetchCurrentTabData().catch((error: unknown) => {
+      console.warn("QrlWeb3Wallet: Failed to refresh the active dApp", error);
+    });
   }
 
   private subscribeToActiveTab() {
     try {
       browser.tabs.onActivated.addListener(() => {
-        void this.fetchCurrentTabData();
+        this.refreshCurrentTab();
       });
       browser.tabs.onUpdated.addListener((_, changeInfo, tab) => {
         if (
           tab.active &&
           (changeInfo.url !== undefined || changeInfo.status === "complete")
         ) {
-          void this.fetchCurrentTabData();
+          this.refreshCurrentTab();
         }
       });
     } catch {
@@ -108,16 +116,21 @@ class DAppRequestStore {
         if (areaName === "session" && profileStorageKey("DAPPS") in changes) {
           this.responseData = {};
           this.canProceed = false;
-          this.onPermissionCallBack = async () => undefined;
+          this.onPermissionCallBack = () => Promise.resolve();
           this.approvalProcessingStatus = {
             isProcessing: false,
             hasApproved: false,
             hasCompleted: false,
           };
-          void this.readDAppRequestData();
+          this.readDAppRequestData().catch((error: unknown) => {
+            console.warn(
+              "QrlWeb3Wallet: Failed to read the dApp request",
+              error,
+            );
+          });
         }
         if (areaName === "local" && profileStorageKey("DAPPS") in changes) {
-          void this.fetchCurrentTabData();
+          this.refreshCurrentTab();
         }
       });
     } catch {
@@ -131,7 +144,7 @@ class DAppRequestStore {
   }
 
   get hasDAppConnected() {
-    return !!this?.currentTabData?.connectedAccounts?.length;
+    return !!this.currentTabData?.connectedAccounts.length;
   }
 
   async fetchCurrentTabData() {
@@ -140,7 +153,7 @@ class DAppRequestStore {
       active: true,
       currentWindow: true,
     });
-    const currentTab = tabs[0];
+    const currentTab = tabs.at(0);
     const urlOrigin = originFromTabUrl(currentTab?.url);
     const connectedDApp = urlOrigin
       ? await StorageUtil.getDAppsConnectedAccountsData(urlOrigin)
@@ -164,9 +177,12 @@ class DAppRequestStore {
 
   async readDAppRequestData() {
     const generation = ++this.dAppRequestReadGeneration;
-    const storedDAppRequestData = await StorageUtil.getDAppsRequestData();
+    const storedDAppRequestData: unknown =
+      await StorageUtil.getDAppsRequestData();
     if (generation !== this.dAppRequestReadGeneration) return;
-    this.dAppRequestData = storedDAppRequestData;
+    this.dAppRequestData = isDAppRequest(storedDAppRequestData)
+      ? storedDAppRequestData
+      : undefined;
   }
 
   /**
@@ -175,7 +191,10 @@ class DAppRequestStore {
    * approval produces after the click goes through that run's own recorder.
    */
   addToResponseData(data: Record<string, unknown>) {
-    const serializableData = getSerializableObject(data);
+    const serializableData: unknown = getSerializableObject(data);
+    if (!isRecord(serializableData)) {
+      throw new Error("Invalid dApp response data");
+    }
     this.responseData = { ...this.responseData, ...serializableData };
   }
 
@@ -184,7 +203,10 @@ class DAppRequestStore {
     bucketKey: string,
     data: Record<string, unknown>,
   ): void {
-    const serializableData = getSerializableObject(data);
+    const serializableData: unknown = getSerializableObject(data);
+    if (!isRecord(serializableData)) {
+      throw new Error("Invalid dApp response data");
+    }
     this.inFlightResponseData.set(bucketKey, {
       ...(this.inFlightResponseData.get(bucketKey) ?? {}),
       ...serializableData,
@@ -207,7 +229,7 @@ class DAppRequestStore {
     this.onPermissionCallBack = callBack;
   }
 
-  async setApprovalProcessingStatus(status: {
+  setApprovalProcessingStatus(status: {
     isProcessing?: boolean;
     hasApproved?: boolean;
     hasCompleted?: boolean;
@@ -216,6 +238,7 @@ class DAppRequestStore {
       ...this.approvalProcessingStatus,
       ...status,
     };
+    return Promise.resolve();
   }
 
   async onPermission(hasApproved: boolean) {
@@ -232,13 +255,16 @@ class DAppRequestStore {
     const bucketKey = requestId ?? "";
     // Bound to this run for as long as it lasts, whatever the screen goes
     // on to show.
-    const record: ResponseRecorder = (data) =>
+    const record: ResponseRecorder = (data) => {
       this.recordForRequest(bucketKey, data);
+    };
     this.inFlightResponseData.set(bucketKey, { ...this.responseData });
     try {
       this.setApprovalProcessingStatus({
         isProcessing: true,
         hasApproved,
+      }).catch((error: unknown) => {
+        console.warn("QrlWeb3Wallet: Failed to update approval status", error);
       });
 
       // Ask the service worker whether this request is still live before
@@ -302,6 +328,8 @@ class DAppRequestStore {
       this.setApprovalProcessingStatus({
         isProcessing: false,
         hasCompleted: true,
+      }).catch((error: unknown) => {
+        console.warn("QrlWeb3Wallet: Failed to update approval status", error);
       });
     }
   }
@@ -341,14 +369,14 @@ class DAppRequestStore {
     // is nothing to ask about.
     if (requestId === undefined) return true;
     try {
-      const acknowledgement = (await browser.runtime.sendMessage({
+      const acknowledgement: unknown = await browser.runtime.sendMessage({
         action: EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS,
         requestId,
         // Which way the user answered, so a surface that dies before the
         // answer arrives is reported as the rejection it was.
         hasApproved,
-      })) as { accepted?: boolean } | undefined;
-      return acknowledgement?.accepted === true;
+      });
+      return isRecord(acknowledgement) && acknowledgement.accepted === true;
     } catch {
       // No listener answered, so the worker is no longer waiting on it.
       return false;

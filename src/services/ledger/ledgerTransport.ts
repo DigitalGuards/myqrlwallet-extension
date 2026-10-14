@@ -33,7 +33,10 @@
 import TransportWebHID from "@ledgerhq/hw-transport-webhid";
 import type Transport from "@ledgerhq/hw-transport";
 import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
-import { speculosTransport, SpeculosTransportService } from "./speculosTransport";
+import {
+  speculosTransport,
+  SpeculosTransportService,
+} from "./speculosTransport";
 
 function isErrorWithMessage(error: unknown): error is Error {
   if (!(error instanceof Error)) {
@@ -51,7 +54,7 @@ const USE_SPECULOS = import.meta.env.VITE_USE_SPECULOS === "true";
 
 if (USE_SPECULOS) {
   console.log(
-    "[LedgerTransport] SPECULOS MODE ENABLED - Using emulator instead of real device"
+    "[LedgerTransport] SPECULOS MODE ENABLED - Using emulator instead of real device",
   );
 }
 
@@ -68,7 +71,7 @@ export interface ILedgerTransport {
     ins: number,
     p1: number,
     p2: number,
-    data?: Buffer | Uint8Array
+    data?: Buffer | Uint8Array,
   ): Promise<Buffer>;
   onDisconnect(callback: () => void): void;
 }
@@ -133,7 +136,7 @@ export class LedgerTransportService implements ILedgerTransport {
       // TransportWebHID.create() will open device selection dialog
       // Dialog is controlled by browser (we cannot customize it)
       this.transport = await TransportWebHID.create(
-        LEDGER_CONFIG.CONNECTION_TIMEOUT
+        LEDGER_CONFIG.CONNECTION_TIMEOUT,
       );
 
       // Listen for device disconnection
@@ -239,7 +242,7 @@ export class LedgerTransportService implements ILedgerTransport {
     ins: number,
     p1: number,
     p2: number,
-    data?: Buffer
+    data?: Buffer,
   ): Promise<Buffer> {
     // Ensure we are connected
     const transport = await this.connect();
@@ -305,7 +308,7 @@ class SpeculosTransportWrapper implements ILedgerTransport {
     ins: number,
     p1: number,
     p2: number,
-    data?: Buffer | Uint8Array
+    data?: Buffer | Uint8Array,
   ): Promise<Buffer> {
     const uint8Data = data ? new Uint8Array(data) : undefined;
     const response = await this.speculos.send(cla, ins, p1, p2, uint8Data);

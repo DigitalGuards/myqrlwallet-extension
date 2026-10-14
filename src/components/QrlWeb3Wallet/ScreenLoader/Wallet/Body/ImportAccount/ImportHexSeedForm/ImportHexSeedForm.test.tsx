@@ -5,16 +5,22 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ImportHexSeedForm from "./ImportHexSeedForm";
+import type { Web3BaseWalletAccount } from "@theqrl/web3";
 
 // The QRL extended seed is exactly 51 bytes, so 0x plus 102 hex characters.
 const VALID_HEX_SEED = `0x${"ab".repeat(51)}`;
 const SHORT_HEX_SEED = `0x${"ab".repeat(32)}`;
 
 describe("ImportHexSeedForm", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (
-    onImported = vi.fn().mockResolvedValue(undefined),
+    onImported = vi
+      .fn<(account: Web3BaseWalletAccount) => Promise<void>>()
+      .mockResolvedValue(undefined),
     mockedStoreValues = mockedStore({
       qrlStore: {
         qrlInstance: {
@@ -26,15 +32,14 @@ describe("ImportHexSeedForm", () => {
                 messageHash: "",
                 signature: "",
               }),
-              signTransaction: async () => ({
-                messageHash: "",
-                rawTransaction: "",
-                signature: "",
-                transactionHash: "",
-              }),
-              encrypt: async () => {
-                throw new Error("Not implemented");
-              },
+              signTransaction: () =>
+                Promise.resolve({
+                  messageHash: "",
+                  rawTransaction: "",
+                  signature: "",
+                  transactionHash: "",
+                }),
+              encrypt: () => Promise.reject(new Error("Not implemented")),
             }),
           },
         },
@@ -125,5 +130,88 @@ describe("ImportHexSeedForm", () => {
       address: "Q2090E9F38771876FB6Fc51a6b464121d3cC093A1",
       seed: VALID_HEX_SEED,
     });
+  });
+
+  it("reports an account derivation error without importing", async () => {
+    const error = new Error("seed derivation failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onImported = renderComponent(
+      undefined,
+      mockedStore({
+        qrlStore: {
+          qrlInstance: {
+            accounts: {
+              seedToAccount: () => {
+                throw error;
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "hexSeed" }),
+      VALID_HEX_SEED,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Import account" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Account could not be imported from the hex seed",
+      ),
+    ).toBeInTheDocument();
+    expect(report).toHaveBeenCalledWith(
+      "[ImportHexSeedForm] Hex seed import failed:",
+      error,
+    );
+    expect(onImported).not.toHaveBeenCalled();
+  });
+
+  it("reports a rejected import and keeps the entered seed available for retry", async () => {
+    const error = new Error("persistence failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onImported = vi
+      .fn<(account: Web3BaseWalletAccount) => Promise<void>>()
+      .mockRejectedValueOnce(error)
+      .mockResolvedValue(undefined);
+    renderComponent(onImported);
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "hexSeed" }),
+      VALID_HEX_SEED,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Import account" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Account could not be imported from the hex seed",
+      ),
+    ).toBeInTheDocument();
+    expect(report).toHaveBeenCalledWith(
+      "[ImportHexSeedForm] Hex seed import failed:",
+      error,
+    );
+    expect(screen.getByRole("textbox", { name: "hexSeed" })).toHaveValue(
+      VALID_HEX_SEED,
+    );
+    expect(onImported).toHaveBeenCalledTimes(1);
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "hexSeed" }),
+      "{backspace}b",
+    );
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Import account" }),
+      ).toBeEnabled();
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Import account" }),
+    );
+    expect(onImported).toHaveBeenCalledTimes(2);
   });
 });

@@ -25,7 +25,9 @@ describe("dApp account notifications", () => {
   });
 
   afterEach(() => {
-    cleanups.splice(0).forEach((cleanup) => cleanup());
+    cleanups.splice(0).forEach((cleanup) => {
+      cleanup();
+    });
   });
 
   const register = (origin: string) => {
@@ -93,7 +95,7 @@ describe("dApp account notifications", () => {
     { origin: "not an origin", url: "https://fallback.example/frame" },
     { url: "about:blank" },
     { url: "file:///tmp/dapp.html" },
-  ])("rejects opaque or malformed sender identity %#", async (sender) => {
+  ])("rejects opaque or malformed sender identity %#", (sender) => {
     const stream = { write: vi.fn() };
     registerDAppAccountNotificationStream(sender, stream);
 
@@ -118,6 +120,61 @@ describe("dApp account notifications", () => {
     });
 
     expect(stream.write).not.toHaveBeenCalled();
+  });
+
+  it.each([null, [], 7, { ALL_DAPPS: [] }, { ALL_DAPPS: null }])(
+    "clears a previous grant for an unreadable storage value %#",
+    (newValue) => {
+      const stream = register("https://dapp.example");
+
+      notifyDAppAccountsChanged({
+        oldValue: dAppsStorage({ "https://dapp.example": ["QAccount"] }),
+        newValue,
+      });
+
+      expect(stream.write).toHaveBeenCalledExactlyOnceWith({
+        jsonrpc: "2.0",
+        method: "qrlWallet_accountsChanged",
+        params: [],
+      });
+    },
+  );
+
+  it("reads string accounts in order and preserves every stored record", () => {
+    const stream = register("https://dapp.example");
+    const newValue = {
+      ALL_DAPPS: {
+        "https://dapp.example": { accounts: ["QSecond", null, 7, "QFirst"] },
+        "https://unreadable.example": null,
+        "https://future.example": { futureGrant: { version: 2 } },
+      },
+    };
+    const original = structuredClone(newValue);
+
+    notifyDAppAccountsChanged({ oldValue: dAppsStorage({}), newValue });
+
+    expect(stream.write).toHaveBeenCalledExactlyOnceWith({
+      jsonrpc: "2.0",
+      method: "qrlWallet_accountsChanged",
+      params: ["QSecond", "QFirst"],
+    });
+    expect(newValue).toEqual(original);
+  });
+
+  it("rejects an array used as a grant record", () => {
+    const stream = register("https://dapp.example");
+    const arrayRecord = Object.assign([], { accounts: ["QUntrusted"] });
+
+    notifyDAppAccountsChanged({
+      oldValue: dAppsStorage({ "https://dapp.example": ["QAccount"] }),
+      newValue: { ALL_DAPPS: { "https://dapp.example": arrayRecord } },
+    });
+
+    expect(stream.write).toHaveBeenCalledExactlyOnceWith({
+      jsonrpc: "2.0",
+      method: "qrlWallet_accountsChanged",
+      params: [],
+    });
   });
 
   it("emits the real account list while the wallet is unlocked (F8)", () => {
@@ -170,7 +227,9 @@ describe("dApp account notifications lock mirror", () => {
   const cleanups: Array<() => void> = [];
 
   afterEach(() => {
-    cleanups.splice(0).forEach((cleanup) => cleanup());
+    cleanups.splice(0).forEach((cleanup) => {
+      cleanup();
+    });
     setWalletLockedForDAppNotifications(false);
   });
 
@@ -208,7 +267,9 @@ describe("dApp account notifications on lock transitions (L-6)", () => {
   });
 
   afterEach(() => {
-    cleanups.splice(0).forEach((cleanup) => cleanup());
+    cleanups.splice(0).forEach((cleanup) => {
+      cleanup();
+    });
     setWalletLockedForDAppNotifications(false);
   });
 
@@ -243,7 +304,7 @@ describe("dApp account notifications on lock transitions (L-6)", () => {
       accounts: ["QAccount"],
       blockchains: [],
       permissions: [],
-    } as never);
+    });
 
     setWalletLockedForDAppNotifications(false);
 
@@ -287,7 +348,9 @@ describe("dApp chain-change notifications", () => {
   const cleanups: Array<() => void> = [];
 
   afterEach(() => {
-    cleanups.splice(0).forEach((cleanup) => cleanup());
+    cleanups.splice(0).forEach((cleanup) => {
+      cleanup();
+    });
   });
 
   const register = (origin: string) => {
@@ -375,5 +438,37 @@ describe("dApp chain-change notifications", () => {
       method: "qrlWallet_chainChanged",
       params: { chainId: "0x301825", networkVersion: "3151909" },
     });
+  });
+
+  it("ignores malformed chain entries and preserves their storage order", () => {
+    const stream = register("https://dapp.example");
+    const newValue = {
+      ACTIVE_BLOCKCHAIN: "0x301825",
+      ALL_BLOCKCHAINS: [null, 7, { chainId: [] }, { chainId: "0x301825" }],
+    };
+    const original = structuredClone(newValue);
+
+    notifyDAppChainChanged({ oldValue: chainStorage("0x539"), newValue });
+
+    expect(stream.write).toHaveBeenCalledExactlyOnceWith({
+      jsonrpc: "2.0",
+      method: "qrlWallet_chainChanged",
+      params: { chainId: "0x301825", networkVersion: "3151909" },
+    });
+    expect(newValue).toEqual(original);
+  });
+
+  it("rejects an array used as a chain record", () => {
+    const stream = register("https://dapp.example");
+
+    notifyDAppChainChanged({
+      oldValue: chainStorage("0x301825"),
+      newValue: {
+        ACTIVE_BLOCKCHAIN: "0x539",
+        ALL_BLOCKCHAINS: [Object.assign([], { chainId: "0x539" })],
+      },
+    });
+
+    expect(stream.write).not.toHaveBeenCalled();
   });
 });

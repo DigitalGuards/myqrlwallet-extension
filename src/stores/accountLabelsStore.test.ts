@@ -1,9 +1,9 @@
 import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
 const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import AccountLabelsStore from "./accountLabelsStore";
 
-const localStore: Record<string, any> = {};
+const localStore: Record<string, unknown> = {};
 vi.mock("webextension-polyfill", () => ({
   __esModule: true,
   default: {
@@ -18,17 +18,18 @@ vi.mock("webextension-polyfill", () => ({
                 : {},
           ),
         ),
-        set: vi.fn((data: Record<string, any>) => {
+        set: vi.fn((data: Record<string, unknown>) => {
           Object.assign(localStore, data);
           return Promise.resolve();
         }),
         remove: vi.fn((key: string | string[]) => {
           for (const item of Array.isArray(key) ? key : [key])
-            delete localStore[item];
+            Reflect.deleteProperty(localStore, item);
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
-          for (const k of Object.keys(localStore)) delete localStore[k];
+          for (const k of Object.keys(localStore))
+            Reflect.deleteProperty(localStore, k);
           return Promise.resolve();
         }),
       },
@@ -45,7 +46,8 @@ describe("AccountLabelsStore", () => {
   const noLedger = () => false;
 
   beforeEach(() => {
-    for (const k of Object.keys(localStore)) delete localStore[k];
+    for (const k of Object.keys(localStore))
+      Reflect.deleteProperty(localStore, k);
     store = new AccountLabelsStore();
   });
 
@@ -151,12 +153,13 @@ describe("AccountLabelsStore", () => {
       ];
 
       const browser = (await import("webextension-polyfill")).default;
-      const setCalls = (browser.storage.local.set as Mock).mock.calls.length;
+      const setCalls = vi.mocked(browser, true).storage.local.set.mock.calls
+        .length;
 
       await store.syncLabels(accounts, noLedger);
 
       // set should not be called again since label already exists
-      expect((browser.storage.local.set as Mock).mock.calls.length).toBe(
+      expect(vi.mocked(browser, true).storage.local.set.mock.calls.length).toBe(
         setCalls,
       );
     });
@@ -285,9 +288,9 @@ describe("AccountLabelsStore", () => {
       await store.ensureLabel(ADDRESS);
 
       expect(store.getLabel(ADDRESS)).toBe("Account 1");
-      expect(localStore[profileStorageKey("ACCOUNT_LABELS")][ADDRESS]).toBe(
-        "Account 1",
-      );
+      expect(localStore[profileStorageKey("ACCOUNT_LABELS")]).toEqual({
+        [ADDRESS]: "Account 1",
+      });
     });
 
     it("does not renumber an account that already has a label", async () => {

@@ -121,6 +121,38 @@ describe("TokenTransfer", () => {
       </StoreProvider>,
     );
 
+  it.each([null, Number.NaN, Infinity])(
+    "opens a saved token transfer with decimals %s and keeps sending disabled",
+    async (tokenDecimals) => {
+      mockGetTransactionValues.mockResolvedValue({
+        receiverAddress: ACCOUNT_B,
+        amount: "1",
+        tokenDetails: {
+          isZrc20Token: true,
+          tokenContractAddress: CONTRACT_C,
+          tokenDecimals,
+          tokenImage: "",
+          tokenBalance: "3",
+          tokenBalanceBaseUnits: "3000000",
+          tokenName: "Token",
+          tokenSymbol: "TOK",
+        },
+      });
+      renderComponent();
+      await waitFor(() =>
+        expect(mockSetTransactionValues).toHaveBeenCalledWith(
+          expect.objectContaining({
+            tokenDetails: expect.objectContaining({ tokenDecimals }),
+          }),
+        ),
+      );
+      const amount = screen.getByRole("textbox", { name: "amount" });
+      await userEvent.clear(amount);
+      await userEvent.type(amount, "1");
+      expect(screen.getByRole("button", { name: "Send TOK" })).toBeDisabled();
+    },
+  );
+
   const fillAndSubmitForm = async (
     buttonName = "Send Quanta",
     amount = "2.5",

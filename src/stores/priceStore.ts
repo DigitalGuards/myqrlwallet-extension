@@ -1,3 +1,8 @@
+import {
+  filterStorageRecord,
+  isFiniteNumber,
+  isRecord,
+} from "@/utilities/storageGuards";
 import StorageUtil from "@/utilities/storageUtil";
 import {
   action,
@@ -143,18 +148,26 @@ class PriceStore {
       // Storage is slower than a warm network call, so a live fetch armed
       // alongside this can land first. Only older data is replaced, which
       // keeps the cache read from putting stale prices back on screen.
-      if (!cached || cached.timestamp <= this.lastUpdated) return;
-      this.prices = cached.prices;
-      this.change24h = cached.change24h;
+      if (!cached) return;
+      const timestamp = isFiniteNumber(cached.timestamp) ? cached.timestamp : 0;
+      if (
+        isFiniteNumber(cached.timestamp)
+          ? timestamp <= this.lastUpdated
+          : this.lastUpdated > 0
+      )
+        return;
+      this.prices = filterStorageRecord(cached.prices, isFiniteNumber);
+      this.change24h = filterStorageRecord(cached.change24h, isFiniteNumber);
+      const updatedAt = filterStorageRecord(cached.updatedAt, isFiniteNumber);
       // A cache written before per-currency stamps existed dates every
       // quote in it to the one timestamp it does carry.
       this.updatedAt = Object.fromEntries(
-        Object.keys(cached.prices).map((key) => [
+        Object.keys(this.prices).map((key) => [
           key,
-          cached.updatedAt?.[key] ?? cached.timestamp,
+          updatedAt[key] ?? timestamp,
         ]),
       );
-      this.lastUpdated = cached.timestamp;
+      this.lastUpdated = timestamp;
     });
 
     if (showBalanceAndPrice) this.setRefreshEnabled(true);
@@ -188,10 +201,10 @@ class PriceStore {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const data: unknown = await response.json();
-    const qrlData = (data as Record<string, unknown> | null)?.[
-      "quantum-resistant-ledger"
-    ];
-    if (!qrlData || typeof qrlData !== "object") {
+    const qrlData = isRecord(data)
+      ? data["quantum-resistant-ledger"]
+      : undefined;
+    if (!isRecord(qrlData)) {
       throw new Error("No QRL data in response");
     }
 
@@ -220,18 +233,15 @@ class PriceStore {
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-    const data = (await response.json()) as {
-      currentPrice?: unknown;
-      priceChange24h?: unknown;
-    } | null;
-    const price = data?.currentPrice;
+    const data: unknown = await response.json();
+    const price = isRecord(data) ? data.currentPrice : undefined;
     if (typeof price !== "number" || !(price > 0)) {
       throw new Error("No usable price in the explorer overview");
     }
     // The explorer reports an exact 0 when it has no 24h baseline to
     // compare against, which is absence of data. Showing it would put a
     // confident "+0.00%" next to a price that simply has no trend yet.
-    const change = data?.priceChange24h;
+    const change = isRecord(data) ? data.priceChange24h : undefined;
     const hasChange = typeof change === "number" && change !== 0;
     return {
       prices: { usd: price },

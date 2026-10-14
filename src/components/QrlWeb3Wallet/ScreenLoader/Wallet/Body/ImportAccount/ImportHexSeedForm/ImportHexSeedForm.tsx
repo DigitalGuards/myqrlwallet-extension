@@ -62,24 +62,22 @@ const ImportHexSeedForm = observer(({ onImported }: ImportHexSeedFormProps) => {
     formState: { isSubmitting, isValid },
   } = form;
 
+  const reportSubmitError = (error: unknown) => {
+    // The raw exception goes to the console only. It carries library
+    // internals and, for a malformed seed, fragments of the secret.
+    console.error("[ImportHexSeedForm] Hex seed import failed:", error);
+    control.setError("hexSeed", {
+      message: t("importAccount.hexSeedImportFailed"),
+    });
+  };
+
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     try {
       const accounts = qrlInstance?.accounts ?? new Web3().qrl.accounts;
       const account = accounts.seedToAccount(formData.hexSeed.trim());
-      if (account) {
-        await onImported(account);
-      } else {
-        control.setError("hexSeed", {
-          message: t("importAccount.hexSeedImportFailed"),
-        });
-      }
+      await onImported(account);
     } catch (error) {
-      // The raw exception goes to the console only. It carries library
-      // internals and, for a malformed seed, fragments of the secret.
-      console.error("[ImportHexSeedForm] Hex seed import failed:", error);
-      control.setError("hexSeed", {
-        message: t("importAccount.hexSeedImportFailed"),
-      });
+      reportSubmitError(error);
     }
   }
 
@@ -89,7 +87,9 @@ const ImportHexSeedForm = observer(({ onImported }: ImportHexSeedFormProps) => {
         name="importHexSeed"
         aria-label="importHexSeed"
         className="w-full"
-        onSubmit={handleSubmit(onSubmit)}
+        onSubmit={(event) => {
+          handleSubmit(onSubmit)(event).catch(reportSubmitError);
+        }}
       >
         <div className="space-y-4">
           <FormField

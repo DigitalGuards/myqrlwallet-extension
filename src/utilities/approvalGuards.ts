@@ -2,6 +2,14 @@ import type {
   BlockchainAdditionalDataType,
   BlockchainDataType,
 } from "@/configuration/qrlBlockchainConfig";
+import type { DAppRequestType } from "@/scripts/middlewares/middlewareTypes";
+import type { Eip712TypedData, Eip712TypeDetails } from "@theqrl/web3-types";
+import {
+  isArrayOf,
+  isFiniteNumber,
+  isRecord,
+  isStorageIdentity,
+} from "./storageGuards";
 
 export const isApprovalRecord = (
   value: unknown,
@@ -16,6 +24,65 @@ export const readApprovalParams = (
   value: unknown,
 ): Record<number, unknown> | undefined =>
   isUnknownArray(value) || isApprovalRecord(value) ? value : undefined;
+
+export const isSwitchQrlChainParameters = (
+  value: unknown,
+): value is { chainId: string } =>
+  isRecord(value) && isStorageIdentity(value.chainId);
+
+type WatchAssetOptions = {
+  address: string;
+  symbol: string;
+  decimals: number;
+  image?: unknown;
+};
+
+const isWatchAssetOptions = (value: unknown): value is WatchAssetOptions =>
+  isRecord(value) &&
+  isStorageIdentity(value.address) &&
+  typeof value.symbol === "string" &&
+  isFiniteNumber(value.decimals) &&
+  Number.isInteger(value.decimals) &&
+  value.decimals >= 0 &&
+  value.decimals <= 36;
+
+export const readWatchAssetOptions = (
+  params: unknown,
+): WatchAssetOptions | undefined => {
+  const request = readApprovalParams(params)?.[0];
+  return isRecord(request) && isWatchAssetOptions(request.options)
+    ? request.options
+    : undefined;
+};
+
+const isEip712TypeDetails = (value: unknown): value is Eip712TypeDetails =>
+  isRecord(value) &&
+  typeof value.name === "string" &&
+  typeof value.type === "string";
+
+const isEip712TypedData = (value: unknown): value is Eip712TypedData =>
+  isRecord(value) &&
+  isRecord(value.types) &&
+  isArrayOf(value.types.EIP712Domain, isEip712TypeDetails) &&
+  Object.values(value.types).every((fields) =>
+    isArrayOf(fields, isEip712TypeDetails),
+  ) &&
+  typeof value.primaryType === "string" &&
+  isArrayOf(value.types[value.primaryType], isEip712TypeDetails) &&
+  isRecord(value.domain) &&
+  Object.values(value.domain).every(
+    (field) => typeof field === "string" || isFiniteNumber(field),
+  ) &&
+  (value.domain.verifyingContract === undefined ||
+    typeof value.domain.verifyingContract === "string") &&
+  isRecord(value.message);
+
+export const isTypedDataV4Params = (
+  value: unknown,
+): value is { 0: string; 1: Eip712TypedData } => {
+  const params = readApprovalParams(value);
+  return typeof params?.[0] === "string" && isEip712TypedData(params[1]);
+};
 
 export const readApprovalTransaction = (
   value: unknown,
@@ -80,6 +147,36 @@ export const isApprovalSender = (value: unknown): value is ApprovalSender =>
   ["url", "favIconUrl", "title", "mainFrameOrigin"].every(
     (key) => value[key] === undefined || typeof value[key] === "string",
   );
+
+export const isDAppRequest = (value: unknown): value is DAppRequestType => {
+  if (!isApprovalRecord(value)) return false;
+  const requestData = value.requestData;
+  const phishing = value.phishingResult;
+  return (
+    typeof value.method === "string" &&
+    (value.requestId === undefined || typeof value.requestId === "string") &&
+    (value.authorizedChainId === undefined ||
+      typeof value.authorizedChainId === "string") &&
+    (requestData === undefined ||
+      (isApprovalRecord(requestData) &&
+        (requestData.senderData === undefined ||
+          (isApprovalSender(requestData.senderData) &&
+            (!("tabId" in requestData.senderData) ||
+              requestData.senderData.tabId === undefined ||
+              typeof requestData.senderData.tabId === "number"))))) &&
+    (phishing === undefined ||
+      (isApprovalRecord(phishing) &&
+        typeof phishing.isDomainPhishing === "boolean" &&
+        (phishing.matchType === undefined ||
+          typeof phishing.matchType === "string") &&
+        (phishing.matchedDomain === undefined ||
+          typeof phishing.matchedDomain === "string") &&
+        (phishing.detectorStatus === undefined ||
+          phishing.detectorStatus === "ready" ||
+          phishing.detectorStatus === "initializing" ||
+          phishing.detectorStatus === "unavailable")))
+  );
+};
 
 // Keep the original records intact; this view only needs their display fields.
 export type ApprovalBlockchain = Pick<

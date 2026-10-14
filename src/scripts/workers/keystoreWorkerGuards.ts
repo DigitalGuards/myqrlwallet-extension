@@ -20,9 +20,13 @@ function isWorkerKeystore(value: unknown): value is KeyStore {
     crypto.kdf === "argon2id" &&
     (typeof params.salt === "string" || params.salt instanceof Uint8Array) &&
     typeof params.m === "number" &&
+    Number.isFinite(params.m) &&
     typeof params.t === "number" &&
+    Number.isFinite(params.t) &&
     typeof params.p === "number" &&
-    typeof params.dklen === "number"
+    Number.isFinite(params.p) &&
+    typeof params.dklen === "number" &&
+    Number.isFinite(params.dklen)
   );
 }
 

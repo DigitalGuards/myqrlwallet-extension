@@ -75,6 +75,7 @@ export type ConnectedAccountsDataType = {
 export type TokenContractType = {
   address: string;
   symbol: string;
-  decimals: number;
+  // watchAsset can produce NaN, serialized to null by browser storage.
+  decimals: number | null;
   image: string;
 };

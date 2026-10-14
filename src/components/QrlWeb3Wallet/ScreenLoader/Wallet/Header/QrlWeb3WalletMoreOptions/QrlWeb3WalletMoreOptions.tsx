@@ -24,30 +24,37 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import browser from "webextension-polyfill";
 
+const extensionGlobals: {
+  chrome?: { sidePanel?: Partial<(typeof globalThis)["chrome"]["sidePanel"]> };
+} = globalThis;
+
 const QrlWeb3WalletMoreOptions = observer(() => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { lockStore, settingsStore } = useStore();
-  const { isPopupWindow, isSidePanel, setSidePanelPreferred } = settingsStore;
-  const { lock } = lockStore;
+  const { isPopupWindow, isSidePanel } = settingsStore;
 
   const openInTab = () => {
-    browser.tabs.create({
-      url: browser.runtime.getURL(APP_TAB_FILE),
-    });
+    browser.tabs
+      .create({
+        url: browser.runtime.getURL(APP_TAB_FILE),
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to open wallet tab:", error);
+      });
   };
 
-  const hasSidePanelApi =
-    typeof chrome !== "undefined" &&
-    typeof chrome?.sidePanel?.open === "function";
+  const sidePanel = extensionGlobals.chrome?.sidePanel;
+  const hasSidePanelApi = typeof sidePanel?.open === "function";
 
   const openAsSidePanel = async () => {
     try {
-      await setSidePanelPreferred(true);
-      await chrome.sidePanel.setOptions({ path: SIDE_PANEL_PATH });
+      await settingsStore.setSidePanelPreferred(true);
+      if (!sidePanel?.setOptions || !sidePanel.open) return;
+      await sidePanel.setOptions({ path: SIDE_PANEL_PATH });
       const win = await browser.windows.getCurrent();
       if (win.id !== undefined) {
-        await chrome.sidePanel.open({ windowId: win.id });
+        await sidePanel.open({ windowId: win.id });
       }
       window.close();
     } catch {
@@ -57,7 +64,7 @@ const QrlWeb3WalletMoreOptions = observer(() => {
 
   const switchToPopup = async () => {
     try {
-      await setSidePanelPreferred(false);
+      await settingsStore.setSidePanelPreferred(false);
       window.close();
     } catch {
       // Fail gracefully.
@@ -94,7 +101,9 @@ const QrlWeb3WalletMoreOptions = observer(() => {
           {isPopupWindow && hasSidePanelApi && (
             <DropdownMenuItem
               className="cursor-pointer data-[highlighted]:text-secondary"
-              onClick={openAsSidePanel}
+              onClick={() => {
+                void openAsSidePanel();
+              }}
             >
               <div className="flex gap-2">
                 <PanelRight size="16" />
@@ -105,7 +114,9 @@ const QrlWeb3WalletMoreOptions = observer(() => {
           {isSidePanel && hasSidePanelApi && (
             <DropdownMenuItem
               className="cursor-pointer data-[highlighted]:text-secondary"
-              onClick={switchToPopup}
+              onClick={() => {
+                void switchToPopup();
+              }}
             >
               <div className="flex gap-2">
                 <PanelLeft size="16" />
@@ -115,7 +126,13 @@ const QrlWeb3WalletMoreOptions = observer(() => {
           )}
           <DropdownMenuItem
             className="cursor-pointer data-[highlighted]:text-secondary"
-            onClick={() => navigate(ROUTES.CONTACTS)}
+            onClick={() => {
+              Promise.resolve(navigate(ROUTES.CONTACTS)).catch(
+                (error: unknown) => {
+                  console.error("Failed to navigate wallet:", error);
+                },
+              );
+            }}
           >
             <div className="flex gap-2">
               <BookUser size="16" />
@@ -124,7 +141,13 @@ const QrlWeb3WalletMoreOptions = observer(() => {
           </DropdownMenuItem>
           <DropdownMenuItem
             className="cursor-pointer data-[highlighted]:text-secondary"
-            onClick={() => navigate(ROUTES.SETTINGS)}
+            onClick={() => {
+              Promise.resolve(navigate(ROUTES.SETTINGS)).catch(
+                (error: unknown) => {
+                  console.error("Failed to navigate wallet:", error);
+                },
+              );
+            }}
           >
             <div className="flex gap-2">
               <Settings size="16" />
@@ -133,7 +156,11 @@ const QrlWeb3WalletMoreOptions = observer(() => {
           </DropdownMenuItem>
           <DropdownMenuItem
             className="cursor-pointer data-[highlighted]:text-secondary"
-            onClick={lock}
+            onClick={() => {
+              lockStore.lock().catch((error: unknown) => {
+                console.error("Failed to lock wallet:", error);
+              });
+            }}
           >
             <div className="flex gap-2">
               <LockKeyhole size="16" />

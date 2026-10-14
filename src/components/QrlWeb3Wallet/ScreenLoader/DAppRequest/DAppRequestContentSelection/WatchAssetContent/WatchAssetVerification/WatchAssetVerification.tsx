@@ -4,46 +4,59 @@ import { Loader, ShieldAlert } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { readWatchAssetOptions } from "@/utilities/approvalGuards";
 
 const WatchAssetVerification = observer(() => {
   const { t } = useTranslation();
   const { dAppRequestStore, qrlStore } = useStore();
-  const { getZrc20TokenDetails } = qrlStore;
   const { dAppRequestData } = dAppRequestStore;
-  const paramsObject = dAppRequestData?.params[0];
-  const contractAddress = paramsObject?.options?.address ?? "";
-  const contractSymbol = paramsObject?.options?.symbol ?? "";
-  const contractDecimals = BigInt(paramsObject?.options?.decimals ?? 0);
+  const asset = readWatchAssetOptions(dAppRequestData?.params);
+  const contractAddress = asset?.address ?? "";
+  const contractSymbol = asset?.symbol ?? "";
+  const contractDecimals = BigInt(asset?.decimals ?? 0);
 
   const [hasVerified, setHasVerified] = useState(false);
   const [verificationResult, setVerificationResult] = useState("");
 
   useEffect(() => {
     (async () => {
-      const tokenDetails = await getZrc20TokenDetails(contractAddress);
-      if (tokenDetails.error) {
+      if (!asset) {
+        setVerificationResult(
+          t("dapp.watchAsset.fetchFailed", { address: contractAddress }),
+        );
+        setHasVerified(true);
+        return;
+      }
+      const tokenDetails = await qrlStore.getZrc20TokenDetails(contractAddress);
+      if (tokenDetails.error || !tokenDetails.token) {
         setVerificationResult(
           t("dapp.watchAsset.fetchFailed", { address: contractAddress }),
         );
       } else {
-        if (tokenDetails?.token?.symbol !== contractSymbol) {
+        if (tokenDetails.token.symbol !== contractSymbol) {
           setVerificationResult(
             t("dapp.watchAsset.symbolMismatch", {
-              expected: tokenDetails?.token?.symbol,
+              expected: tokenDetails.token.symbol,
               received: contractSymbol,
             }),
           );
-        } else if (tokenDetails?.token?.decimals !== contractDecimals) {
+        } else if (tokenDetails.token.decimals !== contractDecimals) {
           setVerificationResult(
             t("dapp.watchAsset.decimalsMismatch", {
-              expected: String(tokenDetails?.token?.decimals),
+              expected: String(tokenDetails.token.decimals),
               received: String(contractDecimals),
             }),
           );
         }
       }
       setHasVerified(true);
-    })();
+    })().catch((error: unknown) => {
+      console.warn("QrlWeb3Wallet: Failed to verify token details", error);
+      setVerificationResult(
+        t("dapp.watchAsset.fetchFailed", { address: contractAddress }),
+      );
+      setHasVerified(true);
+    });
   }, []);
 
   if (!hasVerified) {

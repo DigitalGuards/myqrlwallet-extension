@@ -2,10 +2,18 @@ import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, type NavigateFunction } from "react-router-dom";
 import TransactionHistory from "./TransactionHistory";
+
+const { navigateMock } = vi.hoisted(() => ({
+  navigateMock: vi.fn<NavigateFunction>(),
+}));
+vi.mock("react-router-dom", async (importOriginal) => {
+  const original = await importOriginal<typeof import("react-router-dom")>();
+  return { ...original, useNavigate: () => navigateMock };
+});
 
 const ACTIVE_ACCOUNT = `Q${"a".repeat(128)}`;
 const SECOND_ACCOUNT = `Q${"b".repeat(128)}`;
@@ -61,10 +69,10 @@ describe("TransactionHistory", () => {
   });
 
   it("should load on-chain history for the active account on mount", () => {
-    const loadOnChainHistory = vi.fn();
+    const loadOnChainHistory = vi.fn().mockResolvedValue(undefined);
     renderComponent(
       mockedStore({
-        transactionHistoryStore: { loadOnChainHistory } as any,
+        transactionHistoryStore: { loadOnChainHistory },
       }),
     );
 
@@ -75,13 +83,13 @@ describe("TransactionHistory", () => {
   });
 
   it("should show Load More while the explorer has more pages", async () => {
-    const loadMoreOnChain = vi.fn();
+    const loadMoreOnChain = vi.fn().mockResolvedValue(undefined);
     renderComponent(
       mockedStore({
         transactionHistoryStore: {
           hasMoreOnChain: true,
           loadMoreOnChain,
-        } as any,
+        },
       }),
     );
 
@@ -189,7 +197,7 @@ describe("TransactionHistory", () => {
       mockedStore({
         transactionHistoryStore: {
           onChainFailed: true,
-        } as any,
+        },
       }),
     );
 
@@ -209,4 +217,93 @@ describe("TransactionHistory", () => {
       ),
     ).not.toBeInTheDocument();
   });
+
+  it("reports failed history loads independently and stops polling on unmount", async () => {
+    const failure = new Error("History unavailable");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const stopPolling = vi.fn();
+    try {
+      const view = renderComponent(
+        mockedStore({
+          transactionHistoryStore: {
+            loadHistory: vi.fn().mockRejectedValue(failure),
+            loadOnChainHistory: vi.fn().mockRejectedValue(failure),
+            stopPolling,
+          },
+        }),
+      );
+      await waitFor(() => {
+        expect(report).toHaveBeenCalledWith(
+          "Failed to load transaction history:",
+          failure,
+        );
+        expect(report).toHaveBeenCalledWith(
+          "Failed to load on-chain history:",
+          failure,
+        );
+      });
+      view.unmount();
+      expect(stopPolling).toHaveBeenCalledOnce();
+    } finally {
+      report.mockRestore();
+    }
+  });
+
+  it("reports a failed next page while preserving the displayed history", async () => {
+    const failure = new Error("Page unavailable");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderComponent(
+        mockedStore({
+          transactionHistoryStore: {
+            filteredTransactions: [makeSampleEntry()],
+            hasMoreOnChain: true,
+            loadMoreOnChain: vi.fn().mockRejectedValue(failure),
+          },
+        }),
+      );
+      await userEvent.click(screen.getByRole("button", { name: "Load More" }));
+      expect(report).toHaveBeenCalledWith(
+        "Failed to load more on-chain history:",
+        failure,
+      );
+      expect(screen.getByText("2.5 QRL")).toBeInTheDocument();
+    } finally {
+      report.mockRestore();
+    }
+  });
+
+  it.each(["Speed Up", "Cancel"])(
+    "reports a rejected %s navigation from a pending row",
+    async (action) => {
+      const failure = new Error("Navigation unavailable");
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      navigateMock.mockRejectedValueOnce(failure);
+      const transaction = makeSampleEntry({
+        pendingStatus: "pending",
+        nonce: 5,
+      });
+      try {
+        renderComponent(
+          mockedStore({
+            transactionHistoryStore: { filteredTransactions: [transaction] },
+          }),
+        );
+        await userEvent.click(screen.getByRole("button", { name: action }));
+        expect(navigateMock).toHaveBeenCalledWith(expect.any(String), {
+          state: {
+            transaction,
+            action: action === "Speed Up" ? "speed-up" : "cancel",
+          },
+        });
+        expect(report).toHaveBeenCalledWith(
+          "Failed to open transaction details:",
+          failure,
+        );
+        expect(screen.getByText("2.5 QRL")).toBeInTheDocument();
+      } finally {
+        report.mockRestore();
+      }
+    },
+  );
 });

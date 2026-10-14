@@ -30,7 +30,7 @@ class HiddenAccountsStore {
 
   async unhideAccount(address: string) {
     const updated = { ...this.hiddenAccounts };
-    delete updated[address];
+    Reflect.deleteProperty(updated, address);
     await StorageUtil.setHiddenAccounts(updated);
     runInAction(() => {
       this.hiddenAccounts = updated;
@@ -38,7 +38,7 @@ class HiddenAccountsStore {
   }
 
   isHidden(address: string): boolean {
-    return !!this.hiddenAccounts[address];
+    return this.hiddenAccounts[address] ?? false;
   }
 
   get hiddenAddresses(): string[] {

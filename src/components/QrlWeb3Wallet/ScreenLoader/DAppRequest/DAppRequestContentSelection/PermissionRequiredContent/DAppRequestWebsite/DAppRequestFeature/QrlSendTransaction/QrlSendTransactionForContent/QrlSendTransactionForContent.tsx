@@ -22,6 +22,9 @@ import { useStore } from "@/stores/store";
 import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
+import { readApprovalTransaction } from "@/utilities/approvalGuards";
+import { isRecord } from "@/utilities/storageGuards";
+import { rpcErrors } from "@theqrl/qrl-wallet-provider";
 import { Copy } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -34,7 +37,7 @@ import {
   TransactionRevertInstructionError,
 } from "@theqrl/web3-errors";
 import { isHexStrict } from "@theqrl/web3-validator";
-import { BlockTags, type TransactionCall } from "@theqrl/web3-types";
+import { BlockTags, type Transaction } from "@theqrl/web3-types";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import { TimeoutError, withTimeout } from "@/functions/withTimeout";
 import {
@@ -105,18 +108,79 @@ const hashRawTransaction = (rawTransaction: string): string => {
   return utils.sha3Raw(rawTransaction);
 };
 
+type TransactionQuantity = string | number | bigint;
+
+const isTransactionQuantity = (
+  value: unknown,
+): value is TransactionQuantity => {
+  if (
+    typeof value !== "string" &&
+    typeof value !== "number" &&
+    typeof value !== "bigint"
+  ) {
+    return false;
+  }
+  try {
+    // Match Web3's integer conversion while preserving the supplied value.
+    return BigInt(value) >= 0n;
+  } catch {
+    return false;
+  }
+};
+
+const readTransactionQuantity = (value: unknown): TransactionQuantity => {
+  if (!isTransactionQuantity(value)) {
+    throw new Error("Invalid transaction quantity");
+  }
+  return value;
+};
+
+type ApprovalTransaction = {
+  from?: string | null;
+  to?: string | null;
+  gas?: TransactionQuantity | null;
+  value?: TransactionQuantity | null;
+  data?: string | null;
+  type?: TransactionQuantity;
+};
+
+const isApprovalTransaction = (value: unknown): value is ApprovalTransaction =>
+  isRecord(value) &&
+  (value.from == null || typeof value.from === "string") &&
+  (value.to == null || typeof value.to === "string") &&
+  (value.gas == null || isTransactionQuantity(value.gas)) &&
+  // Web3 and the node decode an empty transaction value as zero.
+  (value.value == null ||
+    value.value === "" ||
+    isTransactionQuantity(value.value)) &&
+  (value.data == null || typeof value.data === "string") &&
+  (value.type === undefined || isTransactionQuantity(value.type));
+
+const isSignedTransaction = (
+  value: unknown,
+): value is { rawTransaction: string; transactionHash: string } =>
+  isRecord(value) &&
+  typeof value.rawTransaction === "string" &&
+  typeof value.transactionHash === "string";
+
 type TransactionObject = {
   chainId: string;
   from: string;
   to?: string;
   data?: string;
-  gas: string;
-  value?: string;
-  nonce: bigint | undefined;
+  gas?: TransactionQuantity;
+  value?: TransactionQuantity;
+  nonce: TransactionQuantity | undefined;
   type?: string;
   maxPriorityFeePerGas?: bigint;
   maxFeePerGas?: string;
   gasPrice?: bigint | undefined;
+};
+
+// The runtime call formatter also accepts an omitted recipient for contract
+// creation. Keep this supported shape local to deployment simulation.
+type SimulationProvider = {
+  call(transaction: Transaction, block: BlockTags): Promise<string>;
 };
 
 type QrlSendTransactionForContentProps = {
@@ -133,23 +197,20 @@ const QrlSendTransactionForContent = observer(
       ledgerStore,
       transactionHistoryStore,
     } = useStore();
-    const { getMnemonicPhrases, readLockState } = lockStore;
-    const { qrlInstance, getGasFeeData, qrlConnection } = qrlStore;
+    const { qrlInstance, qrlConnection } = qrlStore;
     const { blockchain } = qrlConnection;
     const [isWalletLocked, setIsWalletLocked] = useState(false);
-    const {
-      dAppRequestData,
-      setOnPermissionCallBack,
-      reportPendingTransactionHash,
-      setCanProceed,
-    } = dAppRequestStore;
+    const { dAppRequestData } = dAppRequestStore;
 
-    const params = dAppRequestData?.params[0];
+    const rawTransaction = readApprovalTransaction(dAppRequestData?.params);
+    const params = isApprovalTransaction(rawTransaction)
+      ? rawTransaction
+      : undefined;
     const accountFromAddress = params?.from ?? "";
     const accountToAddress = params?.to ?? "";
     const value = BigInt(params?.value ?? 0);
     const gasLimit = BigInt(params?.gas ?? 0);
-    const data = params?.data;
+    const data = params?.data ?? undefined;
 
     // Registered whatever the node is doing. A send that cannot reach the
     // node fails with a real error; the callback being absent instead let
@@ -161,6 +222,10 @@ const QrlSendTransactionForContent = observer(
         record: ResponseRecorder,
       ) => {
         if (hasApproved) {
+          if (!params) {
+            record({ error: rpcErrors.invalidParams() });
+            return;
+          }
           const authorization =
             await revalidateAuthorizedDAppRequest(dAppRequestData);
           if (!authorization.canProceed) {
@@ -174,7 +239,7 @@ const QrlSendTransactionForContent = observer(
           }
         }
       };
-      setOnPermissionCallBack(onPermissionCallBack);
+      dAppRequestStore.setOnPermissionCallBack(onPermissionCallBack);
     }, [transactionType, dAppRequestData]);
 
     // What this request is expected to cost and the worst it could cost
@@ -225,22 +290,20 @@ const QrlSendTransactionForContent = observer(
       maxPriorityFeePerGas: bigint;
     };
     const readFeeBasis = async (
-      requestType: string | undefined,
+      requestType: TransactionQuantity | undefined,
     ): Promise<ReadFee> => {
       if (requestType === "0x2") {
-        const feeData = await getGasFeeData();
-        // Coerced rather than trusted: these are typed as bigint, and
-        // mixing a bigint with anything else throws outright, which would
-        // take the whole approval screen down over a fee read.
-        const baseFeePerGas = BigInt(feeData.baseFeePerGas ?? 0);
-        const maxPriorityFeePerGas = BigInt(feeData.maxPriorityFeePerGas ?? 0);
+        const feeData = await qrlStore.getGasFeeData();
+        const { baseFeePerGas, maxPriorityFeePerGas } = feeData;
         return {
-          feePerGas: BigInt(feeData.maxFeePerGas ?? 0),
+          feePerGas: feeData.maxFeePerGas,
           maxFeePerGas: baseFeePerGas * 2n + maxPriorityFeePerGas,
           maxPriorityFeePerGas,
         };
       }
-      const gasPrice = BigInt((await requireQrlInstance().getGasPrice()) ?? 0);
+      const gasPrice = BigInt(
+        readTransactionQuantity(await requireQrlInstance().getGasPrice()),
+      );
       return {
         feePerGas: gasPrice,
         maxFeePerGas: gasPrice,
@@ -281,7 +344,7 @@ const QrlSendTransactionForContent = observer(
 
     useEffect(() => {
       let isCurrent = true;
-      const request = dAppRequestData?.params?.[0];
+      const request = params;
       const loadFeeBasis = async () => {
         if (!qrlInstance || !request) return;
         let fee: ReadFee | undefined;
@@ -294,14 +357,14 @@ const QrlSendTransactionForContent = observer(
         try {
           const estimate = await qrlInstance.estimateGas(
             {
-              from: request.from,
+              from: request.from ?? undefined,
               ...(request.to ? { to: request.to } : {}),
               ...(request.data ? { data: request.data } : {}),
               ...(request.value ? { value: request.value } : {}),
-            } as unknown as TransactionCall,
+            },
             BlockTags.PENDING,
           );
-          estimatedGas = BigInt(estimate);
+          estimatedGas = BigInt(readTransactionQuantity(estimate));
         } catch {
           // A call that reverts under simulation, or a node that will not
           // estimate, leaves the comparison out instead of blocking the
@@ -317,7 +380,6 @@ const QrlSendTransactionForContent = observer(
       };
       const load = loadFeeBasis();
       feeLoadRef.current = load;
-      void load;
       return () => {
         isCurrent = false;
       };
@@ -350,7 +412,10 @@ const QrlSendTransactionForContent = observer(
       gasLimit > feeBasis.estimatedGas * GAS_LIMIT_INFLATION_FACTOR;
 
     const copyData = () => {
-      navigator.clipboard.writeText(data);
+      if (data === undefined) return;
+      navigator.clipboard.writeText(data).catch((error: unknown) => {
+        console.error("Failed to copy transaction data:", error);
+      });
     };
 
     // Reads the instance and stops right here with the same shaped error
@@ -367,7 +432,12 @@ const QrlSendTransactionForContent = observer(
     const ensureSigningContext = async () => {
       const authorization =
         await revalidateAuthorizedDAppRequest(dAppRequestData);
-      if (!authorization.canProceed) throw authorization.proceedError;
+      if (!authorization.canProceed) {
+        throw (
+          authorization.proceedError ??
+          new Error("The request is no longer authorized.")
+        );
+      }
       if (
         qrlInstance !== qrlStore.qrlInstance ||
         blockchain !== qrlStore.qrlConnection.blockchain ||
@@ -394,18 +464,10 @@ const QrlSendTransactionForContent = observer(
       transaction: TransactionObject,
       timeoutMs: number,
     ) => {
-      const instance = requireQrlInstance();
+      const instance: SimulationProvider = requireQrlInstance();
       try {
-        // `to` is optional here (a contract deployment has none), but
-        // TransactionCall's type declares it required; qrl_call accepts an
-        // absent `to` for a deployment simulation the same way sending one
-        // does. TransactionCall's type is simply narrower than the request
-        // it needs to accept here.
         await withTimeout(
-          instance.call(
-            transaction as unknown as TransactionCall,
-            BlockTags.PENDING,
-          ),
+          instance.call(transaction, BlockTags.PENDING),
           timeoutMs,
           "Simulating the transaction",
         );
@@ -501,18 +563,26 @@ const QrlSendTransactionForContent = observer(
       // Carried through so speed-up/cancel in TransactionDetail has a nonce
       // and fee baseline for this dApp-originated entry, the same as a
       // wallet-initiated send (TokenTransfer.tsx).
-      nonce?: bigint;
+      nonce?: TransactionQuantity;
       maxFeePerGas?: string;
       maxPriorityFeePerGas?: bigint;
-      gasLimit?: string;
+      gasLimit?: TransactionQuantity;
     }) => {
       if (!from) return;
       try {
+        const storedChain: unknown = blockchain;
+        const chain = isRecord(storedChain) ? storedChain : undefined;
+        const currency = isRecord(chain?.nativeCurrency)
+          ? chain.nativeCurrency
+          : undefined;
         const tokenSymbol =
-          blockchain?.nativeCurrency?.symbol ?? NATIVE_TOKEN.symbol;
-        const tokenName = blockchain?.nativeCurrency?.name ?? tokenSymbol;
+          typeof currency?.symbol === "string"
+            ? currency.symbol
+            : NATIVE_TOKEN.symbol;
+        const tokenName =
+          typeof currency?.name === "string" ? currency.name : tokenSymbol;
         const valueAsBigInt =
-          value !== undefined && value !== null
+          value !== undefined
             ? typeof value === "bigint"
               ? value
               : BigInt(value)
@@ -544,7 +614,7 @@ const QrlSendTransactionForContent = observer(
           effectiveGasPrice: "",
           status: false,
           timestamp: Date.now(),
-          chainId: blockchain?.chainId ?? "",
+          chainId: typeof chain?.chainId === "string" ? chain.chainId : "",
           pendingStatus: "pending",
           data: data ?? undefined,
           nonce: nonce !== undefined ? Number(nonce) : undefined,
@@ -607,7 +677,7 @@ const QrlSendTransactionForContent = observer(
     };
 
     const deployContractOrInteract = async (record: ResponseRecorder) => {
-      const request = dAppRequestData?.params?.[0];
+      const request = params;
       // Hoisted above the try so the catch block can still record a pending
       // entry for a TransactionMayStillBeProcessingError (the broadcast
       // timeout case): a `const` declared inside `try` is not visible in
@@ -619,22 +689,28 @@ const QrlSendTransactionForContent = observer(
         // An approval can land before the opening fee read does. Waiting
         // for it here is what keeps the ceiling the one that was shown.
         await awaitFeeBasis();
+        if (!request) throw rpcErrors.invalidParams();
         const { from, to, data, gas, type, value } = request;
+        if (!from) {
+          throw rpcErrors.invalidParams();
+        }
 
-        const isLedgerAccount = ledgerStore.isLedgerAccount(from ?? "");
+        const isLedgerAccount = ledgerStore.isLedgerAccount(from);
 
-        const gasPrice = await qrlInstance?.getGasPrice();
+        const gasPrice: unknown = await qrlInstance?.getGasPrice();
+        const nonce: unknown = await qrlInstance?.getTransactionCount(
+          from,
+          SIGNING_NONCE_BLOCK_TAG,
+        );
         const transactionObject: TransactionObject = {
           chainId: V3_CHAIN_ID,
           from,
           ...(to && { to }),
-          data,
-          gas,
-          value,
-          nonce: await qrlInstance?.getTransactionCount(
-            from,
-            SIGNING_NONCE_BLOCK_TAG,
-          ),
+          // Use Web3's defaults for null optional fields.
+          data: data ?? undefined,
+          gas: gas ?? undefined,
+          value: value ?? undefined,
+          nonce: qrlInstance ? readTransactionQuantity(nonce) : undefined,
         };
         pendingTransactionObject = transactionObject;
         if (type === "0x2") {
@@ -648,7 +724,9 @@ const QrlSendTransactionForContent = observer(
               : freshFee.maxPriorityFeePerGas;
           transactionObject.maxFeePerGas = `0x${signedMaxFeePerGas.toString(16)}`;
         } else {
-          const legacyGasPrice = BigInt(gasPrice ?? 0);
+          const legacyGasPrice = BigInt(
+            readTransactionQuantity(qrlInstance ? gasPrice : 0n),
+          );
           transactionObject.gasPrice = resolveApprovedMaxFeePerGas({
             feePerGas: legacyGasPrice,
             maxFeePerGas: legacyGasPrice,
@@ -687,7 +765,7 @@ const QrlSendTransactionForContent = observer(
           }
 
           rawTransactionToSend = await ledgerStore.signAndSerializeTransaction(
-            from ?? "",
+            from,
             txData,
             common,
           );
@@ -700,33 +778,38 @@ const QrlSendTransactionForContent = observer(
             : undefined;
         } else {
           // Regular account - use mnemonic-based signing
-          const mnemonicPhrases = await getMnemonicPhrases(from ?? "");
+          const mnemonicPhrases = await lockStore.getMnemonicPhrases(from);
           const seed = getHexSeedFromMnemonic(mnemonicPhrases);
           // Guard, as every other signing surface does: the seed must derive
           // the requested sender. Fails fast if `from` is a stale/removed
           // account (getMnemonicPhrases returns "") instead of feeding an
           // empty seed into signTransaction.
-          const addressFromMnemonic =
-            qrlInstance?.accounts.seedToAccount(seed)?.address;
+          const account: unknown = qrlInstance?.accounts.seedToAccount(seed);
+          const addressFromMnemonic = isRecord(account)
+            ? account.address
+            : undefined;
           if (!areAddressesEquivalent(from, addressFromMnemonic)) {
             throw new Error(
               "Signing account does not match the requested sender",
             );
           }
           await ensureSigningContext();
-          const signedTransaction = await qrlInstance?.accounts.signTransaction(
-            transactionObject,
-            seed,
-          );
-          rawTransactionToSend = signedTransaction?.rawTransaction;
-          precomputedHash = signedTransaction?.transactionHash;
+          const signedTransaction: unknown =
+            await qrlInstance?.accounts.signTransaction(
+              transactionObject,
+              seed,
+            );
+          if (isSignedTransaction(signedTransaction)) {
+            rawTransactionToSend = signedTransaction.rawTransaction;
+            precomputedHash = signedTransaction.transactionHash;
+          }
         }
 
         if (rawTransactionToSend && precomputedHash) {
           // The worker learns the hash before the broadcast leaves, so an
           // approval that loses its surface mid-flight can still name the
           // transaction in its answer and watch for it on chain.
-          await reportPendingTransactionHash(precomputedHash);
+          await dAppRequestStore.reportPendingTransactionHash(precomputedHash);
           const transactionHash = await broadcastTransaction(
             rawTransactionToSend,
             transactionObject,
@@ -750,7 +833,7 @@ const QrlSendTransactionForContent = observer(
           // stable EIP-1193 error; the raw guard text never reaches the
           // dApp response.
           setIsWalletLocked(true);
-          void readLockState();
+          void lockStore.readLockState();
           record({ error: walletLockedProviderError() });
           return;
         }
@@ -776,7 +859,7 @@ const QrlSendTransactionForContent = observer(
     };
 
     const sendZndTransfer = async (record: ResponseRecorder) => {
-      const request = dAppRequestData?.params?.[0];
+      const request = params;
       // Hoisted above the try for the same reason as in
       // deployContractOrInteract: the catch block needs it for a
       // TransactionMayStillBeProcessingError, and kept separate from the
@@ -787,6 +870,7 @@ const QrlSendTransactionForContent = observer(
         // See deployContractOrInteract: the displayed ceiling has to be in
         // hand before anything decides what to sign.
         await awaitFeeBasis();
+        if (!request) throw rpcErrors.invalidParams();
         const { from, to, gas, type, value } = request;
 
         if (!from) {
@@ -810,17 +894,18 @@ const QrlSendTransactionForContent = observer(
 
         const isLedgerAccount = ledgerStore.isLedgerAccount(from);
 
-        const gasPrice = await qrlInstance?.getGasPrice();
+        const gasPrice: unknown = await qrlInstance?.getGasPrice();
+        const nonce: unknown = await qrlInstance?.getTransactionCount(
+          from,
+          SIGNING_NONCE_BLOCK_TAG,
+        );
         const transactionObject: TransactionObject = {
           chainId: V3_CHAIN_ID,
           from,
           to,
           gas,
           value,
-          nonce: await qrlInstance?.getTransactionCount(
-            from,
-            SIGNING_NONCE_BLOCK_TAG,
-          ),
+          nonce: qrlInstance ? readTransactionQuantity(nonce) : undefined,
         };
         pendingTransactionObject = transactionObject;
 
@@ -835,7 +920,9 @@ const QrlSendTransactionForContent = observer(
               : freshFee.maxPriorityFeePerGas;
           transactionObject.maxFeePerGas = `0x${signedMaxFeePerGas.toString(16)}`;
         } else {
-          const legacyGasPrice = BigInt(gasPrice ?? 0);
+          const legacyGasPrice = BigInt(
+            readTransactionQuantity(qrlInstance ? gasPrice : 0n),
+          );
           transactionObject.gasPrice = resolveApprovedMaxFeePerGas({
             feePerGas: legacyGasPrice,
             maxFeePerGas: legacyGasPrice,
@@ -875,33 +962,38 @@ const QrlSendTransactionForContent = observer(
             : undefined;
         } else {
           // Regular account - use mnemonic-based signing
-          const mnemonicPhrases = await getMnemonicPhrases(from ?? "");
+          const mnemonicPhrases = await lockStore.getMnemonicPhrases(from);
           const seed = getHexSeedFromMnemonic(mnemonicPhrases);
           // Guard, as every other signing surface does: the seed must derive
           // the requested sender. Fails fast if `from` is a stale/removed
           // account (getMnemonicPhrases returns "") instead of feeding an
           // empty seed into signTransaction.
-          const addressFromMnemonic =
-            qrlInstance?.accounts.seedToAccount(seed)?.address;
+          const account: unknown = qrlInstance?.accounts.seedToAccount(seed);
+          const addressFromMnemonic = isRecord(account)
+            ? account.address
+            : undefined;
           if (!areAddressesEquivalent(from, addressFromMnemonic)) {
             throw new Error(
               "Signing account does not match the requested sender",
             );
           }
           await ensureSigningContext();
-          const signedTransaction = await qrlInstance?.accounts.signTransaction(
-            transactionObject,
-            seed,
-          );
-          rawTransactionToSend = signedTransaction?.rawTransaction;
-          precomputedHash = signedTransaction?.transactionHash;
+          const signedTransaction: unknown =
+            await qrlInstance?.accounts.signTransaction(
+              transactionObject,
+              seed,
+            );
+          if (isSignedTransaction(signedTransaction)) {
+            rawTransactionToSend = signedTransaction.rawTransaction;
+            precomputedHash = signedTransaction.transactionHash;
+          }
         }
 
         if (rawTransactionToSend && precomputedHash) {
           // The worker learns the hash before the broadcast leaves, so an
           // approval that loses its surface mid-flight can still name the
           // transaction in its answer and watch for it on chain.
-          await reportPendingTransactionHash(precomputedHash);
+          await dAppRequestStore.reportPendingTransactionHash(precomputedHash);
           const transactionHash = await broadcastTransaction(
             rawTransactionToSend,
             transactionObject,
@@ -925,7 +1017,7 @@ const QrlSendTransactionForContent = observer(
           // stable EIP-1193 error; the raw guard text never reaches the
           // dApp response.
           setIsWalletLocked(true);
-          void readLockState();
+          void lockStore.readLockState();
           record({ error: walletLockedProviderError() });
           return;
         }
@@ -948,8 +1040,10 @@ const QrlSendTransactionForContent = observer(
     // (security review finding L-1). A screen that reads "Unavailable"
     // where the ceiling belongs has nothing for the user to agree to.
     useEffect(() => {
-      setCanProceed(feeBasis.maxFeePerGas !== undefined);
-    }, [feeBasis.maxFeePerGas]);
+      dAppRequestStore.setCanProceed(
+        params !== undefined && feeBasis.maxFeePerGas !== undefined,
+      );
+    }, [feeBasis.maxFeePerGas, dAppRequestData]);
 
     return (
       <Tabs defaultValue="details" className="w-full">

@@ -44,8 +44,8 @@ class PrivateFieldProvider {
 const vendoredProxy = <T extends object>(provider: T): T =>
   new Proxy(provider, {
     deleteProperty: () => true,
-    get(target, property) {
-      return target[property as keyof T];
+    get(target, property): unknown {
+      return Reflect.get(target, property, target);
     },
   });
 
@@ -75,7 +75,15 @@ describe("withBoundMethods", () => {
   });
 
   it("survives being destructured", () => {
-    const provider = withBoundMethods(new PrivateFieldProvider());
+    const provider: {
+      isConnected: () => boolean;
+      on: (event: string, listener: unknown) => PrivateFieldProvider;
+      removeListener: (
+        event: string,
+        listener: unknown,
+      ) => PrivateFieldProvider;
+      listeners: Array<[string, unknown]>;
+    } = withBoundMethods(new PrivateFieldProvider());
     const { isConnected, on, removeListener } = provider;
     const listener = () => undefined;
 
@@ -87,7 +95,9 @@ describe("withBoundMethods", () => {
   });
 
   it("hands back the same function on every read", () => {
-    const provider = withBoundMethods(new PrivateFieldProvider());
+    const provider: { isConnected: () => boolean } = withBoundMethods(
+      new PrivateFieldProvider(),
+    );
 
     // A page that stores a method and later compares it against a fresh
     // read has to see the same function.
@@ -98,19 +108,32 @@ describe("withBoundMethods", () => {
     const provider = withBoundMethods(new PrivateFieldProvider());
 
     // web3@1.x deletes properties off the provider it is handed.
-    expect(
-      Reflect.deleteProperty(provider, "isConnected" as keyof typeof provider),
-    ).toBe(true);
+    expect(Reflect.deleteProperty(provider, "isConnected")).toBe(true);
     expect(provider.isConnected()).toBe(true);
   });
 
   it("lets a page replace a method", () => {
-    const provider = withBoundMethods(
-      new PrivateFieldProvider(),
-    ) as PrivateFieldProvider & { isConnected: () => boolean };
+    const provider = withBoundMethods(new PrivateFieldProvider());
 
     provider.isConnected = () => false;
 
     expect(provider.isConnected()).toBe(false);
+  });
+
+  it("preserves non-function properties and binds symbol methods with arguments", () => {
+    const read = Symbol("read");
+    const metadata = { connected: true };
+    const provider = withBoundMethods({
+      metadata,
+      optional: undefined,
+      [read](suffix: string) {
+        return `${String(this.metadata.connected)}:${suffix}`;
+      },
+    });
+
+    expect(provider.metadata).toBe(metadata);
+    expect(provider.optional).toBeUndefined();
+    expect(provider[read]("chain")).toBe("true:chain");
+    expect(Reflect.get(provider, read)).toBe(Reflect.get(provider, read));
   });
 });

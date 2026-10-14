@@ -1,3 +1,4 @@
+import { deferred } from "@/test-utils/deferred";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const { mockGetBalance, mockIsListening } = vi.hoisted(() => ({
@@ -7,9 +8,8 @@ const { mockGetBalance, mockIsListening } = vi.hoisted(() => ({
 
 vi.mock("@theqrl/web3", () => {
   class MockWeb3 {
-    static providers = { HttpProvider: class {} };
+    static providers = { HttpProvider: vi.fn() };
     qrl = { getBalance: mockGetBalance, net: { isListening: mockIsListening } };
-    constructor(_opts: unknown) {}
   }
   return {
     __esModule: true,
@@ -364,34 +364,27 @@ describe("QrlStore connection health", () => {
     store.stopBalancePolling();
     store.qrlConnection = { ...store.qrlConnection, isLoading: false };
 
-    let releaseProbe!: (value: boolean) => void;
-    mockIsListening.mockReturnValueOnce(
-      new Promise<boolean>((resolve) => {
-        releaseProbe = resolve;
-      }),
-    );
+    const backgroundProbe = deferred<boolean>();
+    mockIsListening.mockReturnValueOnce(backgroundProbe.promise);
     const probe = store.fetchQrlConnection({ quiet: true });
     await flush();
     // Mid-probe: the status dot must not start pulsing and the chain badge
     // must not go disabled just because a background check is in flight.
     expect(store.qrlConnection.isLoading).toBe(false);
 
-    releaseProbe(true);
+    backgroundProbe.resolve(true);
     await probe;
     expect(store.qrlConnection.isLoading).toBe(false);
     expect(store.qrlConnection.isConnected).toBe(true);
 
     // A foreground probe still reports loading.
     const loadingSeen: boolean[] = [];
-    mockIsListening.mockReturnValueOnce(
-      new Promise<boolean>((resolve) => {
-        releaseProbe = resolve;
-      }),
-    );
+    const foregroundProbe = deferred<boolean>();
+    mockIsListening.mockReturnValueOnce(foregroundProbe.promise);
     const foreground = store.fetchQrlConnection();
     await flush();
     loadingSeen.push(store.qrlConnection.isLoading);
-    releaseProbe(true);
+    foregroundProbe.resolve(true);
     await foreground;
     expect(loadingSeen).toEqual([true]);
     expect(store.qrlConnection.isLoading).toBe(false);

@@ -7,21 +7,17 @@ import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import SwitchQrlChainInfo from "./SwitchQrlChainInfo/SwitchQrlChainInfo";
 import { includeChainForUrlOrigin } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
+import {
+  isSwitchQrlChainParameters,
+  readApprovalParams,
+} from "@/utilities/approvalGuards";
+import { rpcErrors } from "@theqrl/qrl-wallet-provider";
 
 const SwitchQrlChainContent = observer(() => {
   const { t } = useTranslation();
   const { dAppRequestStore, qrlStore } = useStore();
-  const { selectBlockchain } = qrlStore;
-  const {
-    dAppRequestData,
-    onPermission,
-    approvalProcessingStatus,
-    setOnPermissionCallBack,
-  } = dAppRequestStore;
+  const { dAppRequestData, approvalProcessingStatus } = dAppRequestStore;
   const { isProcessing } = approvalProcessingStatus;
-
-  const paramObject = dAppRequestData?.params?.[0];
-  const chainId = paramObject?.chainId;
 
   const switchChain = async () => {
     const onPermissionCallBack = async (
@@ -29,16 +25,22 @@ const SwitchQrlChainContent = observer(() => {
       record: ResponseRecorder,
     ) => {
       if (hasApproved) {
+        const paramObject = readApprovalParams(dAppRequestData?.params)?.[0];
+        if (!isSwitchQrlChainParameters(paramObject)) {
+          record({ error: rpcErrors.invalidParams() });
+          return;
+        }
+        const { chainId } = paramObject;
         await includeChainForUrlOrigin({
           urlOrigin: dAppRequestData?.requestData?.senderData?.url ?? "",
           chainId,
         });
-        await selectBlockchain(chainId);
+        await qrlStore.selectBlockchain(chainId);
         record({ result: true });
       }
     };
-    setOnPermissionCallBack(onPermissionCallBack);
-    await onPermission(true);
+    dAppRequestStore.setOnPermissionCallBack(onPermissionCallBack);
+    await dAppRequestStore.onPermission(true);
   };
 
   return (
@@ -60,7 +62,14 @@ const SwitchQrlChainContent = observer(() => {
           type="button"
           disabled={isProcessing}
           aria-label="No"
-          onClick={() => onPermission(false)}
+          onClick={() => {
+            dAppRequestStore.onPermission(false).catch((error: unknown) => {
+              console.warn(
+                "QrlWeb3Wallet: Error while resolving the permission request\n",
+                error,
+              );
+            });
+          }}
         >
           <X className="mr-2 h-4 w-4" />
           {t("dapp.no")}
@@ -70,7 +79,14 @@ const SwitchQrlChainContent = observer(() => {
           type="button"
           disabled={isProcessing}
           aria-label="Yes"
-          onClick={() => switchChain()}
+          onClick={() => {
+            switchChain().catch((error: unknown) => {
+              console.warn(
+                "QrlWeb3Wallet: Error while resolving the permission request\n",
+                error,
+              );
+            });
+          }}
         >
           <Check className="mr-2 h-4 w-4" />
           {t("dapp.yes")}

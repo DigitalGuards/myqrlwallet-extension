@@ -1,3 +1,4 @@
+import { storedText } from "@/utilities/storageViews";
 import {
   Dialog,
   DialogContent,
@@ -58,17 +59,23 @@ const RecipientPicker = observer(
 
     useEffect(() => {
       if (open) {
-        contactsStore.loadContacts();
-        accountLabelsStore.syncLabels(
-          qrlAccounts.accounts ?? [],
-          ledgerStore.isLedgerAccount.bind(ledgerStore),
-        );
+        contactsStore.loadContacts().catch((error: unknown) => {
+          console.error("Failed to load contacts:", error);
+        });
+        accountLabelsStore
+          .syncLabels(
+            qrlAccounts.accounts,
+            ledgerStore.isLedgerAccount.bind(ledgerStore),
+          )
+          .catch((error: unknown) => {
+            console.error("Failed to sync account labels:", error);
+          });
       }
     }, [open]);
 
     const otherAccounts = useMemo(
       () =>
-        (qrlAccounts.accounts ?? [])
+        qrlAccounts.accounts
           .map((a) => ({
             address: a.accountAddress,
             label: accountLabelsStore.getLabel(a.accountAddress) || undefined,
@@ -138,7 +145,9 @@ const RecipientPicker = observer(
                       key={a.address}
                       address={a.address}
                       label={a.label}
-                      onClick={() => handleSelect(a.address)}
+                      onClick={() => {
+                        handleSelect(a.address);
+                      }}
                     />
                   ))}
                 </div>
@@ -157,8 +166,10 @@ const RecipientPicker = observer(
                     <AddressRow
                       key={c.address}
                       address={c.address}
-                      label={c.name}
-                      onClick={() => handleSelect(c.address)}
+                      label={storedText(c.name)}
+                      onClick={() => {
+                        handleSelect(c.address);
+                      }}
                     />
                   ))}
                 </div>
@@ -177,7 +188,9 @@ const RecipientPicker = observer(
                     <AddressRow
                       key={addr}
                       address={addr}
-                      onClick={() => handleSelect(addr)}
+                      onClick={() => {
+                        handleSelect(addr);
+                      }}
                     />
                   ))}
                 </div>
