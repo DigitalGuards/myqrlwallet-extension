@@ -1,4 +1,9 @@
 import StorageUtil from "@/utilities/storageUtil";
+import {
+  isRecord,
+  isStoredBlockchain,
+  isString,
+} from "@/utilities/storageGuards";
 import { providerNetworkIdentity } from "@/utilities/providerNetwork";
 import {
   DEFAULT_BLOCKCHAIN,
@@ -14,22 +19,9 @@ type NotificationStream = {
   write: (message: unknown) => unknown;
 };
 
-type ConnectedDApp = {
-  accounts?: unknown;
-};
-
 type SenderIdentity = {
   origin?: string;
   url?: string;
-};
-
-type DAppsStorage = {
-  ALL_DAPPS?: Record<string, ConnectedDApp>;
-};
-
-type BlockchainsStorage = {
-  ACTIVE_BLOCKCHAIN?: unknown;
-  ALL_BLOCKCHAINS?: unknown;
 };
 
 const streamsByOrigin = new Map<string, Set<NotificationStream>>();
@@ -127,15 +119,14 @@ export const resolveTrustedSenderOrigin = ({
 };
 
 const accountsByOrigin = (value: unknown): Map<string, string[]> => {
-  const allDApps = (value as DAppsStorage | undefined)?.ALL_DAPPS;
-  if (!allDApps || typeof allDApps !== "object") return new Map();
+  const allDApps = isRecord(value) ? value.ALL_DAPPS : undefined;
+  if (!isRecord(allDApps)) return new Map();
 
   const result = new Map<string, string[]>();
   for (const [origin, data] of Object.entries(allDApps)) {
-    const accounts = Array.isArray(data?.accounts)
-      ? data.accounts.filter(
-          (account): account is string => typeof account === "string",
-        )
+    const storedAccounts: unknown = isRecord(data) ? data.accounts : undefined;
+    const accounts = Array.isArray(storedAccounts)
+      ? storedAccounts.filter(isString)
       : [];
     result.set(origin, accounts);
   }
@@ -195,22 +186,19 @@ export const notifyDAppAccountsChanged = (change?: StorageChange): void => {
  * listener's own turn.
  */
 const activeChainId = (value: unknown): string | undefined => {
-  const blockchains = value as BlockchainsStorage | undefined;
-  const stored = blockchains?.ACTIVE_BLOCKCHAIN;
+  if (!isRecord(value)) return undefined;
+  const stored = value.ACTIVE_BLOCKCHAIN;
   if (typeof stored !== "string") return undefined;
   const target = stored.trim().toLowerCase();
   if (!target) return undefined;
-  const chains = Array.isArray(blockchains?.ALL_BLOCKCHAINS)
-    ? (blockchains.ALL_BLOCKCHAINS as Array<{ chainId?: unknown }>)
+  const chains: unknown[] = Array.isArray(value.ALL_BLOCKCHAINS)
+    ? value.ALL_BLOCKCHAINS
     : QRL_BLOCKCHAINS;
   const known = chains.find(
     (chain) =>
-      typeof chain?.chainId === "string" &&
-      chain.chainId.toLowerCase() === target,
+      isStoredBlockchain(chain) && chain.chainId.toLowerCase() === target,
   );
-  return typeof known?.chainId === "string"
-    ? known.chainId
-    : DEFAULT_BLOCKCHAIN.chainId;
+  return isStoredBlockchain(known) ? known.chainId : DEFAULT_BLOCKCHAIN.chainId;
 };
 
 /**

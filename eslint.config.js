@@ -616,49 +616,9 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/scripts/utils/approvalSurface.ts"],
-    rules: {
-      "@typescript-eslint/no-deprecated": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/boundProvider.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
     files: ["src/scripts/utils/boundProvider.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/dAppAccountNotifications.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/dAppAccountNotifications.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/dAppTransactionWatcher.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-dynamic-delete": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-      "@typescript-eslint/unbound-method": "off",
-      "no-restricted-syntax": "off",
     },
   },
   {
@@ -671,26 +631,10 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/scripts/utils/providerConnectionLifecycle.test.ts"],
-    rules: {
-      "@typescript-eslint/no-base-to-string": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/require-await": "off",
-    },
-  },
-  {
     files: ["src/scripts/utils/providerConnectionLifecycle.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/providerLogger.test.ts"],
-    rules: {
-      "@typescript-eslint/unbound-method": "off",
     },
   },
   {
@@ -731,22 +675,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/scripts/utils/scriptUtils.ts"],
-    rules: {
-      "@typescript-eslint/ban-ts-comment": "off",
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-base-to-string": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/sidePanelContentBridge.test.ts"],
-    rules: {
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
     files: ["src/scripts/utils/sidePanelContentBridge.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
@@ -767,45 +695,9 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/scripts/utils/sidePanelSurface.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-floating-promises": "off",
-      "@typescript-eslint/require-await": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/sidePanelSurface.ts"],
-    rules: {
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-deprecated": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
     files: ["src/scripts/utils/streamUtils.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/trustedSender.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/unrestrictedMethodExecutor.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-extraneous-class": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-      "@typescript-eslint/require-await": "off",
     },
   },
   {

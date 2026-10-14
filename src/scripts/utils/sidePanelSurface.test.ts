@@ -1,7 +1,14 @@
+import { isRecord } from "@/utilities/storageGuards";
 import { profileStorageKey } from "@/utilities/profileStorage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
+
 import { EXTENSION_MESSAGES } from "../constants/streamConstants";
+import {
+  handleApprovalWindowRemoved,
+  isSidePanelOpen,
+  openApprovalSurface,
+} from "./approvalSurface";
 import {
   applyEarlySidePanelToolbarBehavior,
   applySidePanelToolbarBehavior,
@@ -11,26 +18,42 @@ import {
   resetSidePanelOpenerForTests,
 } from "./sidePanelSurface";
 
+const getLocalStorage = vi.spyOn(browser.storage.local, "get");
+const setLocalStorage = vi.spyOn(browser.storage.local, "set");
+const sendTabMessage = vi.spyOn(browser.tabs, "sendMessage");
+
 const SETTINGS_KEY = profileStorageKey("SETTINGS");
 
 const setSettings = (settings: object) => {
-  vi.mocked(browser.storage.local.get).mockImplementation(async (key) =>
-    key === SETTINGS_KEY ? { [SETTINGS_KEY]: settings } : {},
+  getLocalStorage.mockImplementation((key) =>
+    Promise.resolve(key === SETTINGS_KEY ? { [SETTINGS_KEY]: settings } : {}),
   );
 };
 
-const sidePanelOpen = vi.fn(async () => undefined);
-const setPanelBehavior = vi.fn(async () => undefined);
-const setOptions = vi.fn(async () => undefined);
+const sidePanelOpen = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+const setPanelBehavior = vi
+  .fn<() => Promise<void>>()
+  .mockResolvedValue(undefined);
+const setOptions = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
 const installSidePanelApi = () => {
-  (globalThis as Record<string, unknown>).chrome = {
+  vi.stubGlobal("chrome", {
     sidePanel: { open: sidePanelOpen, setPanelBehavior, setOptions },
-  };
+  });
 };
 
 const tabSender = (tabId: number, id = "mock-id") =>
-  ({ id, tab: { id: tabId } }) as browser.Runtime.MessageSender;
+  ({
+    id,
+    tab: {
+      id: tabId,
+      index: 0,
+      active: true,
+      highlighted: true,
+      pinned: false,
+      incognito: false,
+    },
+  }) satisfies browser.Runtime.MessageSender;
 
 describe("side panel toolbar behavior", () => {
   beforeEach(() => {
@@ -42,7 +65,7 @@ describe("side panel toolbar behavior", () => {
   });
 
   afterEach(() => {
-    delete (globalThis as Record<string, unknown>).chrome;
+    vi.unstubAllGlobals();
   });
 
   it("turns the panel on early when no explicit choice was made", async () => {
@@ -69,7 +92,7 @@ describe("side panel toolbar behavior", () => {
   });
 
   it("does nothing on a browser without the side panel API", async () => {
-    delete (globalThis as Record<string, unknown>).chrome;
+    vi.stubGlobal("chrome", undefined);
 
     await applyEarlySidePanelToolbarBehavior();
     await applySidePanelToolbarBehavior();
@@ -89,18 +112,100 @@ describe("side panel toolbar behavior", () => {
       path: "index.html?sidepanel=true",
     });
   });
+
+  it("keeps the toolbar usable when panel behavior is unavailable", async () => {
+    vi.stubGlobal("chrome", { sidePanel: { open: sidePanelOpen } });
+
+    await applyEarlySidePanelToolbarBehavior();
+    await applySidePanelToolbarBehavior();
+
+    expect(setPanelBehavior).not.toHaveBeenCalled();
+    expect(setOptions).not.toHaveBeenCalled();
+  });
+
+  it("handles a rejected toolbar update", async () => {
+    setPanelBehavior.mockRejectedValueOnce(new Error("unavailable"));
+
+    await expect(applySidePanelToolbarBehavior()).resolves.toBeUndefined();
+
+    expect(setOptions).not.toHaveBeenCalled();
+  });
+});
+
+describe("side panel context detection", () => {
+  afterEach(() => {
+    handleApprovalWindowRemoved(77);
+    vi.unstubAllGlobals();
+  });
+
+  it.each([undefined, {}, { runtime: {} }])(
+    "reports no open panel when the context API is unavailable %#",
+    async (chromeApi) => {
+      vi.stubGlobal("chrome", chromeApi);
+
+      await expect(isSidePanelOpen()).resolves.toBe(false);
+    },
+  );
+
+  it.each([null, {}, { length: 1 }, "panel"])(
+    "rejects a malformed context result %#",
+    async (contexts) => {
+      vi.stubGlobal("chrome", {
+        runtime: {
+          ContextType: { SIDE_PANEL: "SIDE_PANEL" },
+          getContexts: vi.fn().mockResolvedValue(contexts),
+        },
+      });
+
+      await expect(isSidePanelOpen()).resolves.toBe(false);
+    },
+  );
+
+  it("treats a rejected context query as no open panel", async () => {
+    vi.stubGlobal("chrome", {
+      runtime: {
+        ContextType: { SIDE_PANEL: "SIDE_PANEL" },
+        getContexts: vi.fn().mockRejectedValue(new Error("unavailable")),
+      },
+    });
+
+    await expect(isSidePanelOpen()).resolves.toBe(false);
+  });
+
+  it("opens the fallback window for malformed popup context results", async () => {
+    setSettings({ sidePanelSurface: "popup" });
+    vi.spyOn(browser.action, "openPopup").mockRejectedValueOnce(
+      new Error("unavailable"),
+    );
+    const createWindow = vi.spyOn(browser.windows, "create");
+    const getContexts = vi.fn().mockResolvedValue({ length: 1 });
+    vi.stubGlobal("chrome", {
+      runtime: {
+        ContextType: { SIDE_PANEL: "SIDE_PANEL", POPUP: "POPUP" },
+        getContexts,
+      },
+    });
+
+    await openApprovalSurface();
+
+    expect(getContexts.mock.calls).toEqual([
+      [{ contextTypes: ["SIDE_PANEL"] }],
+      [{ contextTypes: ["POPUP"] }],
+    ]);
+    expect(createWindow).toHaveBeenCalledOnce();
+  });
 });
 
 describe("handleSidePanelInstalled", () => {
   beforeEach(() => {
     setSettings({});
-    vi.mocked(browser.storage.local.set).mockClear();
+    setLocalStorage.mockClear();
   });
 
   it("arms the notice for an existing install", async () => {
     await handleSidePanelInstalled("update");
 
-    expect(browser.storage.local.set).toHaveBeenCalledWith({
+    expect(setLocalStorage).toHaveBeenCalledWith({
       [SETTINGS_KEY]: { sidePanelNoticePending: true },
     });
   });
@@ -108,7 +213,7 @@ describe("handleSidePanelInstalled", () => {
   it("never shows the notice on a fresh install", async () => {
     await handleSidePanelInstalled("install");
 
-    expect(browser.storage.local.set).not.toHaveBeenCalled();
+    expect(setLocalStorage).not.toHaveBeenCalled();
   });
 
   it("skips users who already chose a surface", async () => {
@@ -116,7 +221,7 @@ describe("handleSidePanelInstalled", () => {
 
     await handleSidePanelInstalled("update");
 
-    expect(browser.storage.local.set).not.toHaveBeenCalled();
+    expect(setLocalStorage).not.toHaveBeenCalled();
   });
 
   it("does not re-arm a notice that was already seen", async () => {
@@ -124,7 +229,7 @@ describe("handleSidePanelInstalled", () => {
 
     await handleSidePanelInstalled("update");
 
-    expect(browser.storage.local.set).not.toHaveBeenCalled();
+    expect(setLocalStorage).not.toHaveBeenCalled();
   });
 });
 
@@ -134,12 +239,12 @@ describe("side panel gesture roundtrip", () => {
     sidePanelOpen.mockClear();
     sidePanelOpen.mockResolvedValue(undefined);
     installSidePanelApi();
-    vi.mocked(browser.tabs.sendMessage).mockResolvedValue(undefined);
+    sendTabMessage.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     resetSidePanelOpenerForTests();
-    delete (globalThis as Record<string, unknown>).chrome;
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -147,16 +252,19 @@ describe("side panel gesture roundtrip", () => {
     sender: browser.Runtime.MessageSender,
     name: string = EXTENSION_MESSAGES.OPEN_SIDE_PANEL,
   ) => {
-    const calls = vi.mocked(browser.tabs.sendMessage).mock.calls;
-    const request = calls[calls.length - 1]?.[1] as { nonce: string };
+    const calls = sendTabMessage.mock.calls;
+    const request: unknown = calls[calls.length - 1]?.[1];
+    if (!isRecord(request) || typeof request.nonce !== "string") {
+      throw new Error("Expected a side panel request nonce");
+    }
     return handleSidePanelOpenMessage({ name, nonce: request.nonce }, sender);
   };
 
   it("opens the panel for the tab that forwarded the gesture", async () => {
     const pending = requestSidePanelOpen(9);
-    await vi.waitFor(() =>
-      expect(browser.tabs.sendMessage).toHaveBeenCalledTimes(1),
-    );
+    await vi.waitFor(() => {
+      expect(sendTabMessage).toHaveBeenCalledTimes(1);
+    });
 
     expect(answerLatestNonce(tabSender(9))).toBe(true);
 
@@ -174,9 +282,7 @@ describe("side panel gesture roundtrip", () => {
   });
 
   it("resolves false when the tab has no content script", async () => {
-    vi.mocked(browser.tabs.sendMessage).mockRejectedValue(
-      new Error("no receiving end"),
-    );
+    sendTabMessage.mockRejectedValue(new Error("no receiving end"));
 
     await expect(requestSidePanelOpen(9)).resolves.toBe(false);
     expect(sidePanelOpen).not.toHaveBeenCalled();
@@ -185,9 +291,9 @@ describe("side panel gesture roundtrip", () => {
   it("resolves false when chrome refuses to open the panel", async () => {
     sidePanelOpen.mockRejectedValue(new Error("no user gesture"));
     const pending = requestSidePanelOpen(9);
-    await vi.waitFor(() =>
-      expect(browser.tabs.sendMessage).toHaveBeenCalledTimes(1),
-    );
+    await vi.waitFor(() => {
+      expect(sendTabMessage).toHaveBeenCalledTimes(1);
+    });
 
     answerLatestNonce(tabSender(9));
 
@@ -195,18 +301,25 @@ describe("side panel gesture roundtrip", () => {
   });
 
   it("does nothing on a browser without the side panel API", async () => {
-    delete (globalThis as Record<string, unknown>).chrome;
+    vi.stubGlobal("chrome", undefined);
 
     await expect(requestSidePanelOpen(9)).resolves.toBe(false);
-    expect(browser.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(sendTabMessage).not.toHaveBeenCalled();
   });
 
   describe("nonce and sender validation", () => {
+    let pending: Promise<boolean>;
+
+    afterEach(async () => {
+      resetSidePanelOpenerForTests();
+      await pending;
+    });
+
     beforeEach(async () => {
-      requestSidePanelOpen(9);
-      await vi.waitFor(() =>
-        expect(browser.tabs.sendMessage).toHaveBeenCalledTimes(1),
-      );
+      pending = requestSidePanelOpen(9);
+      await vi.waitFor(() => {
+        expect(sendTabMessage).toHaveBeenCalledTimes(1);
+      });
     });
 
     it("rejects an unknown nonce", () => {
@@ -230,9 +343,7 @@ describe("side panel gesture roundtrip", () => {
     });
 
     it("rejects a sender that is not a tab", () => {
-      expect(
-        answerLatestNonce({ id: "mock-id" } as browser.Runtime.MessageSender),
-      ).toBe(false);
+      expect(answerLatestNonce({ id: "mock-id" })).toBe(false);
       expect(sidePanelOpen).not.toHaveBeenCalled();
     });
 
@@ -245,6 +356,17 @@ describe("side panel gesture roundtrip", () => {
         ),
       ).toBe(false);
       expect(handleSidePanelOpenMessage(null, tabSender(9))).toBe(false);
+      const request: unknown = sendTabMessage.mock.calls[0]?.[1];
+      if (!isRecord(request)) throw new Error("Expected a panel request");
+      expect(
+        handleSidePanelOpenMessage(
+          Object.assign([], {
+            name: EXTENSION_MESSAGES.OPEN_SIDE_PANEL,
+            nonce: request.nonce,
+          }),
+          tabSender(9),
+        ),
+      ).toBe(false);
       expect(sidePanelOpen).not.toHaveBeenCalled();
     });
 

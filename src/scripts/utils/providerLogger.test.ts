@@ -1,13 +1,29 @@
 import log from "loglevel";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from "vitest";
 import { providerLogger } from "./providerLogger";
+
+let mockedLog: {
+  [Level in "error" | "warn" | "debug" | "info"]: MockInstance<
+    (typeof log)[Level]
+  >;
+};
 
 describe("providerLogger", () => {
   beforeEach(() => {
-    vi.spyOn(log, "error").mockImplementation(() => undefined);
-    vi.spyOn(log, "warn").mockImplementation(() => undefined);
-    vi.spyOn(log, "debug").mockImplementation(() => undefined);
-    vi.spyOn(log, "info").mockImplementation(() => undefined);
+    mockedLog = {
+      error: vi.spyOn(log, "error").mockImplementation(() => undefined),
+      warn: vi.spyOn(log, "warn").mockImplementation(() => undefined),
+      debug: vi.spyOn(log, "debug").mockImplementation(() => undefined),
+      info: vi.spyOn(log, "info").mockImplementation(() => undefined),
+    };
   });
 
   afterEach(() => {
@@ -23,7 +39,7 @@ describe("providerLogger", () => {
       stack: "...",
     });
 
-    expect(log.error).toHaveBeenCalledWith(
+    expect(mockedLog.error).toHaveBeenCalledWith(
       "QrlWallet: something went wrong",
       "Internal JSON-RPC error (code -32603)",
     );
@@ -32,7 +48,10 @@ describe("providerLogger", () => {
   it("prints the message of a real Error", () => {
     providerLogger.warn("QrlWallet - RPC Error:", new Error("boom"));
 
-    expect(log.warn).toHaveBeenCalledWith("QrlWallet - RPC Error:", "boom");
+    expect(mockedLog.warn).toHaveBeenCalledWith(
+      "QrlWallet - RPC Error:",
+      "boom",
+    );
   });
 
   it("drops a transient network failure to debug", () => {
@@ -41,8 +60,8 @@ describe("providerLogger", () => {
       { code: -32603, message: "Failed to fetch" },
     );
 
-    expect(log.error).not.toHaveBeenCalled();
-    expect(log.debug).toHaveBeenCalled();
+    expect(mockedLog.error).not.toHaveBeenCalled();
+    expect(mockedLog.debug).toHaveBeenCalled();
   });
 
   it("keeps a genuine error at error level", () => {
@@ -50,14 +69,14 @@ describe("providerLogger", () => {
       chainId: "nope",
     });
 
-    expect(log.error).toHaveBeenCalled();
-    expect(log.debug).not.toHaveBeenCalled();
+    expect(mockedLog.error).toHaveBeenCalled();
+    expect(mockedLog.debug).not.toHaveBeenCalled();
   });
 
   it("passes plain values through untouched", () => {
     providerLogger.info("QrlWallet:", 42, null);
 
-    expect(log.info).toHaveBeenCalledWith("QrlWallet:", 42, null);
+    expect(mockedLog.info).toHaveBeenCalledWith("QrlWallet:", 42, null);
   });
 
   it("keeps the page-reload notice visible", () => {
@@ -67,7 +86,7 @@ describe("providerLogger", () => {
       "QrlWallet: Disconnected from MyQRLWallet background. Page reload required.",
     );
 
-    expect(log.error).toHaveBeenCalled();
-    expect(log.debug).not.toHaveBeenCalled();
+    expect(mockedLog.error).toHaveBeenCalled();
+    expect(mockedLog.debug).not.toHaveBeenCalled();
   });
 });
