@@ -119,4 +119,21 @@ describe("withBoundMethods", () => {
 
     expect(provider.isConnected()).toBe(false);
   });
+
+  it("preserves non-function properties and binds symbol methods with arguments", () => {
+    const read = Symbol("read");
+    const metadata = { connected: true };
+    const provider = withBoundMethods({
+      metadata,
+      optional: undefined,
+      [read](suffix: string) {
+        return `${String(this.metadata.connected)}:${suffix}`;
+      },
+    });
+
+    expect(provider.metadata).toBe(metadata);
+    expect(provider.optional).toBeUndefined();
+    expect(provider[read]("chain")).toBe("true:chain");
+    expect(Reflect.get(provider, read)).toBe(Reflect.get(provider, read));
+  });
 });

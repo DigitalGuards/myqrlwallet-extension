@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isSidePanelSupported,
   resolveSidePanelPreferred,
@@ -7,17 +7,17 @@ import {
 
 const withSidePanelApi = (present: boolean) => {
   if (present) {
-    (globalThis as Record<string, unknown>).chrome = {
+    vi.stubGlobal("chrome", {
       sidePanel: { open: () => Promise.resolve() },
-    };
+    });
   } else {
-    (globalThis as Record<string, unknown>).chrome = {};
+    vi.stubGlobal("chrome", {});
   }
 };
 
 describe("resolveSidePanelPreferred", () => {
   afterEach(() => {
-    delete (globalThis as Record<string, unknown>).chrome;
+    vi.unstubAllGlobals();
   });
 
   it("defaults to the side panel when no explicit choice was made", () => {
@@ -66,6 +66,23 @@ describe("resolveSidePanelPreferred", () => {
     expect(isSidePanelSupported()).toBe(false);
     expect(resolveSidePanelPreferred({})).toBe(false);
   });
+
+  it.each([
+    undefined,
+    null,
+    { sidePanel: undefined },
+    { sidePanel: null },
+    { sidePanel: {} },
+    { sidePanel: { open: true } },
+  ])(
+    "fails closed when the browser API is unavailable or malformed (%j)",
+    (api) => {
+      vi.stubGlobal("chrome", api);
+
+      expect(isSidePanelSupported()).toBe(false);
+      expect(resolveSidePanelPreferred({})).toBe(false);
+    },
+  );
 
   it("marks the panel document so the UI can classify the surface", () => {
     expect(SIDE_PANEL_PATH).toBe("index.html?sidepanel=true");

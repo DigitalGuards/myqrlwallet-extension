@@ -11,12 +11,11 @@ import log from "loglevel";
 const formatLogArgument = (value: unknown): unknown => {
   if (value instanceof Error) return value.message;
   if (value === null || typeof value !== "object") return value;
-  const candidate = value as { message?: unknown; code?: unknown };
-  if (typeof candidate.message !== "string") return value;
-  const { code } = candidate;
+  if (!("message" in value) || typeof value.message !== "string") return value;
+  const code = "code" in value ? value.code : undefined;
   return typeof code === "number" || typeof code === "string"
-    ? `${candidate.message} (code ${String(code)})`
-    : candidate.message;
+    ? `${value.message} (code ${String(code)})`
+    : value.message;
 };
 
 /**

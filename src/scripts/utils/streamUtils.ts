@@ -9,8 +9,7 @@ import { pipeline } from "readable-stream";
  */
 export const isPrematureClose = (error: unknown) =>
   error instanceof Error &&
-  ((error as Error & { code?: unknown }).code ===
-    "ERR_STREAM_PREMATURE_CLOSE" ||
+  (("code" in error && error.code === "ERR_STREAM_PREMATURE_CLOSE") ||
     error.message === "Premature close");
 
 // Sets up stream multiplexing for the given stream
