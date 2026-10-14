@@ -1,5 +1,6 @@
 import type { NFTMetadata, NFTStandard } from "@/types/nft";
-import { isArrayOf, isRecord, isString } from "@/utilities/storageGuards";
+import { isMetadataText, type MetadataText } from "@/utilities/nftMetadata";
+import { isRecord, isString } from "@/utilities/storageGuards";
 
 type NFTGalleryState = {
   contractAddress: string;
@@ -10,12 +11,24 @@ type NFTGalleryState = {
 type NFTTransferState = NFTGalleryState & {
   tokenId: string;
   imageUrl?: string | null;
-  nftName?: string | null;
+  nftName?: MetadataText;
   balance?: string;
 };
 
 const isOptionalText = (value: unknown): value is string | null | undefined =>
   value === undefined || value === null || isString(value);
+
+const isNFTTokenId = (value: unknown): value is string => {
+  // BigInt accepts blank strings as zero. Require an explicit identifier and
+  // preserve every supported integer spelling for the signer's conversion.
+  if (!isString(value) || value.trim() === "") return false;
+  try {
+    const tokenId = BigInt(value);
+    return tokenId >= 0n && tokenId < 1n << 256n;
+  } catch {
+    return false;
+  }
+};
 
 export const isNFTGalleryState = (value: unknown): value is NFTGalleryState =>
   isRecord(value) &&
@@ -28,23 +41,18 @@ export const isNFTGalleryState = (value: unknown): value is NFTGalleryState =>
 
 export const isNFTTransferState = (value: unknown): value is NFTTransferState =>
   isRecord(value) &&
-  isString(value.tokenId) &&
+  isNFTTokenId(value.tokenId) &&
   isOptionalText(value.imageUrl) &&
-  isOptionalText(value.nftName) &&
+  isMetadataText(value.nftName) &&
   (value.balance === undefined || isString(value.balance)) &&
-  isNFTGalleryState(value);
-
-const isNFTAttribute = (
-  value: unknown,
-): value is NonNullable<NFTMetadata["attributes"]>[number] =>
-  isRecord(value) &&
-  (value.trait_type === undefined || isString(value.trait_type)) &&
-  (isString(value.value) || typeof value.value === "number");
+  isNFTGalleryState(value) &&
+  value.contractAddress.trim() !== "";
 
 export const isNFTMetadata = (value: unknown): value is NFTMetadata =>
   isRecord(value) &&
-  (value.name === undefined || isString(value.name)) &&
-  (value.description === undefined || isString(value.description)) &&
-  (value.image === undefined || isString(value.image)) &&
+  isMetadataText(value.name) &&
+  isMetadataText(value.description) &&
+  isOptionalText(value.image) &&
   (value.attributes === undefined ||
-    isArrayOf(value.attributes, isNFTAttribute));
+    value.attributes === null ||
+    Array.isArray(value.attributes));

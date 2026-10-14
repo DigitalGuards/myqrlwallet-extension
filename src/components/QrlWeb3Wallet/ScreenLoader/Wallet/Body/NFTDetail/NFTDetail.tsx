@@ -7,7 +7,14 @@ import {
   CardTitle,
 } from "@/components/UI/Card";
 import { ROUTES } from "@/router/router";
-import type { NFTMetadata, NFTStandard } from "@/types/nft";
+import type { NFTStandard } from "@/types/nft";
+import { isNFTTransferState } from "@/utilities/nftGuards";
+import {
+  isMetadataText,
+  metadataTextChildren,
+  metadataValueToString,
+} from "@/utilities/nftMetadata";
+import { isRecord, isString } from "@/utilities/storageGuards";
 import { Image, Send } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -16,18 +23,74 @@ import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackgrou
 import CopyableAddress from "../../../Shared/CopyableAddress/CopyableAddress";
 import { useState } from "react";
 
+const readNFTMetadata = (value: unknown) => {
+  if (!isRecord(value)) return null;
+  const attributes: unknown[] = Array.isArray(value.attributes)
+    ? value.attributes
+    : [];
+
+  // Each field contributes independently to this display view. Route metadata
+  // stays intact, including entries the view cannot render.
+  return {
+    name: isMetadataText(value.name) ? value.name : undefined,
+    description: isMetadataText(value.description)
+      ? value.description
+      : undefined,
+    attributes: attributes.flatMap((attribute) => {
+      if (attribute === null || attribute === undefined) return [];
+      // Primitive and array entries expose absent fields in the original view.
+      const fields = isRecord(attribute) ? attribute : {};
+      try {
+        return [
+          {
+            trait_type: isMetadataText(fields.trait_type)
+              ? fields.trait_type
+              : undefined,
+            // Preserve the original renderer's conversion of opaque values.
+            value: metadataValueToString(fields.value),
+          },
+        ];
+      } catch {
+        // A JSON object can shadow toString and make conversion fail.
+        return [];
+      }
+    }),
+  };
+};
+
 const NFTDetail = () => {
   const { t } = useTranslation();
-  const { state } = useLocation();
+  const state: unknown = useLocation().state;
   const navigate = useNavigate();
 
-  const contractAddress: string = state?.contractAddress ?? "";
-  const tokenId: string = state?.tokenId ?? "";
-  const collectionName: string = state?.collectionName ?? "";
-  const metadata: NFTMetadata | null = state?.metadata ?? null;
-  const imageUrl: string = state?.imageUrl ?? "";
-  const standard: NFTStandard = state?.standard ?? "ZRC721";
-  const balance: string | undefined = state?.balance;
+  const details = isRecord(state) ? state : {};
+  const contractAddress = isString(details.contractAddress)
+    ? details.contractAddress
+    : "";
+  const tokenId = isString(details.tokenId) ? details.tokenId : "";
+  const collectionName = isString(details.collectionName)
+    ? details.collectionName
+    : "";
+  const metadata = readNFTMetadata(details.metadata);
+  const imageUrl = isString(details.imageUrl) ? details.imageUrl : "";
+  const standard: NFTStandard =
+    details.standard === "ZRC1155" ? "ZRC1155" : "ZRC721";
+  const balance = isString(details.balance) ? details.balance : undefined;
+
+  // Validate transaction data before applying display fallbacks. A malformed
+  // identifier, standard or balance must keep its rejection at this boundary.
+  const transferDetails = {
+    contractAddress: details.contractAddress,
+    tokenId: details.tokenId,
+    collectionName: details.collectionName ?? "",
+    imageUrl: details.imageUrl ?? "",
+    nftName: metadata?.name ?? "",
+    standard: details.standard ?? "ZRC721",
+    balance: details.balance,
+  };
+  const transferState = isNFTTransferState(transferDetails)
+    ? transferDetails
+    : undefined;
 
   const [imageError, setImageError] = useState(false);
 
@@ -39,7 +102,9 @@ const NFTDetail = () => {
         <Card>
           <CardHeader>
             <CardTitle>
-              {metadata?.name || `${collectionName} #${tokenId}`}
+              {metadataTextChildren(
+                metadata?.name || `${collectionName} #${tokenId}`,
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -47,9 +112,15 @@ const NFTDetail = () => {
               {imageUrl && !imageError ? (
                 <img
                   src={imageUrl}
-                  alt={metadata?.name || `#${tokenId}`}
+                  alt={
+                    metadata?.name === true
+                      ? undefined
+                      : metadataValueToString(metadata?.name || `#${tokenId}`)
+                  }
                   className="w-full object-contain"
-                  onError={() => setImageError(true)}
+                  onError={() => {
+                    setImageError(true);
+                  }}
                 />
               ) : (
                 <div className="flex aspect-square w-full items-center justify-center">
@@ -60,11 +131,9 @@ const NFTDetail = () => {
 
             {metadata?.description && (
               <div className="flex flex-col gap-1">
-                <div className="text-sm font-bold">
-                  {t("nft.description")}
-                </div>
+                <div className="text-sm font-bold">{t("nft.description")}</div>
                 <div className="text-sm text-muted-foreground">
-                  {metadata.description}
+                  {metadataTextChildren(metadata.description)}
                 </div>
               </div>
             )}
@@ -108,20 +177,18 @@ const NFTDetail = () => {
 
             {metadata?.attributes && metadata.attributes.length > 0 && (
               <div className="flex flex-col gap-2">
-                <div className="text-sm font-bold">
-                  {t("nft.attributes")}
-                </div>
+                <div className="text-sm font-bold">{t("nft.attributes")}</div>
                 <div className="grid grid-cols-2 gap-2">
-                  {metadata.attributes.map((attr) => (
+                  {metadata.attributes.map((attr, index) => (
                     <Card
-                      key={attr.trait_type}
+                      key={`${index}:${metadataValueToString(attr.trait_type ?? "")}`}
                       className="flex flex-col gap-1 p-3"
                     >
                       <div className="truncate text-xs text-muted-foreground">
-                        {attr.trait_type}
+                        {metadataTextChildren(attr.trait_type)}
                       </div>
                       <div className="truncate text-xs font-bold">
-                        {String(attr.value)}
+                        {attr.value}
                       </div>
                     </Card>
                   ))}
@@ -133,19 +200,20 @@ const NFTDetail = () => {
             <Button
               className="w-full"
               type="button"
-              onClick={() =>
-                navigate(ROUTES.NFT_TRANSFER, {
-                  state: {
-                    contractAddress,
-                    tokenId,
-                    collectionName,
-                    imageUrl,
-                    nftName: metadata?.name ?? "",
-                    standard,
-                    balance,
-                  },
-                })
-              }
+              disabled={!transferState}
+              onClick={() => {
+                if (!transferState) return;
+                Promise.resolve(
+                  navigate(ROUTES.NFT_TRANSFER, {
+                    state: transferState,
+                  }),
+                ).catch((error: unknown) => {
+                  console.error(
+                    "[NFTDetail] Failed to open NFT transfer:",
+                    error,
+                  );
+                });
+              }}
             >
               <Send className="mr-2 h-4 w-4" />
               {t("nft.sendNftButton")}

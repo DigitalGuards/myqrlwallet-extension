@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  invalidNftTransferFields,
+  validNftTokenIds,
+} from "@/test-utils/nftTransferCases";
+import {
   isNFTGalleryState,
   isNFTMetadata,
   isNFTTransferState,
@@ -9,6 +13,22 @@ const gallery = { contractAddress: `Q${"a".repeat(128)}` };
 const transfer = { ...gallery, tokenId: "7" };
 
 describe("NFT boundary guards", () => {
+  it.each(invalidNftTransferFields)(
+    "rejects malformed transfer fields before display defaults: $label",
+    ({ field, value }) => {
+      expect(isNFTTransferState({ ...transfer, [field]: value })).toBe(false);
+    },
+  );
+
+  it.each(validNftTokenIds)(
+    "preserves a valid uint256 token ID %s",
+    (tokenId) => {
+      const state = { ...transfer, tokenId };
+      expect(isNFTTransferState(state)).toBe(true);
+      expect(state.tokenId).toBe(tokenId);
+    },
+  );
+
   it("accepts legacy route defaults and both NFT standards", () => {
     expect(isNFTGalleryState(gallery)).toBe(true);
     expect(isNFTTransferState(transfer)).toBe(true);
@@ -91,15 +111,15 @@ describe("NFT boundary guards", () => {
   });
 
   it.each(["name", "description", "image"])(
-    "accepts omitted, empty and populated metadata %s",
+    "accepts omitted, null, empty and populated metadata %s",
     (field) => {
-      for (const value of [undefined, "", "Token"]) {
+      for (const value of [undefined, null, "", "Token"]) {
         expect(isNFTMetadata({ [field]: value })).toBe(true);
       }
     },
   );
 
-  it.each([undefined, []])(
+  it.each([undefined, null, []])(
     "accepts optional attribute arrays %j",
     (attributes) => {
       expect(isNFTMetadata({ attributes })).toBe(true);
@@ -144,13 +164,6 @@ describe("NFT boundary guards", () => {
   });
 
   it.each([
-    undefined,
-    null,
-    [],
-    { name: {} },
-    { description: 4 },
-    { image: [] },
-    { attributes: {} },
     { attributes: [null] },
     { attributes: ["Happy"] },
     { attributes: [{}] },
@@ -162,6 +175,42 @@ describe("NFT boundary guards", () => {
     { attributes: [{ trait_type: 7, value: "red" }] },
     { attributes: [{ trait_type: "Color", value: {} }] },
     { attributes: [{ value: "Happy" }, { trait_type: "Color", value: {} }] },
+  ])(
+    "preserves opaque attribute entries for the detail reader: %j",
+    (value) => {
+      const original = structuredClone(value);
+      const attributes = value.attributes;
+      expect(isNFTMetadata(value)).toBe(true);
+      expect(value).toStrictEqual(original);
+      expect(value.attributes).toBe(attributes);
+    },
+  );
+
+  it.each([0, 4, true, false, [], ["Token", [7, null, false]]])(
+    "accepts renderable metadata and transfer names: %j",
+    (value) => {
+      expect(isNFTMetadata({ name: value, description: value })).toBe(true);
+      expect(isNFTTransferState({ ...transfer, nftName: value })).toBe(true);
+    },
+  );
+
+  it("rejects cyclic display text in metadata and transfer routes", () => {
+    const value: unknown[] = ["Token"];
+    value.push(value);
+    expect(isNFTMetadata({ name: value })).toBe(false);
+    expect(isNFTMetadata({ description: value })).toBe(false);
+    expect(isNFTTransferState({ ...transfer, nftName: value })).toBe(false);
+  });
+
+  it.each([
+    undefined,
+    null,
+    [],
+    { name: {} },
+    { name: ["Token", {}] },
+    { description: {} },
+    { image: [] },
+    { attributes: {} },
   ])("rejects malformed metadata %j", (value) => {
     expect(isNFTMetadata(value)).toBe(false);
   });

@@ -24,6 +24,10 @@ import { useStore } from "@/stores/store";
 import type { NFTStandard } from "@/types/nft";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { isCanonicalQrlAddress, isQrlAddress } from "@/utilities/addressUtil";
+import {
+  metadataTextChildren,
+  metadataValueToString,
+} from "@/utilities/nftMetadata";
 import { isNFTTransferState } from "@/utilities/nftGuards";
 import StorageUtil from "@/utilities/storageUtil";
 import { isQrnsName, resolveQrnsName } from "@/utilities/qrnsResolver";
@@ -231,7 +235,7 @@ const NFTTransfer = observer(() => {
         to: receiver,
         amount: 0,
         tokenSymbol: collectionName,
-        tokenName: `${nftName || collectionName} #${tokenId}${sentAmountSuffix}`,
+        tokenName: `${metadataValueToString(nftName || collectionName)} #${tokenId}${sentAmountSuffix}`,
         isZrc20Token: false,
         tokenContractAddress: contractAddress,
         tokenDecimals: 0,
@@ -420,7 +424,11 @@ const NFTTransfer = observer(() => {
                   {nftImageUrl && !imageError ? (
                     <img
                       src={nftImageUrl}
-                      alt={nftName || `#${tokenId}`}
+                      alt={
+                        nftName === true
+                          ? undefined
+                          : metadataValueToString(nftName || `#${tokenId}`)
+                      }
                       className="h-full w-full object-cover"
                       onError={() => {
                         setImageError(true);
@@ -434,7 +442,9 @@ const NFTTransfer = observer(() => {
                 </div>
                 <div className="flex flex-col gap-1">
                   <div className="text-sm font-bold">
-                    {nftName || `${collectionName} #${tokenId}`}
+                    {metadataTextChildren(
+                      nftName || `${collectionName} #${tokenId}`,
+                    )}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     Token #{tokenId}

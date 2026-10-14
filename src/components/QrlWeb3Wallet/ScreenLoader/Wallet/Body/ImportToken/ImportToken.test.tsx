@@ -2,7 +2,7 @@ import { mockedStore } from "@/__mocks__/mockedStore";
 import { discoverTokens } from "@/services/assetDiscovery";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import ImportToken from "./ImportToken";
@@ -29,6 +29,7 @@ describe("ImportToken", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
@@ -145,6 +146,35 @@ describe("ImportToken", () => {
       screen.getByRole("textbox", { name: "contractAddress" }),
     ).toHaveValue(DISCOVERED_ADDRESS);
     // The prefilled address is valid input, so a retry is one click away.
+    expect(
+      screen.getByRole("button", { name: "Fetch token details" }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "Import" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reports a rejected manual lookup and releases the submit state", async () => {
+    const error = new Error("Lookup failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const getZrc20TokenDetails = vi
+      .fn<ReturnType<typeof mockedStore>["qrlStore"]["getZrc20TokenDetails"]>()
+      .mockRejectedValueOnce(error);
+    renderComponent(mockedStore({ qrlStore: { getZrc20TokenDetails } }));
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "contractAddress" }),
+      DISCOVERED_ADDRESS,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Fetch token details" }),
+    );
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "[ImportToken] Failed to fetch token details:",
+        error,
+      );
+    });
+    expect(getZrc20TokenDetails).toHaveBeenCalledWith(DISCOVERED_ADDRESS);
     expect(
       screen.getByRole("button", { name: "Fetch token details" }),
     ).toBeEnabled();

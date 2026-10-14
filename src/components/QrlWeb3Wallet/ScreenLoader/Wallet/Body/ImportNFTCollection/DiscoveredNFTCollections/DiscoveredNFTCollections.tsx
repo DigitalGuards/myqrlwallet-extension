@@ -42,7 +42,7 @@ const DiscoveredNFTCollections = observer(() => {
   useEffect(() => {
     let cancelled = false;
     setSelected(new Set());
-    (async () => {
+    const loadCollections = async () => {
       if (!accountAddress) return;
       const [discovered, stored] = await Promise.all([
         discoverNftCollections(accountAddress, blockchain.chainId),
@@ -58,7 +58,13 @@ const DiscoveredNFTCollections = observer(() => {
           (collection) => !existing.has(collection.address.toLowerCase()),
         ),
       );
-    })();
+    };
+    loadCollections().catch((error: unknown) => {
+      console.error(
+        "[DiscoveredNFTCollections] Failed to load collections:",
+        error,
+      );
+    });
     return () => {
       cancelled = true;
     };
@@ -90,7 +96,7 @@ const DiscoveredNFTCollections = observer(() => {
           image: "",
         });
       }
-      navigate(ROUTES.HOME);
+      await navigate(ROUTES.HOME);
     } finally {
       setIsAdding(false);
     }
@@ -129,7 +135,9 @@ const DiscoveredNFTCollections = observer(() => {
                   id={`discovered-collection-${key}`}
                   name={`discoveredCollection-${key}`}
                   checked={selected.has(key)}
-                  onCheckedChange={() => toggleSelection(collection.address)}
+                  onCheckedChange={() => {
+                    toggleSelection(collection.address);
+                  }}
                   disabled={isAdding}
                 />
                 <Label
@@ -169,7 +177,14 @@ const DiscoveredNFTCollections = observer(() => {
           type="button"
           className="w-full"
           disabled={selected.size === 0 || isAdding}
-          onClick={addSelected}
+          onClick={() => {
+            addSelected().catch((error: unknown) => {
+              console.error(
+                "[DiscoveredNFTCollections] Failed to import collections:",
+                error,
+              );
+            });
+          }}
         >
           {isAdding ? (
             <>

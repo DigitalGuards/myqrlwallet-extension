@@ -37,18 +37,18 @@ const createFormSchema = (t: TFunction) =>
 const ImportNFTCollection = observer(() => {
   const { t } = useTranslation();
   const { qrlStore } = useStore();
-  const { getNftCollectionDetails } = qrlStore;
-
   const [collection, setCollection] =
     useState<
-      Awaited<ReturnType<typeof getNftCollectionDetails>>["collection"]
+      Awaited<ReturnType<typeof qrlStore.getNftCollectionDetails>>["collection"]
     >();
   const [hasImported, setHasImported] = useState(false);
 
   const FormSchema = createFormSchema(t);
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
-    const details = await getNftCollectionDetails(formData.contractAddress);
+    const details = await qrlStore.getNftCollectionDetails(
+      formData.contractAddress,
+    );
     if (details.error) {
       control.setError("contractAddress", { message: details.error });
     } else {
@@ -96,7 +96,14 @@ const ImportNFTCollection = observer(() => {
               name="importNFTCollection"
               aria-label="importNFTCollection"
               className="w-full"
-              onSubmit={handleSubmit(onSubmit)}
+              onSubmit={(event) => {
+                handleSubmit(onSubmit)(event).catch((error: unknown) => {
+                  console.error(
+                    "[ImportNFTCollection] Failed to fetch collection details:",
+                    error,
+                  );
+                });
+              }}
             >
               <Card>
                 <CardHeader>

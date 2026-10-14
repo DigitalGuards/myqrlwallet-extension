@@ -54,13 +54,13 @@ const NFTCollectionImportSuccess = observer(
         standard,
         image: "",
       });
-      navigate(ROUTES.HOME);
+      await navigate(ROUTES.HOME);
     };
 
     return (
       <Card className="w-full">
         <CardHeader>
-          <CardTitle>{t('nft.importCollection')}</CardTitle>
+          <CardTitle>{t("nft.importCollection")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-col gap-4">
@@ -69,7 +69,7 @@ const NFTCollectionImportSuccess = observer(
               size={64}
             />
             <div className="flex flex-col gap-1">
-              <div>{t('nft.contractAddress')}</div>
+              <div>{t("nft.contractAddress")}</div>
               <CopyableAddress
                 address={contractAddress}
                 className="font-bold text-secondary"
@@ -78,23 +78,25 @@ const NFTCollectionImportSuccess = observer(
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-1">
-              <div>{t('nft.collectionName')}</div>
+              <div>{t("nft.collectionName")}</div>
               <div className="font-bold text-secondary">{name}</div>
             </div>
             <div className="flex flex-col gap-1">
-              <div>{t('nft.collectionSymbol')}</div>
+              <div>{t("nft.collectionSymbol")}</div>
               <div className="font-bold text-secondary">{symbol}</div>
             </div>
             <div className="flex flex-col gap-1">
-              <div>{t('nft.standard')}</div>
+              <div>{t("nft.standard")}</div>
               <div className="font-bold text-secondary">
                 {standard === "ZRC1155" ? "ZRC-1155" : "ZRC-721"}
               </div>
             </div>
             {balance !== undefined && (
               <div className="flex flex-col gap-1">
-                <div>{t('nft.ownedCount')}</div>
-                <div className="font-numeric font-bold text-secondary">{balance}</div>
+                <div>{t("nft.ownedCount")}</div>
+                <div className="font-numeric font-bold text-secondary">
+                  {balance}
+                </div>
               </div>
             )}
           </div>
@@ -107,11 +109,22 @@ const NFTCollectionImportSuccess = observer(
             onClick={onCancelImport}
           >
             <X className="mr-2 h-4 w-4" />
-            {t('nft.cancelImport')}
+            {t("nft.cancelImport")}
           </Button>
-          <Button className="w-full" type="button" onClick={onConfirmImport}>
+          <Button
+            className="w-full"
+            type="button"
+            onClick={() => {
+              onConfirmImport().catch((error: unknown) => {
+                console.error(
+                  "[NFTCollectionImportSuccess] Failed to import collection:",
+                  error,
+                );
+              });
+            }}
+          >
             <Download className="mr-2 h-4 w-4" />
-            {t('nft.confirmImport')}
+            {t("nft.confirmImport")}
           </Button>
         </CardFooter>
       </Card>

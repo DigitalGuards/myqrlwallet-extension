@@ -1,10 +1,11 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
+import type StorageUtil from "@/utilities/storageUtil";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, type NavigateFunction } from "react-router-dom";
 import ImportLedger from "./ImportLedger";
 
 const {
@@ -14,11 +15,19 @@ const {
   mockGetLedgerAccounts,
   mockGetAllAccounts,
 } = vi.hoisted(() => ({
-  mockNavigate: vi.fn(),
-  mockAddLedgerAccountToAllAccounts: vi.fn().mockResolvedValue(undefined),
-  mockSetLedgerAccounts: vi.fn().mockResolvedValue(undefined),
-  mockGetLedgerAccounts: vi.fn().mockResolvedValue([]),
-  mockGetAllAccounts: vi.fn().mockResolvedValue([]),
+  mockNavigate: vi.fn<NavigateFunction>(),
+  mockAddLedgerAccountToAllAccounts: vi
+    .fn<typeof StorageUtil.addLedgerAccountToAllAccounts>()
+    .mockResolvedValue(undefined),
+  mockSetLedgerAccounts: vi
+    .fn<typeof StorageUtil.setLedgerAccounts>()
+    .mockResolvedValue(undefined),
+  mockGetLedgerAccounts: vi
+    .fn<typeof StorageUtil.getLedgerAccounts>()
+    .mockResolvedValue([]),
+  mockGetAllAccounts: vi
+    .fn<typeof StorageUtil.getAllAccounts>()
+    .mockResolvedValue([]),
 }));
 
 vi.mock("react-router-dom", async () => ({
@@ -28,33 +37,29 @@ vi.mock("react-router-dom", async () => ({
   useNavigate: () => mockNavigate,
 }));
 
-vi.mock("@/utilities/storageUtil", async () => {
-  const addFn = (...args: any[]) => mockAddLedgerAccountToAllAccounts(...args);
-  const setFn = (...args: any[]) => mockSetLedgerAccounts(...args);
-  const getFn = (...args: any[]) => mockGetLedgerAccounts(...args);
-  const getAllFn = (...args: any[]) => mockGetAllAccounts(...args);
-  return {
-    __esModule: true,
-    default: {
-      addLedgerAccountToAllAccounts: addFn,
-      setLedgerAccounts: setFn,
-      getLedgerAccounts: getFn,
-      getAllAccounts: getAllFn,
-    },
-  };
-});
+vi.mock("@/utilities/storageUtil", () => ({
+  default: {
+    addLedgerAccountToAllAccounts: mockAddLedgerAccountToAllAccounts,
+    setLedgerAccounts: mockSetLedgerAccounts,
+    getLedgerAccounts: mockGetLedgerAccounts,
+    getAllAccounts: mockGetAllAccounts,
+  },
+}));
 
 describe("ImportLedger", () => {
   afterEach(() => {
     cleanup();
-    mockNavigate.mockClear();
+    mockNavigate.mockReset();
     mockAddLedgerAccountToAllAccounts.mockReset().mockResolvedValue(undefined);
     mockSetLedgerAccounts.mockReset().mockResolvedValue(undefined);
     mockGetLedgerAccounts.mockReset().mockResolvedValue([]);
     mockGetAllAccounts.mockReset().mockResolvedValue([]);
+    vi.restoreAllMocks();
   });
 
-  const renderComponent = (storeOverrides = {}) =>
+  const renderComponent = (
+    storeOverrides: Parameters<typeof mockedStore>[0] = {},
+  ) =>
     render(
       <StoreProvider value={mockedStore(storeOverrides)}>
         <MemoryRouter>
@@ -97,7 +102,7 @@ describe("ImportLedger", () => {
       const mockConnect = vi.fn().mockResolvedValue(undefined);
 
       renderComponent({
-        ledgerStore: { connect: mockConnect } as any,
+        ledgerStore: { connect: mockConnect },
       });
 
       const button = screen.getByRole("button", { name: /Connect Ledger/i });
@@ -108,7 +113,7 @@ describe("ImportLedger", () => {
 
     it("should show Connecting... when isConnecting is true", () => {
       renderComponent({
-        ledgerStore: { isConnecting: true } as any,
+        ledgerStore: { isConnecting: true },
       });
 
       expect(screen.getByText("Connecting...")).toBeInTheDocument();
@@ -118,7 +123,7 @@ describe("ImportLedger", () => {
 
     it("should display connectionError from store", () => {
       renderComponent({
-        ledgerStore: { connectionError: "Device not found" } as any,
+        ledgerStore: { connectionError: "Device not found" },
       });
 
       expect(screen.getByText("Device not found")).toBeInTheDocument();
@@ -130,7 +135,7 @@ describe("ImportLedger", () => {
         .mockRejectedValue(new Error("WebHID not supported"));
 
       renderComponent({
-        ledgerStore: { connect: mockConnect } as any,
+        ledgerStore: { connect: mockConnect },
       });
 
       await userEvent.click(
@@ -146,7 +151,7 @@ describe("ImportLedger", () => {
       const mockConnect = vi.fn().mockRejectedValue("unknown error");
 
       renderComponent({
-        ledgerStore: { connect: mockConnect } as any,
+        ledgerStore: { connect: mockConnect },
       });
 
       await userEvent.click(
@@ -191,7 +196,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       expect(screen.getByText("Select Accounts")).toBeInTheDocument();
@@ -207,7 +212,7 @@ describe("ImportLedger", () => {
           accounts: ledgerAccounts,
           deviceInfo: { model: "Nano S Plus", version: "1.2.3" },
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       expect(
@@ -222,7 +227,7 @@ describe("ImportLedger", () => {
           accounts: [],
           isLoadingAccounts: true,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       expect(screen.getByText("Loading accounts...")).toBeInTheDocument();
@@ -234,7 +239,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       expect(
@@ -269,7 +274,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       // Initially the button says "Import 0 accounts" and is disabled
@@ -305,7 +310,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       const importButton = screen.getByRole("button", {
@@ -320,6 +325,7 @@ describe("ImportLedger", () => {
         index: 5,
         derivationPath: "m/44'/238'/0'/0/5",
         publicKey: "0xpubExisting",
+        futureMetadata: { label: "Keep this account metadata" },
       };
       mockGetLedgerAccounts.mockReset().mockResolvedValue([existingAccount]);
 
@@ -330,7 +336,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
         qrlStore: {
           fetchAccounts: mockFetchAccounts,
         },
@@ -378,7 +384,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       await userEvent.click(screen.getByText("Account #1"));
@@ -401,7 +407,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       await userEvent.click(screen.getByText("Account #1"));
@@ -439,7 +445,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       expect(
@@ -454,7 +460,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       expect(screen.getByRole("button", { name: /Previous/i })).toBeDisabled();
@@ -469,7 +475,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: mockFetchPageAccounts,
-        } as any,
+        },
       });
 
       // Clear the initial call from useEffect
@@ -488,7 +494,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: mockFetchPageAccounts,
-        } as any,
+        },
       });
 
       mockFetchPageAccounts.mockClear();
@@ -511,7 +517,7 @@ describe("ImportLedger", () => {
           accounts: ledgerAccounts,
           isLoadingAccounts: true,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       expect(screen.getByRole("button", { name: /Previous/i })).toBeDisabled();
@@ -529,7 +535,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: mockFetchPageAccounts,
-        } as any,
+        },
       });
 
       await userEvent.click(screen.getByRole("button", { name: /Next/i }));
@@ -550,7 +556,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: mockFetchPageAccounts,
-        } as any,
+        },
       });
 
       await userEvent.click(screen.getByRole("button", { name: /Next/i }));
@@ -596,7 +602,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       await waitFor(() => {
@@ -615,7 +621,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       await waitFor(() => {
@@ -641,7 +647,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
       });
 
       await waitFor(() => {
@@ -669,7 +675,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
         qrlStore: {
           fetchAccounts: vi.fn().mockResolvedValue(undefined),
         },
@@ -714,7 +720,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: ledgerAccounts,
           fetchPageAccounts: vi.fn().mockResolvedValue(undefined),
-        } as any,
+        },
         qrlStore: {
           fetchAccounts: vi.fn().mockResolvedValue(undefined),
         },
@@ -756,7 +762,7 @@ describe("ImportLedger", () => {
           fetchPageAccounts: vi
             .fn()
             .mockRejectedValue(new Error("App not open")),
-        } as any,
+        },
       });
 
       await waitFor(() => {
@@ -770,7 +776,7 @@ describe("ImportLedger", () => {
           isConnected: true,
           accounts: [],
           fetchPageAccounts: vi.fn().mockRejectedValue("unknown"),
-        } as any,
+        },
       });
 
       await waitFor(() => {
@@ -779,5 +785,57 @@ describe("ImportLedger", () => {
         ).toBeInTheDocument();
       });
     });
+  });
+
+  it.each([
+    [new Error("Account storage unavailable"), "Account storage unavailable"],
+    ["unknown", "Failed to load accounts"],
+  ])("reports a rejected stored-account read: %s", async (error, message) => {
+    mockGetAllAccounts.mockRejectedValueOnce(error);
+    renderComponent({ ledgerStore: { isConnected: true } });
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(mockSetLedgerAccounts).not.toHaveBeenCalled();
+    expect(mockAddLedgerAccountToAllAccounts).not.toHaveBeenCalled();
+  });
+
+  it("reports a disconnect rejection during cleanup", async () => {
+    const error = new Error("Disconnect failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const disconnect = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(error);
+    const { unmount } = renderComponent({ ledgerStore: { disconnect } });
+    unmount();
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "[ImportLedger] Failed to disconnect:",
+        error,
+      );
+    });
+  });
+
+  it("reports navigation failure after a successful import", async () => {
+    const error = new Error("Navigation failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockNavigate.mockRejectedValueOnce(error);
+    renderComponent({
+      ledgerStore: {
+        isConnected: true,
+        accounts: [{ address: `Q${"a".repeat(128)}`, index: 0 }],
+      },
+    });
+    await userEvent.click(screen.getByText("Account #1"));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Import 1 account" }),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "[ImportLedger] Failed to navigate home:",
+        error,
+      );
+    });
+    expect(mockSetLedgerAccounts).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Import Successful")).toBeInTheDocument();
   });
 });
