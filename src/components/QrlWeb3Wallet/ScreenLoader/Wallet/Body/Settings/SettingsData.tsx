@@ -76,7 +76,13 @@ const SettingsData = observer(() => {
                 size="icon"
                 className="size-8 shrink-0 transition-all hover:text-secondary"
                 aria-label={t("common.back")}
-                onClick={() => navigate(ROUTES.SETTINGS)}
+                onClick={() => {
+                  Promise.resolve(navigate(ROUTES.SETTINGS)).catch(
+                    (error: unknown) => {
+                      console.error("Failed to open settings:", error);
+                    },
+                  );
+                }}
                 data-testid="back-arrow"
               >
                 <MoveLeft />
@@ -91,7 +97,9 @@ const SettingsData = observer(() => {
             <Button
               variant="outline"
               size="sm"
-              onClick={exportBackup}
+              onClick={() => {
+                void exportBackup();
+              }}
               disabled={exporting}
             >
               <Download className="mr-1 h-3.5 w-3.5" />
@@ -111,7 +119,9 @@ const SettingsData = observer(() => {
             <Button
               variant="destructive"
               size="sm"
-              onClick={() => setResetDialogOpen(true)}
+              onClick={() => {
+                setResetDialogOpen(true);
+              }}
             >
               <Trash2 className="mr-1 h-3.5 w-3.5" />
               {t("settings.data.resetButton")}
