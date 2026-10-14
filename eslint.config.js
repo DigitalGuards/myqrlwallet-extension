@@ -454,14 +454,6 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/components/UI/Form.tsx"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unnecessary-template-expression": "off",
-    },
-  },
-  {
     files: ["src/scripts/utils/approvalSurface.test.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
