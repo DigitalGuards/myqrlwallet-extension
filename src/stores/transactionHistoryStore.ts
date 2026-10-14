@@ -22,8 +22,6 @@ import {
   runInAction,
 } from "mobx";
 
-type ReceiptStatus = string | number | bigint;
-
 /**
  * True once a transaction is known to have been included in a block,
  * whether it succeeded or reverted. Both outcomes consume the nonce, so
@@ -52,15 +50,7 @@ const isCancellation = (
 };
 
 type QrlInstance = {
-  getTransactionReceipt: (txHash: string) => Promise<
-    | {
-        status?: ReceiptStatus;
-        blockNumber?: bigint;
-        gasUsed?: bigint;
-        effectiveGasPrice?: bigint;
-      }
-    | undefined
-  >;
+  getTransactionReceipt: (txHash: string) => Promise<unknown>;
 };
 
 class TransactionHistoryStore {
@@ -343,7 +333,7 @@ class TransactionHistoryStore {
   startPolling(accountAddress: string, qrlInstance: QrlInstance) {
     this.stopPolling();
 
-    this.pollingInterval = setInterval(async () => {
+    const poll = async () => {
       const pending = this.pendingTransactions;
       if (pending.length === 0) {
         this.stopPolling();
@@ -402,6 +392,11 @@ class TransactionHistoryStore {
       }
 
       await this.reconcileReplacedTransactions(accountAddress);
+    };
+    this.pollingInterval = setInterval(() => {
+      poll().catch((error: unknown) => {
+        console.error("Failed to poll transaction history:", error);
+      });
     }, 10000);
   }
 

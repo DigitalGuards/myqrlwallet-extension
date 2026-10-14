@@ -1,29 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import QrlStore from "./qrlStore";
+import { deferred } from "@/test-utils/deferred";
 import StorageUtil from "@/utilities/storageUtil";
 
 afterEach(() => vi.restoreAllMocks());
 
 it("a stale startup cannot clear an account during unlock initialization", async () => {
-  const initialize = QrlStore.prototype.initializeBlockchain;
-  vi.spyOn(QrlStore.prototype, "initializeBlockchain").mockResolvedValue();
+  const initializeSpy = vi.spyOn(QrlStore.prototype, "initializeBlockchain");
+  initializeSpy.mockResolvedValue();
   vi.spyOn(QrlStore.prototype, "refreshBlockchainData").mockResolvedValue();
-  let releaseFirst!: () => void;
-  let releaseSecond!: () => void;
+  const firstNetwork = deferred<undefined>();
+  const secondNetwork = deferred<undefined>();
   const network = vi
     .spyOn(QrlStore.prototype, "fetchQrlConnection")
-    .mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          releaseFirst = resolve;
-        }),
-    )
-    .mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          releaseSecond = resolve;
-        }),
-    );
+    .mockReturnValueOnce(firstNetwork.promise)
+    .mockReturnValueOnce(secondNetwork.promise);
   const fetchAccounts = vi
     .spyOn(QrlStore.prototype, "fetchAccounts")
     .mockResolvedValue();
@@ -34,16 +25,21 @@ it("a stale startup cannot clear an account during unlock initialization", async
     () => undefined,
   );
   const store = new QrlStore();
+  initializeSpy.mockRestore();
 
-  const first = initialize.call(store);
-  await vi.waitFor(() => expect(network).toHaveBeenCalledTimes(1));
-  const second = initialize.call(store);
-  await vi.waitFor(() => expect(network).toHaveBeenCalledTimes(2));
-  releaseFirst();
+  const first = QrlStore.prototype.initializeBlockchain.call(store);
+  await vi.waitFor(() => {
+    expect(network).toHaveBeenCalledTimes(1);
+  });
+  const second = QrlStore.prototype.initializeBlockchain.call(store);
+  await vi.waitFor(() => {
+    expect(network).toHaveBeenCalledTimes(2);
+  });
+  firstNetwork.resolve(undefined);
   await first;
   expect(fetchAccounts).not.toHaveBeenCalled();
   expect(validate).not.toHaveBeenCalled();
-  releaseSecond();
+  secondNetwork.resolve(undefined);
   await second;
   expect(fetchAccounts).toHaveBeenCalledTimes(1);
   expect(validate).toHaveBeenCalledTimes(1);
@@ -59,13 +55,8 @@ describe("active account hydration", () => {
       accounts: [{ accountAddress: address, accountBalance: "0" }],
       isLoading: false,
     };
-    let release!: (address: string) => void;
-    vi.spyOn(StorageUtil, "getActiveAccount").mockImplementation(
-      () =>
-        new Promise<string>((resolve) => {
-          release = resolve;
-        }),
-    );
+    const { promise, resolve: release } = deferred<string>();
+    vi.spyOn(StorageUtil, "getActiveAccount").mockReturnValue(promise);
     const hydration = store.validateActiveAccount();
     expect(store.activeAccount.accountAddress).toBe(address);
     release(address);

@@ -3,7 +3,7 @@ const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import HiddenAccountsStore from "./hiddenAccountsStore";
 
-const localStore: Record<string, any> = {};
+const localStore: Record<string, unknown> = {};
 vi.mock("webextension-polyfill", () => ({
   __esModule: true,
   default: {
@@ -18,17 +18,18 @@ vi.mock("webextension-polyfill", () => ({
                 : {},
           ),
         ),
-        set: vi.fn((data: Record<string, any>) => {
+        set: vi.fn((data: Record<string, unknown>) => {
           Object.assign(localStore, data);
           return Promise.resolve();
         }),
         remove: vi.fn((key: string | string[]) => {
           for (const item of Array.isArray(key) ? key : [key])
-            delete localStore[item];
+            Reflect.deleteProperty(localStore, item);
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
-          for (const k of Object.keys(localStore)) delete localStore[k];
+          for (const k of Object.keys(localStore))
+            Reflect.deleteProperty(localStore, k);
           return Promise.resolve();
         }),
       },
@@ -44,7 +45,8 @@ describe("HiddenAccountsStore", () => {
   let store: HiddenAccountsStore;
 
   beforeEach(() => {
-    for (const k of Object.keys(localStore)) delete localStore[k];
+    for (const k of Object.keys(localStore))
+      Reflect.deleteProperty(localStore, k);
     store = new HiddenAccountsStore();
   });
 

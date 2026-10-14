@@ -18,11 +18,7 @@ import { useTranslation } from "react-i18next";
 const SidePanelNotice = observer(() => {
   const { t } = useTranslation();
   const { settingsStore } = useStore();
-  const {
-    sidePanelNoticePending,
-    dismissSidePanelNotice,
-    setSidePanelPreferred,
-  } = settingsStore;
+  const { sidePanelNoticePending } = settingsStore;
 
   if (!sidePanelNoticePending) {
     return null;
@@ -37,14 +33,29 @@ const SidePanelNotice = observer(() => {
             <button
               type="button"
               className="font-medium text-primary underline underline-offset-2"
-              onClick={() => setSidePanelPreferred(false)}
+              onClick={() => {
+                settingsStore
+                  .setSidePanelPreferred(false)
+                  .catch((error: unknown) => {
+                    console.error("Failed to switch to popup:", error);
+                  });
+              }}
             >
               {t("sidePanelNotice.usePopup")}
             </button>
             <button
               type="button"
               className="font-medium underline underline-offset-2"
-              onClick={dismissSidePanelNotice}
+              onClick={() => {
+                settingsStore
+                  .dismissSidePanelNotice()
+                  .catch((error: unknown) => {
+                    console.error(
+                      "Failed to dismiss side-panel notice:",
+                      error,
+                    );
+                  });
+              }}
             >
               {t("sidePanelNotice.dismiss")}
             </button>

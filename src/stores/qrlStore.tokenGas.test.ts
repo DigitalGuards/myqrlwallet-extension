@@ -1,10 +1,24 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+const { transfer } = vi.hoisted(() => ({
+  transfer:
+    vi.fn<
+      () => {
+        call: ReturnType<typeof vi.fn>;
+        estimateGas: ReturnType<typeof vi.fn>;
+      }
+    >(),
+}));
+
 vi.mock("@theqrl/web3", () => {
   class MockWeb3 {
-    static providers = { HttpProvider: class {} };
-    qrl = {};
-    constructor(_opts: unknown) {}
+    static providers = { HttpProvider: vi.fn() };
+    qrl = {
+      Contract: class {
+        methods = { transfer };
+      },
+      getBlock: vi.fn().mockResolvedValue({ baseFeePerGas: 1000n }),
+    };
   }
   return {
     __esModule: true,
@@ -29,6 +43,7 @@ vi.mock("@/utilities/storageUtil", () => ({
 }));
 
 import QrlStore from "./qrlStore";
+import Web3 from "@theqrl/web3";
 
 const FROM = `Q${"a".repeat(128)}`;
 const TO = `Q${"b".repeat(128)}`;
@@ -44,17 +59,12 @@ const storeWithContract = (transferStubs: {
 }) => {
   vi.spyOn(QrlStore.prototype, "initializeBlockchain").mockResolvedValue();
   const store = new QrlStore();
-  const transfer = vi.fn(() => ({
+  transfer.mockReturnValue({
     call: transferStubs.call ?? vi.fn().mockResolvedValue(true),
     estimateGas:
       transferStubs.estimateGas ?? vi.fn().mockResolvedValue(BigInt(60000)),
-  }));
-  store.qrlInstance = {
-    Contract: class {
-      methods = { transfer };
-    },
-    getBlock: vi.fn().mockResolvedValue({ baseFeePerGas: BigInt(1000) }),
-  } as never;
+  });
+  store.qrlInstance = new Web3().qrl;
   return { store, transfer };
 };
 

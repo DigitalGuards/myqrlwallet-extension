@@ -4,27 +4,38 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import type { KeyStore } from "@theqrl/web3";
 import { toChecksumAddress } from "@theqrl/wallet.js";
+import type {
+  ConnectedAccountsDataType,
+  DAppRequestType,
+} from "@/scripts/middlewares/middlewareTypes";
+import { malformed } from "@/test-utils/malformed";
+import {
+  getStoredValue,
+  isArrayOf,
+  isContact,
+} from "@/utilities/storageGuards";
 
 // In-memory mock of browser.storage.local and browser.storage.session
-const localStore: Record<string, any> = {};
-const sessionStore: Record<string, any> = {};
+const localStore: Record<string, unknown> = {};
+const sessionStore: Record<string, unknown> = {};
 
-const makeStorageArea = (store: Record<string, any>) => ({
+const makeStorageArea = (store: Record<string, unknown>) => ({
   get: vi.fn((key: string | null) =>
     Promise.resolve(
       key === null ? { ...store } : key in store ? { [key]: store[key] } : {},
     ),
   ),
-  set: vi.fn((data: Record<string, any>) => {
+  set: vi.fn((data: Record<string, unknown>) => {
     Object.assign(store, data);
     return Promise.resolve();
   }),
   remove: vi.fn((key: string | string[]) => {
-    for (const item of Array.isArray(key) ? key : [key]) delete store[item];
+    for (const item of Array.isArray(key) ? key : [key])
+      Reflect.deleteProperty(store, item);
     return Promise.resolve();
   }),
   clear: vi.fn(() => {
-    for (const k of Object.keys(store)) delete store[k];
+    for (const k of Object.keys(store)) Reflect.deleteProperty(store, k);
     return Promise.resolve();
   }),
 });
@@ -77,12 +88,8 @@ vi.mock("@/configuration/qrlBlockchainConfig", () => ({
   ],
 }));
 
-vi.mock("@theqrl/web3", () => ({
-  KeyStore: class {},
-}));
-
-const clearStore = (store: Record<string, any>) => {
-  for (const k of Object.keys(store)) delete store[k];
+const clearStore = (store: Record<string, unknown>) => {
+  for (const k of Object.keys(store)) Reflect.deleteProperty(store, k);
 };
 
 const ACCOUNT = toChecksumAddress(`Q${"a".repeat(128)}`);
@@ -262,8 +269,12 @@ describe("StorageUtil", () => {
 
     it("rejects malformed keystore addresses", async () => {
       await expect(
-        StorageUtil.setKeystores([{ id: "bad", address: "Q123" }] as any),
+        StorageUtil.setKeystores([
+          malformed<KeyStore>({ id: "bad", address: "Q123" }),
+        ]),
       ).rejects.toThrow("invalid QRL address");
+      expect(mockLocal.set).not.toHaveBeenCalled();
+      expect(mockLocal.remove).not.toHaveBeenCalled();
     });
   });
 
@@ -405,10 +416,9 @@ describe("StorageUtil", () => {
         LEGACY_ACCOUNT,
         ACCOUNT,
       ]);
-      expect(localStore[profileStorageKey("ACCOUNTS")].ALL_ACCOUNTS).toEqual([
-        LEGACY_ACCOUNT,
-        ACCOUNT,
-      ]);
+      expect(localStore[profileStorageKey("ACCOUNTS")]).toEqual({
+        ALL_ACCOUNTS: [LEGACY_ACCOUNT, ACCOUNT],
+      });
     });
   });
 
@@ -445,7 +455,7 @@ describe("StorageUtil", () => {
     };
 
     it("should store and retrieve all blockchains", async () => {
-      await StorageUtil.setAllBlockChains([chain1, chain2] as any);
+      await StorageUtil.setAllBlockChains([chain1, chain2]);
       const result = await StorageUtil.getAllBlockChains();
       expect(result).toEqual([chain1, chain2]);
     });
@@ -464,7 +474,7 @@ describe("StorageUtil", () => {
       await StorageUtil.setAllBlockChains([
         staleBuiltin,
         customWithQrlSymbol,
-      ] as any);
+      ]);
       const result = await StorageUtil.getAllBlockChains();
       expect(result[0].nativeCurrency).toEqual({
         name: "Quanta",
@@ -487,7 +497,7 @@ describe("StorageUtil", () => {
     });
 
     it("should store and retrieve active blockchain", async () => {
-      await StorageUtil.setAllBlockChains([chain1, chain2] as any);
+      await StorageUtil.setAllBlockChains([chain1, chain2]);
       await StorageUtil.setActiveBlockChain("0x2");
       const result = await StorageUtil.getActiveBlockChain();
       expect(result.chainId).toBe("0x2");
@@ -519,12 +529,11 @@ describe("StorageUtil", () => {
     it("persists a canonical QIP-55 QRNS registry", async () => {
       await StorageUtil.setAllBlockChains([
         { ...chain1, qrnsRegistryAddress: ACCOUNT },
-      ] as any);
+      ]);
 
-      expect(
-        localStore[profileStorageKey("BLOCKCHAINS")].ALL_BLOCKCHAINS[0]
-          .qrnsRegistryAddress,
-      ).toBe(ACCOUNT);
+      expect(localStore[profileStorageKey("BLOCKCHAINS")]).toEqual({
+        ALL_BLOCKCHAINS: [{ ...chain1, qrnsRegistryAddress: ACCOUNT }],
+      });
       expect(
         (await StorageUtil.getAllBlockChains())[0].qrnsRegistryAddress,
       ).toBe(ACCOUNT);
@@ -535,12 +544,11 @@ describe("StorageUtil", () => {
       async (qrnsRegistryAddress) => {
         await StorageUtil.setAllBlockChains([
           { ...chain1, qrnsRegistryAddress },
-        ] as any);
+        ]);
 
-        expect(
-          localStore[profileStorageKey("BLOCKCHAINS")].ALL_BLOCKCHAINS[0]
-            .qrnsRegistryAddress,
-        ).toBeUndefined();
+        expect(localStore[profileStorageKey("BLOCKCHAINS")]).toEqual({
+          ALL_BLOCKCHAINS: [{ ...chain1, qrnsRegistryAddress: undefined }],
+        });
       },
     );
 
@@ -556,7 +564,7 @@ describe("StorageUtil", () => {
         await expect(
           StorageUtil.setAllBlockChains([
             { ...chain1, qrnsRegistryAddress },
-          ] as any),
+          ]),
         ).rejects.toThrow("128 hexadecimal characters");
         expect(localStore[profileStorageKey("BLOCKCHAINS")]).toBeUndefined();
       },
@@ -578,10 +586,9 @@ describe("StorageUtil", () => {
         expect(
           (await StorageUtil.getAllBlockChains())[0].qrnsRegistryAddress,
         ).toBe(undefined);
-        expect(
-          localStore[profileStorageKey("BLOCKCHAINS")].ALL_BLOCKCHAINS[0]
-            .qrnsRegistryAddress,
-        ).toBe(qrnsRegistryAddress);
+        expect(localStore[profileStorageKey("BLOCKCHAINS")]).toEqual({
+          ALL_BLOCKCHAINS: [{ ...chain1, qrnsRegistryAddress }],
+        });
       },
     );
   });
@@ -733,7 +740,9 @@ describe("StorageUtil", () => {
   // ── DApps request data (session storage) ───────────────────
 
   describe("DApps request data", () => {
-    const requestData = { method: "qrl_requestAccounts" } as any;
+    const requestData = {
+      method: "qrl_requestAccounts",
+    } satisfies DAppRequestType;
 
     it("should store and retrieve DApp request data", async () => {
       await StorageUtil.setDAppsRequestData(requestData);
@@ -776,7 +785,7 @@ describe("StorageUtil", () => {
       accounts: [ACCOUNT],
       blockchains: [],
       permissions: [],
-    } as any;
+    } satisfies ConnectedAccountsDataType;
 
     it("should store and retrieve connected accounts data", async () => {
       await StorageUtil.setDAppsConnectedAccountsData(connectedData);
@@ -797,11 +806,14 @@ describe("StorageUtil", () => {
         connectedData.urlOrigin,
       );
       expect(result?.blockchains[0].qrnsRegistryAddress).toBe(ACCOUNT);
-      expect(
-        localStore[profileStorageKey("DAPPS")].ALL_DAPPS[
-          connectedData.urlOrigin
-        ].blockchains[0].qrnsRegistryAddress,
-      ).toBe(ACCOUNT);
+      expect(localStore[profileStorageKey("DAPPS")]).toEqual({
+        ALL_DAPPS: {
+          [connectedData.urlOrigin]: {
+            ...connectedData,
+            blockchains: [{ ...connectedChain, qrnsRegistryAddress: ACCOUNT }],
+          },
+        },
+      });
     });
 
     it.each([undefined, null, ""])(
@@ -812,11 +824,16 @@ describe("StorageUtil", () => {
           blockchains: [{ ...connectedChain, qrnsRegistryAddress }],
         });
 
-        expect(
-          localStore[profileStorageKey("DAPPS")].ALL_DAPPS[
-            connectedData.urlOrigin
-          ].blockchains[0].qrnsRegistryAddress,
-        ).toBeUndefined();
+        expect(localStore[profileStorageKey("DAPPS")]).toEqual({
+          ALL_DAPPS: {
+            [connectedData.urlOrigin]: {
+              ...connectedData,
+              blockchains: [
+                { ...connectedChain, qrnsRegistryAddress: undefined },
+              ],
+            },
+          },
+        });
       },
     );
 
@@ -856,11 +873,16 @@ describe("StorageUtil", () => {
         connectedData.urlOrigin,
       );
       expect(result?.blockchains[0].qrnsRegistryAddress).toBeUndefined();
-      expect(
-        localStore[profileStorageKey("DAPPS")].ALL_DAPPS[
-          connectedData.urlOrigin
-        ].blockchains[0].qrnsRegistryAddress,
-      ).toBe(registryAddress);
+      expect(localStore[profileStorageKey("DAPPS")]).toEqual({
+        ALL_DAPPS: {
+          [connectedData.urlOrigin]: {
+            ...connectedData,
+            blockchains: [
+              { ...connectedChain, qrnsRegistryAddress: registryAddress },
+            ],
+          },
+        },
+      });
     });
 
     it("should return undefined for unknown origin", async () => {
@@ -910,11 +932,16 @@ describe("StorageUtil", () => {
       await expect(
         StorageUtil.getDAppsConnectedAccountsData(legacySession.urlOrigin),
       ).resolves.toBeUndefined();
-      expect(
-        localStore[profileStorageKey("DAPPS")].ALL_DAPPS[
-          legacySession.urlOrigin
-        ].accounts,
-      ).toEqual([LEGACY_ACCOUNT]);
+      expect(localStore[profileStorageKey("DAPPS")]).toEqual({
+        ALL_DAPPS: {
+          [legacySession.urlOrigin]: {
+            urlOrigin: legacySession.urlOrigin,
+            accounts: [LEGACY_ACCOUNT],
+            blockchains: [],
+            permissions: [],
+          },
+        },
+      });
     });
   });
 
@@ -1010,6 +1037,15 @@ describe("StorageUtil", () => {
   // ── Transaction history ────────────────────────────────────
 
   describe("Transaction history", () => {
+    const storedTransactions = (account: string) =>
+      getStoredValue(
+        localStore[profileStorageKey("TX_HISTORY")],
+        "ALL_TX_HISTORY",
+        account,
+        "0x1",
+        "transactions",
+      );
+
     describe("getTransactionHistory", () => {
       it("should return empty array when no history exists", async () => {
         const result = await StorageUtil.getTransactionHistory(ACCOUNT);
@@ -1045,11 +1081,7 @@ describe("StorageUtil", () => {
         const entry = makeTxEntry();
         await StorageUtil.setTransactionHistoryEntry(ACCOUNT, entry);
 
-        expect(
-          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
-            ACCOUNT
-          ]["0x1"].transactions,
-        ).toEqual([entry]);
+        expect(storedTransactions(ACCOUNT)).toEqual([entry]);
       });
 
       it("should prepend new entry to existing transactions", async () => {
@@ -1070,13 +1102,7 @@ describe("StorageUtil", () => {
         });
         await StorageUtil.setTransactionHistoryEntry(ACCOUNT, newEntry);
 
-        const stored =
-          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
-            ACCOUNT
-          ]["0x1"].transactions;
-        expect(stored).toHaveLength(2);
-        expect(stored[0]).toEqual(newEntry);
-        expect(stored[1]).toEqual(existing);
+        expect(storedTransactions(ACCOUNT)).toEqual([newEntry, existing]);
       });
 
       it("should deduplicate by transactionHash", async () => {
@@ -1090,12 +1116,7 @@ describe("StorageUtil", () => {
         const updated = makeTxEntry({ status: false });
         await StorageUtil.setTransactionHistoryEntry(ACCOUNT, updated);
 
-        const stored =
-          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
-            ACCOUNT
-          ]["0x1"].transactions;
-        expect(stored).toHaveLength(1);
-        expect(stored[0]).toEqual(updated);
+        expect(storedTransactions(ACCOUNT)).toEqual([updated]);
       });
 
       it("should not affect other accounts in storage", async () => {
@@ -1111,11 +1132,7 @@ describe("StorageUtil", () => {
 
         await StorageUtil.setTransactionHistoryEntry(ACCOUNT, makeTxEntry());
 
-        expect(
-          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
-            ACCOUNT_2
-          ]["0x1"].transactions,
-        ).toEqual([otherEntry]);
+        expect(storedTransactions(ACCOUNT_2)).toEqual([otherEntry]);
       });
     });
 
@@ -1129,11 +1146,7 @@ describe("StorageUtil", () => {
 
         await StorageUtil.clearTransactionHistory(ACCOUNT);
 
-        expect(
-          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
-            ACCOUNT
-          ]["0x1"].transactions,
-        ).toEqual([]);
+        expect(storedTransactions(ACCOUNT)).toEqual([]);
       });
 
       it("should do nothing when no history exists", async () => {
@@ -1155,16 +1168,8 @@ describe("StorageUtil", () => {
 
         await StorageUtil.clearTransactionHistory(ACCOUNT);
 
-        expect(
-          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
-            ACCOUNT
-          ]["0x1"].transactions,
-        ).toEqual([]);
-        expect(
-          localStore[profileStorageKey("TX_HISTORY")]["ALL_TX_HISTORY"][
-            ACCOUNT_2
-          ]["0x1"].transactions,
-        ).toEqual([otherEntry]);
+        expect(storedTransactions(ACCOUNT)).toEqual([]);
+        expect(storedTransactions(ACCOUNT_2)).toEqual([otherEntry]);
       });
     });
   });
@@ -1185,13 +1190,26 @@ describe("StorageUtil", () => {
         { name: "Alice", address: ACCOUNT },
       ]);
 
-      localStore[profileStorageKey("CONTACTS")].ALL_CONTACTS.push({
+      const contacts = getStoredValue(
+        localStore[profileStorageKey("CONTACTS")],
+        "ALL_CONTACTS",
+      );
+      if (!isArrayOf(contacts, isContact)) {
+        throw new Error("Expected stored contacts");
+      }
+      contacts.push({
         name: "Legacy",
         address: LEGACY_ACCOUNT,
       });
       expect(await StorageUtil.getContacts()).toEqual([
         { name: "Alice", address: ACCOUNT },
       ]);
+      expect(localStore[profileStorageKey("CONTACTS")]).toEqual({
+        ALL_CONTACTS: [
+          { name: "Alice", address: ACCOUNT },
+          { name: "Legacy", address: LEGACY_ACCOUNT },
+        ],
+      });
     });
   });
 
@@ -1424,18 +1442,18 @@ describe("StorageUtil", () => {
 });
 
 describe("storageUtil module boundary", () => {
-  // storageUtil deliberately copies the returned-accounts caveat literal
-  // instead of importing CAVEAT_TYPES. middlewareTypes has a runtime
+  // storageUtil deliberately copies the returned-accounts caveat literal.
+  // middlewareTypes has a runtime
   // dependency on @theqrl/qrl-wallet-provider, and importing a *value* from
   // it (type-only imports are erased at build) pulls that provider into every
   // bundle touching storageUtil, including the popup, which has no Buffer
   // polyfill: the page then dies at module init with "Buffer is not defined"
   // and renders blank. These are the tripwires for both halves of that.
   const readSource = async () => {
-    const { readFileSync } = await import("node:fs");
-    const { resolve } = await import("node:path");
-    return readFileSync(
-      resolve(process.cwd(), "src/utilities/storageUtil.ts"),
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    return fs.readFileSync(
+      path.resolve(process.cwd(), "src/utilities/storageUtil.ts"),
       "utf8",
     );
   };
@@ -1465,7 +1483,7 @@ describe("clearDAppsRequestDataForRequestId", () => {
   let StorageUtil: typeof import("@/utilities/storageUtil").default;
 
   beforeEach(async () => {
-    for (const key of Object.keys(sessionStore)) delete sessionStore[key];
+    clearStore(sessionStore);
     vi.resetModules();
     StorageUtil = (await import("@/utilities/storageUtil")).default;
   });
@@ -1474,7 +1492,7 @@ describe("clearDAppsRequestDataForRequestId", () => {
     await StorageUtil.setDAppsRequestData({
       method: "qrl_sendTransaction",
       requestId: "request-a",
-    } as never);
+    });
 
     await StorageUtil.clearDAppsRequestDataForRequestId("request-a");
 
@@ -1485,7 +1503,7 @@ describe("clearDAppsRequestDataForRequestId", () => {
     await StorageUtil.setDAppsRequestData({
       method: "qrl_signMessage",
       requestId: "request-b",
-    } as never);
+    });
 
     await StorageUtil.clearDAppsRequestDataForRequestId("request-a");
 
@@ -1498,7 +1516,7 @@ describe("clearDAppsRequestDataForRequestId", () => {
     await StorageUtil.setDAppsRequestData({
       method: "qrl_signMessage",
       requestId: "request-b",
-    } as never);
+    });
 
     await StorageUtil.clearDAppsRequestDataForRequestId(undefined);
 

@@ -1,4 +1,14 @@
 import browser from "webextension-polyfill";
+import { getStorageRecord, isRecord } from "@/utilities/storageGuards";
+
+const isErrorWithStack = (
+  value: unknown,
+): value is { message: string; stack: string } =>
+  isRecord(value) &&
+  typeof value.stack === "string" &&
+  value.stack.length > 0 &&
+  typeof value.message === "string" &&
+  value.message.length > 0;
 
 /**
  * Returns an Error if extension.runtime.lastError is present
@@ -14,18 +24,17 @@ import browser from "webextension-polyfill";
  * @see {@link https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/runtime/lastError}
  */
 export function checkForLastError() {
-  const { lastError } = browser.runtime;
+  const lastError: unknown = browser.runtime.lastError;
   if (!lastError) {
     return undefined;
   }
 
-  // @ts-expect-error - lastError may have a stack property not declared in webextension-polyfill types
-  // if it quacks like an Error, its an Error
-  if (lastError.stack && lastError.message) {
+  if (isErrorWithStack(lastError)) {
     return lastError;
   }
   // repair incomplete error object (eg chromium v77)
-  return new Error(lastError.message);
+  const { message } = getStorageRecord(lastError);
+  return new Error(typeof message === "string" ? message : undefined);
 }
 
 /**
@@ -39,24 +48,21 @@ function sanitizeError(error: unknown): {
   message?: string;
   data?: unknown;
 } {
-  if (error && typeof error === "object") {
-    const e = error as { code?: number; message?: string; data?: unknown };
-    return {
-      ...(typeof e.code === "number" && { code: e.code }),
-      message: typeof e.message === "string" ? e.message : String(error),
-      ...(e.data !== undefined && { data: e.data }),
-    };
-  }
-  return { message: String(error) };
+  const fields = getStorageRecord(error);
+  return {
+    ...(typeof fields.code === "number" && { code: fields.code }),
+    message:
+      typeof fields.message === "string" ? fields.message : String(error),
+    ...(fields.data !== undefined && { data: fields.data }),
+  };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getSerializableObject(jsonObject: any) {
-  if (jsonObject?.error) {
+export function getSerializableObject(jsonObject: unknown): unknown {
+  if (isRecord(jsonObject) && jsonObject.error) {
     return { error: sanitizeError(jsonObject.error) };
   }
   return JSON.parse(
-    JSON.stringify(jsonObject, (_, value) => {
+    JSON.stringify(jsonObject, (_: string, value: unknown) => {
       if (typeof value === "bigint") {
         return "0x".concat(value.toString(16));
       }

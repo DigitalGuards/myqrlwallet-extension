@@ -7,9 +7,8 @@ const { mockGetBalance, mockIsListening } = vi.hoisted(() => ({
 
 vi.mock("@theqrl/web3", () => {
   class MockWeb3 {
-    static providers = { HttpProvider: class {} };
+    static providers = { HttpProvider: vi.fn() };
     qrl = { getBalance: mockGetBalance, net: { isListening: mockIsListening } };
-    constructor(_opts: unknown) {}
   }
   return {
     __esModule: true,
@@ -36,6 +35,8 @@ vi.mock("@/utilities/storageUtil", () => ({
   default: mockStorage,
 }));
 
+import Web3 from "@theqrl/web3";
+import { deferred } from "@/test-utils/deferred";
 import QrlStore, { BALANCE_POLL_INTERVAL_MS } from "./qrlStore";
 
 const ACCOUNT = "Q79b662ce3d663643df4454a8ba3f532c0de6887f";
@@ -104,11 +105,9 @@ describe("QrlStore balance polling", () => {
       const store = new QrlStore();
       await flush();
       store.stopBalancePolling();
-      let finishOld!: (value: bigint) => void;
-      const oldBalance = new Promise<bigint>((resolve) => {
-        finishOld = resolve;
-      });
-      store.qrlInstance = { getBalance: vi.fn(() => oldBalance) } as never;
+      const { promise: oldBalance, resolve: finishOld } = deferred<bigint>();
+      mockGetBalance.mockReturnValueOnce(oldBalance);
+      store.qrlInstance = new Web3().qrl;
       const refresh = () =>
         mode === "foreground"
           ? store.fetchAccounts()
@@ -119,9 +118,8 @@ describe("QrlStore balance polling", () => {
         ...store.qrlConnection.blockchain,
         chainId: "0x2",
       };
-      store.qrlInstance = {
-        getBalance: vi.fn(async () => 25n * 10n ** 18n),
-      } as never;
+      mockGetBalance.mockResolvedValue(25n * 10n ** 18n);
+      store.qrlInstance = new Web3().qrl;
       await refresh();
       finishOld(99n * 10n ** 18n);
       await first;
@@ -134,15 +132,12 @@ describe("QrlStore balance polling", () => {
     const store = new QrlStore();
     await flush();
     store.stopBalancePolling();
-    let finishOld!: (value: bigint) => void;
-    const oldBalance = new Promise<bigint>((resolve) => {
-      finishOld = resolve;
-    });
-    const getBalance = vi
-      .fn()
+    const { promise: oldBalance, resolve: finishOld } = deferred<bigint>();
+    const getBalance = mockGetBalance
+      .mockReset()
       .mockReturnValueOnce(oldBalance)
       .mockResolvedValue(25n * 10n ** 18n);
-    store.qrlInstance = { getBalance } as never;
+    store.qrlInstance = new Web3().qrl;
     const first = store.fetchAccounts();
     await flush();
     await store.refreshBalancesQuietly();

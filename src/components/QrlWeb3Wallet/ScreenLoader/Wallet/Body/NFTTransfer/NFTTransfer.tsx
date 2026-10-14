@@ -25,10 +25,10 @@ import type { NFTStandard } from "@/types/nft";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { isCanonicalQrlAddress, isQrlAddress } from "@/utilities/addressUtil";
 import {
-  isMetadataText,
   metadataTextChildren,
   metadataValueToString,
 } from "@/utilities/nftMetadata";
+import { isNFTTransferState } from "@/utilities/nftGuards";
 import StorageUtil from "@/utilities/storageUtil";
 import { isQrnsName, resolveQrnsName } from "@/utilities/qrnsResolver";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -80,46 +80,45 @@ const createFormSchema = (t: TFunction, maxAmount?: string) =>
 
 const NFTTransfer = observer(() => {
   const { t } = useTranslation();
-  const { state } = useLocation();
+  const state: unknown = useLocation().state;
   const navigate = useNavigate();
   const { lockStore, qrlStore, ledgerStore, transactionHistoryStore } =
     useStore();
-  const { getMnemonicPhrases } = lockStore;
-  const {
-    activeAccount,
-    signNftTransfer,
-    getErc1155TokenBalance,
-    fetchAccounts,
-    sendRawTransaction,
-  } = qrlStore;
+  const { activeAccount } = qrlStore;
   const { accountAddress } = activeAccount;
 
-  const contractAddress: string = state?.contractAddress ?? "";
-  const tokenId: string = state?.tokenId ?? "";
-  const collectionName: string = state?.collectionName ?? "";
-  const nftImageUrl: string = state?.imageUrl ?? "";
-  const rawNftName: unknown = state?.nftName;
-  const nftName = isMetadataText(rawNftName) ? rawNftName : "";
-  const standard: NFTStandard = state?.standard ?? "ZRC721";
+  const routeState = isNFTTransferState(state) ? state : undefined;
+  const contractAddress = routeState?.contractAddress ?? "";
+  const tokenId = routeState?.tokenId ?? "";
+  const collectionName = routeState?.collectionName ?? "";
+  const nftImageUrl = routeState?.imageUrl ?? "";
+  const nftName = routeState?.nftName ?? "";
+  const standard: NFTStandard = routeState?.standard ?? "ZRC721";
   const is1155 = standard === "ZRC1155";
 
   // Route state carries the balance snapshotted at gallery time; re-read
   // it live on mount so the max-amount validation can't let a stale
   // snapshot sign a transfer that reverts on chain.
   const [ownedBalance, setOwnedBalance] = useState<string | undefined>(
-    state?.balance,
+    routeState?.balance,
   );
   useEffect(() => {
     if (!is1155) return;
     let cancelled = false;
-    (async () => {
-      const live = await getErc1155TokenBalance(contractAddress, tokenId);
+    const loadBalance = async () => {
+      const live = await qrlStore.getErc1155TokenBalance(
+        contractAddress,
+        tokenId,
+      );
       if (!cancelled && live !== undefined) setOwnedBalance(live);
-    })();
+    };
+    loadBalance().catch((error: unknown) => {
+      console.error("Failed to refresh NFT balance:", error);
+    });
     return () => {
       cancelled = true;
     };
-  }, [contractAddress, tokenId, is1155]);
+  }, [contractAddress, tokenId, is1155, qrlStore]);
 
   const FormSchema = createFormSchema(t, is1155 ? ownedBalance : undefined);
 
@@ -155,11 +154,21 @@ const NFTTransfer = observer(() => {
   // recreated with the new max, but a value validated against the stale
   // snapshot would otherwise keep its old verdict until the next edit.
   useEffect(() => {
-    if (is1155 && ownedBalance !== undefined) void trigger("amount");
+    if (is1155 && ownedBalance !== undefined) {
+      trigger("amount").catch((error: unknown) => {
+        console.error("Failed to validate NFT amount:", error);
+      });
+    }
   }, [ownedBalance, is1155, trigger]);
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     try {
+      if (!routeState) {
+        control.setError("receiverAddress", {
+          message: t("transfer.errorFailed"),
+        });
+        return;
+      }
       let receiver = formData.receiverAddress;
       if (isQrnsName(receiver) && !resolvedAddress) {
         control.setError("receiverAddress", {
@@ -180,8 +189,9 @@ const NFTTransfer = observer(() => {
         return;
       }
 
-      const mnemonicPhrases = await getMnemonicPhrases(accountAddress);
-      const signResult = await signNftTransfer(
+      const mnemonicPhrases =
+        await lockStore.getMnemonicPhrases(accountAddress);
+      const signResult = await qrlStore.signNftTransfer(
         accountAddress,
         receiver,
         tokenId,
@@ -248,31 +258,46 @@ const NFTTransfer = observer(() => {
         historyEntry,
       );
 
-      sendRawTransaction(rawTransaction).then(
-        async (receipt) => {
-          // Shared classifier: a receipt whose hash or block does not match
-          // proves nothing, and only a real status field settles the entry.
-          const update = transactionFailureUpdate({ receipt }, transactionHash);
-          if (update.receiptStatusVerified) {
+      qrlStore
+        .sendRawTransaction(rawTransaction)
+        .then(
+          async (receipt) => {
+            // Shared classifier: a receipt whose hash or block does not match
+            // proves nothing, and only a real status field settles the entry.
+            const update = transactionFailureUpdate(
+              { receipt },
+              transactionHash,
+            );
+            if (update.receiptStatusVerified) {
+              await transactionHistoryStore.updateTransaction(
+                accountAddress,
+                transactionHash,
+                update,
+              );
+              await qrlStore.fetchAccounts();
+            }
+          },
+          async (err: unknown) => {
+            console.error("[NFTTransfer] Broadcast failed:", err);
             await transactionHistoryStore.updateTransaction(
               accountAddress,
               transactionHash,
-              update,
+              transactionFailureUpdate(err, transactionHash),
             );
-            await fetchAccounts();
-          }
-        },
-        async (err) => {
-          console.error("[NFTTransfer] Broadcast failed:", err);
-          await transactionHistoryStore.updateTransaction(
-            accountAddress,
-            transactionHash,
-            transactionFailureUpdate(err, transactionHash),
+          },
+        )
+        .catch((error: unknown) => {
+          console.error(
+            "[NFTTransfer] Failed to process broadcast result:",
+            error,
           );
+        });
+
+      Promise.resolve(navigate(ROUTES.TRANSACTION_HISTORY)).catch(
+        (error: unknown) => {
+          console.error("Failed to open transaction history:", error);
         },
       );
-
-      navigate(ROUTES.TRANSACTION_HISTORY);
     } catch (error) {
       if (isWalletLockedError(error)) {
         // The SW's decrypted keys and this surface's own isLocked belief
@@ -280,7 +305,9 @@ const NFTTransfer = observer(() => {
         // hit the real, locked state. Push the screen to the lock view
         // immediately: the dashboard would otherwise stay up with a form
         // that can only fail again (L4).
-        void lockStore.readLockState();
+        lockStore.readLockState().catch((lockError: unknown) => {
+          console.error("Failed to refresh wallet lock state:", lockError);
+        });
         control.setError("receiverAddress", {
           message: t("account.walletLockedError"),
         });
@@ -372,7 +399,17 @@ const NFTTransfer = observer(() => {
 
   return (
     <Form {...form}>
-      <form className="w-full" onSubmit={handleSubmit(onSubmit)}>
+      <form
+        className="w-full"
+        onSubmit={(event) => {
+          handleSubmit(onSubmit)(event).catch((error: unknown) => {
+            console.error("Failed to submit NFT transfer:", error);
+            control.setError("receiverAddress", {
+              message: t("transfer.errorOccurred", { error }),
+            });
+          });
+        }}
+      >
         <CircuitBackground />
         <div className="page-enter relative z-10 p-8">
           <BackButton />
@@ -393,7 +430,9 @@ const NFTTransfer = observer(() => {
                           : metadataValueToString(nftName || `#${tokenId}`)
                       }
                       className="h-full w-full object-cover"
-                      onError={() => setImageError(true)}
+                      onError={() => {
+                        setImageError(true);
+                      }}
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center">
@@ -513,7 +552,11 @@ const NFTTransfer = observer(() => {
                 className="w-full"
                 type="button"
                 variant="outline"
-                onClick={() => navigate(-1)}
+                onClick={() => {
+                  Promise.resolve(navigate(-1)).catch((error: unknown) => {
+                    console.error("Failed to close NFT transfer:", error);
+                  });
+                }}
               >
                 <X className="mr-2 h-4 w-4" />
                 {t("transfer.cancelButton")}
@@ -521,6 +564,7 @@ const NFTTransfer = observer(() => {
               <Button
                 disabled={
                   isSubmitting ||
+                  !routeState ||
                   !isValid ||
                   qrnsResolving ||
                   (isQrnsName(watchedReceiver) && !resolvedAddress)

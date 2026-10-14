@@ -146,7 +146,10 @@ const nullableMetadataCases = [false, true].flatMap((nullName) =>
 
 const optionalMetadataCases: {
   label: string;
-  metadata: NFTMetadata | null | undefined;
+  metadata:
+    | (NFTMetadata & { name?: string | null; description?: string | null })
+    | null
+    | undefined;
 }[] = [
   ...nullableMetadataCases.map(
     ({ label, metadata: { name, description, image } }) => ({

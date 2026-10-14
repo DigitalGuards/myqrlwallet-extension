@@ -13,14 +13,14 @@ const { lockState } = vi.hoisted(() => ({
 vi.mock("../lockManager/lockManager", () => ({
   __esModule: true,
   default: {
-    isLocked: async () => {
+    isLocked: () => {
       if (lockState.readFails) {
-        throw new Error("The lock state is unreadable.");
+        return Promise.reject(new Error("The lock state is unreadable."));
       }
-      return {
+      return Promise.resolve({
         isLocked: lockState.isLocked,
         hasPasswordSet: lockState.hasPasswordSet,
-      };
+      });
     },
   },
 }));
@@ -49,14 +49,13 @@ const WRONG_CHECKSUM_ACCOUNT = `${CHECKSUM_ACCOUNT.slice(0, 1)}${
     : CHECKSUM_ACCOUNT[1].toUpperCase()
 }${CHECKSUM_ACCOUNT.slice(2)}`;
 
-const request = (method: string, params: unknown[]) =>
-  ({
-    id: 1,
-    jsonrpc: "2.0",
-    method,
-    params,
-    senderData: { url: `${ORIGIN}/request` },
-  }) as never;
+const request = (method: string, params: unknown[]) => ({
+  id: 1,
+  jsonrpc: "2.0",
+  method,
+  params,
+  senderData: { url: `${ORIGIN}/request` },
+});
 
 describe("dApp chain authorization", () => {
   beforeEach(() => {
@@ -64,7 +63,7 @@ describe("dApp chain authorization", () => {
     vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
       urlOrigin: ORIGIN,
       accounts: [ACCOUNT],
-      blockchains: [{ chainId: "0x301825" } as never],
+      blockchains: [DEFAULT_BLOCKCHAIN],
       permissions: [],
     });
     vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue(
@@ -241,13 +240,14 @@ describe("dApp chain authorization", () => {
     );
 
     expect(result.canProceed).toBe(false);
-    expect(result.proceedError?.message).toContain("has not been authorized");
+    expect(result.proceedError.message).toContain("has not been authorized");
   });
 
   it("rejects before approval when the active chain was not granted", async () => {
-    vi.mocked(StorageUtil.getActiveBlockChain).mockResolvedValue({
+    vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue({
+      ...DEFAULT_BLOCKCHAIN,
       chainId: "0x1",
-    } as never);
+    });
 
     const result = await checkAccountAndChainHaveBeenAuthorized(
       request(RESTRICTED_METHODS.QRL_SEND_TRANSACTION, [{ from: ACCOUNT }]),
@@ -281,9 +281,10 @@ describe("dApp chain authorization", () => {
   });
 
   it("revalidates the bound chain immediately before execution", async () => {
-    vi.mocked(StorageUtil.getActiveBlockChain).mockResolvedValue({
+    vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue({
+      ...DEFAULT_BLOCKCHAIN,
       chainId: "0x1",
-    } as never);
+    });
 
     const result = await revalidateAuthorizedDAppRequest({
       method: RESTRICTED_METHODS.PERSONAL_SIGN,
@@ -324,7 +325,7 @@ describe("custom-chain QRNS registry validation", () => {
     `Q${CHECKSUM_ACCOUNT.slice(1).toLowerCase()}`,
   ])("rejects a non-QIP-55 QRNS registry (%s)", async (qrnsRegistryAddress) => {
     const result = await checkWalletAddQrlChainParams(
-      { ...chain, qrnsRegistryAddress } as never,
+      { ...chain, qrnsRegistryAddress },
       true,
     );
 
@@ -338,7 +339,7 @@ describe("custom-chain QRNS registry validation", () => {
     "accepts an empty or canonical QRNS registry (%s)",
     async (qrnsRegistryAddress) => {
       const result = await checkWalletAddQrlChainParams(
-        { ...chain, qrnsRegistryAddress } as never,
+        { ...chain, qrnsRegistryAddress },
         true,
       );
 
@@ -357,7 +358,7 @@ describe("dApp chain authorization for PQ signing methods", () => {
     vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
       urlOrigin: ORIGIN,
       accounts: [ACCOUNT],
-      blockchains: [{ chainId: "0x301825" } as never],
+      blockchains: [DEFAULT_BLOCKCHAIN],
       permissions: [],
     });
     vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue(
@@ -413,9 +414,10 @@ describe("dApp chain authorization for PQ signing methods", () => {
   });
 
   it("rejects qrl_signMessage when the active chain was not granted", async () => {
-    vi.mocked(StorageUtil.getActiveBlockChain).mockResolvedValue({
+    vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue({
+      ...DEFAULT_BLOCKCHAIN,
       chainId: "0x1",
-    } as never);
+    });
 
     const result = await checkAccountAndChainHaveBeenAuthorized(
       request(RESTRICTED_METHODS.QRL_SIGN_MESSAGE, [ACCOUNT, "0xdeadbeef"]),
@@ -426,9 +428,10 @@ describe("dApp chain authorization for PQ signing methods", () => {
   });
 
   it("revalidation rejects a stored qrl_signMessage request after a chain switch", async () => {
-    vi.mocked(StorageUtil.getActiveBlockChain).mockResolvedValue({
+    vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue({
+      ...DEFAULT_BLOCKCHAIN,
       chainId: "0x1",
-    } as never);
+    });
 
     const result = await revalidateAuthorizedDAppRequest({
       method: RESTRICTED_METHODS.QRL_SIGN_MESSAGE,
@@ -517,7 +520,7 @@ describe("wallet_addQRLChain rpcUrls validation (L5)", () => {
     const result = await checkWalletAddQrlChainParams({
       ...chain,
       rpcUrls: ["https://rpc.example", "https://rpc2.example"],
-    } as never);
+    });
 
     expect(result.canProceed).toBe(true);
   });
@@ -537,7 +540,7 @@ describe("wallet_addQRLChain rpcUrls validation (L5)", () => {
       const result = await checkWalletAddQrlChainParams({
         ...chain,
         rpcUrls: ["https://rpc.example", url],
-      } as never);
+      });
 
       expect(result.canProceed).toBe(false);
       expect(result.proceedError?.message).toContain("rpcUrls");
@@ -562,7 +565,7 @@ describe("wallet_addQRLChain rpcUrls validation (L5)", () => {
     const result = await checkWalletAddQrlChainParams({
       ...chain,
       rpcUrls: ["https://rpc.example", url],
-    } as never);
+    });
 
     expect(result.canProceed).toBe(false);
     expect(result.proceedError?.message).toContain("rpcUrls");
@@ -578,7 +581,7 @@ describe("wallet_addQRLChain rpcUrls validation (L5)", () => {
     const result = await checkWalletAddQrlChainParams({
       ...chain,
       rpcUrls: [url],
-    } as never);
+    });
 
     expect(result.canProceed).toBe(true);
   });
@@ -588,7 +591,7 @@ describe("wallet_addQRLChain rpcUrls validation (L5)", () => {
     const result = await checkWalletAddQrlChainParams({
       ...chain,
       rpcUrls: ["http://127.0.0.1:8545", "https://rpc.example"],
-    } as never);
+    });
 
     expect(result.canProceed).toBe(false);
   });
@@ -604,7 +607,7 @@ describe("wallet_addQRLChain rpcUrls validation (L5)", () => {
         isTestnet: true,
         defaultWsRpcUrl: "",
         isCustomChain: true,
-      } as never,
+      },
       true,
     );
 
@@ -627,7 +630,7 @@ describe("wallet_addQRLChain rpcUrls validation (L5)", () => {
         isTestnet: true,
         defaultWsRpcUrl: "",
         isCustomChain: true,
-      } as never,
+      },
       true,
     );
 
@@ -697,7 +700,7 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
     vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
       urlOrigin: ORIGIN,
       accounts: [ACCOUNT],
-      blockchains: [{ chainId: "0x301825" } as never],
+      blockchains: [DEFAULT_BLOCKCHAIN],
       permissions: [],
     });
     vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue(
@@ -722,8 +725,8 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
 
     expectLockedRefusal(authorized);
     expectLockedRefusal(unauthorized);
-    expect(unauthorized.proceedError?.message).toBe(
-      authorized.proceedError?.message,
+    expect(unauthorized.proceedError.message).toBe(
+      authorized.proceedError.message,
     );
   });
 
@@ -746,7 +749,7 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
 
   it("gives an origin with no grant at all the same locked refusal", async () => {
     lockState.isLocked = true;
-    vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+    vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
       urlOrigin: ORIGIN,
       accounts: [],
       blockchains: [],
@@ -767,9 +770,10 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
 
   it("keeps every locked refusal free of address, chain and connection detail", async () => {
     lockState.isLocked = true;
-    vi.mocked(StorageUtil.getActiveBlockChain).mockResolvedValue({
+    vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue({
+      ...DEFAULT_BLOCKCHAIN,
       chainId: "0x1",
-    } as never);
+    });
 
     const results = [
       await checkAccountHasBeenAuthorized(
@@ -823,7 +827,7 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
         `${ORIGIN}/request`,
         true,
       );
-      vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+      vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
         urlOrigin: UNCONNECTED_ORIGIN,
         accounts: [],
         blockchains: [],
@@ -836,11 +840,11 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
 
       expectLockedRefusal(connected);
       expectLockedRefusal(unconnected);
-      expect(unconnected.proceedError?.message).toBe(
-        connected.proceedError?.message,
+      expect(unconnected.proceedError.message).toBe(
+        connected.proceedError.message,
       );
       [connected, unconnected].forEach((result) => {
-        const message = result.proceedError?.message ?? "";
+        const message = result.proceedError.message;
         expect(message).not.toContain("connected");
         expect(message).not.toContain(ORIGIN);
         expect(message).not.toContain(UNCONNECTED_ORIGIN);
@@ -855,7 +859,7 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
         `${ORIGIN}/request`,
         true,
       );
-      vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+      vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
         urlOrigin: UNCONNECTED_ORIGIN,
         accounts: [],
         blockchains: [],
@@ -868,7 +872,7 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
 
       expect(connected.canProceed).toBe(true);
       expect(unconnected.canProceed).toBe(false);
-      expect(unconnected.proceedError?.message).toBe(
+      expect(unconnected.proceedError.message).toBe(
         "The dApp is not connected to MyQRLWallet.",
       );
     },
@@ -890,7 +894,7 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
     const connected = await checkUrlOriginHasBeenConnected(`${ORIGIN}/request`);
     expect(connected.canProceed).toBe(true);
 
-    vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+    vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
       urlOrigin: UNCONNECTED_ORIGIN,
       accounts: [],
       blockchains: [],
@@ -900,7 +904,7 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
       `${UNCONNECTED_ORIGIN}/request`,
     );
     expect(unconnected.canProceed).toBe(false);
-    expect(unconnected.proceedError?.message).toBe(
+    expect(unconnected.proceedError.message).toBe(
       "The dApp is not connected to MyQRLWallet.",
     );
   });
@@ -928,7 +932,7 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
 
     expect(authorized.canProceed).toBe(true);
     expect(unauthorized.canProceed).toBe(false);
-    expect(unauthorized.proceedError?.message).toContain(
+    expect(unauthorized.proceedError.message).toContain(
       "has not been authorized",
     );
   });
@@ -952,7 +956,7 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
   });
 
   it("keeps the unlocked chain-grant refusal for an origin with no grant", async () => {
-    vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+    vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
       urlOrigin: ORIGIN,
       accounts: [ACCOUNT],
       blockchains: [],
@@ -984,7 +988,7 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
 
   it("revalidation still refuses an ungranted chain while locked", async () => {
     lockState.isLocked = true;
-    vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+    vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
       urlOrigin: ORIGIN,
       accounts: [ACCOUNT],
       blockchains: [],
@@ -1017,7 +1021,7 @@ describe("locked-wallet authorization oracle (L6/L-1)", () => {
   });
 
   it("revalidation after unlock refuses an ungranted chain", async () => {
-    vi.mocked(StorageUtil.getDAppsConnectedAccountsData).mockResolvedValue({
+    vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
       urlOrigin: ORIGIN,
       accounts: [ACCOUNT],
       blockchains: [],

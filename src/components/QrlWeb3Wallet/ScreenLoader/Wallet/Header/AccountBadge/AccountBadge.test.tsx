@@ -1,7 +1,7 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider, type StoreType } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
@@ -42,21 +42,20 @@ describe("AccountBadge", () => {
   ): StoreType => {
     const accountLabelsStore = new AccountLabelsStore();
     accountLabelsStore.labels = labels;
-    return {
-      ...mockedStore({
-        qrlStore: {
-          activeAccount: { accountAddress: activeAccountAddress },
-          qrlAccounts: {
-            isLoading: false,
-            accounts: accounts.map((accountAddress) => ({
-              accountAddress,
-              accountBalance: "0.0 Quanta",
-            })),
-          },
+    const store = mockedStore({
+      qrlStore: {
+        activeAccount: { accountAddress: activeAccountAddress },
+        qrlAccounts: {
+          isLoading: false,
+          accounts: accounts.map((accountAddress) => ({
+            accountAddress,
+            accountBalance: "0.0 Quanta",
+          })),
         },
-      }),
-      accountLabelsStore,
-    };
+      },
+    });
+    store.accountLabelsStore = accountLabelsStore;
+    return store;
   };
 
   const renderComponent = (mockedStoreValues: StoreType) =>
@@ -122,5 +121,29 @@ describe("AccountBadge", () => {
     renderComponent(storeWith([], ""));
 
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("reports a label load failure and keeps the current account label", async () => {
+    const failure = new Error("Storage unavailable");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderComponent(
+        mockedStore({
+          accountLabelsStore: {
+            loadLabels: vi.fn().mockRejectedValue(failure),
+            displayLabel: () => "Savings",
+          },
+        }),
+      );
+      expect(screen.getByText("Savings")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(report).toHaveBeenCalledWith(
+          "Failed to load account labels:",
+          failure,
+        );
+      });
+    } finally {
+      report.mockRestore();
+    }
   });
 });

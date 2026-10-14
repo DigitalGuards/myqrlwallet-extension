@@ -1,4 +1,5 @@
 import StorageUtil from "@/utilities/storageUtil";
+import { isRecord } from "@/utilities/storageGuards";
 import browser from "webextension-polyfill";
 import { EXTENSION_MESSAGES } from "../constants/streamConstants";
 import {
@@ -13,14 +14,9 @@ import {
 // wait would fail anyway.
 export const SIDE_PANEL_ROUNDTRIP_TIMEOUT_MS = 500;
 
-type MaybeRecord = Record<string, unknown>;
-
-const isRecord = (value: unknown): value is MaybeRecord =>
-  typeof value === "object" && value !== null;
-
-const hasPanelBehaviorApi = (): boolean =>
-  isSidePanelSupported() &&
-  typeof chrome.sidePanel?.setPanelBehavior === "function";
+const extensionGlobals: {
+  chrome?: { sidePanel?: Partial<(typeof globalThis)["chrome"]["sidePanel"]> };
+} = globalThis;
 
 /**
  * Runs before the rest of service-worker startup so the FIRST toolbar click
@@ -34,12 +30,13 @@ const hasPanelBehaviorApi = (): boolean =>
  * pass, and this one stays down to a single storage read.
  */
 export const applyEarlySidePanelToolbarBehavior = async (): Promise<void> => {
-  if (!hasPanelBehaviorApi()) {
+  const panel = extensionGlobals.chrome?.sidePanel;
+  if (!isSidePanelSupported() || !panel?.setPanelBehavior) {
     return;
   }
   try {
     const settings = await StorageUtil.getSettings();
-    await chrome.sidePanel.setPanelBehavior({
+    await panel.setPanelBehavior({
       openPanelOnActionClick: resolveSidePanelPreferred(settings),
     });
   } catch {
@@ -52,15 +49,16 @@ export const applyEarlySidePanelToolbarBehavior = async (): Promise<void> => {
  * path. Runs once service-worker initialisation is done.
  */
 export const applySidePanelToolbarBehavior = async (): Promise<void> => {
-  if (!hasPanelBehaviorApi()) {
+  const panel = extensionGlobals.chrome?.sidePanel;
+  if (!isSidePanelSupported() || !panel?.setPanelBehavior) {
     return;
   }
   try {
     const settings = await StorageUtil.getSettings();
-    await chrome.sidePanel.setPanelBehavior({
+    await panel.setPanelBehavior({
       openPanelOnActionClick: resolveSidePanelPreferred(settings),
     });
-    await chrome.sidePanel.setOptions({ path: SIDE_PANEL_PATH });
+    await panel.setOptions?.({ path: SIDE_PANEL_PATH });
   } catch {
     // sidePanel API may not be available in all browsers.
   }
@@ -95,8 +93,9 @@ type PendingOpen = {
 const pendingOpens = new Map<string, PendingOpen>();
 
 const mintNonce = (): string => {
-  const webCrypto = globalThis.crypto;
-  if (typeof webCrypto?.randomUUID === "function") {
+  const webCrypto: Pick<Crypto, "getRandomValues"> &
+    Partial<Pick<Crypto, "randomUUID">> = globalThis.crypto;
+  if (typeof webCrypto.randomUUID === "function") {
     return webCrypto.randomUUID();
   }
   const bytes = new Uint8Array(16);
@@ -150,17 +149,22 @@ export const handleSidePanelOpenMessage = (
   clearTimeout(entry.timer);
   pendingOpens.delete(nonce);
 
-  if (!isSidePanelSupported()) {
+  const panel = extensionGlobals.chrome?.sidePanel;
+  if (!isSidePanelSupported() || !panel?.open) {
     entry.resolve(false);
     return true;
   }
 
   // open() must be called synchronously here: it consumes the user gesture
   // the content script just forwarded, and awaiting anything first spends it.
-  chrome.sidePanel
+  panel
     .open({ tabId })
-    .then(() => entry.resolve(true))
-    .catch(() => entry.resolve(false));
+    .then(() => {
+      entry.resolve(true);
+    })
+    .catch(() => {
+      entry.resolve(false);
+    });
   return true;
 };
 

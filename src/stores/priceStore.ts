@@ -1,4 +1,8 @@
-import { filterStorageRecord, isFiniteNumber } from "@/utilities/storageGuards";
+import {
+  filterStorageRecord,
+  isFiniteNumber,
+  isRecord,
+} from "@/utilities/storageGuards";
 import StorageUtil from "@/utilities/storageUtil";
 import {
   action,
@@ -197,10 +201,10 @@ class PriceStore {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const data: unknown = await response.json();
-    const qrlData = (data as Record<string, unknown> | null)?.[
-      "quantum-resistant-ledger"
-    ];
-    if (!qrlData || typeof qrlData !== "object") {
+    const qrlData = isRecord(data)
+      ? data["quantum-resistant-ledger"]
+      : undefined;
+    if (!isRecord(qrlData)) {
       throw new Error("No QRL data in response");
     }
 
@@ -229,18 +233,15 @@ class PriceStore {
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-    const data = (await response.json()) as {
-      currentPrice?: unknown;
-      priceChange24h?: unknown;
-    } | null;
-    const price = data?.currentPrice;
+    const data: unknown = await response.json();
+    const price = isRecord(data) ? data.currentPrice : undefined;
     if (typeof price !== "number" || !(price > 0)) {
       throw new Error("No usable price in the explorer overview");
     }
     // The explorer reports an exact 0 when it has no 24h baseline to
     // compare against, which is absence of data. Showing it would put a
     // confident "+0.00%" next to a price that simply has no trend yet.
-    const change = data?.priceChange24h;
+    const change = isRecord(data) ? data.priceChange24h : undefined;
     const hasChange = typeof change === "number" && change !== 0;
     return {
       prices: { usd: price },

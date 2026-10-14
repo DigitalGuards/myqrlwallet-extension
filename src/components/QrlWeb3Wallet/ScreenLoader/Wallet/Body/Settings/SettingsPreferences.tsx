@@ -29,14 +29,7 @@ const SettingsPreferences = observer(() => {
   const navigate = useNavigate();
   const { settingsStore } = useStore();
   const { t } = useTranslation();
-  const {
-    currency,
-    setCurrency,
-    language,
-    setLanguage,
-    defaultGasTier,
-    setDefaultGasTier,
-  } = settingsStore;
+  const { currency, language, defaultGasTier } = settingsStore;
 
   const GAS_TIER_OPTIONS: { value: GasTier; label: string }[] = [
     { value: "low", label: t("settings.preferences.gasLow") },
@@ -57,7 +50,13 @@ const SettingsPreferences = observer(() => {
                 size="icon"
                 className="size-8 shrink-0 transition-all hover:text-secondary"
                 aria-label={t("common.back")}
-                onClick={() => navigate(ROUTES.SETTINGS)}
+                onClick={() => {
+                  Promise.resolve(navigate(ROUTES.SETTINGS)).catch(
+                    (error: unknown) => {
+                      console.error("Failed to open settings:", error);
+                    },
+                  );
+                }}
                 data-testid="back-arrow"
               >
                 <MoveLeft />
@@ -73,7 +72,11 @@ const SettingsPreferences = observer(() => {
               <Select
                 name="displayCurrency"
                 value={currency}
-                onValueChange={setCurrency}
+                onValueChange={(value) => {
+                  settingsStore.setCurrency(value).catch((error: unknown) => {
+                    console.error("Failed to save currency:", error);
+                  });
+                }}
               >
                 <SelectTrigger
                   aria-label={t("settings.preferences.currencyLabel")}
@@ -97,7 +100,11 @@ const SettingsPreferences = observer(() => {
               <Select
                 name="displayLanguage"
                 value={language}
-                onValueChange={setLanguage}
+                onValueChange={(value) => {
+                  settingsStore.setLanguage(value).catch((error: unknown) => {
+                    console.error("Failed to save language:", error);
+                  });
+                }}
               >
                 <SelectTrigger
                   aria-label={t("settings.preferences.languageLabel")}
@@ -121,7 +128,19 @@ const SettingsPreferences = observer(() => {
               <Select
                 name="defaultGasTier"
                 value={defaultGasTier}
-                onValueChange={(v) => setDefaultGasTier(v as GasTier)}
+                onValueChange={(value) => {
+                  if (
+                    value === "low" ||
+                    value === "market" ||
+                    value === "aggressive"
+                  ) {
+                    settingsStore
+                      .setDefaultGasTier(value)
+                      .catch((error: unknown) => {
+                        console.error("Failed to save default gas fee:", error);
+                      });
+                  }
+                }}
               >
                 <SelectTrigger aria-label={t("settings.preferences.gasLabel")}>
                   <SelectValue />
