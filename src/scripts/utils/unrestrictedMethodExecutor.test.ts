@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Json, JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import browser from "webextension-polyfill";
+import { checkForLastError, getSerializableObject } from "./scriptUtils";
 import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
 
 const {
@@ -33,12 +36,12 @@ vi.mock("@/utilities/storageUtil", () => ({
 // The real LockManager pulls in the @theqrl/web3 crypto graph; qrl_accounts
 // only needs its isLocked() answer (F8).
 vi.mock("../lockManager/lockManager", () => ({
-  default: { isLocked: (...args: any[]) => mockIsLocked(...args) },
+  default: { isLocked: mockIsLocked },
 }));
 
 vi.mock("@theqrl/web3", () => {
   class MockWeb3 {
-    static providers = { HttpProvider: class {} };
+    static providers = { HttpProvider: vi.fn() };
     provider = {};
     qrl = {
       getChainId,
@@ -56,22 +59,20 @@ vi.mock("@theqrl/web3-core", () => ({
 
 import { executeUnrestrictedMethod } from "./unrestrictedMethodExecutor";
 
-const request = (url: string) =>
-  ({
-    id: 1,
-    jsonrpc: "2.0",
-    method: UNRESTRICTED_METHODS.QRL_WEB3_WALLET_GET_PROVIDER_STATE,
-    senderData: { url },
-  }) as never;
+const request = (url: string): JsonRpcRequest => ({
+  id: 1,
+  jsonrpc: "2.0",
+  method: UNRESTRICTED_METHODS.QRL_WEB3_WALLET_GET_PROVIDER_STATE,
+  senderData: { url },
+});
 
-const rpcRequest = (method: string, params: unknown[]) =>
-  ({
-    id: 1,
-    jsonrpc: "2.0",
-    method,
-    params,
-    senderData: { url: "https://connected.example" },
-  }) as never;
+const rpcRequest = (method: string, params: Json[]): JsonRpcRequest => ({
+  id: 1,
+  jsonrpc: "2.0",
+  method,
+  params,
+  senderData: { url: "https://connected.example" },
+});
 
 const ADDRESS = `Q${"0".repeat(128)}`;
 const TOPIC = `0x${"ab".repeat(64)}`;
@@ -86,10 +87,12 @@ describe("qrlWallet_getProviderState", () => {
     getActiveBlockChain.mockReset().mockResolvedValue(ACTIVE_CHAIN);
     getConnectedAccounts
       .mockReset()
-      .mockImplementation(async (origin) =>
-        origin === "https://connected.example"
-          ? { accounts: ["QConnected"] }
-          : undefined,
+      .mockImplementation((origin: string) =>
+        Promise.resolve(
+          origin === "https://connected.example"
+            ? { accounts: ["QConnected"] }
+            : undefined,
+        ),
       );
     requestManagerSend.mockReset();
   });
@@ -118,16 +121,16 @@ describe("qrlWallet_getProviderState", () => {
 
   it("reads the latest accounts after the network identity", async () => {
     let resolveChain: ((chain: typeof ACTIVE_CHAIN) => void) | undefined;
-    let connected = { accounts: ["QConnected"] } as
-      | { accounts: string[] }
-      | undefined;
+    let connected: { accounts: string[] } | undefined = {
+      accounts: ["QConnected"],
+    };
     getActiveBlockChain.mockImplementationOnce(
       () =>
         new Promise<typeof ACTIVE_CHAIN>((resolve) => {
           resolveChain = resolve;
         }),
     );
-    getConnectedAccounts.mockImplementation(async () => connected);
+    getConnectedAccounts.mockImplementation(() => Promise.resolve(connected));
 
     const providerState = executeUnrestrictedMethod(
       request("https://connected.example/swap"),
@@ -211,13 +214,12 @@ describe("qrlWallet_getProviderState", () => {
 });
 
 describe("wallet_getPermissions (F8)", () => {
-  const permissionsRequest = (origin: string) =>
-    ({
-      id: 1,
-      jsonrpc: "2.0",
-      method: UNRESTRICTED_METHODS.WALLET_GET_PERMISSIONS,
-      senderData: { url: origin },
-    }) as never;
+  const permissionsRequest = (origin: string): JsonRpcRequest => ({
+    id: 1,
+    jsonrpc: "2.0",
+    method: UNRESTRICTED_METHODS.WALLET_GET_PERMISSIONS,
+    senderData: { url: origin },
+  });
 
   const storedPermissions = [
     {
@@ -339,13 +341,12 @@ describe("QIP-55 log RPC methods", () => {
 });
 
 describe("qrl_accounts (F8)", () => {
-  const request = (origin: string) =>
-    ({
-      id: 1,
-      jsonrpc: "2.0",
-      method: UNRESTRICTED_METHODS.QRL_ACCOUNTS,
-      senderData: { url: origin },
-    }) as never;
+  const request = (origin: string): JsonRpcRequest => ({
+    id: 1,
+    jsonrpc: "2.0",
+    method: UNRESTRICTED_METHODS.QRL_ACCOUNTS,
+    senderData: { url: origin },
+  });
 
   beforeEach(() => {
     mockIsLocked.mockReset();
@@ -424,5 +425,123 @@ describe("qrl_accounts hides the grant state while locked (L-1)", () => {
     expect(unconnected.result).toEqual([]);
     expect(connected.error).toBeUndefined();
     expect(unconnected.error).toBeUndefined();
+  });
+});
+
+describe("provider response serialization", () => {
+  it("serializes nested bigint values without changing the input", () => {
+    const response = { result: [0n, 255n, { height: 16n }], label: "block" };
+
+    expect(getSerializableObject(response)).toEqual({
+      result: ["0x0", "0xff", { height: "0x10" }],
+      label: "block",
+    });
+    expect(response.result).toEqual([0n, 255n, { height: 16n }]);
+  });
+
+  it("preserves RPC error fields and removes internal fields", () => {
+    const data = { reason: "denied" };
+    const error = Object.assign(new Error("rejected"), {
+      code: 4001,
+      data,
+      internal: "private",
+    });
+
+    expect(getSerializableObject({ error, result: "ignored" })).toEqual({
+      error: { code: 4001, message: "rejected", data },
+    });
+    expect(error.data).toBe(data);
+    expect(error.stack).toBeTypeOf("string");
+  });
+
+  it("narrows malformed error fields and retains their existing text fallback", () => {
+    expect(
+      getSerializableObject({ error: { code: "4001", message: 7 } }),
+    ).toEqual({
+      error: { message: "[object Object]" },
+    });
+    expect(getSerializableObject({ error: "rejected" })).toEqual({
+      error: { message: "rejected" },
+    });
+    expect(
+      getSerializableObject({ error: { toString: () => "custom" } }),
+    ).toEqual({
+      error: { message: "custom" },
+    });
+  });
+
+  it("treats arrays carrying error metadata as arrays", () => {
+    const response = Object.assign(["result"], {
+      error: { code: 4001, message: "untrusted" },
+    });
+    const error = Object.assign([], { code: 4001, message: "untrusted" });
+
+    expect(getSerializableObject(response)).toEqual(["result"]);
+    expect(getSerializableObject({ error })).toEqual({
+      error: { message: "" },
+    });
+  });
+
+  it.each([null, false, 7, "result", ["one", "two"], { error: null }])(
+    "preserves a JSON response %#",
+    (response) => {
+      expect(getSerializableObject(response)).toEqual(response);
+    },
+  );
+
+  it("preserves serialization failures", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    expect(() => getSerializableObject(circular)).toThrow(TypeError);
+    expect(() => getSerializableObject(undefined)).toThrow(SyntaxError);
+  });
+});
+
+describe("runtime error normalization", () => {
+  const setLastError = (lastError: unknown) => {
+    Object.defineProperty(browser.runtime, "lastError", {
+      value: lastError,
+      configurable: true,
+    });
+  };
+
+  afterEach(() => {
+    Reflect.deleteProperty(browser.runtime, "lastError");
+  });
+
+  it("returns undefined when no runtime error is present", () => {
+    expect(checkForLastError()).toBeUndefined();
+  });
+
+  it("keeps a complete error object and its stack", () => {
+    const error = new Error("disconnected");
+    setLastError(error);
+
+    expect(checkForLastError()).toBe(error);
+  });
+
+  it("repairs an error that only carries a message", () => {
+    setLastError({ message: "disconnected" });
+
+    expect(checkForLastError()).toEqual(new Error("disconnected"));
+  });
+
+  it("repairs malformed stack metadata while keeping the message", () => {
+    const error = { message: "disconnected", stack: 42 };
+    setLastError(error);
+
+    const result = checkForLastError();
+    expect(result).toBeInstanceOf(Error);
+    expect(result?.message).toBe("disconnected");
+    expect(result?.stack).toBeTypeOf("string");
+  });
+
+  it("ignores a malformed message without coercing it", () => {
+    const toString = vi.fn(() => "untrusted");
+    setLastError({ message: { toString } });
+
+    expect(checkForLastError()).toEqual(new Error());
+    expect(toString).not.toHaveBeenCalled();
   });
 });

@@ -62,7 +62,7 @@ const networkIdentityFromNode = async (
 };
 
 export const executeUnrestrictedMethod = async (
-  req: JsonRpcRequest<JsonRpcRequest>,
+  req: JsonRpcRequest,
 ): Promise<unknown> => {
   if (req.method === UNRESTRICTED_METHODS.QRL_WALLET_CAPABILITIES) {
     const chain = await StorageUtil.getActiveBlockChain();

@@ -37,11 +37,14 @@ class ProbeChannel extends Duplex {
 const waitForBufferedRequest = async (suffix: string) => {
   const postMessage = vi
     .spyOn(window, "postMessage")
-    .mockImplementation((message, targetOrigin) => {
+    .mockImplementation((message: unknown, targetOrigin) => {
       window.dispatchEvent(
         new MessageEvent("message", {
           data: message,
-          origin: String(targetOrigin),
+          origin:
+            typeof targetOrigin === "string"
+              ? targetOrigin
+              : (targetOrigin?.targetOrigin ?? "/"),
           source: window,
         }),
       );
@@ -55,7 +58,7 @@ const waitForBufferedRequest = async (suffix: string) => {
     id: 42,
     method: "qrlWallet_getProviderState",
   };
-  const received: (typeof request)[] = [];
+  const received: unknown[] = [];
 
   let content: WindowPostMessageStream | undefined;
   try {
@@ -64,9 +67,13 @@ const waitForBufferedRequest = async (suffix: string) => {
       name: `content-${suffix}`,
       target: `inpage-${suffix}`,
     });
-    content.on("data", (message) => received.push(message));
+    content.on("data", (message: unknown) => {
+      received.push(message);
+    });
 
-    await vi.waitFor(() => expect(received).toEqual([request]));
+    await vi.waitFor(() => {
+      expect(received).toEqual([request]);
+    });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(received).toEqual([request]);
   } finally {
@@ -97,8 +104,9 @@ describe("initializeContentScriptProviderConnection", () => {
     const port = {
       onMessage: { addListener: vi.fn() },
     };
-    const setupConnection = vi.fn(async (providerPort: typeof port) => {
+    const setupConnection = vi.fn((providerPort: typeof port) => {
       providerPort.onMessage.addListener(() => undefined);
+      return Promise.resolve();
     });
     const announceReady = vi.fn(async () => {
       await tabsQuery();
@@ -110,7 +118,9 @@ describe("initializeContentScriptProviderConnection", () => {
       announceReady,
     );
 
-    await vi.waitFor(() => expect(tabsQuery).toHaveBeenCalledOnce());
+    await vi.waitFor(() => {
+      expect(tabsQuery).toHaveBeenCalledOnce();
+    });
     expect(port.onMessage.addListener).toHaveBeenCalledOnce();
 
     resolveTabsQuery?.();
@@ -128,10 +138,11 @@ describe("initializeContentScriptProviderConnection", () => {
         }),
       },
     };
-    const setupConnection = vi.fn(async (providerPort: typeof port) => {
+    const setupConnection = vi.fn((providerPort: typeof port) => {
       providerPort.onMessage.addListener((request) => {
         handledRequestIds.push(request.id);
       });
+      return Promise.resolve();
     });
     const announceReady = vi.fn(
       () =>
@@ -146,7 +157,9 @@ describe("initializeContentScriptProviderConnection", () => {
       announceReady,
     );
 
-    await vi.waitFor(() => expect(announceReady).toHaveBeenCalledOnce());
+    await vi.waitFor(() => {
+      expect(announceReady).toHaveBeenCalledOnce();
+    });
     receiveRequest?.({ id: 42 });
     expect(handledRequestIds).toEqual([42]);
 
@@ -201,15 +214,15 @@ describe("createProviderChannelBridge", () => {
     expect(bridge.markConnectionReady()).toBe(0);
 
     page.emitInbound({ jsonrpc: "2.0", id: 1, method: "first" });
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(firstExtension.writes).toEqual([
         { jsonrpc: "2.0", id: 1, method: "first" },
-      ]),
-    );
+      ]);
+    });
     firstExtension.emitInbound({ id: 1, result: "first" });
-    await vi.waitFor(() =>
-      expect(page.writes).toEqual([{ id: 1, result: "first" }]),
-    );
+    await vi.waitFor(() => {
+      expect(page.writes).toEqual([{ id: 1, result: "first" }]);
+    });
     disconnectFirst();
     firstExtension.destroy();
 
@@ -221,18 +234,18 @@ describe("createProviderChannelBridge", () => {
     const disconnectSecond = bridge.attachExtensionChannel(secondExtension);
     expect(bridge.markConnectionReady()).toBe(0);
     page.emitInbound({ jsonrpc: "2.0", id: 2, method: "second" });
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(secondExtension.writes).toEqual([
         { jsonrpc: "2.0", id: 2, method: "second" },
-      ]),
-    );
+      ]);
+    });
     secondExtension.emitInbound({ id: 2, result: "second" });
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(page.writes).toEqual([
         { id: 1, result: "first" },
         { id: 2, result: "second" },
-      ]),
-    );
+      ]);
+    });
 
     disconnectSecond();
     secondExtension.destroy();
@@ -253,9 +266,9 @@ describe("createProviderChannelBridge", () => {
       method: "qrl_blockNumber",
     };
     page.emitInbound(beforeDisconnect);
-    await vi.waitFor(() =>
-      expect(firstExtension.writes).toEqual([beforeDisconnect]),
-    );
+    await vi.waitFor(() => {
+      expect(firstExtension.writes).toEqual([beforeDisconnect]);
+    });
     disconnectFirst();
     firstExtension.destroy();
 
@@ -287,13 +300,13 @@ describe("createProviderChannelBridge", () => {
     secondExtension.emitInbound({ id: 1, result: "old" });
     secondExtension.emitInbound({ id: 2, result: "gap" });
     secondExtension.emitInbound({ id: 3, result: "new" });
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(page.writes).toEqual([
         { id: 1, result: "old" },
         { id: 2, result: "gap" },
         { id: 3, result: "new" },
-      ]),
-    );
+      ]);
+    });
     expect(bridge.markConnectionReady()).toBe(0);
 
     disconnectSecond();
@@ -325,9 +338,9 @@ describe("createProviderChannelBridge", () => {
     page.emitInbound(broadcast);
     page.emitInbound(approval);
     page.emitInbound(read);
-    await vi.waitFor(() =>
-      expect(firstExtension.writes).toEqual([broadcast, approval, read]),
-    );
+    await vi.waitFor(() => {
+      expect(firstExtension.writes).toEqual([broadcast, approval, read]);
+    });
 
     disconnectFirst();
     firstExtension.destroy();
@@ -361,7 +374,9 @@ describe("createProviderChannelBridge", () => {
     // a second time.
     secondExtension.emitInbound({ jsonrpc: "2.0", id: "tx", result: "0xhash" });
     secondExtension.emitInbound({ jsonrpc: "2.0", id: 8, result: "0x2" });
-    await vi.waitFor(() => expect(page.writes).toHaveLength(3));
+    await vi.waitFor(() => {
+      expect(page.writes).toHaveLength(3);
+    });
     expect(page.writes[2]).toEqual({ jsonrpc: "2.0", id: 8, result: "0x2" });
 
     disconnectSecond();
@@ -446,7 +461,9 @@ describe("createProviderChannelBridge", () => {
         method: "qrl_blockNumber",
       });
     }
-    await vi.waitFor(() => expect(page.writes).toHaveLength(1));
+    await vi.waitFor(() => {
+      expect(page.writes).toHaveLength(1);
+    });
     expect(page.writes[0]).toEqual({
       jsonrpc: "2.0",
       id: 0,
@@ -484,9 +501,9 @@ describe("createProviderChannelBridge", () => {
     // The live connection is piped straight through, so the request that
     // broke the cap still reaches the worker. What the cap decides is which
     // request the page is told about, and that is the newest one.
-    await vi.waitFor(() =>
-      expect(extension.writes).toHaveLength(MAX_PENDING_REQUESTS + 1),
-    );
+    await vi.waitFor(() => {
+      expect(extension.writes).toHaveLength(MAX_PENDING_REQUESTS + 1);
+    });
 
     expect(page.writes).toEqual([
       {
@@ -500,7 +517,9 @@ describe("createProviderChannelBridge", () => {
     ]);
     // The long-running approval is untouched and still answerable.
     extension.emitInbound({ jsonrpc: "2.0", id: 0, result: "0xhash" });
-    await vi.waitFor(() => expect(page.writes).toHaveLength(2));
+    await vi.waitFor(() => {
+      expect(page.writes).toHaveLength(2);
+    });
     expect(page.writes[1]).toEqual({
       jsonrpc: "2.0",
       id: 0,
@@ -526,7 +545,9 @@ describe("createProviderChannelBridge", () => {
       method: "qrl_sendRawTransaction",
     };
     page.emitInbound(broadcast);
-    await vi.waitFor(() => expect(firstExtension.writes).toEqual([broadcast]));
+    await vi.waitFor(() => {
+      expect(firstExtension.writes).toEqual([broadcast]);
+    });
 
     disconnectFirst();
     firstExtension.destroy();
@@ -561,7 +582,9 @@ describe("createProviderChannelBridge", () => {
     try {
       clock.mockReturnValue(Date.now() + PENDING_REQUEST_TTL_MS + 1);
       page.emitInbound({ jsonrpc: "2.0", id: "fresh", method: "qrl_chainId" });
-      await vi.waitFor(() => expect(page.writes).toHaveLength(1));
+      await vi.waitFor(() => {
+        expect(page.writes).toHaveLength(1);
+      });
       expect(page.writes[0]).toEqual({
         jsonrpc: "2.0",
         id: "orphan",
@@ -588,7 +611,11 @@ describe("createProviderChannelBridge", () => {
     const extension = new ProbeChannel();
     const bridge = createProviderChannelBridge(page);
     bridge.attachExtensionChannel(extension);
-    page.emitInbound({ jsonrpc: "2.0", id: "waiting", method: "qrl_requestAccounts" });
+    page.emitInbound({
+      jsonrpc: "2.0",
+      id: "waiting",
+      method: "qrl_requestAccounts",
+    });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(page.writes).toEqual([]);
 
@@ -645,7 +672,9 @@ describe("createProviderChannelBridge", () => {
 
     page.emitInbound({ jsonrpc: "2.0", id: 0, method: "zero" });
     page.emitInbound({ jsonrpc: "2.0", id: "0", method: "string-zero" });
-    await vi.waitFor(() => expect(extension.writes).toHaveLength(2));
+    await vi.waitFor(() => {
+      expect(extension.writes).toHaveLength(2);
+    });
 
     extension.emitInbound({ jsonrpc: "2.0", id: 0, result: "number" });
     extension.emitInbound({ jsonrpc: "2.0", id: 0, result: "duplicate" });
@@ -660,7 +689,7 @@ describe("createProviderChannelBridge", () => {
       method: "qrlWeb3Wallet_chainChanged",
       params: ["0x539"],
     });
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(page.writes).toEqual([
         { jsonrpc: "2.0", id: 0, result: "number" },
         {
@@ -673,8 +702,8 @@ describe("createProviderChannelBridge", () => {
           method: "qrlWeb3Wallet_chainChanged",
           params: ["0x539"],
         },
-      ]),
-    );
+      ]);
+    });
 
     disconnect();
     extension.destroy();
