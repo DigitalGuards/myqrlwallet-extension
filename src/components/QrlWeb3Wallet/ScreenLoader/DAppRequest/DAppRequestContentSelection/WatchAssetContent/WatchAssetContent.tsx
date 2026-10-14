@@ -9,22 +9,18 @@ import ChainBadge from "../../../Wallet/Header/ChainBadge/ChainBadge";
 import WatchAssetInfo from "./WatchAssetInfo/WatchAssetInfo";
 import StorageUtil from "@/utilities/storageUtil";
 import WatchAssetVerification from "./WatchAssetVerification/WatchAssetVerification";
+import { readWatchAssetOptions } from "@/utilities/approvalGuards";
+import { rpcErrors } from "@theqrl/qrl-wallet-provider";
 
 const WatchAssetContent = observer(() => {
   const { t } = useTranslation();
   const { dAppRequestStore, qrlStore } = useStore();
   const { activeAccount } = qrlStore;
   const { accountAddress } = activeAccount;
-  const {
-    onPermission,
-    approvalProcessingStatus,
-    setOnPermissionCallBack,
-    dAppRequestData,
-  } = dAppRequestStore;
+  const { approvalProcessingStatus, dAppRequestData } = dAppRequestStore;
   const { isProcessing } = approvalProcessingStatus;
 
-  const paramsObject = dAppRequestData?.params[0];
-  const tokenContract = paramsObject?.options;
+  const tokenContract = readWatchAssetOptions(dAppRequestData?.params);
 
   const addBlockchain = async () => {
     const onPermissionCallBack = async (
@@ -32,17 +28,21 @@ const WatchAssetContent = observer(() => {
       record: ResponseRecorder,
     ) => {
       if (hasApproved) {
+        if (!tokenContract) {
+          record({ error: rpcErrors.invalidParams() });
+          return;
+        }
         await StorageUtil.setTokenContractsList(accountAddress, {
-          address: tokenContract?.address ?? "",
-          symbol: tokenContract?.symbol ?? "",
-          decimals: parseInt(tokenContract?.decimals ?? 0),
-          image: tokenContract?.image ?? "",
+          address: tokenContract.address,
+          symbol: tokenContract.symbol,
+          decimals: parseInt(String(tokenContract.decimals)),
+          image: tokenContract.image ?? "",
         });
         record({ result: true });
       }
     };
-    setOnPermissionCallBack(onPermissionCallBack);
-    await onPermission(true);
+    dAppRequestStore.setOnPermissionCallBack(onPermissionCallBack);
+    await dAppRequestStore.onPermission(true);
   };
 
   return (
@@ -65,7 +65,14 @@ const WatchAssetContent = observer(() => {
           type="button"
           disabled={isProcessing}
           aria-label="No"
-          onClick={() => onPermission(false)}
+          onClick={() => {
+            dAppRequestStore.onPermission(false).catch((error: unknown) => {
+              console.warn(
+                "QrlWeb3Wallet: Error while resolving the permission request\n",
+                error,
+              );
+            });
+          }}
         >
           <X className="mr-2 h-4 w-4" />
           {t("dapp.no")}
@@ -75,7 +82,14 @@ const WatchAssetContent = observer(() => {
           type="button"
           disabled={isProcessing}
           aria-label="Yes"
-          onClick={() => addBlockchain()}
+          onClick={() => {
+            addBlockchain().catch((error: unknown) => {
+              console.warn(
+                "QrlWeb3Wallet: Error while resolving the permission request\n",
+                error,
+              );
+            });
+          }}
         >
           <Check className="mr-2 h-4 w-4" />
           {t("dapp.yes")}

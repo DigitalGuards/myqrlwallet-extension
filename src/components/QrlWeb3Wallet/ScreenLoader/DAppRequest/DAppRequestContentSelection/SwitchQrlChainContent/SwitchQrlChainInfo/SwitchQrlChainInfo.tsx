@@ -7,12 +7,20 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ChainInfoCard from "./ChainInfoCard/ChainInfoCard";
 import { ArrowDown } from "lucide-react";
+import {
+  isSwitchQrlChainParameters,
+  readApprovalParams,
+} from "@/utilities/approvalGuards";
+import { isStoredBlockchain } from "@/utilities/storageGuards";
 
 const SwitchQrlChainInfo = () => {
   const { t } = useTranslation();
   const { dAppRequestStore } = useStore();
   const { dAppRequestData } = dAppRequestStore;
-  const paramObject = dAppRequestData?.params?.[0];
+  const paramObject = readApprovalParams(dAppRequestData?.params)?.[0];
+  const switchingChainId = isSwitchQrlChainParameters(paramObject)
+    ? paramObject.chainId
+    : undefined;
 
   const [currentChain, setCurrentChain] = useState<
     BlockchainDataType | undefined
@@ -23,9 +31,13 @@ const SwitchQrlChainInfo = () => {
 
   useEffect(() => {
     (async () => {
-      const currentChainId = (await StorageUtil.getActiveBlockChain())?.chainId;
-      const switchingChainId = paramObject?.chainId;
-      const allBlockchains = (await StorageUtil.getAllBlockChains()).map(blockchainView);
+      const currentChain: unknown = await StorageUtil.getActiveBlockChain();
+      const currentChainId = isStoredBlockchain(currentChain)
+        ? currentChain.chainId
+        : undefined;
+      const allBlockchains = (await StorageUtil.getAllBlockChains()).map(
+        blockchainView,
+      );
       setCurrentChain(
         allBlockchains.find(
           (chain) =>
@@ -38,7 +50,9 @@ const SwitchQrlChainInfo = () => {
             chain.chainId.toLowerCase() === switchingChainId?.toLowerCase(),
         ),
       );
-    })();
+    })().catch((error: unknown) => {
+      console.warn("QrlWeb3Wallet: Failed to load switch-chain details", error);
+    });
   }, []);
 
   if (!currentChain || !switchingChain)
@@ -51,16 +65,16 @@ const SwitchQrlChainInfo = () => {
   return (
     <Card className="flex flex-col gap-4 p-4">
       <ChainInfoCard
-        title={t('dapp.switchChain.current')}
-        description={t('dapp.switchChain.currentDescription')}
+        title={t("dapp.switchChain.current")}
+        description={t("dapp.switchChain.currentDescription")}
         chain={currentChain}
       />
       <div className="flex justify-center">
         <ArrowDown data-testid="arrow-down-icon" />
       </div>
       <ChainInfoCard
-        title={t('dapp.switchChain.to')}
-        description={t('dapp.switchChain.toDescription')}
+        title={t("dapp.switchChain.to")}
+        description={t("dapp.switchChain.toDescription")}
         chain={switchingChain}
       />
     </Card>

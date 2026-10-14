@@ -3,14 +3,15 @@ import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressD
 import { useStore } from "@/stores/store";
 import { useTranslation } from "react-i18next";
 import CurrencyImagePreload from "../../AddQrlChainContent/AddQrlChainInfo/AddQrlChainDetails/CurrencyImagePreload/CurrencyImagePreload";
+import { readWatchAssetOptions } from "@/utilities/approvalGuards";
+import { storedText } from "@/utilities/storageViews";
 
 const WatchAssetInfo = () => {
   const { t } = useTranslation();
   const { dAppRequestStore } = useStore();
   const { dAppRequestData } = dAppRequestStore;
 
-  const paramsObject = dAppRequestData?.params[0];
-  const asset = paramsObject?.options;
+  const asset = readWatchAssetOptions(dAppRequestData?.params);
 
   return (
     <Card className="flex flex-col gap-4 p-4">
@@ -28,7 +29,7 @@ const WatchAssetInfo = () => {
               <div>{t("dapp.watchAsset.symbol")}</div>
               <div className="font-bold text-secondary">{asset?.symbol}</div>
             </div>
-            <CurrencyImagePreload iconUrls={[asset?.image ?? ""]} />
+            <CurrencyImagePreload iconUrls={[storedText(asset?.image)]} />
           </div>
           <div className="flex flex-col gap-1">
             <div>{t("dapp.watchAsset.decimals")}</div>
