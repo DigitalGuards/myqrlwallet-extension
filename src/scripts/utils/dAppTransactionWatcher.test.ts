@@ -1,4 +1,5 @@
 import { deferred } from "@/test-utils/deferred";
+import { profileStorageKey } from "@/utilities/profileStorage";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Plain object stores (hoisting-safe) ────────────────────────────
@@ -101,8 +102,14 @@ import {
   registerDAppTransactionWatch,
 } from "./dAppTransactionWatcher";
 
+const alarms: {
+  create: (
+    name: string,
+    info: browser.Alarms.CreateAlarmInfoType,
+  ) => void | Promise<void>;
+} = browser.alarms;
 const mockAlarms = {
-  create: vi.spyOn(browser.alarms, "create"),
+  create: vi.spyOn(alarms, "create"),
   clear: vi.spyOn(browser.alarms, "clear"),
   get: vi.spyOn(browser.alarms, "get"),
 };
@@ -112,6 +119,7 @@ const HASH = "0xabc123";
 const HASH_2 = "0xdef456";
 const ACCOUNT = `Q${"a".repeat(128)}`;
 const CHAIN_ID = "0x301825";
+const WATCH_STORAGE_KEY = profileStorageKey("DAPP_TX_WATCHES");
 
 const clearStore = (store: Record<string, unknown>) => {
   for (const key of Object.keys(store)) Reflect.deleteProperty(store, key);
@@ -141,6 +149,60 @@ describe("dAppTransactionWatcher", () => {
   });
 
   describe("registerDAppTransactionWatch", () => {
+    it("waits for asynchronous alarm creation before finishing registration", async () => {
+      const creation = deferred<undefined>();
+      mockAlarms.create.mockImplementationOnce(() => creation.promise);
+      const finished = vi.fn(() => undefined);
+      const registration = registerDAppTransactionWatch({
+        hash: HASH,
+        account: ACCOUNT,
+        chainId: CHAIN_ID,
+      }).then(finished);
+
+      try {
+        await vi.waitFor(() => {
+          expect(mockAlarms.create).toHaveBeenCalledOnce();
+        });
+        expect(finished).not.toHaveBeenCalled();
+      } finally {
+        creation.resolve(undefined);
+        await registration;
+      }
+      expect(finished).toHaveBeenCalledOnce();
+    });
+
+    it("propagates an alarm creation rejection while retaining the saved watch", async () => {
+      const failure = new Error("alarm unavailable");
+      mockAlarms.create.mockImplementationOnce(() => Promise.reject(failure));
+
+      await expect(
+        registerDAppTransactionWatch({
+          hash: HASH,
+          account: ACCOUNT,
+          chainId: CHAIN_ID,
+        }),
+      ).rejects.toBe(failure);
+      expect(sessionStore[WATCH_STORAGE_KEY]).toMatchObject([
+        {
+          hash: HASH,
+          account: ACCOUNT,
+          chainId: CHAIN_ID,
+        },
+      ]);
+    });
+
+    it("supports synchronous alarm creation", async () => {
+      mockAlarms.create.mockImplementationOnce(() => undefined);
+
+      await registerDAppTransactionWatch({
+        hash: HASH,
+        account: ACCOUNT,
+        chainId: CHAIN_ID,
+      });
+
+      expect(mockAlarms.create).toHaveBeenCalledOnce();
+    });
+
     it("arms the alarm once for the first registration", async () => {
       await registerDAppTransactionWatch({
         hash: HASH,
@@ -194,6 +256,71 @@ describe("dAppTransactionWatcher", () => {
       expect(updateTransactionHistoryEntry).toHaveBeenCalledTimes(1);
       expect(mockShowTransactionNotification).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it.each([null, 12, "unreadable", { futureWatches: [] }])(
+    "preserves a malformed stored list and rejects operations on it (%j)",
+    async (stored) => {
+      sessionStore[WATCH_STORAGE_KEY] = stored;
+      await expect(
+        registerDAppTransactionWatch({
+          hash: HASH,
+          account: ACCOUNT,
+          chainId: CHAIN_ID,
+        }),
+      ).rejects.toThrow("Invalid dApp transaction watch storage");
+      await expect(handleDAppTransactionWatchAlarm()).rejects.toThrow(
+        "Invalid dApp transaction watch storage",
+      );
+
+      expect(sessionStore[WATCH_STORAGE_KEY]).toBe(stored);
+      expect(mockAlarms.create).not.toHaveBeenCalled();
+      expect(mockAlarms.clear).not.toHaveBeenCalled();
+      expect(getQrlProperties).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves unreadable records and unrelated metadata through registration and confirmation", async () => {
+    const unreadable = { hash: HASH, startedAt: "older-format" };
+    const retained = {
+      hash: "0xother",
+      account: ACCOUNT,
+      chainId: "0xother-chain",
+      startedAt: Date.now(),
+      futureMetadata: { keep: true },
+    };
+    const invalidTimestamp = {
+      hash: HASH,
+      account: ACCOUNT,
+      chainId: CHAIN_ID,
+      startedAt: NaN,
+    };
+    const original = [
+      null,
+      unreadable,
+      retained,
+      7,
+      invalidTimestamp,
+      { ...retained, hash: 12 },
+      { ...retained, account: null },
+      { ...retained, chainId: [] },
+    ];
+    sessionStore[WATCH_STORAGE_KEY] = original;
+
+    await registerDAppTransactionWatch({
+      hash: HASH,
+      account: ACCOUNT,
+      chainId: CHAIN_ID,
+    });
+    const getTransactionReceipt = vi.fn().mockResolvedValue(minedReceipt(HASH));
+    getQrlProperties.mockResolvedValue({ qrl: { getTransactionReceipt } });
+    await handleDAppTransactionWatchAlarm();
+
+    expect(sessionStore[WATCH_STORAGE_KEY]).toEqual(original);
+    expect(getTransactionReceipt).toHaveBeenCalledExactlyOnceWith(HASH);
+    expect(updateTransactionHistoryEntry).toHaveBeenCalledOnce();
+    expect(mockShowTransactionNotification).toHaveBeenCalledOnce();
+    expect(mockAlarms.clear).not.toHaveBeenCalled();
   });
 
   describe("handleDAppTransactionWatchAlarm", () => {

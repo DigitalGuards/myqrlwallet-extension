@@ -17,14 +17,13 @@ vi.mock("./dAppTransactionWatcher", () => ({
 const ACCOUNT = `Q${"a".repeat(128)}`;
 const ORIGIN = "https://audit-dapp.example";
 
-const sendTransactionRequest = (from: unknown) =>
-  ({
-    id: 1,
-    jsonrpc: "2.0",
-    method: RESTRICTED_METHODS.QRL_SEND_TRANSACTION,
-    params: [{ from }],
-    senderData: { url: `${ORIGIN}/request` },
-  }) as never;
+const sendTransactionRequest = (from: unknown) => ({
+  id: 1,
+  jsonrpc: "2.0",
+  method: RESTRICTED_METHODS.QRL_SEND_TRANSACTION,
+  params: [{ from }],
+  senderData: { url: `${ORIGIN}/request` },
+});
 
 describe("registerDAppTransactionWatchIfApproved", () => {
   it("registers a watch for the tx sender and the authorized chain", async () => {

@@ -17,5 +17,11 @@ describe("isPrematureClose", () => {
     ).toBe(false);
     expect(isPrematureClose(undefined)).toBe(false);
     expect(isPrematureClose("Premature close")).toBe(false);
+    expect(isPrematureClose({ code: "ERR_STREAM_PREMATURE_CLOSE" })).toBe(
+      false,
+    );
+    expect(
+      isPrematureClose(Object.assign(new Error("failed"), { code: 42 })),
+    ).toBe(false);
   });
 });

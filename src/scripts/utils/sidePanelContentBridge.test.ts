@@ -65,8 +65,26 @@ describe("handleSidePanelOpenRequest", () => {
     expect(handleSidePanelOpenRequest({ name: "SOMETHING_ELSE" })).toBe(false);
     expect(handleSidePanelOpenRequest(request(42))).toBe(false);
     expect(handleSidePanelOpenRequest(request(""))).toBe(false);
+    expect(handleSidePanelOpenRequest(Object.assign([], request()))).toBe(
+      false,
+    );
     expect(sendMessage).not.toHaveBeenCalled();
   });
+
+  it.each([null, {}, { isActive: "true" }, { isActive: 1 }])(
+    "requires a boolean active gesture (%j)",
+    (activation) => {
+      Object.defineProperty(navigator, "userActivation", {
+        value: activation,
+        configurable: true,
+      });
+
+      expect(handleSidePanelOpenRequest(request(), { id: "mock-id" })).toBe(
+        false,
+      );
+      expect(sendMessage).not.toHaveBeenCalled();
+    },
+  );
 
   it("swallows a send failure so the worker can fall back", () => {
     sendMessage.mockRejectedValue(new Error("no receiving end"));

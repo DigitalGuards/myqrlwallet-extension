@@ -1,3 +1,6 @@
+const isMethod = (value: unknown): value is (...args: unknown[]) => unknown =>
+  typeof value === "function";
+
 /**
  * Hands a page a provider whose methods survive being pulled off the
  * object.
@@ -27,15 +30,15 @@ export const withBoundMethods = <T extends object>(provider: T): T => {
     // them, delete properties off the provider they are handed.
     deleteProperty: () => true,
     get(target, property) {
-      const value = Reflect.get(target, property, target);
-      if (typeof value !== "function") return value;
+      const value: unknown = Reflect.get(target, property, target);
+      if (!isMethod(value)) return value;
       const cached = boundMethods.get(property);
       if (cached !== undefined) return cached;
-      const bound = (value as (...args: unknown[]) => unknown).bind(target);
+      const bound = value.bind(target);
       boundMethods.set(property, bound);
       return bound;
     },
-    set(target, property, value) {
+    set(target, property, value: unknown) {
       // A page that overwrites a method has to replace what the next read
       // returns, so the cache entry goes with it.
       boundMethods.delete(property);
