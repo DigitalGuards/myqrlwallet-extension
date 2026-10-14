@@ -16,7 +16,10 @@ beforeAll(() => {
 });
 
 describe("SettingsAppearance", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -65,5 +68,19 @@ describe("SettingsAppearance", () => {
     await userEvent.click(screen.getByRole("option", { name: "Dark" }));
 
     expect(setThemePreference).toHaveBeenCalledWith("dark");
+  });
+
+  it("reports a rejected theme save", async () => {
+    const error = new Error("storage unavailable");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const setThemePreference = vi.fn().mockRejectedValue(error);
+    renderComponent(mockedStore({ settingsStore: { setThemePreference } }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Theme" }));
+    await userEvent.click(screen.getByRole("option", { name: "Light" }));
+    expect(setThemePreference).toHaveBeenCalledWith("light");
+    expect(report).toHaveBeenCalledWith(
+      "Failed to save theme preference:",
+      error,
+    );
   });
 });

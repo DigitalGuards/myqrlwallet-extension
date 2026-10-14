@@ -4,16 +4,29 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { Separator } from "@/components/UI/Separator";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
+import { isRecord } from "@/utilities/storageGuards";
 import { ExternalLink, Mail, MoveLeft } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
 
-const WALLET_VERSION =
-  typeof chrome !== "undefined" && chrome.runtime?.getManifest
-    ? chrome.runtime.getManifest().version
-    : "0.4.0";
+const isManifestRuntime = (
+  value: unknown,
+): value is { getManifest: () => unknown } =>
+  isRecord(value) && typeof value.getManifest === "function";
+
+export const getWalletVersion = (chromeApi: unknown): string => {
+  if (isRecord(chromeApi) && isManifestRuntime(chromeApi.runtime)) {
+    const manifest = chromeApi.runtime.getManifest();
+    if (isRecord(manifest) && typeof manifest.version === "string") {
+      return manifest.version;
+    }
+  }
+  return "0.4.0";
+};
+
+const WALLET_VERSION = getWalletVersion(Reflect.get(globalThis, "chrome"));
 const REPO_URL = "https://github.com/DigitalGuards/myqrlwallet-extension";
 
 interface AboutLink {
@@ -116,7 +129,13 @@ const SettingsAbout = observer(() => {
                 size="icon"
                 className="size-8 shrink-0 transition-all hover:text-secondary"
                 aria-label={t("common.back")}
-                onClick={() => navigate(ROUTES.SETTINGS)}
+                onClick={() => {
+                  Promise.resolve(navigate(ROUTES.SETTINGS)).catch(
+                    (error: unknown) => {
+                      console.error("Failed to open settings:", error);
+                    },
+                  );
+                }}
                 data-testid="back-arrow"
               >
                 <MoveLeft />

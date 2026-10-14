@@ -20,7 +20,7 @@ const SettingsAppearance = observer(() => {
   const navigate = useNavigate();
   const { settingsStore } = useStore();
   const { t } = useTranslation();
-  const { themePreference, setThemePreference } = settingsStore;
+  const { themePreference } = settingsStore;
 
   const THEME_OPTIONS = [
     { value: "system", label: t("settings.appearance.system") },
@@ -41,7 +41,13 @@ const SettingsAppearance = observer(() => {
                 size="icon"
                 className="size-8 shrink-0 transition-all hover:text-secondary"
                 aria-label={t("common.back")}
-                onClick={() => navigate(ROUTES.SETTINGS)}
+                onClick={() => {
+                  Promise.resolve(navigate(ROUTES.SETTINGS)).catch(
+                    (error: unknown) => {
+                      console.error("Failed to open settings:", error);
+                    },
+                  );
+                }}
                 data-testid="back-arrow"
               >
                 <MoveLeft />
@@ -56,9 +62,19 @@ const SettingsAppearance = observer(() => {
             <Select
               name="themePreference"
               value={themePreference}
-              onValueChange={(value) =>
-                setThemePreference(value as "system" | "light" | "dark")
-              }
+              onValueChange={(value) => {
+                if (
+                  value === "system" ||
+                  value === "light" ||
+                  value === "dark"
+                ) {
+                  settingsStore
+                    .setThemePreference(value)
+                    .catch((error: unknown) => {
+                      console.error("Failed to save theme preference:", error);
+                    });
+                }
+              }}
             >
               <SelectTrigger aria-label="Theme">
                 <SelectValue />

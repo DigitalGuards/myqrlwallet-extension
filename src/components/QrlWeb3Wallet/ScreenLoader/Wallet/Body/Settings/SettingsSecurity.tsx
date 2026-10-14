@@ -61,13 +61,9 @@ const SettingsSecurity = observer(() => {
   const { t } = useTranslation();
   const {
     autoLockMinutes,
-    setAutoLockMinutes,
     showBalanceAndPrice,
-    setShowBalanceAndPrice,
     notificationsEnabled,
-    setNotificationsEnabled,
     phishingDetectionEnabled,
-    setPhishingDetectionEnabled,
   } = settingsStore;
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -109,8 +105,8 @@ const SettingsSecurity = observer(() => {
     setPasswordChanged(false);
     // R2: re-read the persisted counter first - see LockPasswordCheck's
     // identical guard.
-    if (await refreshWait()) return;
     try {
+      if (await refreshWait()) return;
       const result = await lockStore.changePassword(
         formData.currentPassword,
         formData.newPassword,
@@ -153,7 +149,9 @@ const SettingsSecurity = observer(() => {
 
   const handleTogglePrice = (checked: boolean | "indeterminate") => {
     const enabled = checked === true;
-    setShowBalanceAndPrice(enabled);
+    settingsStore.setShowBalanceAndPrice(enabled).catch((error: unknown) => {
+      console.error("Failed to save balance display preference:", error);
+    });
     // One chokepoint: the store decides whether turning this back on needs
     // a refresh right now or can wait for the next tick.
     priceStore.setRefreshEnabled(enabled);
@@ -172,7 +170,13 @@ const SettingsSecurity = observer(() => {
                 size="icon"
                 className="size-8 shrink-0 transition-all hover:text-secondary"
                 aria-label={t("common.back")}
-                onClick={() => navigate(ROUTES.SETTINGS)}
+                onClick={() => {
+                  Promise.resolve(navigate(ROUTES.SETTINGS)).catch(
+                    (error: unknown) => {
+                      console.error("Failed to open settings:", error);
+                    },
+                  );
+                }}
                 data-testid="back-arrow"
               >
                 <MoveLeft />
@@ -188,7 +192,13 @@ const SettingsSecurity = observer(() => {
               <Select
                 name="autoLockMinutes"
                 value={String(autoLockMinutes)}
-                onValueChange={(value) => setAutoLockMinutes(Number(value))}
+                onValueChange={(value) => {
+                  settingsStore
+                    .setAutoLockMinutes(Number(value))
+                    .catch((error: unknown) => {
+                      console.error("Failed to save auto-lock timeout:", error);
+                    });
+                }}
               >
                 <SelectTrigger
                   aria-label={t("settings.security.autoLockLabel")}
@@ -228,9 +238,16 @@ const SettingsSecurity = observer(() => {
                   id="notifications-enabled"
                   name="notificationsEnabled"
                   checked={notificationsEnabled}
-                  onCheckedChange={(checked) =>
-                    setNotificationsEnabled(checked === true)
-                  }
+                  onCheckedChange={(checked) => {
+                    settingsStore
+                      .setNotificationsEnabled(checked === true)
+                      .catch((error: unknown) => {
+                        console.error(
+                          "Failed to save notification preference:",
+                          error,
+                        );
+                      });
+                  }}
                 />
                 <Label htmlFor="notifications-enabled" className="text-sm">
                   {t("settings.security.notificationsLabel")}
@@ -247,9 +264,16 @@ const SettingsSecurity = observer(() => {
                   id="phishing-detection-enabled"
                   name="phishingDetectionEnabled"
                   checked={phishingDetectionEnabled}
-                  onCheckedChange={(checked) =>
-                    setPhishingDetectionEnabled(checked === true)
-                  }
+                  onCheckedChange={(checked) => {
+                    settingsStore
+                      .setPhishingDetectionEnabled(checked === true)
+                      .catch((error: unknown) => {
+                        console.error(
+                          "Failed to save phishing detection preference:",
+                          error,
+                        );
+                      });
+                  }}
                 />
                 <Label htmlFor="phishing-detection-enabled" className="text-sm">
                   {t("settings.security.phishingDetectionLabel")}
@@ -263,7 +287,9 @@ const SettingsSecurity = observer(() => {
             <Button
               variant="outline"
               className="w-full"
-              onClick={() => setDialogOpen(true)}
+              onClick={() => {
+                setDialogOpen(true);
+              }}
             >
               <KeyRound className="mr-2 h-4 w-4" />
               {t("settings.security.changePassword")}
@@ -283,7 +309,16 @@ const SettingsSecurity = observer(() => {
             <form
               name="changePassword"
               className="flex flex-col gap-3"
-              onSubmit={handleSubmit(onChangePassword)}
+              onSubmit={(event) => {
+                handleSubmit(onChangePassword)(event).catch(
+                  (error: unknown) => {
+                    console.error("Failed to submit password change:", error);
+                    form.setError("currentPassword", {
+                      message: t("lock.unlock.errorFailed"),
+                    });
+                  },
+                );
+              }}
             >
               <FormField
                 control={control}
