@@ -49,7 +49,6 @@ export const GasFeeNotice = observer(
   }: GasFeeNoticeProps) => {
     const { t } = useTranslation();
     const { qrlStore, priceStore, settingsStore } = useStore();
-    const { getNativeTokenGas, getZrc20TokenGas } = qrlStore;
 
     const hasValuesForGasCalculation = !!from && !!to && !!value;
 
@@ -61,11 +60,11 @@ export const GasFeeNotice = observer(
     });
 
     const calculateNativeTokenGas = async () => {
-      return await getNativeTokenGas(overrides);
+      return await qrlStore.getNativeTokenGas(overrides);
     };
 
     const calculateZrc20TokenGas = async () => {
-      return await getZrc20TokenGas(
+      return await qrlStore.getZrc20TokenGas(
         from,
         to,
         value,
@@ -90,13 +89,15 @@ export const GasFeeNotice = observer(
         });
         onGasFeeCalculated?.(gasFeeAmount);
       } catch (error) {
-        setGasFee({ ...gasFee, error: `${error}`, isLoading: false });
+        setGasFee({ ...gasFee, error: String(error), isLoading: false });
         onGasFeeCalculated?.("");
       }
     };
 
     useEffect(() => {
-      calculateGasFee();
+      calculateGasFee().catch((error: unknown) => {
+        console.error("[GasFeeNotice] Failed to report gas estimate:", error);
+      });
     }, [from, to, value, overrides]);
 
     const { showBalanceAndPrice, currency } = settingsStore;
@@ -119,7 +120,7 @@ export const GasFeeNotice = observer(
             <div>{gasFee.error}</div>
           ) : (
             <div className="w-full overflow-hidden font-numeric">
-              {t("gasFee.estimated", { amount: gasFee?.estimatedGas })}
+              {t("gasFee.estimated", { amount: gasFee.estimatedGas })}
               {fiatGas && (
                 <span className="ml-1 text-muted-foreground">{fiatGas}</span>
               )}

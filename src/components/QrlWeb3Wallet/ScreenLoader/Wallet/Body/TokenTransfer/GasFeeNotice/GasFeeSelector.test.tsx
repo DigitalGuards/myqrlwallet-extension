@@ -1,4 +1,5 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
+import type { GasFeeOverrides } from "@/types/gasFee";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -60,7 +61,7 @@ describe("GasFeeSelector", () => {
   });
 
   it("should render estimated costs for each tier", async () => {
-    const getNativeTokenGas = vi.fn(async () => "0.042");
+    const getNativeTokenGas = vi.fn().mockResolvedValue("0.042");
     renderComponent(mockedStore({ qrlStore: { getNativeTokenGas } }));
 
     await waitFor(() => {
@@ -69,7 +70,8 @@ describe("GasFeeSelector", () => {
   });
 
   it("should call onOverridesChange when selecting a tier", async () => {
-    const onOverridesChange = vi.fn();
+    const onOverridesChange =
+      vi.fn<ComponentProps<typeof GasFeeSelector>["onOverridesChange"]>();
     renderComponent(undefined, { onOverridesChange });
 
     await act(async () => {
@@ -80,7 +82,8 @@ describe("GasFeeSelector", () => {
   });
 
   it("should call onOverridesChange with aggressive tier", async () => {
-    const onOverridesChange = vi.fn();
+    const onOverridesChange =
+      vi.fn<ComponentProps<typeof GasFeeSelector>["onOverridesChange"]>();
     renderComponent(undefined, { onOverridesChange });
 
     await act(async () => {
@@ -107,11 +110,11 @@ describe("GasFeeSelector", () => {
   });
 
   it("should pre-fill advanced inputs with market values", async () => {
-    const getGasFeeData = vi.fn(async () => ({
+    const getGasFeeData = vi.fn().mockResolvedValue({
       baseFeePerGas: BigInt(1000),
       maxPriorityFeePerGas: BigInt(300),
       maxFeePerGas: BigInt(1300),
-    }));
+    });
     renderComponent(mockedStore({ qrlStore: { getGasFeeData } }));
 
     await act(async () => {
@@ -127,7 +130,8 @@ describe("GasFeeSelector", () => {
   });
 
   it("should collapse advanced and revert to selected tier", async () => {
-    const onOverridesChange = vi.fn();
+    const onOverridesChange =
+      vi.fn<ComponentProps<typeof GasFeeSelector>["onOverridesChange"]>();
     renderComponent(undefined, { onOverridesChange });
 
     // First select Low
@@ -158,7 +162,8 @@ describe("GasFeeSelector", () => {
   });
 
   it("should emit advanced overrides when typing in inputs", async () => {
-    const onOverridesChange = vi.fn();
+    const onOverridesChange =
+      vi.fn<ComponentProps<typeof GasFeeSelector>["onOverridesChange"]>();
     renderComponent(undefined, { onOverridesChange });
 
     await act(async () => {
@@ -173,12 +178,10 @@ describe("GasFeeSelector", () => {
     });
 
     const advancedCalls = onOverridesChange.mock.calls.filter(
-      (call: any) => call[0].tier === "advanced",
+      (call) => call[0].tier === "advanced",
     );
     expect(advancedCalls.length).toBeGreaterThan(0);
-    expect((advancedCalls[advancedCalls.length - 1] as any)[0].tier).toBe(
-      "advanced",
-    );
+    expect(advancedCalls[advancedCalls.length - 1][0].tier).toBe("advanced");
   });
 
   it("should sanitize non-numeric input in advanced fields", async () => {
@@ -198,7 +201,8 @@ describe("GasFeeSelector", () => {
   });
 
   it("should use defaultGasTier from settings as initial selection", async () => {
-    const onOverridesChange = vi.fn();
+    const onOverridesChange =
+      vi.fn<ComponentProps<typeof GasFeeSelector>["onOverridesChange"]>();
     renderComponent(
       mockedStore({
         settingsStore: { defaultGasTier: "aggressive" as const },
@@ -215,7 +219,8 @@ describe("GasFeeSelector", () => {
   });
 
   it("reports the stored default tier on mount, without the user touching it", async () => {
-    const onOverridesChange = vi.fn();
+    const onOverridesChange =
+      vi.fn<ComponentProps<typeof GasFeeSelector>["onOverridesChange"]>();
     renderComponent(
       mockedStore({ settingsStore: { defaultGasTier: "low" as const } }),
       { onOverridesChange },
@@ -230,7 +235,8 @@ describe("GasFeeSelector", () => {
   });
 
   it("applies a default tier that arrives after the first render", async () => {
-    const onOverridesChange = vi.fn();
+    const onOverridesChange =
+      vi.fn<ComponentProps<typeof GasFeeSelector>["onOverridesChange"]>();
     const store = mockedStore();
     const { rerender } = render(
       <StoreProvider value={store}>
@@ -270,7 +276,8 @@ describe("GasFeeSelector", () => {
   });
 
   it("does not move a tier the user picked when the stored default lands late", async () => {
-    const onOverridesChange = vi.fn();
+    const onOverridesChange =
+      vi.fn<ComponentProps<typeof GasFeeSelector>["onOverridesChange"]>();
     const store = mockedStore();
     const { rerender } = render(
       <StoreProvider value={store}>
@@ -309,9 +316,10 @@ describe("GasFeeSelector", () => {
 
   it("keeps the other tiers priced when one estimate throws", async () => {
     const onGasFeeCalculated = vi.fn();
-    const getNativeTokenGas = vi.fn(async (overrides?: { tier: string }) => {
-      if (overrides?.tier === "aggressive") throw new Error("RPC error");
-      return "0.042";
+    const getNativeTokenGas = vi.fn((overrides?: GasFeeOverrides) => {
+      if (overrides?.tier === "aggressive")
+        return Promise.reject(new Error("RPC error"));
+      return Promise.resolve("0.042");
     });
     renderComponent(mockedStore({ qrlStore: { getNativeTokenGas } }), {
       onGasFeeCalculated,
@@ -329,9 +337,9 @@ describe("GasFeeSelector", () => {
 
   it("surfaces a failed estimate through onEstimateError", async () => {
     const onEstimateError = vi.fn();
-    const getNativeTokenGas = vi.fn(async () => {
-      throw new Error("execution reverted");
-    });
+    const getNativeTokenGas = vi
+      .fn()
+      .mockRejectedValue(new Error("execution reverted"));
     renderComponent(mockedStore({ qrlStore: { getNativeTokenGas } }), {
       onEstimateError,
     });
@@ -345,9 +353,9 @@ describe("GasFeeSelector", () => {
 
   it("clears a failed estimate once there is nothing left to price", async () => {
     const onEstimateError = vi.fn();
-    const getNativeTokenGas = vi.fn(async () => {
-      throw new Error("execution reverted");
-    });
+    const getNativeTokenGas = vi
+      .fn()
+      .mockRejectedValue(new Error("execution reverted"));
     const store = mockedStore({ qrlStore: { getNativeTokenGas } });
     const view = renderComponent(store, { onEstimateError });
 
@@ -380,16 +388,14 @@ describe("GasFeeSelector", () => {
   it("reports a worst-case fee for advanced values on every change", async () => {
     const onGasFeeCalculated = vi.fn();
     const getNativeTokenGas = vi.fn(
-      async (overrides?: {
-        tier: string;
-        gasLimit?: number;
-      }): Promise<string> => (overrides?.tier === "advanced" ? "0.5" : "0.042"),
+      (overrides?: GasFeeOverrides): Promise<string> =>
+        Promise.resolve(overrides?.tier === "advanced" ? "0.5" : "0.042"),
     );
-    const getGasFeeData = vi.fn(async () => ({
+    const getGasFeeData = vi.fn().mockResolvedValue({
       baseFeePerGas: BigInt(1000),
       maxPriorityFeePerGas: BigInt(300),
       maxFeePerGas: BigInt(1300),
-    }));
+    });
     renderComponent(
       mockedStore({ qrlStore: { getNativeTokenGas, getGasFeeData } }),
       { onGasFeeCalculated },
@@ -405,7 +411,7 @@ describe("GasFeeSelector", () => {
     });
 
     const inputs = screen.getAllByRole("textbox");
-    getNativeTokenGas.mockImplementation(async () => "0.75");
+    getNativeTokenGas.mockResolvedValue("0.75");
     await act(async () => {
       await userEvent.clear(inputs[1]);
       await userEvent.type(inputs[1], "5000");
@@ -428,7 +434,7 @@ describe("GasFeeSelector", () => {
 
   it("should call onGasFeeCalculated when tier is selected and costs are loaded", async () => {
     const onGasFeeCalculated = vi.fn();
-    const getNativeTokenGas = vi.fn(async () => "0.042");
+    const getNativeTokenGas = vi.fn().mockResolvedValue("0.042");
     renderComponent(mockedStore({ qrlStore: { getNativeTokenGas } }), {
       onGasFeeCalculated,
     });
@@ -445,9 +451,7 @@ describe("GasFeeSelector", () => {
   });
 
   it("should handle gas calculation errors gracefully", async () => {
-    const getNativeTokenGas = vi.fn(async () => {
-      throw new Error("RPC error");
-    });
+    const getNativeTokenGas = vi.fn().mockRejectedValue(new Error("RPC error"));
     renderComponent(mockedStore({ qrlStore: { getNativeTokenGas } }));
 
     await waitFor(() => {
@@ -460,10 +464,9 @@ describe("GasFeeSelector", () => {
   });
 
   it("should open advanced with fallback when getGasFeeData throws", async () => {
-    const onOverridesChange = vi.fn();
-    const getGasFeeData = vi.fn(async () => {
-      throw new Error("RPC error");
-    });
+    const onOverridesChange =
+      vi.fn<ComponentProps<typeof GasFeeSelector>["onOverridesChange"]>();
+    const getGasFeeData = vi.fn().mockRejectedValue(new Error("RPC error"));
     renderComponent(mockedStore({ qrlStore: { getGasFeeData } }), {
       onOverridesChange,
     });
@@ -477,13 +480,14 @@ describe("GasFeeSelector", () => {
 
     // Should have called onOverridesChange with advanced tier
     const advancedCalls = onOverridesChange.mock.calls.filter(
-      (call: any) => call[0].tier === "advanced",
+      (call) => call[0].tier === "advanced",
     );
     expect(advancedCalls.length).toBeGreaterThan(0);
   });
 
   it("should handle typing in maxFeePerGas and gasLimit advanced inputs", async () => {
-    const onOverridesChange = vi.fn();
+    const onOverridesChange =
+      vi.fn<ComponentProps<typeof GasFeeSelector>["onOverridesChange"]>();
     renderComponent(undefined, { onOverridesChange });
 
     await act(async () => {
@@ -509,13 +513,13 @@ describe("GasFeeSelector", () => {
     expect(inputs[2]).toHaveValue("50000");
 
     const advancedCalls = onOverridesChange.mock.calls.filter(
-      (call: any) => call[0].tier === "advanced",
+      (call) => call[0].tier === "advanced",
     );
     expect(advancedCalls.length).toBeGreaterThan(0);
   });
 
   it("should calculate gas for ZRC-20 tokens", async () => {
-    const getZrc20TokenGas = vi.fn(async () => "1.5");
+    const getZrc20TokenGas = vi.fn().mockResolvedValue("1.5");
     renderComponent(mockedStore({ qrlStore: { getZrc20TokenGas } }), {
       isZrc20Token: true,
       tokenContractAddress: "0x28c4113a9d3a2e836f28c23ed8e3c1e7c243f566",
@@ -527,5 +531,147 @@ describe("GasFeeSelector", () => {
     });
 
     expect(screen.getByText("Gas fee")).toBeInTheDocument();
+  });
+
+  it("ignores tier estimates that settle after the transfer inputs change", async () => {
+    let resolveOld = (_value: string) => {};
+    const oldEstimate = new Promise<string>((resolve) => {
+      resolveOld = resolve;
+    });
+    const getNativeTokenGas = vi.fn(() => oldEstimate);
+    const onGasFeeCalculated = vi.fn();
+    const store = mockedStore({ qrlStore: { getNativeTokenGas } });
+    const view = renderComponent(store, { onGasFeeCalculated });
+    expect(getNativeTokenGas).toHaveBeenCalledTimes(3);
+
+    getNativeTokenGas.mockResolvedValue("0.75");
+    view.rerender(
+      <StoreProvider value={store}>
+        <MemoryRouter>
+          <GasFeeSelector
+            {...defaultProps}
+            value={2}
+            onGasFeeCalculated={onGasFeeCalculated}
+          />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+    await waitFor(() => {
+      expect(onGasFeeCalculated).toHaveBeenLastCalledWith("0.75");
+    });
+    onGasFeeCalculated.mockClear();
+    await act(async () => {
+      resolveOld("0.042");
+      await oldEstimate;
+    });
+    expect(onGasFeeCalculated).not.toHaveBeenCalled();
+    expect(screen.queryByText("0.042 Quanta")).not.toBeInTheDocument();
+  });
+
+  it.each(["resolve", "reject"] as const)(
+    "ignores an advanced estimate that %ss after closing advanced mode",
+    async (outcome) => {
+      let resolveOld = (_value: string) => {};
+      let rejectOld = (_error: Error) => {};
+      const oldEstimate = new Promise<string>((resolve, reject) => {
+        resolveOld = resolve;
+        rejectOld = reject;
+      });
+      const getNativeTokenGas = vi.fn((overrides?: GasFeeOverrides) =>
+        overrides?.tier === "advanced" ? oldEstimate : Promise.resolve("0.042"),
+      );
+      const onGasFeeCalculated = vi.fn();
+      const onEstimateError = vi.fn();
+      renderComponent(mockedStore({ qrlStore: { getNativeTokenGas } }), {
+        onGasFeeCalculated,
+        onEstimateError,
+      });
+      await userEvent.click(screen.getByText("Advanced"));
+      await userEvent.click(screen.getByText("Low"));
+      onGasFeeCalculated.mockClear();
+      onEstimateError.mockClear();
+      await act(async () => {
+        if (outcome === "resolve") resolveOld("0.75");
+        else rejectOld(new Error("stale estimate"));
+        await Promise.allSettled([oldEstimate]);
+      });
+      expect(onGasFeeCalculated).not.toHaveBeenCalled();
+      expect(onEstimateError).not.toHaveBeenCalled();
+      expect(
+        screen.queryByText(/gas fee could not be estimated/i),
+      ).not.toBeInTheDocument();
+    },
+  );
+  it("reports a fee callback failure after tier estimates settle", async () => {
+    const failure = new Error("Fee callback failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderComponent(
+        mockedStore({
+          qrlStore: { getNativeTokenGas: vi.fn().mockResolvedValue("0.042") },
+        }),
+        {
+          onGasFeeCalculated: (fee) => {
+            if (fee) throw failure;
+          },
+        },
+      );
+      await waitFor(() => {
+        expect(report).toHaveBeenCalledWith(
+          "[GasFeeSelector] Failed to report gas estimate:",
+          failure,
+        );
+      });
+    } finally {
+      report.mockRestore();
+    }
+  });
+
+  it("reports a failed error callback for an advanced estimate", async () => {
+    const failure = new Error("Error callback failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderComponent(
+        mockedStore({
+          qrlStore: {
+            getNativeTokenGas: (overrides) =>
+              overrides?.tier === "advanced"
+                ? Promise.reject(new Error("Advanced estimate unavailable"))
+                : Promise.resolve("0.042"),
+          },
+        }),
+        {
+          onEstimateError: (message) => {
+            if (message) throw failure;
+          },
+        },
+      );
+      await userEvent.click(screen.getByText("Advanced"));
+      expect(report).toHaveBeenCalledWith(
+        "[GasFeeSelector] Failed to report gas estimate:",
+        failure,
+      );
+    } finally {
+      report.mockRestore();
+    }
+  });
+
+  it("reports a rejected advanced-toggle callback", async () => {
+    const failure = new Error("Override callback failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderComponent(undefined, {
+        onOverridesChange: (overrides) => {
+          if (overrides.tier === "advanced") throw failure;
+        },
+      });
+      await userEvent.click(screen.getByText("Advanced"));
+      expect(report).toHaveBeenCalledWith(
+        "[GasFeeSelector] Failed to change gas tier:",
+        failure,
+      );
+    } finally {
+      report.mockRestore();
+    }
   });
 });
