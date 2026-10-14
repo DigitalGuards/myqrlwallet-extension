@@ -8,6 +8,11 @@ import {
   substituteErc1155TokenId,
 } from "@/utilities/ipfsUtil";
 import type { NFTMetadata, NFTStandard } from "@/types/nft";
+import {
+  isMetadataText,
+  metadataTextChildren,
+  metadataValueToString,
+} from "@/utilities/nftMetadata";
 import { Image } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
@@ -91,6 +96,8 @@ const NFTGalleryItem = observer(
     }, [contractAddress, tokenId, standard]);
 
     const imageUrl = imageCandidates[imageIndex] ?? "";
+    const rawName: unknown = metadata?.name;
+    const name = isMetadataText(rawName) ? rawName : undefined;
 
     const handleClick = () => {
       navigate(ROUTES.NFT_DETAIL, {
@@ -121,7 +128,11 @@ const NFTGalleryItem = observer(
           ) : imageUrl ? (
             <img
               src={imageUrl}
-              alt={metadata?.name || `#${tokenId}`}
+              alt={
+                name === true
+                  ? undefined
+                  : metadataValueToString(name || `#${tokenId}`)
+              }
               className="h-full w-full object-cover"
               onError={() => setImageIndex((i) => i + 1)}
             />
@@ -138,7 +149,7 @@ const NFTGalleryItem = observer(
         </div>
         <div className="p-2">
           <div className="truncate text-xs font-bold">
-            {metadata?.name || `#${tokenId}`}
+            {metadataTextChildren(name || `#${tokenId}`)}
           </div>
           <div className="truncate text-xs text-muted-foreground">
             Token #{tokenId}

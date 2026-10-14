@@ -46,7 +46,7 @@ const TokenImportSuccess = observer(
         decimals: parseInt(decimals?.toString() ?? "0"),
         image: "",
       });
-      navigate(ROUTES.HOME);
+      await navigate(ROUTES.HOME);
     };
 
     return (
@@ -79,7 +79,9 @@ const TokenImportSuccess = observer(
             </div>
             <div className="flex flex-col gap-1">
               <div>{t("importToken.totalSupplyLabel")}</div>
-              <div className="font-numeric font-bold text-secondary">{totalSupply}</div>
+              <div className="font-numeric font-bold text-secondary">
+                {totalSupply}
+              </div>
             </div>
             <div className="flex flex-col gap-1">
               <div>{t("importToken.balanceLabel")}</div>
@@ -105,7 +107,18 @@ const TokenImportSuccess = observer(
             <X className="mr-2 h-4 w-4" />
             {t("importToken.cancelButton")}
           </Button>
-          <Button className="w-full" type="button" onClick={onConfirmImport}>
+          <Button
+            className="w-full"
+            type="button"
+            onClick={() => {
+              onConfirmImport().catch((error: unknown) => {
+                console.error(
+                  "[TokenImportSuccess] Failed to import token:",
+                  error,
+                );
+              });
+            }}
+          >
             <Download className="mr-2 h-4 w-4" />
             {t("importToken.confirmButton")}
           </Button>

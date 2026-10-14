@@ -9,13 +9,14 @@ export type NFTCollectionType = {
 };
 
 export type NFTMetadata = {
-  name?: string;
-  description?: string;
-  image?: string;
+  name?: string | null;
+  description?: string | null;
+  image?: string | null;
   attributes?: Array<{
-    trait_type: string;
-    value: string | number;
-  }>;
+    trait_type?: string | null;
+    // Attribute values are opaque metadata, converted to text by the reader.
+    value?: unknown;
+  }> | null;
 };
 
 export type NFTTokenInfo = {

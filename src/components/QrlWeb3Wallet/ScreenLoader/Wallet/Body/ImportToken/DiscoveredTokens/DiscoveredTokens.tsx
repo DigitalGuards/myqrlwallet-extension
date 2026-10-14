@@ -39,7 +39,7 @@ const DiscoveredTokens = observer(({ onReview }: DiscoveredTokensProps) => {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const loadTokens = async () => {
       if (!accountAddress) return;
       const [discovered, stored] = await Promise.all([
         discoverTokens(accountAddress, blockchain.chainId),
@@ -55,7 +55,10 @@ const DiscoveredTokens = observer(({ onReview }: DiscoveredTokensProps) => {
           (token) => !existing.has(token.address.toLowerCase()),
         ),
       );
-    })();
+    };
+    loadTokens().catch((error: unknown) => {
+      console.error("[DiscoveredTokens] Failed to load tokens:", error);
+    });
     return () => {
       cancelled = true;
     };
@@ -103,7 +106,14 @@ const DiscoveredTokens = observer(({ onReview }: DiscoveredTokensProps) => {
                     name: token.name || token.symbol,
                   })}
                   disabled={reviewingAddress !== undefined}
-                  onClick={() => void review(token)}
+                  onClick={() => {
+                    review(token).catch((error: unknown) => {
+                      console.error(
+                        "[DiscoveredTokens] Failed to review token:",
+                        error,
+                      );
+                    });
+                  }}
                 >
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     {/* A token name with no spaces (a spam token's calling
