@@ -1,6 +1,16 @@
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import i18n from "@/i18n";
+import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
+import { deferred } from "@/test-utils/deferred";
+import { SIDE_PANEL_PATH } from "@/scripts/utils/sidePanelPreference";
 
-const localStore: Record<string, any> = {};
+const { mockSendMessage } = vi.hoisted(() => ({
+  mockSendMessage: vi
+    .fn<(message: unknown) => Promise<void>>()
+    .mockResolvedValue(undefined),
+}));
+
+const localStore: Record<string, unknown> = {};
 vi.mock("webextension-polyfill", () => ({
   __esModule: true,
   default: {
@@ -9,16 +19,17 @@ vi.mock("webextension-polyfill", () => ({
         get: vi.fn((key: string) =>
           Promise.resolve(key in localStore ? { [key]: localStore[key] } : {}),
         ),
-        set: vi.fn((data: Record<string, any>) => {
+        set: vi.fn((data: Record<string, unknown>) => {
           Object.assign(localStore, data);
           return Promise.resolve();
         }),
         remove: vi.fn((key: string) => {
-          delete localStore[key];
+          Reflect.deleteProperty(localStore, key);
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
-          for (const k of Object.keys(localStore)) delete localStore[k];
+          for (const k of Object.keys(localStore))
+            Reflect.deleteProperty(localStore, k);
           return Promise.resolve();
         }),
       },
@@ -28,7 +39,7 @@ vi.mock("webextension-polyfill", () => ({
       },
     },
     runtime: {
-      sendMessage: vi.fn(() => Promise.resolve()),
+      sendMessage: mockSendMessage,
     },
     alarms: {
       create: vi.fn(() => Promise.resolve()),
@@ -41,19 +52,25 @@ import browser from "webextension-polyfill";
 import SettingsStore from "./settingsStore";
 import StorageUtil from "@/utilities/storageUtil";
 
-const mockSendMessage = browser.runtime.sendMessage as Mock;
+const mockedBrowser = vi.mocked(browser, true);
 
 describe("SettingsStore", () => {
   let store: SettingsStore;
 
   beforeEach(() => {
-    for (const k of Object.keys(localStore)) delete localStore[k];
+    for (const k of Object.keys(localStore))
+      Reflect.deleteProperty(localStore, k);
 
     // Provide minimal DOM stubs for the constructor
     const root = document.documentElement;
     root.classList.remove("dark", "light");
 
     store = new SettingsStore();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("should initialize with default values", () => {
@@ -133,9 +150,7 @@ describe("SettingsStore", () => {
     });
 
     it("should not throw if sendMessage fails", async () => {
-      (mockSendMessage as Mock<() => Promise<any>>).mockRejectedValueOnce(
-        new Error("SW not ready"),
-      );
+      mockSendMessage.mockRejectedValueOnce(new Error("SW not ready"));
 
       await expect(store.setAutoLockMinutes(5)).resolves.not.toThrow();
       expect(store.autoLockMinutes).toBe(5);
@@ -170,9 +185,150 @@ describe("SettingsStore", () => {
       const settings = await StorageUtil.getSettings();
       expect(settings.language).toBe("de");
     });
+
+    it("reports a language change rejection and persists the selected language", async () => {
+      await store.whenSettingsLoaded();
+      const error = new Error("language unavailable");
+      vi.spyOn(i18n, "changeLanguage").mockRejectedValueOnce(error);
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await store.setLanguage("de");
+
+      expect(store.language).toBe("de");
+      expect(await StorageUtil.getSettings()).toMatchObject({ language: "de" });
+      expect(report).toHaveBeenCalledWith("Failed to change language:", error);
+    });
+
+    it("starts persistence while the language change is still pending", async () => {
+      await store.whenSettingsLoaded();
+      const languageChange =
+        deferred<Awaited<ReturnType<typeof i18n.changeLanguage>>>();
+      const change = vi
+        .spyOn(i18n, "changeLanguage")
+        .mockReturnValueOnce(languageChange.promise);
+      const persist = vi.spyOn(StorageUtil, "setSettings");
+
+      await store.setLanguage("de");
+
+      expect(change).toHaveBeenCalledWith("de");
+      expect(persist).toHaveBeenCalledTimes(1);
+      expect(change.mock.invocationCallOrder[0]).toBeLessThan(
+        persist.mock.invocationCallOrder[0],
+      );
+      languageChange.resolve(i18n.t.bind(i18n));
+    });
+  });
+
+  describe("side panel preference", () => {
+    it("persists the choice before configuring the panel in order", async () => {
+      await store.whenSettingsLoaded();
+      const persist = vi.spyOn(StorageUtil, "setSettings");
+      const setPanelBehavior = vi
+        .fn<() => Promise<void>>()
+        .mockResolvedValue(undefined);
+      const setOptions = vi
+        .fn<() => Promise<void>>()
+        .mockResolvedValue(undefined);
+      vi.stubGlobal("chrome", { sidePanel: { setPanelBehavior, setOptions } });
+
+      await store.setSidePanelPreferred(true);
+
+      expect(setPanelBehavior).toHaveBeenCalledWith({
+        openPanelOnActionClick: true,
+      });
+      expect(setOptions).toHaveBeenCalledWith({ path: SIDE_PANEL_PATH });
+      expect(persist.mock.invocationCallOrder[0]).toBeLessThan(
+        setPanelBehavior.mock.invocationCallOrder[0],
+      );
+      expect(setPanelBehavior.mock.invocationCallOrder[0]).toBeLessThan(
+        setOptions.mock.invocationCallOrder[0],
+      );
+      expect(await StorageUtil.getSettings()).toMatchObject({
+        sidePanelSurface: "panel",
+        sidePanelNoticePending: false,
+        sidePanelNoticeSeen: true,
+      });
+
+      await store.setSidePanelPreferred(false);
+      expect(setPanelBehavior).toHaveBeenLastCalledWith({
+        openPanelOnActionClick: false,
+      });
+      expect(setOptions).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      undefined,
+      null,
+      {},
+      { sidePanel: {} },
+      { sidePanel: { setPanelBehavior: "unavailable" } },
+    ])(
+      "persists the choice when the native API is unavailable: %j",
+      async (nativeApi) => {
+        await store.whenSettingsLoaded();
+        vi.stubGlobal("chrome", nativeApi);
+        await store.setSidePanelPreferred(true);
+        expect(await StorageUtil.getSettings()).toMatchObject({
+          sidePanelSurface: "panel",
+        });
+      },
+    );
+
+    it("retains the choice when native configuration rejects", async () => {
+      await store.whenSettingsLoaded();
+      const setOptions = vi.fn();
+      vi.stubGlobal("chrome", {
+        sidePanel: {
+          setPanelBehavior: vi.fn().mockRejectedValue(new Error("unavailable")),
+          setOptions,
+        },
+      });
+      await store.setSidePanelPreferred(true);
+      expect(setOptions).not.toHaveBeenCalled();
+      expect(await StorageUtil.getSettings()).toMatchObject({
+        sidePanelSurface: "panel",
+      });
+    });
   });
 
   describe("loadSettings (via constructor)", () => {
+    it("reports a language load rejection and finishes loading the other settings", async () => {
+      await store.whenSettingsLoaded();
+      await StorageUtil.setSettings({
+        language: "fr",
+        currency: "GBP",
+        notificationsEnabled: false,
+      });
+      const error = new Error("language unavailable");
+      vi.spyOn(i18n, "changeLanguage").mockRejectedValueOnce(error);
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      const loaded = new SettingsStore();
+
+      await loaded.whenSettingsLoaded();
+
+      expect(loaded.language).toBe("fr");
+      expect(loaded.currency).toBe("GBP");
+      expect(loaded.notificationsEnabled).toBe(false);
+      expect(report).toHaveBeenCalledWith("Failed to change language:", error);
+    });
+
+    it("preserves unreadable and future settings when another field changes", async () => {
+      await store.whenSettingsLoaded();
+      const key = `${V3_STORAGE_PREFIX}SETTINGS`;
+      const stored = {
+        language: { future: "locale" },
+        currency: "GBP",
+        future: [1, 2],
+      };
+      localStore[key] = stored;
+      const loaded = new SettingsStore();
+      await loaded.whenSettingsLoaded();
+      expect(loaded.language).toBe("en");
+
+      await loaded.setCurrency("EUR");
+
+      expect(localStore[key]).toEqual({ ...stored, currency: "EUR" });
+    });
     it("should load persisted settings on construction", async () => {
       await StorageUtil.setSettings({
         themePreference: "dark",
@@ -205,11 +361,12 @@ describe("SettingsStore", () => {
   });
   describe("a failed settings read", () => {
     it("resolves whenSettingsLoaded with the defaults", async () => {
-      const get = browser.storage.local.get as Mock;
       const consoleError = vi
         .spyOn(console, "error")
         .mockImplementation(() => {});
-      get.mockRejectedValue(new Error("storage unavailable"));
+      mockedBrowser.storage.local.get.mockRejectedValueOnce(
+        new Error("storage unavailable"),
+      );
 
       const failing = new SettingsStore();
       // A rejection here would reject everything chained off it, and the

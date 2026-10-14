@@ -6,6 +6,7 @@ import {
   SIDE_PANEL_PATH,
 } from "@/scripts/utils/sidePanelPreference";
 import type { GasTier } from "@/types/gasFee";
+import { isRecord } from "@/utilities/storageGuards";
 import StorageUtil, { type WalletSettings } from "@/utilities/storageUtil";
 import { action, makeAutoObservable, observable, runInAction } from "mobx";
 import browser from "webextension-polyfill";
@@ -17,6 +18,16 @@ const THEME = Object.freeze({
 
 type ThemePreference = "system" | "light" | "dark";
 type SidePanelSurface = "panel" | "popup";
+
+type SidePanelApi = {
+  setPanelBehavior: (options: { openPanelOnActionClick: boolean }) => unknown;
+  setOptions?: (options: { path: string }) => unknown;
+};
+
+const isSidePanelApi = (value: unknown): value is SidePanelApi =>
+  isRecord(value) &&
+  typeof value.setPanelBehavior === "function" &&
+  (value.setOptions === undefined || typeof value.setOptions === "function");
 
 class SettingsStore {
   isDarkMode: boolean;
@@ -75,7 +86,7 @@ class SettingsStore {
 
     this.isDarkMode = window.matchMedia("(prefers-color-scheme: dark)").matches;
     this.theme = this.isDarkMode ? THEME.DARK : THEME.LIGHT;
-    document?.documentElement?.classList?.add(this.theme);
+    document.documentElement.classList.add(this.theme);
 
     // Each surface is identified deterministically by a URL marker, never by a
     // viewport measurement. The action popup loads bare `index.html` (from the
@@ -128,7 +139,9 @@ class SettingsStore {
       }
       if (settings.language) {
         this.language = settings.language;
-        i18n.changeLanguage(settings.language);
+        i18n.changeLanguage(settings.language).catch((error: unknown) => {
+          console.error("Failed to change language:", error);
+        });
       }
       if (settings.defaultGasTier) {
         this.defaultGasTier = settings.defaultGasTier;
@@ -150,8 +163,7 @@ class SettingsStore {
   }
 
   #applyTheme(pref: ThemePreference) {
-    const root = document?.documentElement;
-    if (!root) return;
+    const root = document.documentElement;
 
     root.classList.remove(THEME.DARK, THEME.LIGHT);
 
@@ -212,7 +224,9 @@ class SettingsStore {
 
   async setLanguage(language: string) {
     this.language = language;
-    i18n.changeLanguage(language);
+    i18n.changeLanguage(language).catch((error: unknown) => {
+      console.error("Failed to change language:", error);
+    });
     await this.#persistSettings(["language"]);
   }
 
@@ -253,16 +267,15 @@ class SettingsStore {
       "sidePanelNoticePending",
       "sidePanelNoticeSeen",
     ]);
-    if (
-      typeof chrome !== "undefined" &&
-      typeof chrome?.sidePanel?.setPanelBehavior === "function"
-    ) {
+    const chromeApi: unknown = Reflect.get(globalThis, "chrome");
+    if (isRecord(chromeApi) && isSidePanelApi(chromeApi.sidePanel)) {
+      const sidePanel = chromeApi.sidePanel;
       try {
-        await chrome.sidePanel.setPanelBehavior({
+        await sidePanel.setPanelBehavior({
           openPanelOnActionClick: preferred,
         });
         if (preferred) {
-          await chrome.sidePanel.setOptions({ path: SIDE_PANEL_PATH });
+          await sidePanel.setOptions?.({ path: SIDE_PANEL_PATH });
         }
       } catch {
         // sidePanel API may not be available in all browsers.

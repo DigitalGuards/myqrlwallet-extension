@@ -343,7 +343,7 @@ class TransactionHistoryStore {
   startPolling(accountAddress: string, qrlInstance: QrlInstance) {
     this.stopPolling();
 
-    this.pollingInterval = setInterval(async () => {
+    const poll = async () => {
       const pending = this.pendingTransactions;
       if (pending.length === 0) {
         this.stopPolling();
@@ -402,6 +402,11 @@ class TransactionHistoryStore {
       }
 
       await this.reconcileReplacedTransactions(accountAddress);
+    };
+    this.pollingInterval = setInterval(() => {
+      poll().catch((error: unknown) => {
+        console.error("Failed to poll transaction history:", error);
+      });
     }, 10000);
   }
 
