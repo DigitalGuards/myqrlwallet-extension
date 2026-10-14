@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  invalidNftTransferFields,
+  validNftTokenIds,
+} from "@/test-utils/nftTransferCases";
+import {
   isNFTGalleryState,
   isNFTMetadata,
   isNFTTransferState,
@@ -9,6 +13,22 @@ const gallery = { contractAddress: `Q${"a".repeat(128)}` };
 const transfer = { ...gallery, tokenId: "7" };
 
 describe("NFT boundary guards", () => {
+  it.each(invalidNftTransferFields)(
+    "rejects malformed transfer fields before display defaults: $label",
+    ({ field, value }) => {
+      expect(isNFTTransferState({ ...transfer, [field]: value })).toBe(false);
+    },
+  );
+
+  it.each(validNftTokenIds)(
+    "preserves a valid uint256 token ID %s",
+    (tokenId) => {
+      const state = { ...transfer, tokenId };
+      expect(isNFTTransferState(state)).toBe(true);
+      expect(state.tokenId).toBe(tokenId);
+    },
+  );
+
   it("accepts legacy route defaults and both NFT standards", () => {
     expect(isNFTGalleryState(gallery)).toBe(true);
     expect(isNFTTransferState(transfer)).toBe(true);

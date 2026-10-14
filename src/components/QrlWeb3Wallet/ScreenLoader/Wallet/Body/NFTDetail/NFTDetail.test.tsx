@@ -1697,22 +1697,17 @@ describe("NFTDetail", () => {
       balance: {},
       metadata: false,
     },
-  ])("uses safe defaults for malformed route state: %j", async (state) => {
-    renderComponent(state);
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Send NFT" }));
-    expect(navigate).toHaveBeenCalledWith(ROUTES.NFT_TRANSFER, {
-      state: {
-        contractAddress: "",
-        tokenId: "",
-        collectionName: "",
-        imageUrl: "",
-        nftName: "",
-        standard: "ZRC721",
-        balance: undefined,
-      },
-    });
-  });
+  ])(
+    "keeps malformed route display defaults separate from transfers: %j",
+    async (state) => {
+      renderComponent(state);
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+      const send = screen.getByRole("button", { name: "Send NFT" });
+      expect(send).toBeDisabled();
+      await userEvent.click(send);
+      expect(navigate).not.toHaveBeenCalled();
+    },
+  );
 
   it("shows the placeholder after an image fails", () => {
     renderComponent();

@@ -8,6 +8,7 @@ import {
 } from "@/components/UI/Card";
 import { ROUTES } from "@/router/router";
 import type { NFTStandard } from "@/types/nft";
+import { isNFTTransferState } from "@/utilities/nftGuards";
 import {
   isMetadataText,
   metadataTextChildren,
@@ -75,6 +76,21 @@ const NFTDetail = () => {
   const standard: NFTStandard =
     details.standard === "ZRC1155" ? "ZRC1155" : "ZRC721";
   const balance = isString(details.balance) ? details.balance : undefined;
+
+  // Validate transaction data before applying display fallbacks. A malformed
+  // identifier, standard or balance must keep its rejection at this boundary.
+  const transferDetails = {
+    contractAddress: details.contractAddress,
+    tokenId: details.tokenId,
+    collectionName: details.collectionName ?? "",
+    imageUrl: details.imageUrl ?? "",
+    nftName: metadata?.name ?? "",
+    standard: details.standard ?? "ZRC721",
+    balance: details.balance,
+  };
+  const transferState = isNFTTransferState(transferDetails)
+    ? transferDetails
+    : undefined;
 
   const [imageError, setImageError] = useState(false);
 
@@ -184,18 +200,12 @@ const NFTDetail = () => {
             <Button
               className="w-full"
               type="button"
+              disabled={!transferState}
               onClick={() => {
+                if (!transferState) return;
                 Promise.resolve(
                   navigate(ROUTES.NFT_TRANSFER, {
-                    state: {
-                      contractAddress,
-                      tokenId,
-                      collectionName,
-                      imageUrl,
-                      nftName: metadata?.name ?? "",
-                      standard,
-                      balance,
-                    },
+                    state: transferState,
                   }),
                 ).catch((error: unknown) => {
                   console.error(

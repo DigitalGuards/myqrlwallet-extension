@@ -18,6 +18,18 @@ type NFTTransferState = NFTGalleryState & {
 const isOptionalText = (value: unknown): value is string | null | undefined =>
   value === undefined || value === null || isString(value);
 
+const isNFTTokenId = (value: unknown): value is string => {
+  // BigInt accepts blank strings as zero. Require an explicit identifier and
+  // preserve every supported integer spelling for the signer's conversion.
+  if (!isString(value) || value.trim() === "") return false;
+  try {
+    const tokenId = BigInt(value);
+    return tokenId >= 0n && tokenId < 1n << 256n;
+  } catch {
+    return false;
+  }
+};
+
 export const isNFTGalleryState = (value: unknown): value is NFTGalleryState =>
   isRecord(value) &&
   isString(value.contractAddress) &&
@@ -29,11 +41,12 @@ export const isNFTGalleryState = (value: unknown): value is NFTGalleryState =>
 
 export const isNFTTransferState = (value: unknown): value is NFTTransferState =>
   isRecord(value) &&
-  isString(value.tokenId) &&
+  isNFTTokenId(value.tokenId) &&
   isOptionalText(value.imageUrl) &&
   isMetadataText(value.nftName) &&
   (value.balance === undefined || isString(value.balance)) &&
-  isNFTGalleryState(value);
+  isNFTGalleryState(value) &&
+  value.contractAddress.trim() !== "";
 
 export const isNFTMetadata = (value: unknown): value is NFTMetadata =>
   isRecord(value) &&
