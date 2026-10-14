@@ -2,10 +2,7 @@ import { Button } from "@/components/UI/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/UI/tabs";
 import { useStore } from "@/stores/store";
-import type {
-  TokenFilter,
-  TransactionHistoryEntry,
-} from "@/types/transactionHistory";
+import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { History, Loader } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useEffect, useMemo } from "react";
@@ -61,16 +58,16 @@ const TransactionHistory = observer(() => {
 
   useEffect(() => {
     if (accountAddress) {
-      transactionHistoryStore.loadHistory(
-        accountAddress,
-        qrlStore.qrlInstance as Parameters<
-          typeof transactionHistoryStore.loadHistory
-        >[1],
-      );
-      transactionHistoryStore.loadOnChainHistory(
-        accountAddress,
-        blockchain.chainId,
-      );
+      transactionHistoryStore
+        .loadHistory(accountAddress, qrlStore.qrlInstance)
+        .catch((error: unknown) => {
+          console.error("Failed to load transaction history:", error);
+        });
+      transactionHistoryStore
+        .loadOnChainHistory(accountAddress, blockchain.chainId)
+        .catch((error: unknown) => {
+          console.error("Failed to load on-chain history:", error);
+        });
     }
     return () => {
       transactionHistoryStore.stopPolling();
@@ -95,9 +92,16 @@ const TransactionHistory = observer(() => {
           <CardContent className="flex flex-col gap-4">
             <Tabs
               value={filter}
-              onValueChange={(value) =>
-                transactionHistoryStore.setFilter(value as TokenFilter)
-              }
+              onValueChange={(value) => {
+                if (
+                  value === "all" ||
+                  value === "native" ||
+                  value === "zrc20" ||
+                  value === "nft"
+                ) {
+                  transactionHistoryStore.setFilter(value);
+                }
+              }}
             >
               <TabsList className="w-full">
                 <TabsTrigger value="all" className="flex-1">
@@ -155,12 +159,16 @@ const TransactionHistory = observer(() => {
                 type="button"
                 variant="outline"
                 disabled={isLoadingOnChain}
-                onClick={() =>
-                  void transactionHistoryStore.loadMoreOnChain(
-                    accountAddress,
-                    blockchain.chainId,
-                  )
-                }
+                onClick={() => {
+                  transactionHistoryStore
+                    .loadMoreOnChain(accountAddress, blockchain.chainId)
+                    .catch((error: unknown) => {
+                      console.error(
+                        "Failed to load more on-chain history:",
+                        error,
+                      );
+                    });
+                }}
               >
                 {isLoadingOnChain && (
                   <Loader className="mr-2 h-4 w-4 animate-spin" />

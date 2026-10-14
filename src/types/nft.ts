@@ -13,7 +13,7 @@ export type NFTMetadata = {
   description?: string;
   image?: string;
   attributes?: Array<{
-    trait_type: string;
+    trait_type?: string;
     value: string | number;
   }>;
 };

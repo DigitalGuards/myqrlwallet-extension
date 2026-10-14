@@ -79,6 +79,19 @@ describe("providerLogger", () => {
     expect(mockedLog.info).toHaveBeenCalledWith("QrlWallet:", 42, null);
   });
 
+  it("narrows serialized messages and codes while preserving other objects", () => {
+    const malformed = { message: 42, code: -1 };
+    const details = { message: "rejected", code: { reason: "permission" } };
+
+    providerLogger.info(malformed, details, { message: "failed", code: "RPC" });
+
+    expect(mockedLog.info).toHaveBeenCalledWith(
+      malformed,
+      "rejected",
+      "failed (code RPC)",
+    );
+  });
+
   it("keeps the page-reload notice visible", () => {
     // A bare /disconnected/ pattern hid this one, and it is exactly the
     // line a dApp developer needs when the stream really has gone.

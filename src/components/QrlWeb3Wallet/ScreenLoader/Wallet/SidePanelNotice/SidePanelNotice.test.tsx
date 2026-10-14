@@ -52,4 +52,28 @@ describe("SidePanelNotice", () => {
 
     expect(dismissSidePanelNotice).toHaveBeenCalledTimes(1);
   });
+  it.each(["Switch to the popup", "Dismiss"])(
+    "reports a rejected %s action",
+    async (action) => {
+      const failure = new Error("Storage unavailable");
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        renderWith({
+          sidePanelNoticePending: true,
+          setSidePanelPreferred: vi.fn().mockRejectedValue(failure),
+          dismissSidePanelNotice: vi.fn().mockRejectedValue(failure),
+        });
+        await userEvent.click(screen.getByRole("button", { name: action }));
+        expect(report).toHaveBeenCalledWith(
+          action === "Dismiss"
+            ? "Failed to dismiss side-panel notice:"
+            : "Failed to switch to popup:",
+          failure,
+        );
+        expect(screen.getByRole("alert")).toBeInTheDocument();
+      } finally {
+        report.mockRestore();
+      }
+    },
+  );
 });

@@ -39,7 +39,7 @@ describe("TransactionSuccessful", () => {
       </StoreProvider>,
     );
 
-  it("should render the transaction successful component", async () => {
+  it("should render the transaction successful component", () => {
     renderComponent();
 
     expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(

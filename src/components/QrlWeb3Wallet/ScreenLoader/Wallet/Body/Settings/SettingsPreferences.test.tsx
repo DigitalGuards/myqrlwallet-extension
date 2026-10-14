@@ -14,7 +14,10 @@ beforeAll(() => {
 });
 
 describe("SettingsPreferences", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -78,4 +81,45 @@ describe("SettingsPreferences", () => {
 
     expect(setDefaultGasTier).toHaveBeenCalledWith("aggressive");
   });
+
+  it.each([
+    {
+      label: "Display currency",
+      option: "EUR",
+      value: "EUR",
+      message: "Failed to save currency:",
+    },
+    {
+      label: "Language",
+      option: "Deutsch",
+      value: "de",
+      message: "Failed to save language:",
+    },
+    {
+      label: "Default gas fee",
+      option: "Aggressive",
+      value: "aggressive",
+      message: "Failed to save default gas fee:",
+    },
+  ])(
+    "reports a rejected $label save",
+    async ({ label, option, value, message }) => {
+      const error = new Error("storage unavailable");
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      const save = vi.fn<() => Promise<void>>().mockRejectedValue(error);
+      renderComponent(
+        mockedStore({
+          settingsStore: {
+            setCurrency: save,
+            setLanguage: save,
+            setDefaultGasTier: save,
+          },
+        }),
+      );
+      await userEvent.click(screen.getByRole("combobox", { name: label }));
+      await userEvent.click(screen.getByRole("option", { name: option }));
+      expect(save).toHaveBeenCalledWith(value);
+      expect(report).toHaveBeenCalledWith(message, error);
+    },
+  );
 });

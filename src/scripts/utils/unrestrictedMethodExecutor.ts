@@ -1,5 +1,26 @@
 import { storedText } from "@/utilities/storageViews";
 import StorageUtil from "@/utilities/storageUtil";
+import { isRecord } from "@/utilities/storageGuards";
+import {
+  isApprovalSender,
+  isStringArray,
+  isUnknownArray,
+} from "@/utilities/approvalGuards";
+import {
+  isOptionalRpcBlock,
+  isOptionalRpcBoolean,
+  isOptionalRpcNumber,
+  isRpcBytes,
+  isRpcBytesArray,
+  isRpcNumber,
+  isRpcNumberArray,
+  isRpcString,
+  isRpcTransaction,
+  readRpcParameter,
+  readRpcParams,
+  type RpcBlockContext,
+  type RpcTransactionContext,
+} from "./unrestrictedMethodGuards";
 import {
   providerNetworkIdentity,
   type ProviderNetworkIdentity,
@@ -12,12 +33,48 @@ import {
 import Web3, { FMT_BYTES, FMT_NUMBER } from "@theqrl/web3";
 import { Web3RequestManager } from "@theqrl/web3-core";
 import { qrlRpcMethods } from "@theqrl/web3-rpc-methods";
-import { BaseProvider } from "@theqrl/qrl-wallet-provider/providers";
-import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
+import type { BaseProvider } from "@theqrl/qrl-wallet-provider/providers";
 import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
 import { prepareQip55LogFilter } from "./qip55LogFilter";
 import { getSerializableObject } from "./scriptUtils";
 import LockManager from "../lockManager/lockManager";
+
+type ActiveChain = { defaultRpcUrl: string; chainId?: unknown };
+
+const isActiveChain = (value: unknown): value is ActiveChain =>
+  isRecord(value) && typeof value.defaultRpcUrl === "string";
+
+const readActiveChain = (value: unknown): ActiveChain => {
+  if (!isActiveChain(value))
+    throw new Error("The wallet cannot read the active network.");
+  return value;
+};
+
+const readConnectionField = (value: unknown, field: string): unknown => {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value))
+    throw new Error("The wallet cannot read the stored dApp connection.");
+  return value[field];
+};
+
+const readAccounts = (value: unknown): string[] => {
+  const accounts = readConnectionField(value, "accounts");
+  if (accounts === undefined || accounts === null) return [];
+  if (!isStringArray(accounts))
+    throw new Error("The wallet cannot read the stored dApp accounts.");
+  return accounts;
+};
+
+const readPermissions = (value: unknown): unknown[] => {
+  const permissions = readConnectionField(value, "permissions");
+  if (permissions === undefined || permissions === null) return [];
+  if (!isUnknownArray(permissions))
+    throw new Error("The wallet cannot read the stored dApp permissions.");
+  return permissions;
+};
+
+const requestOrigin = (sender: unknown): string =>
+  new URL(isApprovalSender(sender) ? (sender.url ?? "") : "").origin;
 
 /**
  * Executes read-only ("unrestricted") provider methods against the active
@@ -36,7 +93,9 @@ import LockManager from "../lockManager/lockManager";
 // Exported for dAppTransactionWatcher.ts, which needs the same
 // service-worker-only, CORS-exempt RPC access to poll receipts.
 export const getQrlProperties = async () => {
-  const { defaultRpcUrl } = await StorageUtil.getActiveBlockChain();
+  const { defaultRpcUrl } = readActiveChain(
+    await StorageUtil.getActiveBlockChain(),
+  );
   const qrlHttpProvider = new Web3.providers.HttpProvider(
     storedText(defaultRpcUrl),
   );
@@ -56,20 +115,32 @@ export const getQrlProperties = async () => {
 const networkIdentityFromNode = async (
   qrl: Awaited<ReturnType<typeof getQrlProperties>>["qrl"],
 ): Promise<ProviderNetworkIdentity> => {
-  const chainId = await qrl.getChainId();
-  const networkVersion = (await qrl.net.getId())?.toString() ?? "";
+  const chainId = readRpcParameter(await qrl.getChainId(), isRpcNumber);
+  const networkId: unknown = await qrl.net.getId();
+  const networkVersion =
+    networkId === undefined || networkId === null
+      ? ""
+      : readRpcParameter(networkId, isRpcNumber).toString();
   return { chainId: `0x${chainId.toString(16)}`, networkVersion };
 };
 
 export const executeUnrestrictedMethod = async (
-  req: JsonRpcRequest,
+  req: unknown,
 ): Promise<unknown> => {
+  if (!isRecord(req) || typeof req.method !== "string") {
+    throw new Error("Invalid QRL RPC request.");
+  }
   if (req.method === UNRESTRICTED_METHODS.QRL_WALLET_CAPABILITIES) {
-    const chain = await StorageUtil.getActiveBlockChain();
-    if (chain.chainId.toLowerCase() !== V3_CHAIN_ID)
+    const chain = readActiveChain(await StorageUtil.getActiveBlockChain());
+    if (
+      typeof chain.chainId !== "string" ||
+      chain.chainId.toLowerCase() !== V3_CHAIN_ID
+    )
       throw new Error("Select the v3 Private network.");
     await assertV3Network(storedText(chain.defaultRpcUrl));
-    const currentChain = await StorageUtil.getActiveBlockChain();
+    const currentChain = readActiveChain(
+      await StorageUtil.getActiveBlockChain(),
+    );
     if (
       currentChain.chainId !== chain.chainId ||
       currentChain.defaultRpcUrl !== chain.defaultRpcUrl
@@ -85,25 +156,28 @@ export const executeUnrestrictedMethod = async (
     };
   }
   const { provider, qrl } = await getQrlProperties();
+  const blockContext: RpcBlockContext = qrl;
   const method = req.method;
   if (method === UNRESTRICTED_METHODS.QRL_GET_BLOCK_BY_NUMBER) {
-    // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
-    const [block, hydrated] = req?.params ?? [];
-    const blockInformation = await qrl.getBlock(block, hydrated);
+    const [block, hydrated] = readRpcParams(req.params);
+    const blockInformation = await blockContext.getBlock(
+      readRpcParameter(block, isOptionalRpcBlock),
+      readRpcParameter(hydrated, isOptionalRpcBoolean),
+    );
     return getSerializableObject(blockInformation);
   } else if (
     method === UNRESTRICTED_METHODS.QRL_GET_BLOCK_TRANSACTION_COUNT_BY_HASH ||
     method === UNRESTRICTED_METHODS.QRL_GET_BLOCK_TRANSACTION_COUNT_BY_NUMBER
   ) {
-    // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime
-    const [blockHashOrNumber] = req.params;
-    const transactionCount =
-      await qrl.getBlockTransactionCount(blockHashOrNumber);
+    const [blockHashOrNumber] = readRpcParams(req.params);
+    const transactionCount = await blockContext.getBlockTransactionCount(
+      readRpcParameter(blockHashOrNumber, isOptionalRpcBlock),
+    );
     return "0x".concat(transactionCount.toString(16));
   } else if (
     method === UNRESTRICTED_METHODS.QRL_WEB3_WALLET_GET_PROVIDER_STATE
   ) {
-    const urlOrigin = new URL(req?.senderData?.url ?? "").origin;
+    const urlOrigin = requestOrigin(req.senderData);
     // Served from the stored active chain, with no RPC round trip.
     //
     // These were two live calls to the node. Every page load injects the
@@ -116,8 +190,12 @@ export const executeUnrestrictedMethod = async (
     // back. The stored chain already carries the id and net_version is its
     // decimal, so the node is only consulted when the stored id is
     // unusable.
-    const activeChain = await StorageUtil.getActiveBlockChain();
-    const storedIdentity = providerNetworkIdentity(activeChain.chainId);
+    const activeChain = readActiveChain(
+      await StorageUtil.getActiveBlockChain(),
+    );
+    const storedIdentity = providerNetworkIdentity(
+      typeof activeChain.chainId === "string" ? activeChain.chainId : undefined,
+    );
     const { chainId, networkVersion } =
       storedIdentity ?? (await networkIdentityFromNode(qrl));
     // Read accounts after the network identity so a revoke that arrives while
@@ -136,16 +214,16 @@ export const executeUnrestrictedMethod = async (
       chainId,
       networkVersion,
       isUnlocked: !isLocked,
-      accounts: isLocked ? [] : (connectedAccountsData?.accounts ?? []),
-    } as Parameters<BaseProvider["_initializeState"]>[0];
+      accounts: isLocked ? [] : readAccounts(connectedAccountsData),
+    } satisfies Parameters<BaseProvider["_initializeState"]>[0];
   } else if (method === UNRESTRICTED_METHODS.QRL_SYNCING) {
     const isSyncing = await qrl.isSyncing();
     return isSyncing;
   } else if (method === UNRESTRICTED_METHODS.QRL_UNINSTALL_FILTER) {
-    const [filterIdentifier] = req?.params ?? [];
+    const [filterIdentifier] = readRpcParams(req.params);
     const isSuccess = await qrlRpcMethods.uninstallFilter(
       new Web3RequestManager(provider),
-      filterIdentifier,
+      readRpcParameter(filterIdentifier, isRpcString),
     );
     return isSuccess;
   } else if (method === UNRESTRICTED_METHODS.QRL_UNSUBSCRIBE) {
@@ -170,9 +248,9 @@ export const executeUnrestrictedMethod = async (
     if (isLocked) return [];
     const connectedAccountsData =
       await StorageUtil.getDAppsConnectedAccountsData(
-        new URL(req?.senderData?.url ?? "").origin,
+        requestOrigin(req.senderData),
       );
-    return connectedAccountsData?.accounts ?? [];
+    return readAccounts(connectedAccountsData);
   } else if (method === UNRESTRICTED_METHODS.WALLET_GET_PERMISSIONS) {
     // The permission caveats carry the connected account addresses, so a
     // locked wallet answers with an empty permission list for the same
@@ -181,40 +259,48 @@ export const executeUnrestrictedMethod = async (
     if (isLocked) return [];
     const dAppsConnectedAccountsData =
       await StorageUtil.getDAppsConnectedAccountsData(
-        new URL(req?.senderData?.url ?? "").origin,
+        requestOrigin(req.senderData),
       );
-    return getSerializableObject(dAppsConnectedAccountsData?.permissions ?? []);
+    return getSerializableObject(readPermissions(dAppsConnectedAccountsData));
   } else if (method === UNRESTRICTED_METHODS.WALLET_REVOKE_PERMISSIONS) {
     await StorageUtil.clearDAppsConnectedAccountsData(
-      new URL(req?.senderData?.url ?? "").origin,
+      requestOrigin(req.senderData),
     );
     return null;
   } else if (method === UNRESTRICTED_METHODS.WEB_3_CLIENT_VERSION) {
-    const currentVersion = await qrl?.getNodeInfo();
+    const currentVersion = await qrl.getNodeInfo();
     return currentVersion;
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_BALANCE) {
-    const [accountAddress, accountBlockNumber] = req.params;
-    const balance = await qrl?.getBalance(accountAddress, accountBlockNumber);
+    const [accountAddress, accountBlockNumber] = readRpcParams(req.params);
+    const balance = await qrl.getBalance(
+      readRpcParameter(accountAddress, isRpcString),
+      readRpcParameter(accountBlockNumber, isOptionalRpcNumber),
+    );
     return "0x".concat(balance.toString(16));
   } else if (method === UNRESTRICTED_METHODS.QRL_ESTIMATE_GAS) {
-    const [estimateGasParam] = req.params;
-    const estimatedGas = await qrl.estimateGas(estimateGasParam);
+    const [estimateGasParam] = readRpcParams(req.params);
+    const transactionContext: RpcTransactionContext = qrl;
+    const estimatedGas = await transactionContext.estimateGas(
+      readRpcParameter(estimateGasParam, isRpcTransaction),
+    );
     return "0x".concat(estimatedGas.toString(16));
   } else if (method === UNRESTRICTED_METHODS.QRL_FEE_HISTORY) {
-    const [blockCount, newestBlock, rewardPercentiles] = req.params;
+    const [blockCount, newestBlock, rewardPercentiles] = readRpcParams(
+      req.params,
+    );
     const feeHistory = await qrl.getFeeHistory(
-      blockCount,
-      newestBlock,
-      rewardPercentiles,
+      readRpcParameter(blockCount, isRpcNumber),
+      readRpcParameter(newestBlock, isOptionalRpcNumber),
+      readRpcParameter(rewardPercentiles, isRpcNumberArray),
     );
     return getSerializableObject(feeHistory);
   } else if (method === UNRESTRICTED_METHODS.QRL_BLOCK_NUMBER) {
     const qrlBlockNumber = await qrl.getBlockNumber();
     return "0x".concat(qrlBlockNumber.toString(16));
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_RECEIPT) {
-    const [txHashForTransactionReceipt] = req.params;
+    const [txHashForTransactionReceipt] = readRpcParams(req.params);
     const transactionReceipt = await qrl.getTransactionReceipt(
-      txHashForTransactionReceipt,
+      readRpcParameter(txHashForTransactionReceipt, isRpcBytes),
     );
     return getSerializableObject(transactionReceipt);
   } else if (method === UNRESTRICTED_METHODS.QRL_NEW_BLOCK_FILTER) {
@@ -223,7 +309,7 @@ export const executeUnrestrictedMethod = async (
     );
     return filterIdentifier;
   } else if (method === UNRESTRICTED_METHODS.QRL_NEW_FILTER) {
-    const [filter] = req?.params ?? [];
+    const [filter] = readRpcParams(req.params);
     const filterIdentifier = await new Web3RequestManager(provider).send({
       method: "qrl_newFilter",
       params: [prepareQip55LogFilter(filter)],
@@ -238,12 +324,17 @@ export const executeUnrestrictedMethod = async (
     return filterIdentifier;
   } else if (method === UNRESTRICTED_METHODS.QRL_SEND_RAW_TRANSACTION) {
     await assertV3Network(
-      storedText((await StorageUtil.getActiveBlockChain()).defaultRpcUrl),
+      storedText(
+        readActiveChain(await StorageUtil.getActiveBlockChain()).defaultRpcUrl,
+      ),
     );
-    const [rawTransaction] = req?.params ?? [];
-    const transactionHash = (await qrl.sendSignedTransaction(rawTransaction))
-      ?.transactionHash;
-    return transactionHash;
+    const [rawTransaction] = readRpcParams(req.params);
+    const receipt: unknown = await qrl.sendSignedTransaction(
+      readRpcParameter(rawTransaction, isRpcBytes),
+    );
+    if (receipt === undefined || receipt === null) return undefined;
+    if (!isRecord(receipt)) throw new Error("Invalid QRL transaction receipt.");
+    return readRpcParameter(receipt.transactionHash, isRpcBytes);
   } else if (method === UNRESTRICTED_METHODS.QRL_SUBSCRIBE) {
     // Websocket subscriptions were never wired to a real JSON-RPC transport:
     // the old code POSTed the page's params at a configurable base URL that
@@ -254,47 +345,62 @@ export const executeUnrestrictedMethod = async (
       "qrl_subscribe is not supported by this wallet. Use the qrl_newFilter family for event polling.",
     );
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_BY_HASH) {
-    const [txHashForTransactionByHash] = req.params;
+    const [txHashForTransactionByHash] = readRpcParams(req.params);
     const transactionDetails = await qrl.getTransaction(
-      txHashForTransactionByHash,
+      readRpcParameter(txHashForTransactionByHash, isRpcBytes),
     );
     return getSerializableObject(transactionDetails);
   } else if (method === UNRESTRICTED_METHODS.QRL_CALL) {
-    const [transactionObj, blockParam] = req.params;
-    const qrlCallResponse = await qrl.call(transactionObj, blockParam);
+    const [transactionObj, blockParam] = readRpcParams(req.params);
+    const transactionContext: RpcTransactionContext = qrl;
+    const qrlCallResponse = await transactionContext.call(
+      readRpcParameter(transactionObj, isRpcTransaction),
+      readRpcParameter(blockParam, isOptionalRpcNumber),
+    );
     return qrlCallResponse;
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_CODE) {
-    const [address, blockNumber] = req.params;
-    const byteCode = await qrl.getCode(address, blockNumber);
+    const [address, blockNumber] = readRpcParams(req.params);
+    const byteCode = await qrl.getCode(
+      readRpcParameter(address, isRpcString),
+      readRpcParameter(blockNumber, isOptionalRpcNumber),
+    );
     return byteCode;
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_FILTER_CHANGES) {
-    const [filterIdentifier] = req.params;
+    const [filterIdentifier] = readRpcParams(req.params);
     const logObjects = await qrlRpcMethods.getFilterChanges(
       new Web3RequestManager(provider),
-      filterIdentifier,
+      readRpcParameter(filterIdentifier, isRpcString),
     );
     return getSerializableObject(logObjects);
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_FILTER_LOGS) {
-    const [filterIdentifier] = req.params;
+    const [filterIdentifier] = readRpcParams(req.params);
     const logObjects = await qrlRpcMethods.getFilterLogs(
       new Web3RequestManager(provider),
-      filterIdentifier,
+      readRpcParameter(filterIdentifier, isRpcString),
     );
     return getSerializableObject(logObjects);
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_LOGS) {
-    const [filter] = req.params;
+    const [filter] = readRpcParams(req.params);
     const logs = await new Web3RequestManager(provider).send({
       method: "qrl_getLogs",
       params: [prepareQip55LogFilter(filter)],
     });
     return getSerializableObject(logs);
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_PROOF) {
-    const [address, storageKeys, blockNumber] = req.params;
-    const proof = await qrl.getProof(address, storageKeys, blockNumber);
+    const [address, storageKeys, blockNumber] = readRpcParams(req.params);
+    const proof = await qrl.getProof(
+      readRpcParameter(address, isRpcString),
+      readRpcParameter(storageKeys, isRpcBytesArray),
+      readRpcParameter(blockNumber, isOptionalRpcNumber),
+    );
     return getSerializableObject(proof);
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_STORAGE_AT) {
-    const [address, storageSlot, blockNumber] = req.params;
-    const storageAt = await qrl.getStorageAt(address, storageSlot, blockNumber);
+    const [address, storageSlot, blockNumber] = readRpcParams(req.params);
+    const storageAt = await qrl.getStorageAt(
+      readRpcParameter(address, isRpcString),
+      readRpcParameter(storageSlot, isRpcNumber),
+      readRpcParameter(blockNumber, isOptionalRpcNumber),
+    );
     return storageAt;
   } else if (
     method ===
@@ -302,12 +408,18 @@ export const executeUnrestrictedMethod = async (
     method ===
       UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX
   ) {
-    const [blockHashOrNumber, transactionIndex] = req?.params ?? [];
-    const transactionInformation = qrl?.getTransactionFromBlock(
-      blockHashOrNumber,
-      transactionIndex,
-    );
-    return getSerializableObject(transactionInformation);
+    const [blockHashOrNumber, transactionIndex] = readRpcParams(req.params);
+    // These methods historically serialized the pending promise as {}.
+    // Preserve that immediate response and report later RPC failures locally.
+    blockContext
+      .getTransactionFromBlock(
+        readRpcParameter(blockHashOrNumber, isOptionalRpcBlock),
+        readRpcParameter(transactionIndex, isRpcNumber),
+      )
+      .catch((error: unknown) => {
+        console.error("QrlWeb3Wallet: Failed to look up transaction:", error);
+      });
+    return {};
   } else if (method === UNRESTRICTED_METHODS.QRL_CHAIN_ID) {
     const chainId = await qrl.getChainId({
       number: FMT_NUMBER.HEX,
@@ -315,15 +427,21 @@ export const executeUnrestrictedMethod = async (
     });
     return chainId;
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_COUNT) {
-    const [address, block] = req.params;
-    const transactionCount = await qrl.getTransactionCount(address, block);
+    const [address, block] = readRpcParams(req.params);
+    const transactionCount = await qrl.getTransactionCount(
+      readRpcParameter(address, isRpcString),
+      readRpcParameter(block, isOptionalRpcNumber),
+    );
     return "0x".concat(transactionCount.toString(16));
   } else if (method === UNRESTRICTED_METHODS.QRL_GAS_PRICE) {
     const gasPrice = await qrl.getGasPrice();
     return "0x".concat(gasPrice.toString(16));
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_BLOCK_BY_HASH) {
-    const [blockHash, hydrated] = req.params;
-    const blockInformation = await qrl.getBlock(blockHash, hydrated);
+    const [blockHash, hydrated] = readRpcParams(req.params);
+    const blockInformation = await blockContext.getBlock(
+      readRpcParameter(blockHash, isOptionalRpcBlock),
+      readRpcParameter(hydrated, isOptionalRpcBoolean),
+    );
     return getSerializableObject(blockInformation);
   } else {
     return "";

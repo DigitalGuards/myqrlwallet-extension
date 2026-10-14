@@ -1,9 +1,11 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import NFTGallery from "./NFTGallery";
+import { deferred } from "@/test-utils/deferred";
+import userEvent from "@testing-library/user-event";
 
 vi.mock("./NFTGalleryItem", () => {
   const MockNFTGalleryItem = ({
@@ -28,11 +30,14 @@ const state = {
 };
 
 describe("NFTGallery", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (
-    overrides = {},
-    routeState: Record<string, unknown> = state,
+    overrides: Parameters<typeof mockedStore>[0] = {},
+    routeState: unknown = state,
   ) =>
     render(
       <StoreProvider value={mockedStore(overrides)}>
@@ -53,6 +58,11 @@ describe("NFTGallery", () => {
       },
     });
 
+    expect(
+      await screen.findByText(
+        "No NFTs found in this collection for this account.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText("TestCollection")).toBeInTheDocument();
   });
 
@@ -117,6 +127,82 @@ describe("NFTGallery", () => {
       },
     });
 
+    expect(
+      await screen.findByText(
+        "No NFTs found in this collection for this account.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("backButtonTestId")).toBeInTheDocument();
+  });
+
+  it.each([
+    null,
+    [],
+    { ...state, contractAddress: 7 },
+    { ...state, standard: "ZRC20" },
+  ])(
+    "rejects malformed route state %j before loading tokens",
+    async (routeState) => {
+      const getOwnedNftTokens = vi.fn();
+      renderComponent({ qrlStore: { getOwnedNftTokens } }, routeState);
+
+      expect(
+        await screen.findByRole("button", { name: "Retry" }),
+      ).toBeInTheDocument();
+      expect(getOwnedNftTokens).not.toHaveBeenCalled();
+    },
+  );
+
+  it("shows the load failure and retries after a rejected token request", async () => {
+    const error = new Error("RPC unavailable");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const getOwnedNftTokens = vi
+      .fn()
+      .mockRejectedValueOnce(error)
+      .mockResolvedValueOnce({ tokens: [{ tokenId: "42" }], failed: false });
+    renderComponent({ qrlStore: { getOwnedNftTokens } });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByTestId("gallery-item-42")).toBeInTheDocument();
+    expect(getOwnedNftTokens).toHaveBeenCalledTimes(2);
+    expect(report).toHaveBeenCalledWith("Failed to load NFT gallery:", error);
+  });
+
+  it("ignores a token response after the active account changes", async () => {
+    const pending = deferred<{
+      tokens: { tokenId: string }[];
+      failed: boolean;
+    }>();
+    const getOwnedNftTokens = vi
+      .fn()
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce({
+        tokens: [{ tokenId: "current" }],
+        failed: false,
+      });
+    const view = renderComponent({ qrlStore: { getOwnedNftTokens } });
+    view.rerender(
+      <StoreProvider
+        value={mockedStore({
+          qrlStore: {
+            getOwnedNftTokens,
+            activeAccount: { accountAddress: `Q${"b".repeat(128)}` },
+          },
+        })}
+      >
+        <MemoryRouter initialEntries={[{ pathname: "/nft-gallery", state }]}>
+          <NFTGallery />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+    expect(
+      await screen.findByTestId("gallery-item-current"),
+    ).toBeInTheDocument();
+    await act(async () => {
+      pending.resolve({ tokens: [{ tokenId: "old" }], failed: false });
+      await pending.promise;
+    });
+    expect(screen.queryByTestId("gallery-item-old")).not.toBeInTheDocument();
+    expect(screen.getByTestId("gallery-item-current")).toBeInTheDocument();
   });
 });

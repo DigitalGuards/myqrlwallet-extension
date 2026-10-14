@@ -1,4 +1,5 @@
 import browser from "webextension-polyfill";
+import { isRecord } from "@/services/explorerGuards";
 import { EXTENSION_MESSAGES } from "../constants/streamConstants";
 
 /**
@@ -17,10 +18,10 @@ export const handleSidePanelOpenRequest = (
   message: unknown,
   sender?: browser.Runtime.MessageSender,
 ): boolean => {
-  if (typeof message !== "object" || message === null) {
+  if (!isRecord(message)) {
     return false;
   }
-  const { name, nonce } = message as Record<string, unknown>;
+  const { name, nonce } = message;
   if (name !== EXTENSION_MESSAGES.REQUEST_OPEN_SIDE_PANEL) {
     return false;
   }
@@ -36,7 +37,8 @@ export const handleSidePanelOpenRequest = (
   // actually clicked in carries the activation, and only that frame may
   // answer: any other frame would either fail or open the panel off a
   // gesture the user never gave to it.
-  if (!navigator.userActivation?.isActive) {
+  const activation: unknown = navigator.userActivation;
+  if (!isRecord(activation) || activation.isActive !== true) {
     return false;
   }
 

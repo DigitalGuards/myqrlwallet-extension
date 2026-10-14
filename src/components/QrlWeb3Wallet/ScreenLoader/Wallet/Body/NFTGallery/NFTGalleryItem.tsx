@@ -8,6 +8,7 @@ import {
   substituteErc1155TokenId,
 } from "@/utilities/ipfsUtil";
 import type { NFTMetadata, NFTStandard } from "@/types/nft";
+import { isNFTMetadata } from "@/utilities/nftGuards";
 import { Image } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
@@ -32,7 +33,6 @@ const NFTGalleryItem = observer(
   }: NFTGalleryItemProps) => {
     const navigate = useNavigate();
     const { qrlStore } = useStore();
-    const { getNftTokenUri } = qrlStore;
 
     const [metadata, setMetadata] = useState<NFTMetadata | null>(null);
     // Image URL candidates in preference order (primary gateway, then the
@@ -44,28 +44,33 @@ const NFTGalleryItem = observer(
 
     useEffect(() => {
       let cancelled = false;
-      (async () => {
+      const isCancelled = () => cancelled;
+      const loadMetadata = async () => {
         setIsLoading(true);
         try {
-          const uri = await getNftTokenUri(contractAddress, tokenId, standard);
-          if (cancelled) return;
+          const uri = await qrlStore.getNftTokenUri(
+            contractAddress,
+            tokenId,
+            standard,
+          );
+          if (isCancelled()) return;
 
           if (uri) {
             const meta = await fetchMetadata(uri);
-            if (cancelled) return;
+            if (isCancelled()) return;
 
-            if (meta) {
+            if (isNFTMetadata(meta)) {
               // The 1155 spec's {id} templating applies to URIs inside
               // the metadata document too, not just uri() itself.
               const rawImage =
                 standard === "ZRC1155" && typeof meta.image === "string"
                   ? substituteErc1155TokenId(meta.image, tokenId)
-                  : (meta.image as string);
+                  : meta.image;
               const nftMeta: NFTMetadata = {
-                name: meta.name as string,
-                description: meta.description as string,
+                name: meta.name,
+                description: meta.description,
                 image: rawImage,
-                attributes: meta.attributes as NFTMetadata["attributes"],
+                attributes: meta.attributes,
               };
               setMetadata(nftMeta);
               if (nftMeta.image) {
@@ -80,29 +85,34 @@ const NFTGalleryItem = observer(
             }
           }
         } catch {
-          // Silently fail
+          // Optional metadata can be unavailable; keep displaying the token ID.
         } finally {
-          if (!cancelled) setIsLoading(false);
+          if (!isCancelled()) setIsLoading(false);
         }
-      })();
+      };
+      void loadMetadata();
       return () => {
         cancelled = true;
       };
-    }, [contractAddress, tokenId, standard]);
+    }, [contractAddress, tokenId, standard, qrlStore]);
 
     const imageUrl = imageCandidates[imageIndex] ?? "";
 
     const handleClick = () => {
-      navigate(ROUTES.NFT_DETAIL, {
-        state: {
-          contractAddress,
-          tokenId,
-          collectionName,
-          metadata,
-          imageUrl,
-          standard,
-          balance,
-        },
+      Promise.resolve(
+        navigate(ROUTES.NFT_DETAIL, {
+          state: {
+            contractAddress,
+            tokenId,
+            collectionName,
+            metadata,
+            imageUrl,
+            standard,
+            balance,
+          },
+        }),
+      ).catch((error: unknown) => {
+        console.error("Failed to open NFT details:", error);
       });
     };
 
@@ -123,7 +133,9 @@ const NFTGalleryItem = observer(
               src={imageUrl}
               alt={metadata?.name || `#${tokenId}`}
               className="h-full w-full object-cover"
-              onError={() => setImageIndex((i) => i + 1)}
+              onError={() => {
+                setImageIndex((i) => i + 1);
+              }}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center">

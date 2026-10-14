@@ -1,17 +1,29 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
-import { StoreProvider } from "@/stores/store";
+import { StoreProvider, type StoreType } from "@/stores/store";
+import { historyEntryView } from "@/utilities/storageViews";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import TransactionDetail from "./TransactionDetail";
+
+const { createTab, isLedgerAccount } = vi.hoisted(() => ({
+  createTab: vi.fn().mockResolvedValue({}),
+  isLedgerAccount: vi.fn().mockResolvedValue(false),
+}));
 
 vi.mock("webextension-polyfill", () => ({
   __esModule: true,
   default: {
     tabs: {
-      create: vi.fn(),
+      create: createTab,
     },
   },
 }));
@@ -19,7 +31,7 @@ vi.mock("webextension-polyfill", () => ({
 vi.mock("@/utilities/storageUtil", () => ({
   __esModule: true,
   default: {
-    isLedgerAccount: vi.fn().mockResolvedValue(false),
+    isLedgerAccount,
     getActiveBlockChain: vi.fn().mockResolvedValue({ chainId: "0x1" }),
   },
 }));
@@ -59,9 +71,9 @@ describe("TransactionDetail", () => {
   afterEach(cleanup);
 
   const renderComponent = (
-    transaction?: TransactionHistoryEntry,
+    transaction?: unknown,
     mockedStoreValues = mockedStore(),
-    initialAction?: "speed-up" | "cancel",
+    initialAction?: unknown,
   ) =>
     render(
       <StoreProvider value={mockedStoreValues}>
@@ -110,6 +122,82 @@ describe("TransactionDetail", () => {
     renderComponent(undefined);
 
     expect(screen.getByText("Transaction not found")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["non-object", "invalid"],
+    ["array", []],
+    ["missing fields", { transactionHash: "0xold" }],
+    ["recipient", { ...pendingTransaction, to: null }],
+    ["amount", { ...pendingTransaction, amount: {} }],
+    ["status", { ...pendingTransaction, status: "confirmed" }],
+    ["timestamp", { ...pendingTransaction, timestamp: NaN }],
+    ["pending status", { ...pendingTransaction, pendingStatus: "invalid" }],
+    ["nonce", { ...pendingTransaction, nonce: "5" }],
+    ["inherited nonce", { ...sampleTransaction, __proto__: { nonce: "5" } }],
+    ["gas limit", { ...pendingTransaction, gasLimit: Infinity }],
+    ["fee", { ...pendingTransaction, maxFeePerGas: {} }],
+    ["call data", { ...pendingTransaction, data: [] }],
+    ["receipt flag", { ...pendingTransaction, receiptStatusVerified: "yes" }],
+    [
+      "replacement action",
+      { ...pendingTransaction, replacedByAction: "invalid" },
+    ],
+  ])(
+    "rejects malformed route transaction %s before estimation or signing",
+    (_label, transaction) => {
+      const getGasFeeData = vi.fn();
+      const signAndSendReplacementTransaction = vi.fn();
+      const updateTransaction = vi.fn();
+      renderComponent(
+        transaction,
+        mockedStore({
+          qrlStore: { getGasFeeData, signAndSendReplacementTransaction },
+          transactionHistoryStore: { updateTransaction },
+        }),
+        "speed-up",
+      );
+      expect(screen.getByText("Transaction not found")).toBeInTheDocument();
+      expect(getGasFeeData).not.toHaveBeenCalled();
+      expect(signAndSendReplacementTransaction).not.toHaveBeenCalled();
+      expect(updateTransaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it("renders the validated view of an older stored history entry", () => {
+    renderComponent(historyEntryView({ transactionHash: "0xlegacy" }));
+    expect(screen.getByText("0xlegacy")).toBeInTheDocument();
+    expect(screen.queryByText("Transaction not found")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Speed Up" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("ignores an unknown route action", () => {
+    const getGasFeeData = vi.fn();
+    renderComponent(
+      pendingTransaction,
+      mockedStore({ qrlStore: { getGasFeeData } }),
+      { action: "speed-up" },
+    );
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(getGasFeeData).not.toHaveBeenCalled();
+  });
+
+  it("reports a rejected explorer tab request", async () => {
+    const failure = new Error("Tab unavailable");
+    createTab.mockRejectedValueOnce(failure);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderComponent(sampleTransaction);
+      await userEvent.click(screen.getByText("View on Block Explorer"));
+      expect(report).toHaveBeenCalledWith(
+        "Failed to open block explorer:",
+        failure,
+      );
+    } finally {
+      report.mockRestore();
+    }
   });
 
   it("should display amount and token symbol", () => {
@@ -200,12 +288,10 @@ describe("TransactionDetail", () => {
   });
 
   it("should open block explorer on button click", async () => {
-    const browser = (await import("webextension-polyfill")).default;
-
     renderComponent(sampleTransaction);
 
     await userEvent.click(screen.getByText("View on Block Explorer"));
-    expect(browser.tabs.create).toHaveBeenCalled();
+    expect(createTab).toHaveBeenCalled();
   });
 
   // ── Pending transaction tests ──
@@ -347,7 +433,9 @@ describe("TransactionDetail", () => {
     };
 
     it("leaves the original untouched when the broadcast is rejected", async () => {
-      const updateTransaction = vi.fn().mockResolvedValue(undefined);
+      const updateTransaction = vi
+        .fn<StoreType["transactionHistoryStore"]["updateTransaction"]>()
+        .mockResolvedValue(undefined);
       renderComponent(
         pendingTransaction,
         mockedStore({
@@ -371,13 +459,15 @@ describe("TransactionDetail", () => {
         expect(updateTransaction).toHaveBeenCalled();
       });
       const markedReplaced = updateTransaction.mock.calls.some(
-        (call) => call[2]?.pendingStatus === "replaced",
+        (call) => call[2].pendingStatus === "replaced",
       );
       expect(markedReplaced).toBe(false);
     });
 
     it("marks the original replaced once the node accepts the broadcast", async () => {
-      const updateTransaction = vi.fn().mockResolvedValue(undefined);
+      const updateTransaction = vi
+        .fn<StoreType["transactionHistoryStore"]["updateTransaction"]>()
+        .mockResolvedValue(undefined);
       renderComponent(
         pendingTransaction,
         mockedStore({
@@ -386,9 +476,9 @@ describe("TransactionDetail", () => {
               .fn()
               .mockResolvedValue(signedReplacement),
             sendRawTransaction: vi.fn(
-              async (_raw: string, onBroadcast?: (hash: string) => void) => {
+              (_raw: string, onBroadcast?: (hash: string) => void) => {
                 onBroadcast?.("0xreplacement");
-                return undefined;
+                return Promise.resolve(undefined);
               },
             ),
           },
@@ -411,7 +501,9 @@ describe("TransactionDetail", () => {
     });
 
     it("does not settle the replacement on a receipt for another hash", async () => {
-      const updateTransaction = vi.fn().mockResolvedValue(undefined);
+      const updateTransaction = vi
+        .fn<StoreType["transactionHistoryStore"]["updateTransaction"]>()
+        .mockResolvedValue(undefined);
       renderComponent(
         pendingTransaction,
         mockedStore({
@@ -435,15 +527,99 @@ describe("TransactionDetail", () => {
         expect(updateTransaction).toHaveBeenCalled();
       });
       const confirmed = updateTransaction.mock.calls.some(
-        (call) => call[2]?.pendingStatus === "confirmed",
+        (call) => call[2].pendingStatus === "confirmed",
       );
       expect(confirmed).toBe(false);
     });
   });
 
+  it.each(["broadcast", "receipt", "rejection"] as const)(
+    "reports history persistence failure from the %s handler",
+    async (phase) => {
+      const failure = new Error("History storage unavailable");
+      const broadcastFailure = new Error("Broadcast unavailable");
+      const report = vi.spyOn(console, "error").mockImplementation(() => {});
+      const updateTransaction = vi
+        .fn<StoreType["transactionHistoryStore"]["updateTransaction"]>()
+        .mockRejectedValue(failure);
+      const sendRawTransaction = vi.fn(
+        (_raw: string, onBroadcast?: (hash: string) => void) => {
+          if (phase === "broadcast") {
+            onBroadcast?.("0xreplacement");
+            return new Promise<undefined>(() => {});
+          }
+          return phase === "rejection"
+            ? Promise.reject(broadcastFailure)
+            : Promise.resolve(undefined);
+        },
+      );
+      try {
+        renderComponent(
+          pendingTransaction,
+          mockedStore({
+            qrlStore: {
+              signAndSendReplacementTransaction: vi.fn().mockResolvedValue({
+                transactionHash: "0xreplacement",
+                rawTransaction: "0xraw",
+                error: "",
+              }),
+              sendRawTransaction,
+            },
+            transactionHistoryStore: { updateTransaction },
+          }),
+          "speed-up",
+        );
+        const dialog = await screen.findByRole("alertdialog");
+        await userEvent.click(
+          within(dialog).getByRole("button", { name: "Speed Up" }),
+        );
+        await waitFor(() => {
+          expect(report).toHaveBeenCalledWith(
+            phase === "broadcast"
+              ? "[handleReplacement] Failed to update original transaction:"
+              : "[handleReplacement] Failed to update transaction history:",
+            failure,
+          );
+        });
+        expect(updateTransaction).toHaveBeenCalledTimes(1);
+        expect(updateTransaction).toHaveBeenCalledWith(
+          pendingTransaction.from,
+          phase === "rejection"
+            ? "0xreplacement"
+            : pendingTransaction.transactionHash,
+          expect.objectContaining({
+            pendingStatus: phase === "rejection" ? "unknown" : "replaced",
+          }),
+        );
+      } finally {
+        report.mockRestore();
+      }
+    },
+  );
+
+  it("keeps a signing rejection visible in the replacement dialog", async () => {
+    renderComponent(
+      pendingTransaction,
+      mockedStore({
+        qrlStore: {
+          signAndSendReplacementTransaction: vi
+            .fn()
+            .mockRejectedValue(new Error("Signing unavailable")),
+        },
+      }),
+      "speed-up",
+    );
+    const dialog = await screen.findByRole("alertdialog");
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Speed Up" }),
+    );
+    expect(
+      await screen.findByText("Speed up failed: Error: Signing unavailable"),
+    ).toBeInTheDocument();
+  });
+
   it("should not call sendRawTransaction for Ledger account replacement", async () => {
-    const StorageUtil = (await import("@/utilities/storageUtil")).default;
-    vi.mocked(StorageUtil.isLedgerAccount).mockResolvedValueOnce(true);
+    isLedgerAccount.mockResolvedValueOnce(true);
 
     const mockSendRawTransaction = vi.fn();
     const store = mockedStore({
@@ -464,9 +640,7 @@ describe("TransactionDetail", () => {
 
     // Wait for async handleReplacement to complete
     await waitFor(() => {
-      expect(StorageUtil.isLedgerAccount).toHaveBeenCalledWith(
-        pendingTransaction.from,
-      );
+      expect(isLedgerAccount).toHaveBeenCalledWith(pendingTransaction.from);
     });
 
     expect(mockSendRawTransaction).not.toHaveBeenCalled();
@@ -542,18 +716,28 @@ describe("TransactionDetail", () => {
 
     const store = mockedStore({
       qrlStore: {
-        signAndSendReplacementTransaction: async () => ({
-          transactionHash: "0xnewtx123",
-          rawTransaction: "0xraw123",
-          error: "",
-        }),
-        sendRawTransaction: async () =>
-          ({
+        signAndSendReplacementTransaction: () =>
+          Promise.resolve({
+            transactionHash: "0xnewtx123",
+            rawTransaction: "0xraw123",
+            error: "",
+          }),
+        sendRawTransaction: () =>
+          Promise.resolve({
+            transactionHash: "0xnewtx123",
+            transactionIndex: 0n,
+            blockHash: "0xblock",
+            from: pendingTransaction.from,
+            to: pendingTransaction.to,
+            cumulativeGasUsed: 21000n,
+            logs: [],
+            logsBloom: "0x",
+            root: "0x",
             status: BigInt(1),
             blockNumber: BigInt(200),
             gasUsed: BigInt(21000),
             effectiveGasPrice: BigInt(2000000000),
-          }) as any,
+          }),
       },
       transactionHistoryStore: {
         updateTransaction: mockUpdateTransaction,
