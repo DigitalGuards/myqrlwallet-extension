@@ -663,6 +663,45 @@ describe("createProviderChannelBridge", () => {
     page.destroy();
   });
 
+  it("tracks only requests with record envelopes, usable IDs and string methods", async () => {
+    const page = new ProbeChannel();
+    const extension = new ProbeChannel();
+    const bridge = createProviderChannelBridge(page);
+    bridge.attachExtensionChannel(extension);
+    const request = { id: 0, method: "qrl_chainId" };
+
+    try {
+      for (const envelope of [
+        undefined,
+        null,
+        7,
+        "request",
+        [],
+        Object.assign([], request),
+        { method: "qrl_chainId" },
+        { id: null, method: "qrl_chainId" },
+        { id: {}, method: "qrl_chainId" },
+        { id: 1, method: 7 },
+      ]) {
+        page.emit("data", envelope);
+      }
+      page.emit("data", request);
+      expect(bridge.markConnectionReady()).toBe(1);
+      expect(extension.writes).toEqual([request]);
+
+      const response = { id: 0, result: "0x301825" };
+      extension.emitInbound(Object.assign([], response));
+      extension.emitInbound(response);
+      await vi.waitFor(() => {
+        expect(page.writes).toEqual([response]);
+      });
+    } finally {
+      bridge.destroy();
+      extension.destroy();
+      page.destroy();
+    }
+  });
+
   it("drops stale responses and forwards one response for each known ID", async () => {
     const page = new ProbeChannel();
     const extension = new ProbeChannel();

@@ -462,58 +462,12 @@ export const lintRatchet = [
     },
   },
   {
-    files: ["src/scripts/utils/approvalSlot.test.ts"],
-    rules: {
-      "@typescript-eslint/no-confusing-void-expression": "off",
-    },
-  },
-  {
     files: ["src/scripts/utils/approvalSurface.test.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/require-await": "off",
       "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/boundProvider.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/dAppTransactionWatcher.ts"],
-    rules: {
-      "@typescript-eslint/await-thenable": "off",
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/providerConnectionLifecycle.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/providerLogger.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/qip55LogFilter.test.ts"],
-    rules: {
-      "@typescript-eslint/no-unsafe-assignment": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/qip55LogFilter.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
     },
   },
   {
@@ -525,40 +479,6 @@ export const lintRatchet = [
       "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/require-await": "off",
       "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: [
-      "src/scripts/utils/restrictedMethodsMiddlewareUtils.dAppTransactionWatch.test.ts",
-    ],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/sidePanelContentBridge.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/sidePanelPreference.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/sidePanelPreference.ts"],
-    rules: {
-      "@typescript-eslint/no-deprecated": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/streamUtils.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
     },
   },
   {

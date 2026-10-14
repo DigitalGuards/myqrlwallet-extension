@@ -1,4 +1,5 @@
 import { Transform, type Duplex } from "readable-stream";
+import { isRecord } from "@/services/explorerGuards";
 import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
 
 export const initializeContentScriptProviderConnection = async <TPort>(
@@ -28,13 +29,6 @@ export const createProviderStreamFailureGuard = (
       });
     },
   };
-};
-
-type JsonRpcEnvelope = {
-  id?: string | number | null;
-  method?: unknown;
-  result?: unknown;
-  error?: unknown;
 };
 
 type PendingRequest = {
@@ -139,9 +133,8 @@ const extensionGoneResponse = (id: string | number) => ({
 });
 
 const parseRequest = (envelope: unknown) => {
-  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope))
-    return undefined;
-  const { id, method } = envelope as JsonRpcEnvelope;
+  if (!isRecord(envelope)) return undefined;
+  const { id, method } = envelope;
   if (
     (typeof id !== "string" && typeof id !== "number") ||
     typeof method !== "string"
@@ -151,9 +144,8 @@ const parseRequest = (envelope: unknown) => {
 };
 
 const responseKey = (envelope: unknown) => {
-  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope))
-    return undefined;
-  const response = envelope as JsonRpcEnvelope;
+  if (!isRecord(envelope)) return undefined;
+  const response = envelope;
   if (typeof response.id !== "string" && typeof response.id !== "number")
     return undefined;
   if (!("result" in response) && !("error" in response)) return undefined;
@@ -176,8 +168,9 @@ export const createProviderChannelBridge = (pageChannel: Duplex) => {
     }
   };
 
-  const settleAsReset = (pendingRequest: PendingRequest) =>
+  const settleAsReset = (pendingRequest: PendingRequest) => {
     answerPage(connectionResetResponse(pendingRequest.id));
+  };
 
   const expireStalePending = (now: number) => {
     for (const [key, pendingRequest] of pendingRequests) {

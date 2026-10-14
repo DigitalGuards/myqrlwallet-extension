@@ -237,7 +237,9 @@ describe("approvalSlot", () => {
   });
 
   it("does nothing on a release with no slot held", () => {
-    expect(() => releaseApprovalSlot({ startCooldown: true })).not.toThrow();
+    expect(() => {
+      releaseApprovalSlot({ startCooldown: true });
+    }).not.toThrow();
     expect(claimApprovalSlot({ origin: ORIGIN_A, tabId: 1 })).toEqual({
       claimed: true,
     });
