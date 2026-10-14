@@ -1,4 +1,5 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
+import { isRecord } from "@/utilities/storageGuards";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
 import {
@@ -10,37 +11,63 @@ import {
   resetSidePanelOpenerForTests,
 } from "./sidePanelSurface";
 
-const sidePanelOpen = vi.fn(async () => undefined);
+const sidePanelOpen = vi.fn<() => Promise<void>>();
+const sendMessage = vi.spyOn(browser.tabs, "sendMessage");
+const openPopup = vi.spyOn(browser.action, "openPopup");
+const createWindow = vi.spyOn(browser.windows, "create");
+const updateWindow = vi.spyOn(browser.windows, "update");
+const getLastFocused = vi.spyOn(browser.windows, "getLastFocused");
+const getLocalStorage = vi.spyOn(browser.storage.local, "get");
+const windowProperties = {
+  focused: true,
+  incognito: false,
+  alwaysOnTop: false,
+};
 
 // A browser with the side panel API but no panel currently open.
 const installSidePanelApi = () => {
-  (globalThis as Record<string, unknown>).chrome = {
+  vi.stubGlobal("chrome", {
     sidePanel: { open: sidePanelOpen },
     runtime: {
       ContextType: { SIDE_PANEL: "SIDE_PANEL", POPUP: "POPUP" },
-      getContexts: vi.fn(async () => []),
+      getContexts: vi.fn().mockResolvedValue([]),
     },
-  };
+  });
 };
 
 // Answers the pending gesture roundtrip as the requesting tab would.
 const answerGestureRoundtrip = async (tabId: number) => {
-  await vi.waitFor(() =>
-    expect(browser.tabs.sendMessage).toHaveBeenCalledTimes(1),
-  );
-  const calls = vi.mocked(browser.tabs.sendMessage).mock.calls;
-  const sent = calls[calls.length - 1]?.[1] as { name: string; nonce: string };
+  await vi.waitFor(() => {
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+  const calls = sendMessage.mock.calls;
+  const sent: unknown = calls[calls.length - 1]?.[1];
+  if (!isRecord(sent) || typeof sent.nonce !== "string") {
+    throw new Error("Expected a side panel gesture request with a nonce.");
+  }
   handleSidePanelOpenMessage(
     { name: "QRL_WALLET_OPEN_SIDE_PANEL", nonce: sent.nonce },
-    { id: "mock-id", tab: { id: tabId } } as never,
+    {
+      id: "mock-id",
+      tab: {
+        id: tabId,
+        index: 0,
+        active: true,
+        highlighted: true,
+        pinned: false,
+        incognito: false,
+      },
+    },
   );
 };
 
 const setSettings = (settings: object) => {
-  vi.mocked(browser.storage.local.get).mockImplementation(async (key) =>
-    key === profileStorageKey("SETTINGS")
-      ? { [profileStorageKey("SETTINGS")]: settings }
-      : {},
+  getLocalStorage.mockImplementation((key) =>
+    Promise.resolve(
+      key === profileStorageKey("SETTINGS")
+        ? { [profileStorageKey("SETTINGS")]: settings }
+        : {},
+    ),
   );
 };
 
@@ -55,40 +82,40 @@ describe("openApprovalSurface", () => {
     // The default browser for these cases has no side panel API, so the
     // popup path is the preferred surface.
     setSettings({ sidePanelSurface: "popup" });
-    vi.mocked(browser.tabs.sendMessage).mockResolvedValue(undefined);
-    vi.mocked(browser.action.openPopup).mockResolvedValue(undefined);
-    vi.mocked(browser.windows.create).mockResolvedValue({
+    sendMessage.mockResolvedValue(undefined);
+    openPopup.mockResolvedValue(undefined);
+    createWindow.mockResolvedValue({
+      ...windowProperties,
       id: 77,
-    } as never);
-    vi.mocked(browser.windows.update).mockResolvedValue({} as never);
-    vi.mocked(browser.windows.getLastFocused).mockResolvedValue({
+    });
+    updateWindow.mockResolvedValue(windowProperties);
+    getLastFocused.mockResolvedValue({
+      ...windowProperties,
       left: 100,
       top: 50,
       width: 1280,
       height: 800,
-    } as never);
+    });
   });
 
   afterEach(() => {
     resetSidePanelOpenerForTests();
-    delete (globalThis as Record<string, unknown>).chrome;
+    vi.unstubAllGlobals();
   });
 
   it("prefers the anchored action popup and opens no window", async () => {
     await openApprovalSurface();
 
-    expect(browser.action.openPopup).toHaveBeenCalledTimes(1);
-    expect(browser.windows.create).not.toHaveBeenCalled();
+    expect(openPopup).toHaveBeenCalledTimes(1);
+    expect(createWindow).not.toHaveBeenCalled();
   });
 
   it("falls back to a notification window when openPopup is refused", async () => {
-    vi.mocked(browser.action.openPopup).mockRejectedValue(
-      new Error("openPopup refused"),
-    );
+    openPopup.mockRejectedValue(new Error("openPopup refused"));
 
     await openApprovalSurface();
 
-    expect(browser.windows.create).toHaveBeenCalledWith({
+    expect(createWindow).toHaveBeenCalledWith({
       url: "chrome-extension://mock-id/index.html",
       type: "popup",
       focused: true,
@@ -100,53 +127,51 @@ describe("openApprovalSurface", () => {
     });
   });
 
-  it("focuses the tracked window instead of stacking a second one", async () => {
-    vi.mocked(browser.action.openPopup).mockRejectedValue(
-      new Error("openPopup refused"),
-    );
+  it("focuses the tracked window on subsequent approval requests", async () => {
+    openPopup.mockRejectedValue(new Error("openPopup refused"));
     await openApprovalSurface();
 
     await openApprovalSurface();
 
-    expect(browser.windows.create).toHaveBeenCalledTimes(1);
-    expect(browser.windows.update).toHaveBeenCalledWith(77, {
+    expect(createWindow).toHaveBeenCalledTimes(1);
+    expect(updateWindow).toHaveBeenCalledWith(77, {
       focused: true,
       drawAttention: true,
     });
   });
 
   it("creates a fresh window after the tracked one was closed", async () => {
-    vi.mocked(browser.action.openPopup).mockRejectedValue(
-      new Error("openPopup refused"),
-    );
+    openPopup.mockRejectedValue(new Error("openPopup refused"));
     await openApprovalSurface();
     handleApprovalWindowRemoved(77);
 
     await openApprovalSurface();
 
-    expect(browser.windows.create).toHaveBeenCalledTimes(2);
-    expect(browser.windows.update).not.toHaveBeenCalled();
+    expect(createWindow).toHaveBeenCalledTimes(2);
+    expect(updateWindow).not.toHaveBeenCalled();
   });
 
   it("does nothing when a side panel is already open", async () => {
     setSettings({});
-    (globalThis as Record<string, unknown>).chrome = {
+    vi.stubGlobal("chrome", {
       sidePanel: { open: sidePanelOpen },
       runtime: {
         ContextType: { SIDE_PANEL: "SIDE_PANEL", POPUP: "POPUP" },
-        getContexts: vi.fn(async (filter: { contextTypes: string[] }) =>
-          filter.contextTypes.includes("SIDE_PANEL")
-            ? [{ contextType: "SIDE_PANEL" }]
-            : [],
+        getContexts: vi.fn((filter: { contextTypes: string[] }) =>
+          Promise.resolve(
+            filter.contextTypes.includes("SIDE_PANEL")
+              ? [{ contextType: "SIDE_PANEL" }]
+              : [],
+          ),
         ),
       },
-    };
+    });
 
     await openApprovalSurface({ tabId: 5 });
 
     expect(sidePanelOpen).not.toHaveBeenCalled();
-    expect(browser.action.openPopup).not.toHaveBeenCalled();
-    expect(browser.windows.create).not.toHaveBeenCalled();
+    expect(openPopup).not.toHaveBeenCalled();
+    expect(createWindow).not.toHaveBeenCalled();
   });
 
   it("opens the side panel for the requesting tab when it is preferred", async () => {
@@ -158,8 +183,8 @@ describe("openApprovalSurface", () => {
     await pending;
 
     expect(sidePanelOpen).toHaveBeenCalledWith({ tabId: 5 });
-    expect(browser.action.openPopup).not.toHaveBeenCalled();
-    expect(browser.windows.create).not.toHaveBeenCalled();
+    expect(openPopup).not.toHaveBeenCalled();
+    expect(createWindow).not.toHaveBeenCalled();
   });
 
   it("falls back to the popup when the gesture roundtrip times out", async () => {
@@ -173,7 +198,7 @@ describe("openApprovalSurface", () => {
     vi.useRealTimers();
 
     expect(sidePanelOpen).not.toHaveBeenCalled();
-    expect(browser.action.openPopup).toHaveBeenCalledTimes(1);
+    expect(openPopup).toHaveBeenCalledTimes(1);
   });
 
   it("skips the side panel entirely for an explicit popup choice", async () => {
@@ -182,28 +207,28 @@ describe("openApprovalSurface", () => {
 
     await openApprovalSurface({ tabId: 5 });
 
-    expect(browser.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
     expect(sidePanelOpen).not.toHaveBeenCalled();
-    expect(browser.action.openPopup).toHaveBeenCalledTimes(1);
+    expect(openPopup).toHaveBeenCalledTimes(1);
   });
 
   it("does not open a window when the action popup is already open", async () => {
-    vi.mocked(browser.action.openPopup).mockRejectedValue(
-      new Error("openPopup refused"),
-    );
-    (globalThis as Record<string, unknown>).chrome = {
+    openPopup.mockRejectedValue(new Error("openPopup refused"));
+    vi.stubGlobal("chrome", {
       runtime: {
         ContextType: { SIDE_PANEL: "SIDE_PANEL", POPUP: "POPUP" },
-        getContexts: vi.fn(async (filter: { contextTypes: string[] }) =>
-          filter.contextTypes.includes("POPUP")
-            ? [{ contextType: "POPUP" }]
-            : [],
+        getContexts: vi.fn((filter: { contextTypes: string[] }) =>
+          Promise.resolve(
+            filter.contextTypes.includes("POPUP")
+              ? [{ contextType: "POPUP" }]
+              : [],
+          ),
         ),
       },
-    };
+    });
 
     await openApprovalSurface();
 
-    expect(browser.windows.create).not.toHaveBeenCalled();
+    expect(createWindow).not.toHaveBeenCalled();
   });
 });

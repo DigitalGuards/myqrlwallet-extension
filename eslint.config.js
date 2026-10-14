@@ -273,35 +273,6 @@ export const lintRatchet = [
       "@typescript-eslint/use-unknown-in-catch-callback-variable": "off",
     },
   },
-  {
-    files: ["src/scripts/utils/approvalSurface.test.ts"],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-confusing-void-expression": "off",
-      "@typescript-eslint/require-await": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: [
-      "src/scripts/utils/restrictedMethodsMiddlewareUtils.authorization.test.ts",
-    ],
-    rules: {
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/require-await": "off",
-      "@typescript-eslint/unbound-method": "off",
-    },
-  },
-  {
-    files: ["src/scripts/utils/unrestrictedMethodExecutor.ts"],
-    rules: {
-      "@typescript-eslint/ban-ts-comment": "off",
-      "@typescript-eslint/consistent-type-assertions": "off",
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-    },
-  },
 ];
 // END LINT RATCHET
 
