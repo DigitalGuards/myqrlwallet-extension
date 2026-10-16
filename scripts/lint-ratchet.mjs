@@ -35,6 +35,12 @@ if (baseRef !== undefined) {
     "--end-of-options",
     `${baseRef}^{commit}`,
   ]).trim();
+  if (commit === git(["rev-parse", "HEAD"]).trim()) {
+    console.error(
+      `lint-ratchet: --base-ref ${baseRef} resolves to HEAD (${commit}); choose an independent base commit`,
+    );
+    process.exit(1);
+  }
   const baseSource = git(["show", `${commit}:eslint.config.js`]);
   const bounds = blockBounds(baseSource, true);
   if (bounds === null) {
