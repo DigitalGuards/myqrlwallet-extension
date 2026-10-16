@@ -65,6 +65,9 @@ if (baseRef !== undefined) {
   }
 }
 
+await rejectUnsuppressedFindings();
+
+// Keep checking existing allowances against the rules they disable.
 const eslint = new ESLint({
   cwd: root,
   overrideConfigFile: true,
@@ -138,6 +141,38 @@ if (!check && oldBlock !== block) {
 console.log(
   `lint-ratchet: OK (${pairs.size} pairs, ${current.size} files, ${reports} reports${check ? "" : `, ${stale.length} pairs removed`})`,
 );
+
+async function rejectUnsuppressedFindings() {
+  // Match npm run lint's cwd, config discovery, flags and directive reporting.
+  // ESLint 9 applies bulk suppressions only in lib/cli.js, after lintFiles().
+  // This Node API scan sees every finding bulk suppressions can mute, regardless
+  // of the suppression file's name or location. New file/rule pairs fail here;
+  // suppression files can only cover findings the ratchet already allows.
+  const eslint = new ESLint({
+    cwd: root,
+    overrideConfig: {
+      linterOptions: { reportUnusedDisableDirectives: "error" },
+    },
+  });
+  const results = await eslint.lintFiles(["."]);
+  const added = new Set();
+  for (const result of results) {
+    const file = path.relative(root, result.filePath).split(path.sep).join("/");
+    for (const message of result.messages) {
+      if (message.fatal || !message.ruleId) {
+        throw new Error(`${file}:${message.line}: ${message.message}`);
+      }
+      const pair = `${file}: ${message.ruleId}`;
+      if (!previous.has(pair)) added.add(pair);
+    }
+  }
+  if (added.size) {
+    console.error(
+      `lint-ratchet: fix ${added.size} new file/rule pairs:\n${[...added].sort().join("\n")}`,
+    );
+    process.exit(1);
+  }
+}
 
 function blockBounds(text, allowMissing = false) {
   const from = text.indexOf(start);
