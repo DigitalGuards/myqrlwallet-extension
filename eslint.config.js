@@ -65,6 +65,17 @@ export const baseConfig = [
       "react/prop-types": "off",
     },
   },
+  {
+    // TypeScript applies @ts-nocheck in any letter case and after extra
+    // slashes, while ban-ts-comment matches only the lower-case form.
+    files: ["**/*.{ts,tsx,mts,cts}"],
+    rules: {
+      "no-warning-comments": [
+        "error",
+        { terms: ["@ts-nocheck"], location: "start", decoration: ["/"] },
+      ],
+    },
+  },
   pluginJestDom.configs["flat/recommended"],
   {
     files: strictFiles,
