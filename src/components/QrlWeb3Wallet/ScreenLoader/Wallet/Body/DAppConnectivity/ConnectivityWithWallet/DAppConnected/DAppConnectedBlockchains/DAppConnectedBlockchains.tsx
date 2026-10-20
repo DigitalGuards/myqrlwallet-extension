@@ -1,3 +1,4 @@
+import { storedText } from "@/utilities/storageViews";
 import { Button } from "@/components/UI/Button";
 import { Card } from "@/components/UI/Card";
 import { Label } from "@/components/UI/Label";
@@ -50,19 +51,19 @@ const DAppConnectedBlockchains = observer(() => {
         </div>
       </div>
       <div className="flex flex-col gap-2">
-        {currentTabData?.connectedBlockchains?.map(
+        {currentTabData?.connectedBlockchains.map(
           ({ chainId, chainName, defaultIconUrl, defaultRpcUrl }) => (
             <Card key={chainId} className="flex justify-between gap-3 p-3">
               <div className="flex gap-3">
                 <div className="pt-1">
-                  <ChainIcon src={defaultIconUrl} alt={chainName} />
+                  <ChainIcon src={storedText(defaultIconUrl)} alt={storedText(chainName)} />
                 </div>
                 <div className="flex flex-col break-all">
-                  <span className="font-bold">{chainName}</span>
+                  <span className="font-bold">{storedText(chainName)}</span>
                   <span className="text-xm opacity-80">
                     {t('dapp.chainId', { id: parseInt(chainId, 16) })}
                   </span>
-                  <span className="text-xm opacity-80">{defaultRpcUrl}</span>
+                  <span className="text-xm opacity-80">{storedText(defaultRpcUrl)}</span>
                 </div>
               </div>
             </Card>

@@ -18,8 +18,8 @@ const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Stores (must be prefixed with "mock" for vi.mock hoisting) ────
-const mockLocalStore: Record<string, any> = {};
-const mockSessionStore: Record<string, any> = {};
+const mockLocalStore = new Map<string, unknown>();
+const mockSessionStore = new Map<string, unknown>();
 
 // ── Alarm simulator ────────────────────────────────────────────────
 type MockPendingAlarm = { name: string; scheduledTime: number };
@@ -33,23 +33,25 @@ vi.mock("webextension-polyfill", () => ({
         get: vi.fn((key: string | null) =>
           Promise.resolve(
             key === null
-              ? { ...mockLocalStore }
-              : key in mockLocalStore
-                ? { [key]: mockLocalStore[key] }
+              ? Object.fromEntries(mockLocalStore)
+              : mockLocalStore.has(key)
+                ? { [key]: mockLocalStore.get(key) }
                 : {},
           ),
         ),
-        set: vi.fn((data: Record<string, any>) => {
-          Object.assign(mockLocalStore, data);
+        set: vi.fn((data: Record<string, unknown>) => {
+          for (const [key, value] of Object.entries(data)) {
+            mockLocalStore.set(key, value);
+          }
           return Promise.resolve();
         }),
         remove: vi.fn((key: string | string[]) => {
           for (const item of Array.isArray(key) ? key : [key])
-            delete mockLocalStore[item];
+            mockLocalStore.delete(item);
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
-          for (const k of Object.keys(mockLocalStore)) delete mockLocalStore[k];
+          mockLocalStore.clear();
           return Promise.resolve();
         }),
       },
@@ -57,38 +59,42 @@ vi.mock("webextension-polyfill", () => ({
         get: vi.fn((key: string | null) =>
           Promise.resolve(
             key === null
-              ? { ...mockSessionStore }
-              : key in mockSessionStore
-                ? { [key]: mockSessionStore[key] }
+              ? Object.fromEntries(mockSessionStore)
+              : mockSessionStore.has(key)
+                ? { [key]: mockSessionStore.get(key) }
                 : {},
           ),
         ),
-        set: vi.fn((data: Record<string, any>) => {
-          Object.assign(mockSessionStore, data);
+        set: vi.fn((data: Record<string, unknown>) => {
+          for (const [key, value] of Object.entries(data)) {
+            mockSessionStore.set(key, value);
+          }
           return Promise.resolve();
         }),
         remove: vi.fn((key: string | string[]) => {
           for (const item of Array.isArray(key) ? key : [key])
-            delete mockSessionStore[item];
+            mockSessionStore.delete(item);
           return Promise.resolve();
         }),
       },
       onChanged: { addListener: vi.fn() },
     },
     alarms: {
-      create: vi.fn((name: string, info: any) => {
-        // Remove any existing alarm with the same name (Chrome behaviour)
-        mockPendingAlarms = mockPendingAlarms.filter((a) => a.name !== name);
-        if (info.periodInMinutes) {
-          // Periodic alarm - schedule first tick
-          const scheduledTime = Date.now() + info.periodInMinutes * 60_000;
-          mockPendingAlarms.push({ name, scheduledTime });
-        } else if (info.delayInMinutes) {
-          const scheduledTime = Date.now() + info.delayInMinutes * 60_000;
-          mockPendingAlarms.push({ name, scheduledTime });
-        }
-        return Promise.resolve();
-      }),
+      create: vi.fn(
+        (name: string, info: browser.Alarms.CreateAlarmInfoType) => {
+          // Remove any existing alarm with the same name (Chrome behaviour)
+          mockPendingAlarms = mockPendingAlarms.filter((a) => a.name !== name);
+          if (info.periodInMinutes) {
+            // Periodic alarm - schedule first tick
+            const scheduledTime = Date.now() + info.periodInMinutes * 60_000;
+            mockPendingAlarms.push({ name, scheduledTime });
+          } else if (info.delayInMinutes) {
+            const scheduledTime = Date.now() + info.delayInMinutes * 60_000;
+            mockPendingAlarms.push({ name, scheduledTime });
+          }
+          return Promise.resolve();
+        },
+      ),
       clear: vi.fn((name: string) => {
         mockPendingAlarms = mockPendingAlarms.filter((a) => a.name !== name);
         return Promise.resolve(true);
@@ -119,13 +125,14 @@ vi.mock("webextension-polyfill", () => ({
   },
 }));
 
-vi.mock("@theqrl/web3", () => ({ Bytes: class {} }));
 vi.mock("@/crypto/keystoreCrypto", () => ({
   encryptKeystore: vi.fn(),
 }));
 vi.mock("@/functions/getMnemonicFromHexSeed", () => ({
   getMnemonicFromHexSeed: vi.fn(() => "mocked mnemonic"),
 }));
+
+import type browser from "webextension-polyfill";
 
 import LockManager, {
   LOCK_MANAGER_MESSAGES,
@@ -141,16 +148,15 @@ const MOCK_KEYS: DecryptedKeyType[] = [
   },
 ];
 
-const clearStore = (store: Record<string, any>) => {
-  for (const k of Object.keys(store)) delete store[k];
-};
-
 /** Seed mockLocalStore so isLocked() doesn't call clearAllData(). */
 const seedStorage = () => {
-  mockLocalStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
-    { address: "0x123" },
-  ]);
-  mockLocalStore[profileStorageKey("ACCOUNTS")] = { ALL_ACCOUNTS: ["0x123"] };
+  mockLocalStore.set(
+    profileStorageKey("KEYSTORES"),
+    JSON.stringify([{ address: MOCK_KEYS[0].address, crypto: {} }]),
+  );
+  mockLocalStore.set(profileStorageKey("ACCOUNTS"), {
+    ALL_ACCOUNTS: [MOCK_KEYS[0].address],
+  });
 };
 
 const minutes = (m: number) => m * 60_000;
@@ -185,13 +191,13 @@ async function advanceAndFireAlarms(ms: number): Promise<number> {
 // A legitimate caller: an extension page, matching both the extension id
 // and an extension-origin URL that lockManagerListener's sender guard
 // requires (F9).
-const TRUSTED_SENDER = {
+const TRUSTED_SENDER: browser.Runtime.MessageSender = {
   id: "mock-extension-id",
   url: "chrome-extension://mock-extension-id/index.html",
-} as any;
+};
 
 /** Simulate sending a message through the lockManagerListener (like the popup does). */
-async function sendMessage(name: string, data?: any) {
+async function sendMessage(name: string, data?: unknown) {
   return LockManager.lockManagerListener({ name, data }, TRUSTED_SENDER);
 }
 
@@ -217,8 +223,8 @@ describe("Auto-lock integration scenarios", () => {
   beforeEach(async () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
-    clearStore(mockLocalStore);
-    clearStore(mockSessionStore);
+    mockLocalStore.clear();
+    mockSessionStore.clear();
     mockPendingAlarms = [];
     LockManager.stopKeepAliveInterval();
     await LockManager.lock();
@@ -235,7 +241,9 @@ describe("Auto-lock integration scenarios", () => {
 
   describe("15-minute auto-lock", () => {
     beforeEach(() => {
-      mockLocalStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 15 };
+      mockLocalStore.set(profileStorageKey("SETTINGS"), {
+        autoLockMinutes: 15,
+      });
     });
 
     it("should stay unlocked at 14 minutes", async () => {
@@ -254,7 +262,7 @@ describe("Auto-lock integration scenarios", () => {
       expect(fired).toBeGreaterThanOrEqual(1);
       expect(await checkLocked()).toBe(true);
       expect(
-        mockLocalStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")],
+        mockLocalStore.get(profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")),
       ).toBeDefined();
     });
 
@@ -276,7 +284,9 @@ describe("Auto-lock integration scenarios", () => {
 
   describe("activity reset", () => {
     beforeEach(() => {
-      mockLocalStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 15 };
+      mockLocalStore.set(profileStorageKey("SETTINGS"), {
+        autoLockMinutes: 15,
+      });
     });
 
     it("should reset timer when activity happens before timeout", async () => {
@@ -353,7 +363,7 @@ describe("Auto-lock integration scenarios", () => {
 
   describe("auto-lock disabled (Never / 0 minutes)", () => {
     beforeEach(() => {
-      mockLocalStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 0 };
+      mockLocalStore.set(profileStorageKey("SETTINGS"), { autoLockMinutes: 0 });
     });
 
     it("should never lock regardless of time", async () => {
@@ -369,7 +379,9 @@ describe("Auto-lock integration scenarios", () => {
 
   describe("manual lock", () => {
     beforeEach(() => {
-      mockLocalStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 15 };
+      mockLocalStore.set(profileStorageKey("SETTINGS"), {
+        autoLockMinutes: 15,
+      });
     });
 
     it("should lock immediately on manual lock, clearing alarms", async () => {
@@ -389,7 +401,9 @@ describe("Auto-lock integration scenarios", () => {
 
   describe("settings change while unlocked", () => {
     it("should apply new shorter timeout immediately", async () => {
-      mockLocalStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 15 };
+      mockLocalStore.set(profileStorageKey("SETTINGS"), {
+        autoLockMinutes: 15,
+      });
       await unlockWallet();
 
       // 5 minutes pass
@@ -397,7 +411,7 @@ describe("Auto-lock integration scenarios", () => {
       expect(await checkLocked()).toBe(false);
 
       // User changes setting to 1 minute
-      mockLocalStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 1 };
+      mockLocalStore.set(profileStorageKey("SETTINGS"), { autoLockMinutes: 1 });
       await sendMessage(LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK);
 
       // 30 seconds - still unlocked
@@ -411,14 +425,14 @@ describe("Auto-lock integration scenarios", () => {
     });
 
     it("should switch from timed to Never without locking", async () => {
-      mockLocalStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 5 };
+      mockLocalStore.set(profileStorageKey("SETTINGS"), { autoLockMinutes: 5 });
       await unlockWallet();
 
       // 3 minutes pass
       await advanceAndFireAlarms(minutes(3));
 
       // Change to "Never"
-      mockLocalStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 0 };
+      mockLocalStore.set(profileStorageKey("SETTINGS"), { autoLockMinutes: 0 });
       await sendMessage(LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK);
 
       // Advance way past original timeout
@@ -427,14 +441,14 @@ describe("Auto-lock integration scenarios", () => {
     });
 
     it("should switch from Never to timed and lock after timeout", async () => {
-      mockLocalStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 0 };
+      mockLocalStore.set(profileStorageKey("SETTINGS"), { autoLockMinutes: 0 });
       await unlockWallet();
 
       await advanceAndFireAlarms(minutes(60));
       expect(await checkLocked()).toBe(false);
 
       // Change to 2 minutes
-      mockLocalStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 2 };
+      mockLocalStore.set(profileStorageKey("SETTINGS"), { autoLockMinutes: 2 });
       await sendMessage(LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK);
 
       // 1 minute - still unlocked
@@ -458,7 +472,7 @@ describe("Auto-lock integration scenarios", () => {
     { autoLockMinutes: 60, label: "1 hour" },
   ])("$label auto-lock", ({ autoLockMinutes }) => {
     it(`should stay unlocked at ${autoLockMinutes - 0.5} min and lock at ${autoLockMinutes + 0.5} min`, async () => {
-      mockLocalStore[profileStorageKey("SETTINGS")] = { autoLockMinutes };
+      mockLocalStore.set(profileStorageKey("SETTINGS"), { autoLockMinutes });
       await unlockWallet();
 
       // 30 seconds before timeout - still unlocked
@@ -476,23 +490,30 @@ describe("Auto-lock integration scenarios", () => {
 
   describe("timestamps", () => {
     it("should have LOCKED > UNLOCKED after auto-lock", async () => {
-      mockLocalStore[profileStorageKey("SETTINGS")] = { autoLockMinutes: 1 };
+      mockLocalStore.set(profileStorageKey("SETTINGS"), { autoLockMinutes: 1 });
 
       await unlockWallet();
       // Simulate the popup saving the UNLOCKED timestamp (as it does in lockStore.unlock)
-      mockLocalStore[profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP")] =
-        Date.now();
+      mockLocalStore.set(
+        profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP"),
+        Date.now(),
+      );
 
       await advanceAndFireAlarms(minutes(1) + 1);
       expect(await checkLocked()).toBe(true);
 
-      const lockedTs =
-        mockLocalStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")];
-      const unlockedTs =
-        mockLocalStore[profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP")];
+      const lockedTs = mockLocalStore.get(
+        profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP"),
+      );
+      const unlockedTs = mockLocalStore.get(
+        profileStorageKey("LOCK_MANAGER_UNLOCKED_TIMESTAMP"),
+      );
 
       expect(lockedTs).toBeDefined();
       expect(unlockedTs).toBeDefined();
+      if (typeof unlockedTs !== "number") {
+        throw new Error("Expected an unlock timestamp");
+      }
       expect(lockedTs).toBeGreaterThan(unlockedTs);
     });
   });

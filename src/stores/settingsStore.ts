@@ -6,7 +6,8 @@ import {
   SIDE_PANEL_PATH,
 } from "@/scripts/utils/sidePanelPreference";
 import type { GasTier } from "@/types/gasFee";
-import StorageUtil from "@/utilities/storageUtil";
+import { isRecord } from "@/utilities/storageGuards";
+import StorageUtil, { type WalletSettings } from "@/utilities/storageUtil";
 import { action, makeAutoObservable, observable, runInAction } from "mobx";
 import browser from "webextension-polyfill";
 
@@ -17,6 +18,16 @@ const THEME = Object.freeze({
 
 type ThemePreference = "system" | "light" | "dark";
 type SidePanelSurface = "panel" | "popup";
+
+type SidePanelApi = {
+  setPanelBehavior: (options: { openPanelOnActionClick: boolean }) => unknown;
+  setOptions?: (options: { path: string }) => unknown;
+};
+
+const isSidePanelApi = (value: unknown): value is SidePanelApi =>
+  isRecord(value) &&
+  typeof value.setPanelBehavior === "function" &&
+  (value.setOptions === undefined || typeof value.setOptions === "function");
 
 class SettingsStore {
   isDarkMode: boolean;
@@ -75,7 +86,7 @@ class SettingsStore {
 
     this.isDarkMode = window.matchMedia("(prefers-color-scheme: dark)").matches;
     this.theme = this.isDarkMode ? THEME.DARK : THEME.LIGHT;
-    document?.documentElement?.classList?.add(this.theme);
+    document.documentElement.classList.add(this.theme);
 
     // Each surface is identified deterministically by a URL marker, never by a
     // viewport measurement. The action popup loads bare `index.html` (from the
@@ -128,7 +139,9 @@ class SettingsStore {
       }
       if (settings.language) {
         this.language = settings.language;
-        i18n.changeLanguage(settings.language);
+        i18n.changeLanguage(settings.language).catch((error: unknown) => {
+          console.error("Failed to change language:", error);
+        });
       }
       if (settings.defaultGasTier) {
         this.defaultGasTier = settings.defaultGasTier;
@@ -150,8 +163,7 @@ class SettingsStore {
   }
 
   #applyTheme(pref: ThemePreference) {
-    const root = document?.documentElement;
-    if (!root) return;
+    const root = document.documentElement;
 
     root.classList.remove(THEME.DARK, THEME.LIGHT);
 
@@ -169,34 +181,37 @@ class SettingsStore {
     this.isDarkMode = resolved === THEME.DARK;
   }
 
-  async #persistSettings() {
-    await StorageUtil.setSettings({
-      themePreference: this.themePreference,
-      autoLockMinutes: this.autoLockMinutes,
-      currency: this.currency,
-      language: this.language,
-      defaultGasTier: this.defaultGasTier,
-      showBalanceAndPrice: this.showBalanceAndPrice,
-      // Kept in sync so a downgrade to an older build still reads a sane
-      // value. The surface decision itself uses sidePanelSurface.
-      sidePanelPreferred: this.sidePanelPreferred,
-      sidePanelSurface: this.sidePanelSurface,
-      sidePanelNoticePending: this.sidePanelNoticePending,
-      sidePanelNoticeSeen: this.sidePanelNoticeSeen,
-      notificationsEnabled: this.notificationsEnabled,
-      phishingDetectionEnabled: this.phishingDetectionEnabled,
-    });
+  async #persistSettings(changedFields: (keyof WalletSettings)[]) {
+    await StorageUtil.setSettings(
+      {
+        themePreference: this.themePreference,
+        autoLockMinutes: this.autoLockMinutes,
+        currency: this.currency,
+        language: this.language,
+        defaultGasTier: this.defaultGasTier,
+        showBalanceAndPrice: this.showBalanceAndPrice,
+        // Kept in sync so a downgrade to an older build still reads a sane
+        // value. The surface decision itself uses sidePanelSurface.
+        sidePanelPreferred: this.sidePanelPreferred,
+        sidePanelSurface: this.sidePanelSurface,
+        sidePanelNoticePending: this.sidePanelNoticePending,
+        sidePanelNoticeSeen: this.sidePanelNoticeSeen,
+        notificationsEnabled: this.notificationsEnabled,
+        phishingDetectionEnabled: this.phishingDetectionEnabled,
+      },
+      changedFields,
+    );
   }
 
   async setThemePreference(pref: ThemePreference) {
     this.themePreference = pref;
     this.#applyTheme(pref);
-    await this.#persistSettings();
+    await this.#persistSettings(["themePreference"]);
   }
 
   async setAutoLockMinutes(minutes: number) {
     this.autoLockMinutes = minutes;
-    await this.#persistSettings();
+    await this.#persistSettings(["autoLockMinutes"]);
     browser.runtime
       .sendMessage({ name: LOCK_MANAGER_MESSAGES.UPDATE_AUTO_LOCK })
       .catch(() => {});
@@ -204,33 +219,35 @@ class SettingsStore {
 
   async setCurrency(currency: string) {
     this.currency = currency;
-    await this.#persistSettings();
+    await this.#persistSettings(["currency"]);
   }
 
   async setLanguage(language: string) {
     this.language = language;
-    i18n.changeLanguage(language);
-    await this.#persistSettings();
+    i18n.changeLanguage(language).catch((error: unknown) => {
+      console.error("Failed to change language:", error);
+    });
+    await this.#persistSettings(["language"]);
   }
 
   async setDefaultGasTier(tier: GasTier) {
     this.defaultGasTier = tier;
-    await this.#persistSettings();
+    await this.#persistSettings(["defaultGasTier"]);
   }
 
   async setShowBalanceAndPrice(enabled: boolean) {
     this.showBalanceAndPrice = enabled;
-    await this.#persistSettings();
+    await this.#persistSettings(["showBalanceAndPrice"]);
   }
 
   async setNotificationsEnabled(enabled: boolean) {
     this.notificationsEnabled = enabled;
-    await this.#persistSettings();
+    await this.#persistSettings(["notificationsEnabled"]);
   }
 
   async setPhishingDetectionEnabled(enabled: boolean) {
     this.phishingDetectionEnabled = enabled;
-    await this.#persistSettings();
+    await this.#persistSettings(["phishingDetectionEnabled"]);
   }
 
   /**
@@ -244,17 +261,21 @@ class SettingsStore {
     // The choice itself answers the notice.
     this.sidePanelNoticePending = false;
     this.sidePanelNoticeSeen = true;
-    await this.#persistSettings();
-    if (
-      typeof chrome !== "undefined" &&
-      typeof chrome?.sidePanel?.setPanelBehavior === "function"
-    ) {
+    await this.#persistSettings([
+      "sidePanelPreferred",
+      "sidePanelSurface",
+      "sidePanelNoticePending",
+      "sidePanelNoticeSeen",
+    ]);
+    const chromeApi: unknown = Reflect.get(globalThis, "chrome");
+    if (isRecord(chromeApi) && isSidePanelApi(chromeApi.sidePanel)) {
+      const sidePanel = chromeApi.sidePanel;
       try {
-        await chrome.sidePanel.setPanelBehavior({
+        await sidePanel.setPanelBehavior({
           openPanelOnActionClick: preferred,
         });
         if (preferred) {
-          await chrome.sidePanel.setOptions({ path: SIDE_PANEL_PATH });
+          await sidePanel.setOptions?.({ path: SIDE_PANEL_PATH });
         }
       } catch {
         // sidePanel API may not be available in all browsers.
@@ -266,7 +287,10 @@ class SettingsStore {
   async dismissSidePanelNotice() {
     this.sidePanelNoticePending = false;
     this.sidePanelNoticeSeen = true;
-    await this.#persistSettings();
+    await this.#persistSettings([
+      "sidePanelNoticePending",
+      "sidePanelNoticeSeen",
+    ]);
   }
 }
 

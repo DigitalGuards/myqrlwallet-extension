@@ -1,5 +1,11 @@
+import Web3 from "@theqrl/web3";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
+import type DAppRequestStore from "@/stores/dAppRequestStore";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
+import { TooltipProvider } from "@/components/UI/Tooltip";
+import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
+import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import StorageUtil from "@/utilities/storageUtil";
 import {
   EFFECTIVELY_UNLIMITED_THRESHOLD,
@@ -10,11 +16,21 @@ import {
   encodeParameters,
 } from "@theqrl/web3-qrl-abi";
 import { toChecksumAddress } from "@theqrl/wallet.js";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CalldataSummary from "./CalldataSummary";
+import QrlSendTransaction from "../QrlSendTransaction";
+
+vi.mock("@/functions/getHexSeedFromMnemonic", () => ({
+  getHexSeedFromMnemonic: () => "synthetic-test-seed",
+}));
+
+vi.mock(import("@/configuration/releaseProfile"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  assertV3Network: vi.fn().mockResolvedValue(undefined),
+}));
 
 const SPENDER = `Q${"ab".repeat(64)}`;
 const RECIPIENT = `Q${"cd".repeat(64)}`;
@@ -57,29 +73,41 @@ const RELIC_COLLECTION = {
  * and `totalSupply()` is 0x18160ddd, so the stub answers on the selector
  * the surface asks with.
  */
+const createProbeStore = () => {
+  const store = mockedStore();
+  const instance = new Web3().qrl;
+  const probe = vi.spyOn(instance, "call");
+  store.qrlStore.qrlInstance = instance;
+  return { store, probe };
+};
+
 const probingStore = ({
   isNft,
   totalSupply,
 }: {
   isNft?: boolean;
   totalSupply?: bigint;
-} = {}) =>
-  mockedStore({
-    qrlStore: {
-      qrlInstance: {
-        call: async (transaction: { data?: string }) => {
-          const selector = transaction.data?.slice(0, 10);
-          if (selector === "0x01ffc9a7") {
-            return isNft === undefined ? "0x" : word(isNft ? 1n : 0n);
-          }
-          if (selector === "0x18160ddd") {
-            return totalSupply === undefined ? "0x" : word(totalSupply);
-          }
-          return "0x";
-        },
-      } as any,
-    },
+} = {}) => {
+  const { store, probe } = createProbeStore();
+  probe.mockImplementation((transaction) => {
+    const selector =
+      typeof transaction.data === "string"
+        ? transaction.data.slice(0, 10)
+        : undefined;
+    if (selector === "0x01ffc9a7") {
+      return Promise.resolve(
+        isNft === undefined ? "0x" : word(isNft ? 1n : 0n),
+      );
+    }
+    if (selector === "0x18160ddd") {
+      return Promise.resolve(
+        totalSupply === undefined ? "0x" : word(totalSupply),
+      );
+    }
+    return Promise.resolve("0x");
   });
+  return store;
+};
 
 const renderSummary = (
   data: string,
@@ -133,6 +161,29 @@ describe("CalldataSummary", () => {
     expect(screen.getByText("Recipient")).toBeInTheDocument();
     expect(screen.getByText(toChecksumAddress(RECIPIENT))).toBeInTheDocument();
   });
+
+  it.each([null, Number.NaN, Infinity])(
+    "shows base units when stored decimals are %s",
+    async (decimals) => {
+      vi.spyOn(StorageUtil, "getTokenContractsList").mockResolvedValue([
+        { ...MQW_TOKEN, decimals },
+      ]);
+      await act(() => {
+        renderSummary(
+          call(
+            "transfer(address,uint256)",
+            ["address", "uint256"],
+            [RECIPIENT, "1500000000000000000"],
+          ),
+        );
+        return Promise.resolve();
+      });
+      expect(
+        screen.getByText("1500000000000000000 base units"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("1.5 MQW")).not.toBeInTheDocument();
+    },
+  );
 
   it("falls back to base units when the token is unknown", async () => {
     renderSummary(
@@ -367,13 +418,8 @@ describe("CalldataSummary", () => {
   });
 
   it("renders the decoded call even while a probe is hanging", async () => {
-    const hangingStore = mockedStore({
-      qrlStore: {
-        qrlInstance: {
-          call: () => new Promise(() => {}),
-        } as any,
-      },
-    });
+    const { store: hangingStore, probe } = createProbeStore();
+    probe.mockImplementation(() => new Promise(() => {}));
 
     renderSummary(
       call("approve(address,uint256)", ["address", "uint256"], [SPENDER, "5"]),
@@ -387,20 +433,19 @@ describe("CalldataSummary", () => {
   });
 
   it("clears a previous contract's probe answers when the request changes", async () => {
-    const answers: Record<string, boolean> = {
+    const answers: Partial<Record<string, boolean>> = {
       [CONTRACT]: true,
     };
-    const store = mockedStore({
-      qrlStore: {
-        qrlInstance: {
-          call: async (transaction: { to?: string; data?: string }) => {
-            if (transaction.data?.slice(0, 10) !== "0x01ffc9a7") return "0x";
-            const answer = answers[transaction.to ?? ""];
-            if (answer === undefined) return new Promise(() => {});
-            return word(answer ? 1n : 0n);
-          },
-        } as any,
-      },
+    const { store, probe } = createProbeStore();
+    probe.mockImplementation((transaction) => {
+      if (
+        typeof transaction.data !== "string" ||
+        transaction.data.slice(0, 10) !== "0x01ffc9a7"
+      )
+        return Promise.resolve("0x");
+      const answer = answers[transaction.to];
+      if (answer === undefined) return new Promise(() => {});
+      return Promise.resolve(word(answer ? 1n : 0n));
     });
     const approveCall = call(
       "approve(address,uint256)",
@@ -585,4 +630,206 @@ describe("CalldataSummary", () => {
       expect(screen.getByText("Audited router")).toBeInTheDocument(),
     );
   });
+
+  it.each([
+    { name: "missing params", params: undefined },
+    { name: "null params", params: null },
+    { name: "empty object", params: {} },
+    { name: "empty array", params: [] },
+    { name: "null array entry", params: [null] },
+    { name: "number array entry", params: [42] },
+    { name: "null object entry", params: { 0: null } },
+    { name: "number object entry", params: { 0: 42 } },
+    { name: "string params", params: "invalid" },
+  ])("refuses $name with the real approval content", async ({ params }) => {
+    const setCanProceed = vi.fn();
+    const setOnPermissionCallBack =
+      vi.fn<DAppRequestStore["setOnPermissionCallBack"]>();
+    const getMnemonicPhrases = vi.fn().mockResolvedValue("");
+    const addTransaction = vi.fn().mockResolvedValue(undefined);
+    const store = mockedStore({
+      dAppRequestStore: {
+        dAppRequestData: { method: "qrl_sendTransaction", params },
+        setCanProceed,
+        setOnPermissionCallBack,
+      },
+      lockStore: { getMnemonicPhrases },
+      transactionHistoryStore: { addTransaction },
+    });
+    render(
+      <StoreProvider value={store}>
+        <MemoryRouter>
+          <TooltipProvider>
+            <QrlSendTransaction />
+          </TooltipProvider>
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+    expect(screen.getByText("Review this request")).toBeInTheDocument();
+    expect(setCanProceed).toHaveBeenLastCalledWith(false);
+
+    const callback = setOnPermissionCallBack.mock.lastCall?.[0];
+    if (!callback) throw new Error("Missing approval callback");
+    const record = vi.fn<ResponseRecorder>();
+    await act(async () => {
+      await callback(true, record);
+    });
+
+    expect(record).toHaveBeenCalledOnce();
+    expect(record.mock.lastCall?.[0].error).toMatchObject({ code: -32602 });
+    expect(getMnemonicPhrases).not.toHaveBeenCalled();
+    expect(addTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each(["array", "object"])(
+    "preserves transfer metadata through the real approval content for %s params",
+    async (format) => {
+      vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockResolvedValue({
+        urlOrigin: "https://request.example",
+        accounts: [OWNER],
+        blockchains: [DEFAULT_BLOCKCHAIN],
+        permissions: [],
+      });
+      vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue(
+        DEFAULT_BLOCKCHAIN,
+      );
+      const transaction = {
+        from: OWNER,
+        to: RECIPIENT,
+        value: "0xde0b6b3a7640000",
+        gas: "0x5208",
+        type: "0x2",
+      };
+      const request = {
+        method: "qrl_sendTransaction",
+        requestId: "transfer-metadata-test",
+        authorizedChainId: DEFAULT_BLOCKCHAIN.chainId,
+        requestData: { senderData: { url: "https://request.example" } },
+        params: format === "array" ? [transaction] : { 0: transaction },
+      };
+      const authorization = await revalidateAuthorizedDAppRequest(request);
+      expect(authorization.canProceed).toBe(true);
+
+      const setOnPermissionCallBack =
+        vi.fn<DAppRequestStore["setOnPermissionCallBack"]>();
+      const setCanProceed = vi.fn();
+      const addTransaction = vi.fn().mockResolvedValue(undefined);
+      const signTransaction = vi.fn().mockResolvedValue({
+        rawTransaction: "0xdeadbeef",
+        transactionHash: "0xprecomputed",
+      });
+      const send = vi.fn().mockResolvedValue("0xbroadcast");
+      const store = mockedStore({
+        dAppRequestStore: {
+          dAppRequestData: request,
+          setCanProceed,
+          setOnPermissionCallBack,
+        },
+        qrlStore: {
+          getGasFeeData: vi.fn().mockResolvedValue({
+            baseFeePerGas: 100n,
+            maxFeePerGas: 200n,
+            maxPriorityFeePerGas: 10n,
+          }),
+          qrlInstance: {
+            accounts: {
+              seedToAccount: vi.fn().mockReturnValue({ address: OWNER }),
+              signTransaction,
+            },
+            getGasPrice: vi.fn().mockResolvedValue(100n),
+            getTransactionCount: vi.fn().mockResolvedValue(3n),
+            estimateGas: vi.fn().mockResolvedValue(21000n),
+            call: vi.fn().mockResolvedValue("0x"),
+            requestManager: { send },
+          },
+        },
+        transactionHistoryStore: { addTransaction },
+      });
+      const { rerender } = render(
+        <StoreProvider value={store}>
+          <MemoryRouter>
+            <TooltipProvider>
+              <QrlSendTransaction />
+            </TooltipProvider>
+          </MemoryRouter>
+        </StoreProvider>,
+      );
+      await waitFor(() => {
+        expect(setCanProceed).toHaveBeenLastCalledWith(true);
+      });
+      const callback = setOnPermissionCallBack.mock.lastCall?.[0];
+      if (!callback) throw new Error("Missing approval callback");
+      const record = vi.fn();
+      await act(async () => {
+        await callback(true, record);
+      });
+
+      expect(signTransaction).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          from: OWNER,
+          to: RECIPIENT,
+          value: transaction.value,
+          gas: transaction.gas,
+          nonce: 3n,
+          maxFeePerGas: "0xd2",
+          maxPriorityFeePerGas: 10n,
+        }),
+        "synthetic-test-seed",
+      );
+      expect(send).toHaveBeenCalledExactlyOnceWith({
+        method: "qrl_sendRawTransaction",
+        params: ["0xdeadbeef"],
+      });
+      expect(record).toHaveBeenCalledExactlyOnceWith({
+        transactionHash: "0xbroadcast",
+      });
+      expect(addTransaction).toHaveBeenCalledExactlyOnceWith(
+        OWNER,
+        expect.objectContaining({
+          to: RECIPIENT,
+          transactionHash: "0xbroadcast",
+          amount: "1",
+          nonce: 3,
+          gasLimit: 21000,
+          maxFeePerGas: "210",
+          maxPriorityFeePerGas: "10",
+        }),
+      );
+
+      const invalidStore = mockedStore({
+        dAppRequestStore: {
+          dAppRequestData: { ...request, params: null },
+          setCanProceed,
+          setOnPermissionCallBack,
+        },
+        transactionHistoryStore: { addTransaction },
+      });
+      rerender(
+        <StoreProvider value={invalidStore}>
+          <MemoryRouter>
+            <TooltipProvider>
+              <QrlSendTransaction />
+            </TooltipProvider>
+          </MemoryRouter>
+        </StoreProvider>,
+      );
+      expect(screen.getByText("Review this request")).toBeInTheDocument();
+      expect(screen.queryByText("1 Quanta")).not.toBeInTheDocument();
+      expect(setCanProceed).toHaveBeenLastCalledWith(false);
+
+      const invalidCallback = setOnPermissionCallBack.mock.lastCall?.[0];
+      if (!invalidCallback) throw new Error("Missing approval callback");
+      const invalidRecord = vi.fn<ResponseRecorder>();
+      await act(async () => {
+        await invalidCallback(true, invalidRecord);
+      });
+      expect(invalidRecord).toHaveBeenCalledOnce();
+      expect(invalidRecord.mock.lastCall?.[0].error).toMatchObject({
+        code: -32602,
+      });
+      expect(signTransaction).toHaveBeenCalledOnce();
+      expect(send).toHaveBeenCalledOnce();
+      expect(addTransaction).toHaveBeenCalledOnce();
+    },
+  );
 });

@@ -4,6 +4,23 @@ import browser from "webextension-polyfill";
 import StorageUtil from "@/utilities/storageUtil";
 import DAppRequestStore from "./dAppRequestStore";
 import { EXTENSION_MESSAGES } from "@/scripts/constants/streamConstants";
+import type { DAppRequestType } from "@/scripts/middlewares/middlewareTypes";
+import { isRecord } from "@/utilities/storageGuards";
+import { malformed } from "@/test-utils/malformed";
+
+const mockedBrowser = vi.mocked(browser, true);
+type ConnectedDApp = Awaited<
+  ReturnType<typeof StorageUtil.getDAppsConnectedAccountsData>
+>;
+const makeTab = (overrides: Partial<browser.Tabs.Tab>): browser.Tabs.Tab => ({
+  active: true,
+  highlighted: true,
+  incognito: false,
+  index: 0,
+  pinned: false,
+  windowId: 1,
+  ...overrides,
+});
 
 describe("DAppRequestStore permission refresh", () => {
   beforeEach(() => {
@@ -16,8 +33,8 @@ describe("DAppRequestStore permission refresh", () => {
       .spyOn(DAppRequestStore.prototype, "fetchCurrentTabData")
       .mockResolvedValue();
     new DAppRequestStore();
-    const listener = vi.mocked(browser.storage.onChanged.addListener).mock
-      .calls[0]?.[0];
+    const listener =
+      mockedBrowser.storage.onChanged.addListener.mock.calls.at(0)?.[0];
 
     listener?.(
       { [profileStorageKey("DAPPS")]: { oldValue: {}, newValue: {} } },
@@ -37,8 +54,8 @@ describe("DAppRequestStore permission refresh", () => {
     store.setOnPermissionCallBack(staleCallback);
     store.setCanProceed(true);
     store.addToResponseData({ accounts: ["QStale"] });
-    const listener = vi.mocked(browser.storage.onChanged.addListener).mock
-      .calls[0]?.[0];
+    const listener =
+      mockedBrowser.storage.onChanged.addListener.mock.calls.at(0)?.[0];
 
     listener?.(
       { [profileStorageKey("DAPPS")]: { oldValue: {}, newValue: {} } },
@@ -56,20 +73,24 @@ describe("DAppRequestStore permission refresh", () => {
       DAppRequestStore.prototype,
       "fetchCurrentTabData",
     ).mockResolvedValue();
-    let resolveStaleRequest: ((value: unknown) => void) | undefined;
-    let resolveNewestRequest: ((value: unknown) => void) | undefined;
+    let resolveStaleRequest:
+      | ((value: DAppRequestType | undefined) => void)
+      | undefined;
+    let resolveNewestRequest:
+      | ((value: DAppRequestType | undefined) => void)
+      | undefined;
     vi.spyOn(StorageUtil, "getDAppsRequestData")
       .mockImplementationOnce(
         () =>
-          new Promise((resolve) => {
+          new Promise<DAppRequestType | undefined>((resolve) => {
             resolveStaleRequest = resolve;
-          }) as never,
+          }),
       )
       .mockImplementationOnce(
         () =>
-          new Promise((resolve) => {
+          new Promise<DAppRequestType | undefined>((resolve) => {
             resolveNewestRequest = resolve;
-          }) as never,
+          }),
       );
     const store = new DAppRequestStore();
     const staleRead = store.readDAppRequestData();
@@ -97,33 +118,40 @@ describe("DAppRequestStore permission refresh", () => {
   });
 
   it("updates an open side panel when the active tab changes origins", async () => {
-    vi.mocked(browser.tabs.query).mockResolvedValue([
-      {
+    mockedBrowser.tabs.query.mockResolvedValue([
+      makeTab({
         active: true,
         url: "https://connected.example/app",
         title: "Connected",
         favIconUrl: "",
-      } as never,
+      }),
     ]);
     vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockImplementation(
-      async (origin) =>
-        origin === "https://connected.example"
-          ? ({ accounts: ["QConnected"], blockchains: [] } as never)
-          : undefined,
+      (origin) =>
+        Promise.resolve(
+          origin === "https://connected.example"
+            ? {
+                urlOrigin: origin,
+                accounts: ["QConnected"],
+                blockchains: [],
+                permissions: [],
+              }
+            : undefined,
+        ),
     );
     const store = new DAppRequestStore();
     await vi.waitFor(() => {
       expect(store.currentTabData?.connectedAccounts).toEqual(["QConnected"]);
     });
-    const onActivated = vi.mocked(browser.tabs.onActivated.addListener).mock
-      .calls[0]?.[0];
-    vi.mocked(browser.tabs.query).mockResolvedValue([
-      {
+    const onActivated =
+      mockedBrowser.tabs.onActivated.addListener.mock.calls.at(0)?.[0];
+    mockedBrowser.tabs.query.mockResolvedValue([
+      makeTab({
         active: true,
         url: "https://disconnected.example/app",
         title: "Disconnected",
         favIconUrl: "",
-      } as never,
+      }),
     ]);
 
     onActivated?.({ tabId: 2, windowId: 1 });
@@ -137,13 +165,13 @@ describe("DAppRequestStore permission refresh", () => {
   });
 
   it("clears the side panel safely while an active tab has no web origin", async () => {
-    vi.mocked(browser.tabs.query).mockResolvedValue([
-      {
+    mockedBrowser.tabs.query.mockResolvedValue([
+      makeTab({
         active: true,
         url: "about:blank",
         title: "New tab",
         favIconUrl: "",
-      } as never,
+      }),
     ]);
     const getConnectedAccounts = vi.spyOn(
       StorageUtil,
@@ -163,57 +191,61 @@ describe("DAppRequestStore permission refresh", () => {
   });
 
   it("keeps the newest tab when permission reads resolve out of order", async () => {
-    let resolveConnectedTab: ((value: unknown) => void) | undefined;
-    vi.mocked(browser.tabs.query).mockResolvedValue([
-      {
+    let resolveConnectedTab: ((value: ConnectedDApp) => void) | undefined;
+    mockedBrowser.tabs.query.mockResolvedValue([
+      makeTab({
         active: true,
         url: "about:blank",
         title: "New tab",
         favIconUrl: "",
-      } as never,
+      }),
     ]);
     vi.spyOn(StorageUtil, "getDAppsConnectedAccountsData").mockImplementation(
       (origin) => {
         if (origin === "https://connected.example") {
-          return new Promise((resolve) => {
+          return new Promise<ConnectedDApp>((resolve) => {
             resolveConnectedTab = resolve;
-          }) as never;
+          });
         }
         return Promise.resolve({
+          urlOrigin: origin ?? "",
           accounts: [],
           blockchains: [],
-        }) as never;
+          permissions: [],
+        });
       },
     );
     const store = new DAppRequestStore();
     await vi.waitFor(() => {
       expect(store.currentTabData?.urlOrigin).toBe("");
     });
-    vi.mocked(browser.tabs.query).mockResolvedValue([
-      {
+    mockedBrowser.tabs.query.mockResolvedValue([
+      makeTab({
         active: true,
         url: "https://connected.example/app",
         title: "Connected",
         favIconUrl: "",
-      } as never,
+      }),
     ]);
     const staleFetch = store.fetchCurrentTabData();
     await vi.waitFor(() => {
       expect(resolveConnectedTab).toBeTypeOf("function");
     });
-    vi.mocked(browser.tabs.query).mockResolvedValue([
-      {
+    mockedBrowser.tabs.query.mockResolvedValue([
+      makeTab({
         active: true,
         url: "https://disconnected.example/app",
         title: "Disconnected",
         favIconUrl: "",
-      } as never,
+      }),
     ]);
 
     await store.fetchCurrentTabData();
     resolveConnectedTab?.({
+      urlOrigin: "https://connected.example",
       accounts: ["QStale"],
       blockchains: [],
+      permissions: [],
     });
     await staleFetch;
     expect(store.currentTabData).toMatchObject({
@@ -240,19 +272,20 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
    * runtime message with undefined, the way the worker does.
    */
   const acknowledgeInProgress = (ack: unknown) => {
-    vi.mocked(browser.runtime.sendMessage).mockImplementation(
-      async (message: unknown) => {
-        const action = (message as { action?: string })?.action;
-        if (action === EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS) return ack;
-        return undefined;
-      },
+    mockedBrowser.runtime.sendMessage.mockImplementation((message: unknown) =>
+      Promise.resolve(
+        isRecord(message) &&
+          message.action === EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS
+          ? ack
+          : undefined,
+      ),
     );
   };
 
   const sentMessages = () =>
-    vi
-      .mocked(browser.runtime.sendMessage)
-      .mock.calls.map((call) => call[0] as Record<string, unknown>);
+    mockedBrowser.runtime.sendMessage.mock.calls
+      .map(([message]): unknown => message)
+      .filter(isRecord);
 
   const sentResponse = () =>
     sentMessages().find(
@@ -268,8 +301,8 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
   const swapInAnotherRequest = (store: DAppRequestStore) => {
     // What the session-storage subscription does when a second dApp takes
     // the approval slot while this approval is still running.
-    const listener = vi.mocked(browser.storage.onChanged.addListener).mock
-      .calls[0]?.[0];
+    const listener =
+      mockedBrowser.storage.onChanged.addListener.mock.calls.at(0)?.[0];
     listener?.(
       { [profileStorageKey("DAPPS")]: { oldValue: {}, newValue: {} } },
       "session",
@@ -282,8 +315,9 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
 
   it("posts the requestId captured at click time (M1)", async () => {
     const store = buildStore("request-a");
-    store.setOnPermissionCallBack(async () => {
+    store.setOnPermissionCallBack(() => {
       swapInAnotherRequest(store);
+      return Promise.resolve();
     });
 
     await store.onPermission(true);
@@ -297,9 +331,10 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
 
   it("keeps the approval's own result out of the newer request (M1)", async () => {
     const store = buildStore("request-a");
-    store.setOnPermissionCallBack(async (_hasApproved, record) => {
+    store.setOnPermissionCallBack((_hasApproved, record) => {
       swapInAnotherRequest(store);
       record({ transactionHash: "0xabc" });
+      return Promise.resolve();
     });
 
     await store.onPermission(true);
@@ -334,8 +369,9 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
       requestId: "request-b",
       method: "qrl_signMessage",
     };
-    store.setOnPermissionCallBack(async (_hasApproved, record) => {
+    store.setOnPermissionCallBack((_hasApproved, record) => {
       record({ signature: "0xsecond" });
+      return Promise.resolve();
     });
     await store.onPermission(true);
     releaseFirst?.();
@@ -369,7 +405,7 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
 
   it("tells the worker which way the user answered (L-2)", async () => {
     const store = buildStore("request-a");
-    store.setOnPermissionCallBack(async () => undefined);
+    store.setOnPermissionCallBack(() => Promise.resolve());
 
     await store.onPermission(false);
 
@@ -383,8 +419,9 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
   it("asks the service worker before it does any work (L-2)", async () => {
     const seenBeforeCallback: unknown[] = [];
     const store = buildStore("request-a");
-    store.setOnPermissionCallBack(async () => {
+    store.setOnPermissionCallBack(() => {
       seenBeforeCallback.push(...sentMessages());
+      return Promise.resolve();
     });
 
     await store.onPermission(true);
@@ -398,7 +435,16 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
     ]);
   });
 
-  it.each([undefined, { accepted: false }, {}])(
+  it.each([
+    undefined,
+    null,
+    [],
+    true,
+    { accepted: false },
+    { accepted: "true" },
+    { accepted: 1 },
+    {},
+  ])(
     "does no work when the worker does not acknowledge the request (%s) (L-2)",
     async (ack) => {
       const clear = vi
@@ -420,7 +466,7 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
   );
 
   it("does no work when the acknowledgement cannot be delivered (L-2)", async () => {
-    vi.mocked(browser.runtime.sendMessage).mockRejectedValue(
+    mockedBrowser.runtime.sendMessage.mockRejectedValue(
       new Error("Receiving end does not exist"),
     );
     const callBack = vi.fn().mockResolvedValue(undefined);
@@ -437,7 +483,7 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
       .spyOn(StorageUtil, "clearDAppsRequestDataForRequestId")
       .mockResolvedValue(undefined);
     const store = buildStore("request-a");
-    store.setOnPermissionCallBack(async () => undefined);
+    store.setOnPermissionCallBack(() => Promise.resolve());
 
     await store.onPermission(true);
 
@@ -450,17 +496,17 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
     const clear = vi
       .spyOn(StorageUtil, "clearDAppsRequestDataForRequestId")
       .mockResolvedValue(undefined);
-    vi.mocked(browser.runtime.sendMessage).mockImplementation(
-      async (message: unknown) => {
-        const action = (message as { action?: string })?.action;
-        if (action === EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS) {
-          return { accepted: true };
-        }
-        throw new Error("Receiving end does not exist");
-      },
-    );
+    mockedBrowser.runtime.sendMessage.mockImplementation((message: unknown) => {
+      if (
+        isRecord(message) &&
+        message.action === EXTENSION_MESSAGES.DAPP_REQUEST_IN_PROGRESS
+      ) {
+        return Promise.resolve({ accepted: true });
+      }
+      return Promise.reject(new Error("Receiving end does not exist"));
+    });
     const store = buildStore("request-a");
-    store.setOnPermissionCallBack(async () => undefined);
+    store.setOnPermissionCallBack(() => Promise.resolve());
 
     await store.onPermission(true);
 
@@ -469,9 +515,9 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
 
   it("still finishes when the callback throws (M1)", async () => {
     const store = buildStore("request-a");
-    store.setOnPermissionCallBack(async () => {
-      throw new Error("signing failed");
-    });
+    store.setOnPermissionCallBack(() =>
+      Promise.reject(new Error("signing failed")),
+    );
 
     await store.onPermission(true);
 
@@ -487,21 +533,23 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
     // was never registered used to leave the bucket empty, and the
     // middleware turned the resulting truthy {} into a success carrying no
     // signature.
-    store.setOnPermissionCallBack(async () => undefined);
+    store.setOnPermissionCallBack(() => Promise.resolve());
 
     await store.onPermission(true);
 
-    const response = sentResponse()?.response as
-      | { error?: { code?: number; message?: string } }
-      | undefined;
-    expect(response?.error?.code).toBe(-32603);
-    expect(response?.error?.message).toContain("produced no result");
+    const response = sentResponse()?.response;
+    if (!isRecord(response) || !isRecord(response.error)) {
+      throw new Error("Expected a provider error response");
+    }
+    expect(response.error.code).toBe(-32603);
+    expect(response.error.message).toContain("produced no result");
   });
 
   it("leaves a result the approval did produce alone", async () => {
     const store = buildStore("request-a", "personal_sign");
-    store.setOnPermissionCallBack(async (_hasApproved, record) => {
+    store.setOnPermissionCallBack((_hasApproved, record) => {
       record({ signature: "0xsigned" });
+      return Promise.resolve();
     });
 
     await store.onPermission(true);
@@ -512,7 +560,7 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
   it("leaves an account approval that answered from responseData alone", async () => {
     const store = buildStore("request-a", "qrl_requestAccounts");
     store.addToResponseData({ accounts: ["QChosen"] });
-    store.setOnPermissionCallBack(async () => undefined);
+    store.setOnPermissionCallBack(() => Promise.resolve());
 
     await store.onPermission(true);
 
@@ -521,10 +569,239 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
 
   it("adds nothing to a rejection", async () => {
     const store = buildStore("request-a", "personal_sign");
-    store.setOnPermissionCallBack(async () => undefined);
+    store.setOnPermissionCallBack(() => Promise.resolve());
 
     await store.onPermission(false);
 
     expect(sentResponse()?.response).toEqual({});
+  });
+
+  it("serializes recorded results for the clicked request", async () => {
+    const store = buildStore("request-a");
+    store.setOnPermissionCallBack((_approved, record) => {
+      record({ nonce: 12n, transactionHash: "0xhash" });
+      return Promise.resolve();
+    });
+    await store.onPermission(true);
+    expect(sentResponse()?.response).toEqual({
+      nonce: "0xc",
+      transactionHash: "0xhash",
+    });
+  });
+
+  it("handles a malformed recorded result through the approval error path", async () => {
+    const clear = vi
+      .spyOn(StorageUtil, "clearDAppsRequestDataForRequestId")
+      .mockResolvedValue();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const store = buildStore("request-a");
+    store.setOnPermissionCallBack((_approved, record) => {
+      record({ toJSON: () => null });
+      return Promise.resolve();
+    });
+    await store.onPermission(true);
+    expect(sentResponse()).toBeUndefined();
+    expect(clear).toHaveBeenCalledWith("request-a");
+    expect(warn).toHaveBeenCalledWith(
+      "QrlWeb3Wallet: Error while resolving the permission request\n",
+      new Error("Invalid dApp response data"),
+    );
+    expect(store.approvalProcessingStatus.hasCompleted).toBe(true);
+  });
+
+  it("reports rejected status updates without losing the approval response", async () => {
+    const failure = new Error("Status update failed");
+    vi.spyOn(
+      DAppRequestStore.prototype,
+      "setApprovalProcessingStatus",
+    ).mockRejectedValue(failure);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const store = buildStore("request-a");
+    store.addToResponseData({ signature: "0xsigned" });
+    await store.onPermission(true);
+    expect(sentResponse()?.response).toEqual({ signature: "0xsigned" });
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenLastCalledWith(
+      "QrlWeb3Wallet: Failed to update approval status",
+      failure,
+    );
+  });
+
+  it("applies status synchronously and retains its resolved Promise result", async () => {
+    const store = buildStore("request-a");
+    const update = store.setApprovalProcessingStatus({
+      isProcessing: true,
+      hasApproved: true,
+    });
+    expect(store.approvalProcessingStatus).toEqual({
+      isProcessing: true,
+      hasApproved: true,
+      hasCompleted: false,
+    });
+    await expect(update).resolves.toBeUndefined();
+  });
+});
+
+describe("DAppRequestStore boundaries", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    undefined,
+    null,
+    [],
+    {},
+    { method: 1 },
+    { method: "personal_sign", requestId: 2 },
+    { method: "personal_sign", authorizedChainId: false },
+    { method: "personal_sign", requestData: { senderData: { url: 1 } } },
+    { method: "personal_sign", requestData: { senderData: { tabId: "one" } } },
+    { method: "personal_sign", phishingResult: { isDomainPhishing: "false" } },
+    {
+      method: "personal_sign",
+      phishingResult: { isDomainPhishing: false, detectorStatus: "unknown" },
+    },
+  ])(
+    "rejects malformed stored request metadata without writing storage: %j",
+    async (value) => {
+      vi.spyOn(
+        DAppRequestStore.prototype,
+        "fetchCurrentTabData",
+      ).mockResolvedValue();
+      vi.spyOn(StorageUtil, "getDAppsRequestData").mockResolvedValue(
+        malformed<DAppRequestType | undefined>(value),
+      );
+      const store = new DAppRequestStore();
+      store.dAppRequestData = {
+        method: "personal_sign",
+        requestId: "previous",
+      };
+
+      await store.readDAppRequestData();
+
+      expect(store.hasDAppRequest).toBe(false);
+      expect(mockedBrowser.storage.session.set.mock.calls).toHaveLength(0);
+      expect(mockedBrowser.storage.session.remove.mock.calls).toHaveLength(0);
+      expect(mockedBrowser.storage.local.set.mock.calls).toHaveLength(0);
+    },
+  );
+
+  it("retains valid request fields and legacy requests with no id", async () => {
+    vi.spyOn(
+      DAppRequestStore.prototype,
+      "fetchCurrentTabData",
+    ).mockResolvedValue();
+    const request: DAppRequestType = {
+      method: "personal_sign",
+      params: ["message", "account"],
+      authorizedChainId: "0x1",
+      requestData: {
+        senderData: { url: "https://dapp.example", tabId: 1, title: "dApp" },
+      },
+      phishingResult: {
+        isDomainPhishing: false,
+        detectorStatus: "ready",
+        matchType: "allowlist",
+        matchedDomain: "dapp.example",
+      },
+    };
+    vi.spyOn(StorageUtil, "getDAppsRequestData").mockResolvedValue(request);
+    const store = new DAppRequestStore();
+    await store.readDAppRequestData();
+    expect(store.dAppRequestData).toEqual(request);
+  });
+
+  it("reports rejected tab refreshes from construction and browser events", async () => {
+    const failure = new Error("Tabs unavailable");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetch = vi
+      .spyOn(DAppRequestStore.prototype, "fetchCurrentTabData")
+      .mockRejectedValue(failure);
+    new DAppRequestStore();
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+    const activated =
+      mockedBrowser.tabs.onActivated.addListener.mock.calls.at(0)?.[0];
+    const updated =
+      mockedBrowser.tabs.onUpdated.addListener.mock.calls.at(0)?.[0];
+    const changed =
+      mockedBrowser.storage.onChanged.addListener.mock.calls.at(0)?.[0];
+    if (!activated || !updated || !changed)
+      throw new Error("Expected browser listeners");
+    activated({ tabId: 1, windowId: 1 });
+    updated(1, { status: "complete" }, makeTab({}));
+    changed({ [profileStorageKey("DAPPS")]: { newValue: {} } }, "local");
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledTimes(4);
+    });
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(warn).toHaveBeenLastCalledWith(
+      "QrlWeb3Wallet: Failed to refresh the active dApp",
+      failure,
+    );
+  });
+
+  it("reports rejected request reads from storage events", async () => {
+    vi.spyOn(
+      DAppRequestStore.prototype,
+      "fetchCurrentTabData",
+    ).mockResolvedValue();
+    const failure = new Error("Storage unavailable");
+    vi.spyOn(StorageUtil, "getDAppsRequestData").mockRejectedValue(failure);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    new DAppRequestStore();
+    const listener =
+      mockedBrowser.storage.onChanged.addListener.mock.calls.at(0)?.[0];
+    if (!listener) throw new Error("Expected storage listener");
+    listener({ [profileStorageKey("DAPPS")]: { newValue: {} } }, "session");
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(
+        "QrlWeb3Wallet: Failed to read the dApp request",
+        failure,
+      );
+    });
+  });
+
+  it("handles an empty active-tab list", async () => {
+    mockedBrowser.tabs.query.mockResolvedValueOnce([]);
+    const store = new DAppRequestStore();
+    await vi.waitFor(() => {
+      expect(store.currentTabData).toEqual({
+        favIconUrl: "",
+        title: "",
+        urlOrigin: "",
+        connectedAccounts: [],
+        connectedBlockchains: [],
+      });
+    });
+  });
+
+  it("preserves serialized approval fields and rejects a non-record result", () => {
+    vi.spyOn(
+      DAppRequestStore.prototype,
+      "fetchCurrentTabData",
+    ).mockResolvedValue();
+    const store = new DAppRequestStore();
+    store.addToResponseData({
+      nonce: 12n,
+      nested: { value: 15n },
+      retained: true,
+    });
+    expect(store.responseData).toEqual({
+      nonce: "0xc",
+      nested: { value: "0xf" },
+      retained: true,
+    });
+    expect(() => {
+      store.addToResponseData({ toJSON: () => ["invalid"] });
+    }).toThrow("Invalid dApp response data");
+    expect(store.responseData).toEqual({
+      nonce: "0xc",
+      nested: { value: "0xf" },
+      retained: true,
+    });
   });
 });

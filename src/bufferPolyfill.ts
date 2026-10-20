@@ -17,4 +17,5 @@ import { Buffer } from "buffer";
  * only on `buffer`, so it is fully evaluated before the next import in
  * main.tsx is touched.
  */
-globalThis.Buffer = globalThis.Buffer ?? Buffer;
+const browserGlobals: { Buffer?: typeof globalThis.Buffer | null } = globalThis;
+globalThis.Buffer = browserGlobals.Buffer ?? Buffer;

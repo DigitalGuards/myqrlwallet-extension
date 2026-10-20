@@ -5,6 +5,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
+import { KeystoreStorageCorruptError } from "@/utilities/storageUtil";
 import LockPasswordCheck from "./LockPasswordCheck";
 
 const {
@@ -69,9 +70,7 @@ describe("LockPasswordCheck", () => {
     renderComponent(
       mockedStore({
         lockStore: {
-          unlock: async (_password: string) => {
-            return "wrong-password" as const;
-          },
+          unlock: () => Promise.resolve("wrong-password" as const),
         },
       }),
     );
@@ -91,6 +90,47 @@ describe("LockPasswordCheck", () => {
     await waitFor(() => {
       expect(screen.getByText("Enter your password")).toBeInTheDocument();
     });
+  });
+
+  it("shows corrupt wallet data and keeps the reset confirmation reachable", async () => {
+    const resetWallet = vi
+      .fn<() => Promise<void>>()
+      .mockResolvedValue(undefined);
+    renderComponent(
+      mockedStore({
+        lockStore: {
+          unlock: () => Promise.reject(new KeystoreStorageCorruptError()),
+          resetWallet,
+        },
+      }),
+    );
+
+    await userEvent.type(
+      screen.getByLabelText("Enter password"),
+      "test-password",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Unlock" }));
+
+    expect(
+      await screen.findByText(
+        "The wallet data in this browser could not be read.",
+      ),
+    ).toBeInTheDocument();
+    expect(mockRecordFailedUnlockAttempt).not.toHaveBeenCalled();
+    expect(mockClearUnlockAttempts).not.toHaveBeenCalled();
+    const recovery = screen.getByRole("button", {
+      name: "Forgot password? Reset the wallet",
+    });
+    expect(recovery).toBeEnabled();
+    await userEvent.click(recovery);
+    const confirm = screen.getByRole("button", { name: "Reset wallet" });
+    expect(confirm).toBeDisabled();
+    await userEvent.type(
+      screen.getByLabelText("Type RESET to confirm"),
+      "RESET",
+    );
+    expect(confirm).toBeEnabled();
+    expect(resetWallet).not.toHaveBeenCalled();
   });
 
   it("should not display the field error if password validation succeeds", async () => {
@@ -113,7 +153,25 @@ describe("LockPasswordCheck", () => {
     });
   });
 
-  it("should render the unlock button disabled if the password field is empty", async () => {
+  it("reports a failed attempt-gate refresh and leaves unlock uncalled", async () => {
+    const unlock = vi.fn().mockResolvedValue("success");
+    renderComponent(mockedStore({ lockStore: { unlock } }));
+    await userEvent.type(screen.getByLabelText("Enter password"), "password");
+    mockGetUnlockAttemptState.mockRejectedValueOnce(
+      new Error("Attempt state unavailable"),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Unlock" }));
+
+    expect(
+      await screen.findByText("Attempt state unavailable"),
+    ).toBeInTheDocument();
+    expect(unlock).not.toHaveBeenCalled();
+    expect(mockRecordFailedUnlockAttempt).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Enter password")).toBeEnabled();
+  });
+
+  it("should render the unlock button disabled if the password field is empty", () => {
     renderComponent(
       mockedStore({
         qrlStore: {
@@ -198,7 +256,7 @@ describe("LockPasswordCheck", () => {
       renderComponent(
         mockedStore({
           lockStore: {
-            unlock: async () => "wrong-password" as const,
+            unlock: () => Promise.resolve("wrong-password" as const),
           },
         }),
       );
@@ -226,7 +284,7 @@ describe("LockPasswordCheck", () => {
       renderComponent(
         mockedStore({
           lockStore: {
-            unlock: async () => "wrong-password" as const,
+            unlock: () => Promise.resolve("wrong-password" as const),
           },
         }),
       );
@@ -260,7 +318,7 @@ describe("LockPasswordCheck", () => {
     });
 
     it("disables the unlock button once a wait is imposed, so a second click cannot retry early", async () => {
-      const unlock = vi.fn(async () => "wrong-password" as const);
+      const unlock = vi.fn(() => Promise.resolve("wrong-password" as const));
       mockRecordFailedUnlockAttempt.mockResolvedValue({
         failedAttempts: 6,
         waitUntil: Date.now() + 10_000,
@@ -286,7 +344,7 @@ describe("LockPasswordCheck", () => {
       renderComponent(
         mockedStore({
           lockStore: {
-            unlock: async () => "success" as const,
+            unlock: () => Promise.resolve("success" as const),
           },
         }),
       );
@@ -311,7 +369,7 @@ describe("LockPasswordCheck", () => {
       renderComponent(
         mockedStore({
           lockStore: {
-            unlock: async () => "failed" as const,
+            unlock: () => Promise.resolve("failed" as const),
           },
         }),
       );

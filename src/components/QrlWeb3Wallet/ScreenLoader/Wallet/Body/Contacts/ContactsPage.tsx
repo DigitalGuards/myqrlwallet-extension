@@ -25,7 +25,9 @@ const ContactsPage = observer(() => {
   const [editingContact, setEditingContact] = useState<Contact | undefined>();
 
   useEffect(() => {
-    contactsStore.loadContacts();
+    contactsStore.loadContacts().catch((error: unknown) => {
+      console.error("Failed to load contacts:", error);
+    });
   }, []);
 
   const handleAdd = () => {
@@ -82,14 +84,22 @@ const ContactsPage = observer(() => {
               <ContactForm
                 initialContact={editingContact}
                 existingAddresses={contacts.map((c) => c.address)}
-                onSave={handleSave}
+                onSave={(contact) => {
+                  handleSave(contact).catch((error: unknown) => {
+                    console.error("Failed to save contact:", error);
+                  });
+                }}
                 onCancel={handleCancel}
               />
             ) : (
               <ContactList
                 contacts={contacts}
                 onEdit={handleEdit}
-                onDelete={handleDelete}
+                onDelete={(address) => {
+                  handleDelete(address).catch((error: unknown) => {
+                    console.error("Failed to delete contact:", error);
+                  });
+                }}
               />
             )}
           </CardContent>

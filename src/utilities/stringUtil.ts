@@ -19,29 +19,29 @@ export const sanitizeForDisplay = (input: string): SanitizedDisplay => {
 /**
  * A utility for handling string related operations
  */
-class StringUtil {
+const StringUtil = {
   /**
    * A function for splitting the address with spaces between them, making the address more readable.
    */
-  static getSplitAddress(
+  getSplitAddress(
     accountAddress: string,
     splitLength: number = 5,
-    prefixLength = accountAddress?.startsWith("Q") ? 1 : 2,
+    prefixLength = accountAddress.startsWith("Q") ? 1 : 2,
   ) {
-    const prefix = accountAddress?.substring(0, prefixLength);
+    const prefix = accountAddress.substring(0, prefixLength);
     const addressSplit: string[] = [];
-    for (let i = prefixLength; i < accountAddress?.length; i += splitLength) {
-      addressSplit.push(accountAddress?.substring(i, i + splitLength));
+    for (let i = prefixLength; i < accountAddress.length; i += splitLength) {
+      addressSplit.push(accountAddress.substring(i, i + splitLength));
     }
     return { prefix, addressSplit };
-  }
+  },
 
   /**
    * A function for downloading the secret mnemonic phrases to the system.
    */
-  static downloadRecoveryPhrases = (account: Web3BaseWalletAccount) => {
-    const accountAddress = account?.address;
-    const accountHexSeed = account?.seed;
+  downloadRecoveryPhrases: (account: Web3BaseWalletAccount) => {
+    const accountAddress = account.address;
+    const accountHexSeed = account.seed;
     const mnemonicPhrases = getMnemonicFromHexSeed(accountHexSeed);
     const mnemonicObject = {
       "Public Information": {
@@ -64,7 +64,7 @@ class StringUtil {
     anchorElement.click();
     document.body.removeChild(anchorElement);
     URL.revokeObjectURL(url);
-  };
-}
+  },
+};
 
 export default StringUtil;

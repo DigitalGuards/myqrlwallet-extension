@@ -1,20 +1,32 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { ObservableBalances } from "@/__mocks__/observableBalances";
+import { deferred } from "@/test-utils/deferred";
+import type StorageUtil from "@/utilities/storageUtil";
+import type { TransactionValuesType } from "@/utilities/storageUtil";
+import { NATIVE_TOKEN } from "@/constants/nativeToken";
+import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
+import { walletLocalStorage } from "@/utilities/profileStorage";
+import type { resolveQrnsName } from "@/utilities/qrnsResolver";
+import Web3 from "@theqrl/web3";
+import { observable, runInAction } from "mobx";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { toChecksumAddress } from "@theqrl/wallet.js";
 import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import TokenTransfer from "./TokenTransfer";
+
+type QrlStore = ReturnType<typeof mockedStore>["qrlStore"];
 
 vi.mock("@theqrl/web3", async () => {
   const originalModule =
@@ -29,15 +41,23 @@ const {
   mockGetTransactionValues,
   mockSetTransactionValues,
   mockClearTransactionValues,
+  mockGetActiveBlockChain,
   mockResolveQrnsName,
 } = vi.hoisted(() => ({
-  mockGetTransactionValues: vi.fn().mockResolvedValue({
-    receiverAddress: "",
-    amount: 0,
-  }),
-  mockSetTransactionValues: vi.fn().mockResolvedValue(undefined),
-  mockClearTransactionValues: vi.fn().mockResolvedValue(undefined),
-  mockResolveQrnsName: vi.fn(),
+  mockGetTransactionValues: vi
+    .fn<typeof StorageUtil.getTransactionValues>()
+    .mockResolvedValue({
+      receiverAddress: "",
+      amount: 0,
+    }),
+  mockSetTransactionValues: vi
+    .fn<typeof StorageUtil.setTransactionValues>()
+    .mockResolvedValue(undefined),
+  mockClearTransactionValues: vi
+    .fn<typeof StorageUtil.clearTransactionValues>()
+    .mockResolvedValue(undefined),
+  mockGetActiveBlockChain: vi.fn<typeof StorageUtil.getActiveBlockChain>(),
+  mockResolveQrnsName: vi.fn<typeof resolveQrnsName>(),
 }));
 
 vi.mock("@/utilities/qrnsResolver", async () => {
@@ -46,21 +66,18 @@ vi.mock("@/utilities/qrnsResolver", async () => {
   >("@/utilities/qrnsResolver");
   return {
     ...originalModule,
-    resolveQrnsName: (...args: any[]) => mockResolveQrnsName(...args),
+    resolveQrnsName: mockResolveQrnsName,
   };
 });
 
-vi.mock("@/utilities/storageUtil", async () => {
+vi.mock("@/utilities/storageUtil", () => {
   return {
     __esModule: true,
     default: {
-      getTransactionValues: (...args: any[]) =>
-        mockGetTransactionValues(...args),
-      setTransactionValues: (...args: any[]) =>
-        mockSetTransactionValues(...args),
-      clearTransactionValues: (...args: any[]) =>
-        mockClearTransactionValues(...args),
-      getActiveBlockChain: async () => ({ chainId: "0x1" }),
+      getTransactionValues: mockGetTransactionValues,
+      setTransactionValues: mockSetTransactionValues,
+      clearTransactionValues: mockClearTransactionValues,
+      getActiveBlockChain: mockGetActiveBlockChain,
     },
   };
 });
@@ -81,17 +98,35 @@ const CONTRACT_C = toChecksumAddress(`Q${"c".repeat(128)}`);
 const CONTRACT_D = toChecksumAddress(`Q${"d".repeat(128)}`);
 const QRNS_REGISTRY = toChecksumAddress(`Q${"e".repeat(128)}`);
 const QRNS_RPC_URL = "https://qns-rpc.example";
+const TOKEN_DETAILS = {
+  isZrc20Token: true,
+  tokenContractAddress: CONTRACT_C,
+  tokenDecimals: 8,
+  tokenImage: "token.png",
+  tokenBalance: "3",
+  tokenBalanceBaseUnits: "300000000",
+  tokenName: "Token",
+  tokenSymbol: "TOK",
+};
+
+const CurrentRoute = () => (
+  <output aria-label="Current route">{useLocation().pathname}</output>
+);
 
 describe("TokenTransfer", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   beforeEach(() => {
-    mockGetTransactionValues.mockResolvedValue({
+    mockGetTransactionValues.mockReset().mockResolvedValue({
       receiverAddress: "",
       amount: 0,
     });
-    mockSetTransactionValues.mockResolvedValue(undefined);
-    mockClearTransactionValues.mockResolvedValue(undefined);
+    mockSetTransactionValues.mockReset().mockResolvedValue(undefined);
+    mockClearTransactionValues.mockReset().mockResolvedValue(undefined);
+    mockGetActiveBlockChain.mockReset().mockResolvedValue(DEFAULT_BLOCKCHAIN);
     mockResolveQrnsName.mockReset();
   });
 
@@ -105,26 +140,723 @@ describe("TokenTransfer", () => {
       <StoreProvider value={withQip55Account(mockedStoreValues)}>
         <MemoryRouter>
           <TokenTransfer />
+          <CurrentRoute />
         </MemoryRouter>
       </StoreProvider>,
     );
 
   const renderComponentWithState = (
-    state: Record<string, any>,
+    state: unknown,
     mockedStoreValues = mockedStore(),
   ) =>
     render(
       <StoreProvider value={withQip55Account(mockedStoreValues)}>
         <MemoryRouter initialEntries={[{ pathname: "/token-transfer", state }]}>
           <TokenTransfer />
+          <CurrentRoute />
         </MemoryRouter>
       </StoreProvider>,
     );
+
+  const waitForEditing = async () => {
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "amount" })).toBeEnabled();
+    });
+  };
+
+  // Async invocation drift changes which network a storage operation selects.
+  // Deferring derived values can also discard the result of an earlier event.
+  // Compare both classes with origin/dev while each dependency is pending.
+  describe("origin/dev async timing", () => {
+    const nativeDetails = {
+      isZrc20Token: false,
+      tokenContractAddress: "",
+      tokenDecimals: 0,
+      tokenImage: NATIVE_TOKEN.image,
+      tokenBalance: "",
+      tokenBalanceBaseUnits: "",
+      tokenName: NATIVE_TOKEN.name,
+      tokenSymbol: NATIVE_TOKEN.symbol,
+    };
+    const draftShapes = [
+      { name: "native", tokenDetails: undefined },
+      { name: "native metadata", tokenDetails: nativeDetails },
+      { name: "ZRC-20", tokenDetails: TOKEN_DETAILS },
+      {
+        name: "legacy ZRC-20",
+        tokenDetails: { ...TOKEN_DETAILS, tokenBalanceBaseUnits: undefined },
+      },
+    ];
+
+    const realDraftStorage = async (saved: TransactionValuesType) => {
+      const { default: storage } = await vi.importActual<
+        typeof import("@/utilities/storageUtil")
+      >("@/utilities/storageUtil");
+      let chainId = DEFAULT_BLOCKCHAIN.chainId;
+      const key = `${chainId}_TRANSACTION_VALUES`;
+      vi.spyOn(storage, "getActiveBlockChain").mockImplementation(() =>
+        Promise.resolve({ ...DEFAULT_BLOCKCHAIN, chainId }),
+      );
+      mockGetActiveBlockChain.mockImplementation(() =>
+        storage.getActiveBlockChain(),
+      );
+      const values = new Map<string, unknown>([
+        [key, saved],
+        ["unrelated", { label: "unrelated record" }],
+      ]);
+      vi.spyOn(walletLocalStorage, "get").mockImplementation((key) =>
+        Promise.resolve({ [key]: structuredClone(values.get(key)) }),
+      );
+      const commit = (data: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(data))
+          values.set(key, structuredClone(value));
+        return Promise.resolve();
+      };
+      const write = vi
+        .spyOn(walletLocalStorage, "set")
+        .mockImplementation(commit);
+      const remove = vi
+        .spyOn(walletLocalStorage, "remove")
+        .mockImplementation((key) => {
+          values.delete(key);
+          return Promise.resolve();
+        });
+      mockGetTransactionValues.mockImplementation((...args) =>
+        storage.getTransactionValues(...args),
+      );
+      mockSetTransactionValues.mockImplementation((...args) =>
+        storage.setTransactionValues(...args),
+      );
+      mockClearTransactionValues.mockImplementation((...args) =>
+        storage.clearTransactionValues(...args),
+      );
+      return {
+        storage,
+        values,
+        write,
+        remove,
+        commit,
+        key,
+        selectChain: (selected: string) => {
+          chainId = selected;
+        },
+      };
+    };
+
+    it.each(
+      draftShapes.flatMap((draft) =>
+        ["close", "cancel", "pending cancel"].flatMap((action) =>
+          ["amount", "receiverAddress"].map((field) => ({
+            ...draft,
+            action,
+            field,
+          })),
+        ),
+      ),
+    )(
+      "starts both $field saves before $action for $name and preserves the other network's draft",
+      async ({ action, field, tokenDetails }) => {
+        const initial = {
+          amount: field === "amount" ? "" : "1",
+          receiverAddress: ACCOUNT_B,
+          tokenDetails,
+        };
+        const first = {
+          amount: "1",
+          receiverAddress: field === "amount" ? ACCOUNT_B : CONTRACT_C,
+        };
+        const second = {
+          amount: field === "amount" ? "2" : "1",
+          receiverAddress: field === "amount" ? ACCOUNT_B : CONTRACT_D,
+        };
+        const { values, write, remove, commit, key, selectChain } =
+          await realDraftStorage(initial);
+        const otherKey = "0x2_TRANSACTION_VALUES";
+        const otherDraft = {
+          amount: "7",
+          receiverAddress: CONTRACT_D,
+          tokenDetails: TOKEN_DETAILS,
+          futureMetadata: { label: "other network" },
+        };
+        values.set(otherKey, otherDraft);
+        const view = renderComponent(
+          mockedStore({
+            qrlStore: { getAccountBalance: () => "100.0 Quanta" },
+          }),
+        );
+        await waitFor(() => {
+          expect(
+            screen.getByRole("textbox", { name: "receiverAddress" }),
+          ).toHaveValue(ACCOUNT_B);
+          expect(values.get(key)).toMatchObject({ receiverAddress: ACCOUNT_B });
+        });
+        const saving = deferred<undefined>();
+        const clearing = deferred<undefined>();
+        write.mockClear().mockImplementationOnce((data) => {
+          const snapshot = structuredClone(data);
+          return saving.promise.then(() => commit(snapshot));
+        });
+        if (action === "pending cancel") {
+          remove.mockImplementationOnce((key) =>
+            clearing.promise.then(() => {
+              values.delete(key);
+            }),
+          );
+        }
+        const input = screen.getByRole("textbox", { name: field });
+        fireEvent.change(input, {
+          target: {
+            value: field === "amount" ? first.amount : first.receiverAddress,
+          },
+        });
+        await waitFor(() => {
+          expect(write.mock.calls[0]?.[0][key]).toMatchObject(first);
+        });
+        await act(async () => {
+          fireEvent.change(input, {
+            target: {
+              value:
+                field === "amount" ? second.amount : second.receiverAddress,
+            },
+          });
+          await Promise.resolve();
+        });
+        // The second save captures its network while the first is pending.
+        expect(write.mock.calls.map(([data]) => data[key])).toContainEqual(
+          expect.objectContaining(second),
+        );
+        if (action !== "close") {
+          await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+          expect(remove).toHaveBeenCalledExactlyOnceWith(key);
+          expect(
+            screen.getByRole("status", { name: "Current route" }),
+          ).toHaveTextContent(/^\/$/);
+        }
+        view.unmount();
+        selectChain("0x2");
+        await act(async () => {
+          saving.resolve(undefined);
+          await saving.promise;
+          clearing.resolve(undefined);
+          await clearing.promise;
+        });
+        expect(values.get(otherKey)).toEqual(otherDraft);
+        expect(values.get("unrelated")).toEqual({ label: "unrelated record" });
+      },
+    );
+
+    it.each(
+      draftShapes.flatMap((draft) =>
+        ["first save", "second save"].map((completesFirst) => ({
+          ...draft,
+          completesFirst,
+        })),
+      ),
+    )(
+      "keeps both $name saves on their original network when $completesFirst completes first after closing",
+      async ({ tokenDetails, completesFirst }) => {
+        const { values, write, commit, key, selectChain } =
+          await realDraftStorage({
+            amount: "1",
+            receiverAddress: ACCOUNT_B,
+            tokenDetails,
+          });
+        const otherKey = "0x2_TRANSACTION_VALUES";
+        const otherDraft = {
+          amount: "7",
+          receiverAddress: CONTRACT_D,
+          tokenDetails: TOKEN_DETAILS,
+          futureMetadata: { label: "other network" },
+        };
+        values.set(otherKey, otherDraft);
+        const view = renderComponent(
+          mockedStore({
+            qrlStore: { getAccountBalance: () => "100.0 Quanta" },
+          }),
+        );
+        const amount = screen.getByRole("textbox", { name: "amount" });
+        await waitFor(() => {
+          expect(amount).toHaveValue("1");
+          expect(values.get(key)).toMatchObject({
+            amount: "1",
+            receiverAddress: ACCOUNT_B,
+          });
+        });
+        const first = deferred<undefined>();
+        const second = deferred<undefined>();
+        let saving = first;
+        write.mockClear().mockImplementation((data) => {
+          const snapshot = structuredClone(data);
+          return saving.promise.then(() => commit(snapshot));
+        });
+        await act(async () => {
+          fireEvent.change(amount, { target: { value: "2" } });
+          await Promise.resolve();
+        });
+        const firstWrites = structuredClone(write.mock.calls);
+        expect(firstWrites.length).toBeGreaterThan(0);
+        for (const [data] of firstWrites) {
+          expect(Object.keys(data)).toEqual([key]);
+          expect(data[key]).toMatchObject({
+            amount: "2",
+            receiverAddress: ACCOUNT_B,
+          });
+        }
+        saving = second;
+        await act(async () => {
+          fireEvent.change(
+            screen.getByRole("textbox", { name: "receiverAddress" }),
+            { target: { value: CONTRACT_C } },
+          );
+          await Promise.resolve();
+        });
+        const writesBeforeClose = structuredClone(write.mock.calls);
+        const secondWrites = writesBeforeClose.slice(firstWrites.length);
+        expect(secondWrites.length).toBeGreaterThan(0);
+        for (const [data] of secondWrites) {
+          expect(Object.keys(data)).toEqual([key]);
+          expect(data[key]).toMatchObject({
+            amount: "2",
+            receiverAddress: CONTRACT_C,
+          });
+        }
+        view.unmount();
+        selectChain("0x2");
+        const completions =
+          completesFirst === "first save" ? [first, second] : [second, first];
+        for (const completed of completions) {
+          await act(async () => {
+            completed.resolve(undefined);
+            await completed.promise;
+          });
+          expect(values.get(otherKey)).toEqual(otherDraft);
+          expect(values.get("unrelated")).toEqual({
+            label: "unrelated record",
+          });
+          expect(write.mock.calls).toEqual(writesBeforeClose);
+        }
+      },
+    );
+
+    it("reads the active network again at each save invocation", async () => {
+      const { values, write, key, selectChain } = await realDraftStorage({
+        amount: "1",
+        receiverAddress: ACCOUNT_B,
+      });
+      renderComponent();
+      await waitFor(() => {
+        expect(values.get(key)).toMatchObject({ amount: "1" });
+        expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue(
+          "1",
+        );
+      });
+      selectChain("0x2");
+      await act(async () => {
+        fireEvent.change(screen.getByRole("textbox", { name: "amount" }), {
+          target: { value: "2" },
+        });
+        await Promise.resolve();
+      });
+      expect(write.mock.lastCall?.[0]["0x2_TRANSACTION_VALUES"]).toMatchObject({
+        amount: "2",
+        receiverAddress: ACCOUNT_B,
+      });
+      expect(values.get(key)).toMatchObject({ amount: "1" });
+    });
+
+    it.each(draftShapes)(
+      "clears a submitted $name draft while its autosave is pending",
+      async ({ tokenDetails }) => {
+        const { values, write, remove, commit, key, selectChain } =
+          await realDraftStorage({
+            amount: "1",
+            receiverAddress: ACCOUNT_B,
+            tokenDetails,
+          });
+        const otherKey = "0x2_TRANSACTION_VALUES";
+        const otherDraft = {
+          amount: "7",
+          receiverAddress: CONTRACT_D,
+          tokenDetails: TOKEN_DETAILS,
+          futureMetadata: { label: "other network" },
+        };
+        values.set(otherKey, otherDraft);
+        const broadcast = deferred<undefined>();
+        const view = renderComponent(
+          mockedStore({
+            qrlStore: {
+              signNativeToken: () => Promise.resolve(successSignResult),
+              signZrc20Token: () => Promise.resolve(successSignResult),
+              sendRawTransaction: () => broadcast.promise,
+              getAccountBalance: () => "100.0 Quanta",
+            },
+          }),
+        );
+        const amount = screen.getByRole("textbox", { name: "amount" });
+        await waitFor(() => {
+          expect(amount).toHaveValue("1");
+          expect(values.get(key)).toMatchObject({ amount: "1" });
+        });
+        const saving = deferred<undefined>();
+        write.mockImplementationOnce((data) => {
+          const snapshot = structuredClone(data);
+          return saving.promise.then(() => commit(snapshot));
+        });
+        fireEvent.change(amount, { target: { value: "2" } });
+        const send = screen.getByRole("button", {
+          name: tokenDetails?.isZrc20Token ? "Send TOK" : "Send Quanta",
+        });
+        await waitFor(() => {
+          expect(send).toBeEnabled();
+          expect(write.mock.lastCall?.[0][key]).toMatchObject({ amount: "2" });
+        });
+        await userEvent.click(send);
+        expect(remove).toHaveBeenCalledExactlyOnceWith(key);
+        expect(
+          screen.getByRole("status", { name: "Current route" }),
+        ).toHaveTextContent("/transaction-history");
+        view.unmount();
+        selectChain("0x2");
+        await act(async () => {
+          saving.resolve(undefined);
+          broadcast.resolve(undefined);
+          await Promise.all([saving.promise, broadcast.promise]);
+        });
+        expect(values.get(otherKey)).toEqual(otherDraft);
+        expect(values.get("unrelated")).toEqual({ label: "unrelated record" });
+      },
+    );
+
+    it.each([
+      { name: "fresh transfer", state: { shouldStartFresh: true } },
+      ...draftShapes
+        .filter(({ tokenDetails }) => tokenDetails !== undefined)
+        .map(({ name, tokenDetails }) => ({ name, state: { tokenDetails } })),
+    ])(
+      "starts the $name reset while form defaults are pending",
+      async ({ state }) => {
+        const defaults = deferred<TransactionValuesType>();
+        const clearing = deferred<undefined>();
+        mockGetTransactionValues.mockReturnValueOnce(defaults.promise);
+        mockClearTransactionValues.mockReturnValue(clearing.promise);
+        renderComponentWithState(state);
+        await waitFor(() => {
+          expect(mockClearTransactionValues).toHaveBeenCalledOnce();
+        });
+        expect(mockSetTransactionValues).not.toHaveBeenCalled();
+        await act(async () => {
+          defaults.resolve({ amount: "1", receiverAddress: ACCOUNT_B });
+          await defaults.promise;
+        });
+        expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue(
+          "1",
+        );
+        await act(async () => {
+          clearing.resolve(undefined);
+          await clearing.promise;
+        });
+        expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue("");
+        expect(mockSetTransactionValues).toHaveBeenLastCalledWith(
+          expect.objectContaining({ amount: "", receiverAddress: "" }),
+        );
+      },
+    );
+
+    it.each(["amount", "receiverAddress"])(
+      "starts a %s save while the initialization save is pending",
+      async (field) => {
+        const saving = deferred<undefined>();
+        mockSetTransactionValues.mockReturnValueOnce(saving.promise);
+        renderComponent();
+        await waitFor(() => {
+          expect(mockSetTransactionValues).toHaveBeenCalled();
+        });
+        const input = screen.getByRole("textbox", { name: field });
+        expect(input).toBeEnabled();
+        await act(async () => {
+          fireEvent.change(input, {
+            target: { value: field === "amount" ? "1" : ACCOUNT_B },
+          });
+          await Promise.resolve();
+        });
+        expect(mockSetTransactionValues).toHaveBeenLastCalledWith({
+          amount: field === "amount" ? "1" : "",
+          receiverAddress: field === "amount" ? "" : ACCOUNT_B,
+          tokenDetails: nativeDetails,
+        });
+        await act(async () => {
+          saving.resolve(undefined);
+          await saving.promise;
+        });
+        expect(input).toHaveValue(field === "amount" ? "1" : ACCOUNT_B);
+      },
+    );
+
+    it.each(
+      draftShapes.flatMap((draft) =>
+        [
+          {
+            scenario: "balance grows",
+            amount: "10",
+            firstAmount: "9",
+            balance: "20.0 Quanta",
+            edit: undefined,
+            finalAmount: "9",
+            percentage: "50",
+          },
+          {
+            scenario: "numeric amount and unchanged balance",
+            amount: 10,
+            firstAmount: "9",
+            balance: "10.0 Quanta",
+            edit: undefined,
+            finalAmount: "8",
+            percentage: "100",
+          },
+          {
+            scenario: "balance falls",
+            amount: "10",
+            firstAmount: "9",
+            balance: "8.0 Quanta",
+            edit: undefined,
+            finalAmount: "6",
+            percentage: "100",
+          },
+          {
+            scenario: "user edits the adjusted amount",
+            amount: "10",
+            firstAmount: "9",
+            balance: "20.0 Quanta",
+            edit: "4",
+            finalAmount: "4",
+            percentage: "22",
+          },
+          {
+            scenario: "user clears the adjusted amount",
+            amount: "10",
+            firstAmount: "9",
+            balance: "20.0 Quanta",
+            edit: "",
+            finalAmount: "",
+            percentage: "0",
+          },
+          {
+            scenario: "reserve exhausts the balance",
+            amount: "10",
+            firstAmount: "9",
+            balance: "2.0 Quanta",
+            edit: undefined,
+            finalAmount: "",
+            percentage: "0",
+          },
+          {
+            scenario: "balance exhausts available funds before the fee update",
+            amount: "10",
+            firstAmount: "9",
+            balance: "1.0 Quanta",
+            edit: undefined,
+            finalAmount: "9",
+            percentage: "0",
+          },
+          {
+            scenario: "amount below Max",
+            amount: "5",
+            firstAmount: "5",
+            balance: "20.0 Quanta",
+            edit: undefined,
+            finalAmount: "5",
+            percentage: "28",
+          },
+        ].map((scenario) => ({ ...draft, ...scenario })),
+      ),
+    )(
+      "applies gas events before $name restoration when $scenario",
+      async ({
+        tokenDetails,
+        amount: savedAmount,
+        firstAmount,
+        balance,
+        edit,
+        finalAmount,
+        percentage,
+      }) => {
+        const saved = {
+          amount: savedAmount,
+          receiverAddress: ACCOUNT_B,
+          tokenDetails,
+        };
+        const { values, key } = await realDraftStorage(saved);
+        const details = deferred<TransactionValuesType>();
+        mockGetTransactionValues
+          .mockResolvedValueOnce(saved)
+          .mockReturnValueOnce(details.promise);
+        const gas = deferred<string>();
+        const balances = new ObservableBalances({ [ACCOUNT_A]: "10.0 Quanta" });
+        const settings = observable<{
+          defaultGasTier: "market" | "aggressive";
+        }>({
+          defaultGasTier: "market",
+        });
+        const getGas = vi.fn<QrlStore["getNativeTokenGas"]>((overrides) =>
+          overrides?.tier === "aggressive" ? Promise.resolve("2") : gas.promise,
+        );
+        const store = mockedStore({
+          qrlStore: {
+            getAccountBalance: balances.getAccountBalance,
+            getNativeTokenGas: getGas,
+          },
+        });
+        Object.defineProperty(store.settingsStore, "defaultGasTier", {
+          get: () => settings.defaultGasTier,
+        });
+        renderComponent(store);
+        const amount = screen.getByRole("textbox", { name: "amount" });
+        await waitFor(() => {
+          expect(amount).toHaveValue(String(savedAmount));
+          expect(screen.getByRole("slider")).toHaveAttribute(
+            "aria-valuenow",
+            savedAmount === "5" ? "50" : "100",
+          );
+        });
+        await act(async () => {
+          gas.resolve("1");
+          await gas.promise;
+        });
+        expect(amount).toHaveValue(firstAmount);
+        expect(values.get(key)).toMatchObject({ amount: firstAmount });
+        if (edit !== undefined) {
+          await act(async () => {
+            fireEvent.change(amount, { target: { value: edit } });
+            await Promise.resolve();
+          });
+        }
+        act(() => {
+          balances.set(ACCOUNT_A, balance);
+        });
+        await act(async () => {
+          runInAction(() => {
+            settings.defaultGasTier = "aggressive";
+          });
+          await Promise.resolve();
+        });
+        expect(getGas).toHaveBeenCalledWith({ tier: "aggressive" });
+        expect(amount).toHaveValue(finalAmount);
+        expect(values.get(key)).toMatchObject({
+          amount: finalAmount,
+          receiverAddress: ACCOUNT_B,
+        });
+        expect(screen.getByRole("slider")).toHaveAttribute(
+          "aria-valuenow",
+          percentage,
+        );
+        await act(async () => {
+          details.resolve(saved);
+          await details.promise;
+        });
+        expect(amount).toHaveValue(finalAmount);
+        expect(values.get(key)).toMatchObject({
+          amount: finalAmount,
+          receiverAddress: ACCOUNT_B,
+        });
+      },
+    );
+
+    it("starts metadata restoration while form defaults are pending", async () => {
+      const defaults = deferred<TransactionValuesType>();
+      mockGetTransactionValues
+        .mockReturnValueOnce(defaults.promise)
+        .mockResolvedValueOnce({ tokenDetails: TOKEN_DETAILS });
+      renderComponent();
+      expect(
+        await screen.findByRole("button", { name: "Send TOK" }),
+      ).toBeInTheDocument();
+      expect(mockGetTransactionValues).toHaveBeenCalledTimes(2);
+      expect(mockSetTransactionValues).toHaveBeenCalledWith({
+        amount: undefined,
+        receiverAddress: undefined,
+        tokenDetails: TOKEN_DETAILS,
+      });
+      await act(async () => {
+        defaults.resolve({ amount: "1", receiverAddress: ACCOUNT_B });
+        await defaults.promise;
+      });
+      expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue("1");
+      expect(mockSetTransactionValues).toHaveBeenLastCalledWith({
+        amount: "1",
+        receiverAddress: ACCOUNT_B,
+        tokenDetails: TOKEN_DETAILS,
+      });
+    });
+
+    it("saves edits immediately while metadata restoration is pending", async () => {
+      const details = deferred<TransactionValuesType>();
+      mockGetTransactionValues
+        .mockResolvedValueOnce({ amount: "1", receiverAddress: ACCOUNT_B })
+        .mockReturnValueOnce(details.promise);
+      renderComponent();
+      const amount = screen.getByRole("textbox", { name: "amount" });
+      await waitFor(() => {
+        expect(amount).toHaveValue("1");
+      });
+      expect(amount).toBeEnabled();
+      await act(async () => {
+        fireEvent.change(amount, { target: { value: "2" } });
+        await Promise.resolve();
+      });
+      expect(mockSetTransactionValues).toHaveBeenLastCalledWith({
+        amount: "2",
+        receiverAddress: ACCOUNT_B,
+        tokenDetails: nativeDetails,
+      });
+      await act(async () => {
+        details.resolve({ tokenDetails: TOKEN_DETAILS });
+        await details.promise;
+      });
+      expect(mockSetTransactionValues).toHaveBeenLastCalledWith({
+        amount: "2",
+        receiverAddress: ACCOUNT_B,
+        tokenDetails: TOKEN_DETAILS,
+      });
+    });
+  });
+
+  it.each([null, Number.NaN, Infinity])(
+    "opens a saved token transfer with decimals %s and keeps sending disabled",
+    async (tokenDecimals) => {
+      mockGetTransactionValues.mockResolvedValue({
+        receiverAddress: ACCOUNT_B,
+        amount: "1",
+        tokenDetails: {
+          isZrc20Token: true,
+          tokenContractAddress: CONTRACT_C,
+          tokenDecimals,
+          tokenImage: "",
+          tokenBalance: "3",
+          tokenBalanceBaseUnits: "3000000",
+          tokenName: "Token",
+          tokenSymbol: "TOK",
+        },
+      });
+      renderComponent();
+      await waitFor(() => {
+        expect(
+          mockSetTransactionValues.mock.calls.some(([value]) =>
+            Object.is(value.tokenDetails?.tokenDecimals, tokenDecimals),
+          ),
+        ).toBe(true);
+      });
+      const amount = screen.getByRole("textbox", { name: "amount" });
+      await userEvent.clear(amount);
+      await userEvent.type(amount, "1");
+      expect(screen.getByRole("button", { name: "Send TOK" })).toBeDisabled();
+    },
+  );
 
   const fillAndSubmitForm = async (
     buttonName = "Send Quanta",
     amount = "2.5",
   ) => {
+    await waitForEditing();
     const receiverAddressField = screen.getByRole("textbox", {
       name: "receiverAddress",
     });
@@ -143,8 +875,434 @@ describe("TokenTransfer", () => {
     });
   };
 
-  it("should render the account details component", () => {
+  it.each([
+    [],
+    "invalid",
+    { shouldStartFresh: "true" },
+    { tokenDetails: null },
+    ...[
+      { isZrc20Token: "true" },
+      { tokenContractAddress: 3 },
+      { tokenDecimals: "8" },
+      { tokenBalance: 3 },
+      { tokenBalanceBaseUnits: 300000000 },
+      { tokenName: {} },
+      { tokenSymbol: [] },
+    ].map((fields) => ({ tokenDetails: { ...TOKEN_DETAILS, ...fields } })),
+  ])(
+    "preserves the saved draft and blocks malformed route state %j",
+    async (state) => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      mockGetTransactionValues.mockResolvedValue({
+        receiverAddress: ACCOUNT_B,
+        amount: "1",
+        tokenDetails: TOKEN_DETAILS,
+      });
+      const sign = vi.fn();
+      renderComponentWithState(
+        state,
+        mockedStore({
+          qrlStore: { signNativeToken: sign, signZrc20Token: sign },
+        }),
+      );
+
+      expect(
+        await screen.findByText(/Invalid transfer navigation state/),
+      ).toBeInTheDocument();
+      const amount = screen.getByRole("textbox", { name: "amount" });
+      fireEvent.change(amount, { target: { value: "2" } });
+      expect(
+        screen.getByRole("button", { name: "Send Quanta" }),
+      ).toBeDisabled();
+      const form = amount.closest("form");
+      if (!form) throw new Error("Transfer form is missing");
+      await act(async () => {
+        fireEvent.submit(form);
+        await Promise.resolve();
+      });
+      expect(sign).not.toHaveBeenCalled();
+      expect(mockClearTransactionValues).not.toHaveBeenCalled();
+      expect(mockSetTransactionValues).not.toHaveBeenCalled();
+    },
+  );
+
+  it("accepts unknown image metadata and optional base units in route state", async () => {
+    const { tokenBalanceBaseUnits: _baseUnits, ...tokenDetails } =
+      TOKEN_DETAILS;
+    renderComponentWithState({
+      tokenDetails: { ...tokenDetails, tokenImage: { source: "legacy" } },
+    });
+    expect(
+      await screen.findByRole("button", { name: "Send TOK" }),
+    ).toBeInTheDocument();
+    expect(mockSetTransactionValues).toHaveBeenCalledWith({
+      receiverAddress: "",
+      amount: "",
+      tokenDetails: { ...tokenDetails, tokenImage: { source: "legacy" } },
+    });
+  });
+
+  it.each(["form defaults", "token details", "both"])(
+    "reports %s read failures and blocks sending",
+    async (failure) => {
+      const error = new Error("Draft read failed");
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      if (failure === "form defaults") {
+        mockGetTransactionValues.mockRejectedValueOnce(error);
+      } else if (failure === "token details") {
+        mockGetTransactionValues
+          .mockResolvedValueOnce({ receiverAddress: ACCOUNT_B, amount: "1" })
+          .mockRejectedValueOnce(error);
+      } else {
+        mockGetTransactionValues.mockRejectedValue(error);
+      }
+      renderComponent();
+
+      expect(await screen.findByText(/Draft read failed/)).toBeInTheDocument();
+      fireEvent.change(screen.getByRole("textbox", { name: "amount" }), {
+        target: { value: "1" },
+      });
+      expect(
+        screen.getByRole("button", { name: "Send Quanta" }),
+      ).toBeDisabled();
+      expect(log).toHaveBeenCalledWith(
+        "[TokenTransfer] Failed to load transfer:",
+        error,
+      );
+      expect(mockClearTransactionValues).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports initialization write failures and blocks sending", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mockSetTransactionValues.mockRejectedValue(
+      new Error("Draft initialization failed"),
+    );
     renderComponent();
+    expect(
+      await screen.findByText(/Draft initialization failed/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send Quanta" })).toBeDisabled();
+    expect(mockClearTransactionValues).not.toHaveBeenCalled();
+  });
+
+  it("reports autosave failures and retains the entered form values", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComponent();
+    await waitFor(() => {
+      expect(mockSetTransactionValues).toHaveBeenCalled();
+    });
+    const error = new Error("Draft write failed");
+    mockSetTransactionValues.mockRejectedValue(error);
+    const amount = screen.getByRole("textbox", { name: "amount" });
+    await userEvent.type(amount, "1");
+
+    expect(log).toHaveBeenCalledWith(
+      "[TokenTransfer] Failed to save transfer:",
+      error,
+    );
+    expect(amount).toHaveValue("1");
+    expect(mockClearTransactionValues).not.toHaveBeenCalled();
+  });
+
+  it.each(["amount", "receiverAddress"])(
+    "reports a delayed autosave failure after saving a later %s edit",
+    async (field) => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockGetTransactionValues.mockResolvedValue({
+        amount: "3",
+        receiverAddress: CONTRACT_D,
+      });
+      renderComponent();
+      await waitFor(() => {
+        expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue(
+          "3",
+        );
+        expect(
+          screen.getByRole("textbox", { name: "receiverAddress" }),
+        ).toHaveValue(CONTRACT_D);
+      });
+      const saving = deferred<undefined>();
+      const error = new Error("Earlier draft save failed");
+      const failedSave = saving.promise.then(() => {
+        throw error;
+      });
+      mockSetTransactionValues.mockClear().mockReturnValueOnce(failedSave);
+      const input = screen.getByRole("textbox", { name: field });
+      const first = field === "amount" ? "1" : ACCOUNT_B;
+      const second = field === "amount" ? "2" : CONTRACT_C;
+      await act(async () => {
+        fireEvent.change(input, { target: { value: first } });
+        await Promise.resolve();
+      });
+      await act(async () => {
+        fireEvent.change(input, { target: { value: second } });
+        await Promise.resolve();
+      });
+      expect(mockSetTransactionValues).toHaveBeenCalledWith(
+        expect.objectContaining({ [field]: first }),
+      );
+      expect(mockSetTransactionValues).toHaveBeenLastCalledWith(
+        expect.objectContaining({ [field]: second }),
+      );
+      await act(async () => {
+        saving.resolve(undefined);
+        await failedSave.catch(() => {});
+      });
+      expect(
+        log.mock.calls.filter(
+          ([message]) => message === "[TokenTransfer] Failed to save transfer:",
+        ),
+      ).toEqual([["[TokenTransfer] Failed to save transfer:", error]]);
+      expect(input).toHaveValue(second);
+      expect(input).toBeEnabled();
+      expect(mockClearTransactionValues).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports token balance refresh failures and retains the restored balance", async () => {
+    const error = new Error("Token refresh failed");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComponentWithState(
+      { tokenDetails: TOKEN_DETAILS },
+      mockedStore({
+        qrlStore: { getZrc20TokenDetails: () => Promise.reject(error) },
+      }),
+    );
+    await screen.findByRole("button", { name: "Send TOK" });
+    await userEvent.click(screen.getByRole("button", { name: "Max" }));
+    expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue("3");
+    expect(log).toHaveBeenCalledWith(
+      "[TokenTransfer] Failed to refresh token balance:",
+      error,
+    );
+  });
+
+  it("ignores token balance results from the previously active account", async () => {
+    const token = {
+      name: "Token",
+      symbol: "TOK",
+      decimals: 8n,
+      totalSupply: 100,
+      balance: 2,
+      balanceBaseUnits: "200000000",
+      image: "",
+    };
+    const previous =
+      deferred<Awaited<ReturnType<QrlStore["getZrc20TokenDetails"]>>>();
+    const getDetails = vi
+      .fn<QrlStore["getZrc20TokenDetails"]>()
+      .mockReturnValueOnce(previous.promise)
+      .mockResolvedValue({ token, error: "" });
+    const store = mockedStore({
+      qrlStore: { getZrc20TokenDetails: getDetails },
+    });
+    store.qrlStore.activeAccount = observable({ accountAddress: ACCOUNT_A });
+    renderComponentWithState({ tokenDetails: TOKEN_DETAILS }, store);
+    await waitFor(() => {
+      expect(getDetails).toHaveBeenCalledTimes(1);
+    });
+    act(() => {
+      runInAction(() => {
+        store.qrlStore.activeAccount.accountAddress = ACCOUNT_B;
+      });
+    });
+    await waitFor(() => {
+      expect(getDetails).toHaveBeenCalledTimes(2);
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Max" }));
+    expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue("2");
+    await act(async () => {
+      previous.resolve({
+        token: { ...token, balance: 9, balanceBaseUnits: "900000000" },
+        error: "",
+      });
+      await previous.promise;
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Max" }));
+    expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue("2");
+  });
+
+  it("ignores a stale native gas reserve after the fee tier changes", async () => {
+    const previous = deferred<string>();
+    const getGas = vi.fn<QrlStore["getNativeTokenGas"]>((overrides) =>
+      overrides?.tier === "aggressive"
+        ? Promise.resolve("3")
+        : previous.promise,
+    );
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          getAccountBalance: () => "10.0 Quanta",
+          getNativeTokenGas: getGas,
+        },
+      }),
+    );
+    await waitFor(() => {
+      expect(getGas).toHaveBeenCalledWith({ tier: "market" });
+    });
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "receiverAddress" }),
+      ACCOUNT_B,
+    );
+    await userEvent.type(screen.getByRole("textbox", { name: "amount" }), "1");
+    await userEvent.click(screen.getByText("Aggressive"));
+    await userEvent.click(screen.getByRole("button", { name: "Max" }));
+    expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue("7");
+    await act(async () => {
+      previous.resolve("9");
+      await previous.promise;
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Max" }));
+    expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue("7");
+  });
+
+  it("retains the zero gas reserve fallback when native gas estimation fails", async () => {
+    const getGas = vi
+      .fn<QrlStore["getNativeTokenGas"]>()
+      .mockRejectedValue(new Error("Gas estimate failed"));
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          getAccountBalance: () => "10.0 Quanta",
+          getNativeTokenGas: getGas,
+        },
+      }),
+    );
+    await waitFor(() => {
+      expect(getGas).toHaveBeenCalled();
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Max" }));
+    expect(screen.getByRole("textbox", { name: "amount" })).toHaveValue("10");
+  });
+
+  it("blurs the amount field on a wheel event", async () => {
+    renderComponent();
+    const amount = screen.getByRole("textbox", { name: "amount" });
+    await userEvent.click(amount);
+    expect(amount).toHaveFocus();
+    fireEvent.wheel(amount);
+    expect(amount).not.toHaveFocus();
+  });
+
+  it("reports cancel cleanup failures while navigating home immediately", async () => {
+    const error = new Error("Draft clear failed");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComponentWithState({});
+    await waitFor(() => {
+      expect(mockSetTransactionValues).toHaveBeenCalled();
+    });
+    mockClearTransactionValues.mockRejectedValue(error);
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      screen.getByRole("status", { name: "Current route" }),
+    ).toHaveTextContent(/^\/$/);
+    expect(log).toHaveBeenCalledWith(
+      "[TokenTransfer] Failed to clear transfer:",
+      error,
+    );
+  });
+
+  it("saves pending history before broadcasting and clears the draft before navigation", async () => {
+    const history = deferred<undefined>();
+    const broadcast = deferred<undefined>();
+    const clearing = deferred<undefined>();
+    const send = vi.fn(() => broadcast.promise);
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          signNativeToken: () => Promise.resolve(successSignResult),
+          sendRawTransaction: send,
+        },
+        transactionHistoryStore: { addTransaction: () => history.promise },
+      }),
+    );
+    mockClearTransactionValues.mockReturnValue(clearing.promise);
+    await fillAndSubmitForm();
+    expect(send).not.toHaveBeenCalled();
+    expect(mockClearTransactionValues).not.toHaveBeenCalled();
+    await act(async () => {
+      history.resolve(undefined);
+      await history.promise;
+    });
+    expect(send).toHaveBeenCalledExactlyOnceWith("0xraw");
+    expect(mockClearTransactionValues).toHaveBeenCalledOnce();
+    expect(
+      screen.getByRole("status", { name: "Current route" }),
+    ).toHaveTextContent(/^\/$/);
+    await act(async () => {
+      clearing.resolve(undefined);
+      await clearing.promise;
+    });
+    expect(
+      screen.getByRole("status", { name: "Current route" }),
+    ).toHaveTextContent("/transaction-history");
+    await act(async () => {
+      broadcast.resolve(undefined);
+      await broadcast.promise;
+    });
+  });
+
+  it.each(["receipt", "broadcast rejection", "account refresh"])(
+    "reports background %s handler failures without rewriting transaction status",
+    async (failure) => {
+      const error = new Error("Background update failed");
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const update = vi.fn(() =>
+        failure === "account refresh"
+          ? Promise.resolve()
+          : Promise.reject(error),
+      );
+      const refresh = vi
+        .fn<QrlStore["fetchAccounts"]>()
+        .mockRejectedValue(error);
+      const receipt = {
+        transactionHash: "0xtxhash",
+        status: 1n,
+        blockNumber: 100n,
+        transactionIndex: 0n,
+        blockHash: "0xblock",
+        from: ACCOUNT_A,
+        to: ACCOUNT_B,
+        cumulativeGasUsed: 21000n,
+        gasUsed: 21000n,
+        logs: [],
+        logsBloom: "0x",
+        root: "0x",
+      };
+      renderComponent(
+        mockedStore({
+          qrlStore: {
+            signNativeToken: () => Promise.resolve(successSignResult),
+            sendRawTransaction: () =>
+              failure === "broadcast rejection"
+                ? Promise.reject(new Error("Broadcast failed"))
+                : Promise.resolve(receipt),
+            fetchAccounts: refresh,
+          },
+          transactionHistoryStore: { updateTransaction: update },
+        }),
+      );
+      await fillAndSubmitForm();
+      await waitFor(() => {
+        expect(log).toHaveBeenCalledWith(
+          "[TokenTransfer] Failed to update broadcast history:",
+          error,
+        );
+      });
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledTimes(
+        failure === "account refresh" ? 1 : 0,
+      );
+      expect(
+        screen.getByRole("status", { name: "Current route" }),
+      ).toHaveTextContent("/transaction-history");
+    },
+  );
+
+  it("should render the account details component", async () => {
+    renderComponent();
+    await waitForEditing();
 
     expect(screen.getByText("Active account")).toBeInTheDocument();
     expect(screen.getByText("Account address")).toBeInTheDocument();
@@ -173,6 +1331,7 @@ describe("TokenTransfer", () => {
 
   it("should enable the send quanta button once receiver address, amount and mnemonic phrases are entered", async () => {
     renderComponent();
+    await waitForEditing();
 
     const receiverAddressField = screen.getByRole("textbox", {
       name: "receiverAddress",
@@ -194,6 +1353,7 @@ describe("TokenTransfer", () => {
 
   it("fails closed with a clear state when QRNS is not configured", async () => {
     renderComponent();
+    await waitForEditing();
 
     await userEvent.type(
       screen.getByRole("textbox", { name: "receiverAddress" }),
@@ -219,12 +1379,13 @@ describe("TokenTransfer", () => {
               defaultRpcUrl: QRNS_RPC_URL,
               qrnsRegistryAddress: QRNS_REGISTRY,
             },
-          } as any,
+          },
           signNativeToken: mockSignNativeToken,
           sendRawTransaction: vi.fn().mockResolvedValue(undefined),
         },
       }),
     );
+    await waitForEditing();
 
     await userEvent.type(
       screen.getByRole("textbox", { name: "receiverAddress" }),
@@ -296,12 +1457,13 @@ describe("TokenTransfer", () => {
               defaultRpcUrl: QRNS_RPC_URL,
               qrnsRegistryAddress: QRNS_REGISTRY,
             },
-          } as any,
+          },
           getAccountBalance: () => "10.0 Quanta",
           getZrc20TokenGas: mockGetZrc20TokenGas,
         },
       }),
     );
+    await waitForEditing();
 
     await userEvent.type(
       screen.getByRole("textbox", { name: "receiverAddress" }),
@@ -317,7 +1479,7 @@ describe("TokenTransfer", () => {
           "1",
           CONTRACT_C,
           18,
-          expect.objectContaining({ tier: expect.any(String) }),
+          { tier: "market" },
         );
       },
       { timeout: 3000 },
@@ -325,19 +1487,11 @@ describe("TokenTransfer", () => {
   });
 
   it("ignores an older in-flight QRNS result after the name changes", async () => {
-    let resolveAlice!: (address: string) => void;
-    let resolveBob!: (address: string) => void;
+    const alice = deferred<string>();
+    const bob = deferred<string>();
     mockResolveQrnsName
-      .mockReturnValueOnce(
-        new Promise<string>((resolve) => {
-          resolveAlice = resolve;
-        }),
-      )
-      .mockReturnValueOnce(
-        new Promise<string>((resolve) => {
-          resolveBob = resolve;
-        }),
-      );
+      .mockReturnValueOnce(alice.promise)
+      .mockReturnValueOnce(bob.promise);
 
     renderComponent(
       mockedStore({
@@ -347,29 +1501,42 @@ describe("TokenTransfer", () => {
               defaultRpcUrl: QRNS_RPC_URL,
               qrnsRegistryAddress: QRNS_REGISTRY,
             },
-          } as any,
+          },
         },
       }),
     );
+    await waitForEditing();
 
     const receiver = screen.getByRole("textbox", { name: "receiverAddress" });
     await userEvent.type(receiver, "alice.qrl");
-    await waitFor(() => expect(mockResolveQrnsName).toHaveBeenCalledTimes(1), {
-      timeout: 3000,
-    });
+    await waitFor(
+      () => {
+        expect(mockResolveQrnsName).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3000 },
+    );
 
     await userEvent.clear(receiver);
     await userEvent.type(receiver, "bob.qrl");
-    await waitFor(() => expect(mockResolveQrnsName).toHaveBeenCalledTimes(2), {
-      timeout: 3000,
-    });
+    await waitFor(
+      () => {
+        expect(mockResolveQrnsName).toHaveBeenCalledTimes(2);
+      },
+      { timeout: 3000 },
+    );
 
-    await act(async () => resolveBob(CONTRACT_C));
+    await act(async () => {
+      bob.resolve(CONTRACT_C);
+      await bob.promise;
+    });
     expect(
       await screen.findByText(formatQrlAddressFingerprint(CONTRACT_C)),
     ).toBeInTheDocument();
 
-    await act(async () => resolveAlice(ACCOUNT_B));
+    await act(async () => {
+      alice.resolve(ACCOUNT_B);
+      await alice.promise;
+    });
     expect(
       screen.getByText(formatQrlAddressFingerprint(CONTRACT_C)),
     ).toBeInTheDocument();
@@ -380,6 +1547,7 @@ describe("TokenTransfer", () => {
 
   it("should display the error message if amount is not valid", async () => {
     renderComponent();
+    await waitForEditing();
 
     const amountField = screen.getByRole("textbox", { name: "amount" });
     await waitFor(async () => {
@@ -394,24 +1562,24 @@ describe("TokenTransfer", () => {
     const mockAddTransaction = vi.fn().mockResolvedValue(undefined);
     const validRawTxHex = "0x02f8a00180843b9aca00843b9aca0082520894";
 
-    renderComponent(
-      mockedStore({
-        ledgerStore: {
-          isLedgerAccount: () => true,
-          signAndSerializeTransaction: async () => validRawTxHex,
-        } as any,
-        qrlStore: {
-          qrlInstance: {
-            getTransactionCount: async () => 0,
-            getChainId: async () => 1,
-          } as any,
-          sendRawTransaction: vi.fn().mockResolvedValue(undefined),
-        },
-        transactionHistoryStore: {
-          addTransaction: mockAddTransaction,
-        },
-      }),
-    );
+    const store = mockedStore({
+      ledgerStore: {
+        isLedgerAccount: () => true,
+        signAndSerializeTransaction: () => Promise.resolve(validRawTxHex),
+      },
+      qrlStore: {
+        sendRawTransaction: vi.fn().mockResolvedValue(undefined),
+      },
+      transactionHistoryStore: {
+        addTransaction: mockAddTransaction,
+      },
+    });
+    const instance = new Web3().qrl;
+    vi.spyOn(instance, "getTransactionCount").mockResolvedValue(0n);
+    vi.spyOn(instance, "getChainId").mockResolvedValue(1n);
+    store.qrlStore.qrlInstance = instance;
+    renderComponent(store);
+    await waitForEditing();
 
     await fillAndSubmitForm();
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -425,22 +1593,19 @@ describe("TokenTransfer", () => {
   });
 
   it("should display error when Ledger signing fails", async () => {
-    renderComponent(
-      mockedStore({
-        ledgerStore: {
-          isLedgerAccount: () => true,
-          signAndSerializeTransaction: async () => {
-            throw new Error("User rejected on device");
-          },
-        } as any,
-        qrlStore: {
-          qrlInstance: {
-            getTransactionCount: async () => 0,
-            getChainId: async () => 1,
-          } as any,
-        },
-      }),
-    );
+    const store = mockedStore({
+      ledgerStore: {
+        isLedgerAccount: () => true,
+        signAndSerializeTransaction: () =>
+          Promise.reject(new Error("User rejected on device")),
+      },
+    });
+    const instance = new Web3().qrl;
+    vi.spyOn(instance, "getTransactionCount").mockResolvedValue(0n);
+    vi.spyOn(instance, "getChainId").mockResolvedValue(1n);
+    store.qrlStore.qrlInstance = instance;
+    renderComponent(store);
+    await waitForEditing();
 
     await fillAndSubmitForm();
     expect(screen.getByText(/User rejected on device/)).toBeInTheDocument();
@@ -451,7 +1616,7 @@ describe("TokenTransfer", () => {
     renderComponent(
       mockedStore({
         qrlStore: {
-          signNativeToken: async () => successSignResult,
+          signNativeToken: () => Promise.resolve(successSignResult),
           sendRawTransaction: vi.fn().mockResolvedValue(undefined),
         },
         transactionHistoryStore: {
@@ -459,6 +1624,7 @@ describe("TokenTransfer", () => {
         },
       }),
     );
+    await waitForEditing();
 
     await fillAndSubmitForm();
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -485,6 +1651,7 @@ describe("TokenTransfer", () => {
           transactionHistoryStore: { addTransaction: add },
         }),
       );
+      await waitForEditing();
       await fillAndSubmitForm("Send Quanta", amount);
       expect(sign).toHaveBeenCalledWith(
         ACCOUNT_A,
@@ -527,20 +1694,21 @@ describe("TokenTransfer", () => {
       renderComponent(
         mockedStore({
           qrlStore: {
-            signNativeToken: async () => successSignResult,
+            signNativeToken: () => Promise.resolve(successSignResult),
             sendRawTransaction: vi.fn().mockRejectedValue(error),
           },
           transactionHistoryStore: { updateTransaction: update },
         }),
       );
+      await waitForEditing();
       await fillAndSubmitForm();
-      await waitFor(() =>
+      await waitFor(() => {
         expect(update).toHaveBeenCalledWith(
           ACCOUNT_A,
           "0xtxhash",
           expect.objectContaining(expected),
-        ),
-      );
+        );
+      });
     },
   );
 
@@ -570,6 +1738,7 @@ describe("TokenTransfer", () => {
           },
         }),
       );
+      await waitForEditing();
       await screen.findByRole("button", { name: "Send TST" });
       await fillAndSubmitForm("Send TST", amount);
       expect(sign).toHaveBeenCalledWith(
@@ -600,6 +1769,7 @@ describe("TokenTransfer", () => {
       },
       mockedStore({ qrlStore: { signZrc20Token: sign } }),
     );
+    await waitForEditing();
     await screen.findByRole("button", { name: "Send TST" });
     await waitFor(
       async () => {
@@ -647,11 +1817,12 @@ describe("TokenTransfer", () => {
           qrlStore: {
             signZrc20Token: sign,
             getAccountBalance: () => "10.0 Quanta",
-            getZrc20TokenGas: async () => "0.001",
+            getZrc20TokenGas: () => Promise.resolve("0.001"),
             sendRawTransaction: vi.fn().mockResolvedValue(undefined),
           },
         }),
       );
+      await waitForEditing();
 
       await screen.findByRole("button", { name: "Send MQW" });
       await fillAndSubmitForm("Send MQW", "0.00005");
@@ -678,10 +1849,11 @@ describe("TokenTransfer", () => {
           qrlStore: {
             signZrc20Token: sign,
             getAccountBalance: () => "10.0 Quanta",
-            getZrc20TokenGas: async () => "0.001",
+            getZrc20TokenGas: () => Promise.resolve("0.001"),
           },
         }),
       );
+      await waitForEditing();
 
       await screen.findByRole("button", { name: "Send MQW" });
       await waitFor(
@@ -711,10 +1883,11 @@ describe("TokenTransfer", () => {
         mockedStore({
           qrlStore: {
             getAccountBalance: () => "10.0 Quanta",
-            getZrc20TokenGas: async () => "0.001",
+            getZrc20TokenGas: () => Promise.resolve("0.001"),
           },
         }),
       );
+      await waitForEditing();
 
       await screen.findByRole("button", { name: "Send MQW" });
       await act(async () => {
@@ -748,10 +1921,11 @@ describe("TokenTransfer", () => {
         mockedStore({
           qrlStore: {
             getAccountBalance: () => "10.0 Quanta",
-            getZrc20TokenGas: async () => "0.001",
+            getZrc20TokenGas: () => Promise.resolve("0.001"),
           },
         }),
       );
+      await waitForEditing();
 
       await screen.findByRole("button", { name: "Send WIDE" });
       await act(async () => {
@@ -799,15 +1973,16 @@ describe("TokenTransfer", () => {
             signZrc20Token: sign,
             getZrc20TokenDetails,
             getAccountBalance: () => "10.0 Quanta",
-            getZrc20TokenGas: async () => "0.001",
+            getZrc20TokenGas: () => Promise.resolve("0.001"),
           },
         }),
       );
+      await waitForEditing();
 
       await screen.findByRole("button", { name: "Send MQW" });
-      await waitFor(() =>
-        expect(getZrc20TokenDetails).toHaveBeenCalledWith(CONTRACT_D),
-      );
+      await waitFor(() => {
+        expect(getZrc20TokenDetails).toHaveBeenCalledWith(CONTRACT_D);
+      });
 
       await waitFor(
         async () => {
@@ -848,6 +2023,7 @@ describe("TokenTransfer", () => {
         },
       }),
     );
+    await waitForEditing();
 
     expect(
       await screen.findByText(
@@ -862,6 +2038,7 @@ describe("TokenTransfer", () => {
     renderComponent(
       mockedStore({ qrlStore: { getAccountBalance: () => "10.0 Quanta" } }),
     );
+    await waitForEditing();
 
     expect(
       screen.queryByText(
@@ -871,8 +2048,8 @@ describe("TokenTransfer", () => {
   });
 
   it("re-applies Max when a dearer gas tier raises the reserve", async () => {
-    const getNativeTokenGas = vi.fn(async (overrides?: { tier?: string }) =>
-      overrides?.tier === "aggressive" ? "3" : "1",
+    const getNativeTokenGas = vi.fn((overrides?: { tier?: string }) =>
+      Promise.resolve(overrides?.tier === "aggressive" ? "3" : "1"),
     );
     renderComponent(
       mockedStore({
@@ -882,6 +2059,7 @@ describe("TokenTransfer", () => {
         },
       }),
     );
+    await waitForEditing();
 
     await userEvent.type(
       screen.getByRole("textbox", { name: "receiverAddress" }),
@@ -919,14 +2097,15 @@ describe("TokenTransfer", () => {
         },
       },
       mockedStore({
-        ledgerStore: { isLedgerAccount: () => true } as any,
+        ledgerStore: { isLedgerAccount: () => true },
         qrlStore: {
           signZrc20Token: sign,
           getAccountBalance: () => "10.0 Quanta",
-          getZrc20TokenGas: async () => "0.001",
+          getZrc20TokenGas: () => Promise.resolve("0.001"),
         },
       }),
     );
+    await waitForEditing();
 
     await screen.findByRole("button", { name: "Send TST" });
     await fillAndSubmitForm("Send TST", "1");
@@ -942,7 +2121,7 @@ describe("TokenTransfer", () => {
     renderComponent(
       mockedStore({
         qrlStore: {
-          signNativeToken: async () => successSignResult,
+          signNativeToken: () => Promise.resolve(successSignResult),
           sendRawTransaction: vi.fn().mockResolvedValue(undefined),
         },
         transactionHistoryStore: {
@@ -950,6 +2129,7 @@ describe("TokenTransfer", () => {
         },
       }),
     );
+    await waitForEditing();
 
     await fillAndSubmitForm();
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -966,6 +2146,7 @@ describe("TokenTransfer", () => {
 
   it("should navigate home when cancel button is clicked", async () => {
     renderComponent();
+    await waitForEditing();
 
     const cancelButton = screen.getByRole("button", { name: "Cancel" });
     await act(async () => {
@@ -978,12 +2159,14 @@ describe("TokenTransfer", () => {
     renderComponent(
       mockedStore({
         qrlStore: {
-          signNativeToken: async () => ({
-            error: "Insufficient funds",
-          }),
+          signNativeToken: () =>
+            Promise.resolve({
+              error: "Insufficient funds",
+            }),
         },
       }),
     );
+    await waitForEditing();
 
     await fillAndSubmitForm();
     expect(screen.getByText(/Insufficient funds/)).toBeInTheDocument();
@@ -993,12 +2176,11 @@ describe("TokenTransfer", () => {
     renderComponent(
       mockedStore({
         qrlStore: {
-          signNativeToken: async () => {
-            throw new Error("Network timeout");
-          },
+          signNativeToken: () => Promise.reject(new Error("Network timeout")),
         },
       }),
     );
+    await waitForEditing();
 
     await fillAndSubmitForm();
     expect(screen.getByText(/Network timeout/)).toBeInTheDocument();
@@ -1017,6 +2199,7 @@ describe("TokenTransfer", () => {
         },
       }),
     );
+    await waitForEditing();
 
     await fillAndSubmitForm();
 
@@ -1055,6 +2238,7 @@ describe("TokenTransfer", () => {
         },
       }),
     );
+    await waitForEditing();
 
     await waitFor(() => {
       expect(screen.getByText("Send TST")).toBeInTheDocument();
@@ -1087,6 +2271,7 @@ describe("TokenTransfer", () => {
     });
 
     renderComponent();
+    await waitForEditing();
 
     await waitFor(() => {
       expect(screen.getByText("Send STK")).toBeInTheDocument();
@@ -1095,6 +2280,7 @@ describe("TokenTransfer", () => {
 
   it("should reset form when shouldStartFresh state is true", async () => {
     renderComponentWithState({ shouldStartFresh: true });
+    await waitForEditing();
 
     await waitFor(() => {
       expect(mockClearTransactionValues).toHaveBeenCalled();
@@ -1107,10 +2293,11 @@ describe("TokenTransfer", () => {
       mockedStore({
         qrlStore: {
           getAccountBalance: balances.getAccountBalance,
-          getNativeTokenGas: vi.fn(async () => "0.001"),
+          getNativeTokenGas: vi.fn(() => Promise.resolve("0.001")),
         },
       }),
     );
+    await waitForEditing();
 
     const receiverAddressField = screen.getByRole("textbox", {
       name: "receiverAddress",
@@ -1159,10 +2346,11 @@ describe("TokenTransfer", () => {
       mockedStore({
         qrlStore: {
           getAccountBalance: () => "5.0 Quanta",
-          getNativeTokenGas: vi.fn(async () => "0.001"),
+          getNativeTokenGas: vi.fn(() => Promise.resolve("0.001")),
         },
       }),
     );
+    await waitForEditing();
 
     const receiverAddressField = screen.getByRole("textbox", {
       name: "receiverAddress",
@@ -1196,10 +2384,11 @@ describe("TokenTransfer", () => {
       mockedStore({
         qrlStore: {
           getAccountBalance: () => "100.0 Quanta",
-          getNativeTokenGas: vi.fn(async () => "0.001"),
+          getNativeTokenGas: vi.fn(() => Promise.resolve("0.001")),
         },
       }),
     );
+    await waitForEditing();
 
     const receiverAddressField = screen.getByRole("textbox", {
       name: "receiverAddress",
@@ -1242,10 +2431,11 @@ describe("TokenTransfer", () => {
       mockedStore({
         qrlStore: {
           getAccountBalance: () => "10.0 Quanta",
-          getZrc20TokenGas: vi.fn(async () => "0.001"),
+          getZrc20TokenGas: vi.fn(() => Promise.resolve("0.001")),
         },
       }),
     );
+    await waitForEditing();
 
     await waitFor(() => {
       expect(screen.getByText("Send TST")).toBeInTheDocument();
@@ -1289,10 +2479,11 @@ describe("TokenTransfer", () => {
       mockedStore({
         qrlStore: {
           getAccountBalance: () => "0.0 Quanta",
-          getZrc20TokenGas: vi.fn(async () => "0.001"),
+          getZrc20TokenGas: vi.fn(() => Promise.resolve("0.001")),
         },
       }),
     );
+    await waitForEditing();
 
     await waitFor(() => {
       expect(screen.getByText("Send TST")).toBeInTheDocument();
@@ -1329,6 +2520,7 @@ describe("TokenTransfer", () => {
           },
         }),
       );
+      await waitForEditing();
 
       const maxButton = await screen.findByRole("button", { name: "Max" });
       await userEvent.click(maxButton);
@@ -1346,10 +2538,11 @@ describe("TokenTransfer", () => {
         mockedStore({
           qrlStore: {
             getAccountBalance: () => "10.0 Quanta",
-            getNativeTokenGas: async () => "0.5",
+            getNativeTokenGas: () => Promise.resolve("0.5"),
           },
         }),
       );
+      await waitForEditing();
 
       const maxButton = await screen.findByRole("button", { name: "Max" });
       // The reserve estimate is async; retry Max until it reflects it.
@@ -1368,6 +2561,7 @@ describe("TokenTransfer", () => {
           qrlStore: { getAccountBalance: balances.getAccountBalance },
         }),
       );
+      await waitForEditing();
 
       const maxButton = await screen.findByRole("button", { name: "Max" });
       await userEvent.click(maxButton);
@@ -1400,6 +2594,7 @@ describe("TokenTransfer", () => {
           },
         }),
       );
+      await waitForEditing();
 
       const quarterButton = await screen.findByRole("button", {
         name: "25%",
@@ -1425,6 +2620,7 @@ describe("TokenTransfer", () => {
           tokenSymbol: "TST",
         },
       });
+      await waitForEditing();
 
       await waitFor(() => {
         expect(screen.getByText("Send TST")).toBeInTheDocument();

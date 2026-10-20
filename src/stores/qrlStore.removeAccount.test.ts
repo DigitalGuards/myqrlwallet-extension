@@ -8,9 +8,8 @@ const { mockGetBalance, mockIsListening } = vi.hoisted(() => ({
 
 vi.mock("@theqrl/web3", () => {
   class MockWeb3 {
-    static providers = { HttpProvider: class {} };
+    static providers = { HttpProvider: vi.fn() };
     qrl = { getBalance: mockGetBalance, net: { isListening: mockIsListening } };
-    constructor(_opts: unknown) {}
   }
   return {
     __esModule: true,
@@ -56,7 +55,7 @@ const flush = async () => {
 };
 
 describe("QrlStore.removeAccount", () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
     mockStorage.getAllBlockChains.mockResolvedValue([]);
     mockStorage.getActiveBlockChain.mockResolvedValue("");
@@ -68,6 +67,24 @@ describe("QrlStore.removeAccount", () => {
     vi.clearAllMocks();
     return store;
   };
+
+  it("propagates corrupt keystores before any account removal writes", async () => {
+    const { KeystoreStorageCorruptError } = await vi.importActual<
+      typeof import("@/utilities/storageUtil")
+    >("@/utilities/storageUtil");
+    const error = new KeystoreStorageCorruptError();
+    const store = await createStore();
+    mockStorage.getKeystores.mockRejectedValueOnce(error);
+
+    await expect(store.removeAccount(SECOND)).rejects.toBe(error);
+
+    expect(mockStorage.setAllAccounts).not.toHaveBeenCalled();
+    expect(mockStorage.setKeystores).not.toHaveBeenCalled();
+    expect(mockStorage.removeAccountFromAllDApps).not.toHaveBeenCalled();
+    expect(mockStorage.clearAllAccountData).not.toHaveBeenCalled();
+    expect(mockStorage.setActiveAccount).not.toHaveBeenCalled();
+    expect(mockStorage.clearActiveAccount).not.toHaveBeenCalled();
+  });
 
   it("removes the keystore, the accounts entry, dApp grants and per-account data", async () => {
     mockStorage.getKeystores.mockResolvedValue([
@@ -99,11 +116,13 @@ describe("QrlStore.removeAccount", () => {
     mockStorage.getActiveAccount.mockResolvedValue(SOFTWARE);
 
     const order: string[] = [];
-    mockStorage.setAllAccounts.mockImplementation(async () => {
+    mockStorage.setAllAccounts.mockImplementation(() => {
       order.push("accounts");
+      return Promise.resolve();
     });
-    mockStorage.setKeystores.mockImplementation(async () => {
+    mockStorage.setKeystores.mockImplementation(() => {
       order.push("keystores");
+      return Promise.resolve();
     });
 
     const store = await createStore();

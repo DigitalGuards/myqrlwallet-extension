@@ -6,7 +6,11 @@ import { Check, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import AddQrlChainInfo from "./AddQrlChainInfo/AddQrlChainInfo";
-import { BlockchainBaseDataType } from "@/configuration/qrlBlockchainConfig";
+import {
+  isAddQrlChainParameters,
+  readApprovalParams,
+} from "@/utilities/approvalGuards";
+import { rpcErrors } from "@theqrl/qrl-wallet-provider";
 import StorageUtil from "@/utilities/storageUtil";
 import {
   includeChainForUrlOrigin,
@@ -16,13 +20,7 @@ import {
 const AddQrlChainContent = observer(() => {
   const { t } = useTranslation();
   const { dAppRequestStore, qrlStore } = useStore();
-  const { addChain, selectBlockchain } = qrlStore;
-  const {
-    dAppRequestData,
-    onPermission,
-    approvalProcessingStatus,
-    setOnPermissionCallBack,
-  } = dAppRequestStore;
+  const { dAppRequestData, approvalProcessingStatus } = dAppRequestStore;
   const { isProcessing } = approvalProcessingStatus;
 
   const addBlockchain = async () => {
@@ -31,22 +29,29 @@ const AddQrlChainContent = observer(() => {
       record: ResponseRecorder,
     ) => {
       if (hasApproved) {
-        const blockchain = dAppRequestData
-          ?.params?.[0] as BlockchainBaseDataType;
-        const { chainFound, updatedChainList } = await addChain({
-          chainName: blockchain?.chainName,
-          chainId: blockchain?.chainId,
-          nativeCurrency: blockchain?.nativeCurrency,
-          rpcUrls: blockchain?.rpcUrls,
-          blockExplorerUrls: blockchain?.blockExplorerUrls,
-          iconUrls: blockchain?.iconUrls,
+        const blockchain = readApprovalParams(dAppRequestData?.params)?.[0];
+        if (!isAddQrlChainParameters(blockchain)) {
+          record({
+            error: rpcErrors.invalidParams({
+              message: "Invalid add-chain parameters",
+            }),
+          });
+          return;
+        }
+        const { chainFound, updatedChainList } = await qrlStore.addChain({
+          chainName: blockchain.chainName,
+          chainId: blockchain.chainId,
+          nativeCurrency: blockchain.nativeCurrency,
+          rpcUrls: blockchain.rpcUrls,
+          blockExplorerUrls: blockchain.blockExplorerUrls,
+          iconUrls: blockchain.iconUrls,
           // EIP-3085 orders rpcUrls by preference, and the middleware has
           // already rejected the request unless every entry is acceptable.
           // Picking the first acceptable entry keeps the two in step even
           // if the validation rules move.
-          defaultRpcUrl: pickDefaultRpcUrl(blockchain?.rpcUrls),
-          defaultBlockExplorerUrl: blockchain?.blockExplorerUrls?.[0] ?? "",
-          defaultIconUrl: blockchain?.iconUrls?.[0] ?? "",
+          defaultRpcUrl: pickDefaultRpcUrl(blockchain.rpcUrls),
+          defaultBlockExplorerUrl: blockchain.blockExplorerUrls?.[0] ?? "",
+          defaultIconUrl: blockchain.iconUrls?.[0] ?? "",
           isTestnet: false,
           defaultWsRpcUrl: "",
           isCustomChain: true,
@@ -55,11 +60,11 @@ const AddQrlChainContent = observer(() => {
           await StorageUtil.setAllBlockChains(updatedChainList);
           await includeChainForUrlOrigin({
             urlOrigin: dAppRequestData?.requestData?.senderData?.url ?? "",
-            chainId: blockchain?.chainId,
+            chainId: blockchain.chainId,
           });
           // Approving adds the chain and makes it the wallet's active one,
           // which is what the prompt asks for in so many words.
-          await selectBlockchain(blockchain?.chainId);
+          await qrlStore.selectBlockchain(blockchain.chainId);
         }
         record({ result: true });
       }
@@ -68,8 +73,8 @@ const AddQrlChainContent = observer(() => {
     // has been posted. Clearing it here used to wipe the request before its
     // requestId could be read back, so the dApp was answered 4001 by the
     // approval timeout even though the chain had been added.
-    setOnPermissionCallBack(onPermissionCallBack);
-    await onPermission(true);
+    dAppRequestStore.setOnPermissionCallBack(onPermissionCallBack);
+    await dAppRequestStore.onPermission(true);
   };
 
   return (
@@ -89,7 +94,9 @@ const AddQrlChainContent = observer(() => {
           type="button"
           disabled={isProcessing}
           aria-label="No"
-          onClick={() => onPermission(false)}
+          onClick={() => {
+            void dAppRequestStore.onPermission(false);
+          }}
         >
           <X className="mr-2 h-4 w-4" />
           {t("dapp.no")}
@@ -99,7 +106,14 @@ const AddQrlChainContent = observer(() => {
           type="button"
           disabled={isProcessing}
           aria-label="Yes"
-          onClick={() => addBlockchain()}
+          onClick={() => {
+            addBlockchain().catch((error: unknown) => {
+              console.warn(
+                "QrlWeb3Wallet: Error while resolving the permission request\n",
+                error,
+              );
+            });
+          }}
         >
           <Check className="mr-2 h-4 w-4" />
           {t("dapp.yes")}

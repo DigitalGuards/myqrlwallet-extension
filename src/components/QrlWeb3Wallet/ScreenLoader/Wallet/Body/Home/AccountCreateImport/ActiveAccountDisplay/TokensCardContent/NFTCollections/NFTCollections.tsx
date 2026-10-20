@@ -1,3 +1,4 @@
+import { nftCollectionView } from "@/utilities/storageViews";
 import { NFT_ITEMS_DISPLAY_LIMIT } from "@/constants/nftToken";
 import type { NFTCollectionType } from "@/types/nft";
 import { useStore } from "@/stores/store";
@@ -38,9 +39,11 @@ const NFTCollections = observer(
       (async () => {
         const stored =
           await StorageUtil.getNFTCollectionsList(accountAddress);
-        setCollections(stored);
+        setCollections(stored.map(nftCollectionView));
         onCountChange?.(stored.length);
-      })();
+      })().catch((error: unknown) => {
+        console.error("Failed to load NFT collections:", error);
+      });
     }, [blockchain, accountAddress, reRender]);
 
     const triggerReRender = () => {

@@ -1,5 +1,7 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
-import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
+import { CHAIN } from "@/utilities/__mocks__/storageFixtures";
+import { isRecord } from "@/utilities/storageGuards";
+import { Json, JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { toChecksumAddress } from "@theqrl/wallet.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
@@ -11,10 +13,12 @@ import { DAppResponseType } from "./middlewareTypes";
 const { mockIsLocked, mockCheckDomain, mockOpenApprovalSurface } = vi.hoisted(
   () => ({
     mockIsLocked: vi
-      .fn()
+      .fn<() => Promise<{ isLocked: boolean; hasPasswordSet: boolean }>>()
       .mockResolvedValue({ isLocked: false, hasPasswordSet: true }),
     mockCheckDomain: vi.fn(() => ({ isDomainPhishing: false })),
-    mockOpenApprovalSurface: vi.fn().mockResolvedValue(undefined),
+    mockOpenApprovalSurface: vi
+      .fn<(...args: unknown[]) => Promise<void>>()
+      .mockResolvedValue(undefined),
   }),
 );
 
@@ -43,10 +47,7 @@ const RECIPIENT = toChecksumAddress(`Q${"b".repeat(128)}`);
 const CHAIN_ID = "0x301825";
 const DAPPS_KEY = profileStorageKey("DAPPS");
 
-type ResponseShape = {
-  result?: unknown;
-  error?: { code?: number; message?: string; data?: unknown };
-};
+type ResponseShape = Parameters<typeof restrictedMethodsMiddleware>[1];
 
 /**
  * What the approval screens record when they refuse, as the dApp request
@@ -66,23 +67,20 @@ const RECORDED_LOCKED_ERROR = {
 
 describe("the dApp receives the code the approval recorded", () => {
   let sessionStore: Record<string, unknown>;
+  const addListener = vi.spyOn(browser.runtime.onMessage, "addListener");
+  const removeListener = vi.spyOn(browser.runtime.onMessage, "removeListener");
 
   const pendingRequestId = (): string | undefined => {
-    const dapps = sessionStore[DAPPS_KEY] as
-      | { DAPPS_REQUEST_DATA?: { requestId?: string } }
-      | undefined;
-    return dapps?.DAPPS_REQUEST_DATA?.requestId;
+    const dapps = sessionStore[DAPPS_KEY];
+    const request = isRecord(dapps) ? dapps.DAPPS_REQUEST_DATA : undefined;
+    return isRecord(request) && typeof request.requestId === "string"
+      ? request.requestId
+      : undefined;
   };
 
   const liveMessageListeners = () => {
-    const added = vi
-      .mocked(browser.runtime.onMessage.addListener)
-      .mock.calls.map((call) => call[0]);
-    const removed = new Set(
-      vi
-        .mocked(browser.runtime.onMessage.removeListener)
-        .mock.calls.map((call) => call[0]),
-    );
+    const added = addListener.mock.calls.map((call) => call[0]);
+    const removed = new Set(removeListener.mock.calls.map((call) => call[0]));
     return added.filter((listener) => !removed.has(listener));
   };
 
@@ -94,10 +92,7 @@ describe("the dApp receives the code the approval recorded", () => {
   const post = (message: Partial<DAppResponseType>) => {
     const answers: unknown[] = [];
     for (const listener of liveMessageListeners()) {
-      const answer = (listener as (value: unknown, sender: unknown) => unknown)(
-        message,
-        TRUSTED_SENDER,
-      );
+      const answer: unknown = listener(message, TRUSTED_SENDER, vi.fn());
       if (answer !== undefined) answers.push(answer);
     }
     return answers;
@@ -118,27 +113,23 @@ describe("the dApp receives the code the approval recorded", () => {
       hasApproved: true,
       requestId,
       response,
-    } as Partial<DAppResponseType>);
-    delete sessionStore[DAPPS_KEY];
+    });
+    Reflect.deleteProperty(sessionStore, DAPPS_KEY);
   };
 
-  const buildRequest = (
-    method: string,
-    params: unknown[],
-  ): JsonRpcRequest<JsonRpcRequest> =>
-    ({
-      id: 1,
-      jsonrpc: "2.0",
-      method,
-      params,
-      senderData: { url: `${ORIGIN}/app`, tabId: 11 },
-    }) as never;
+  const buildRequest = (method: string, params: Json[]): JsonRpcRequest => ({
+    id: 1,
+    jsonrpc: "2.0",
+    method,
+    params,
+    senderData: { url: `${ORIGIN}/app`, tabId: 11 },
+  });
 
-  const run = async (method: string, params: unknown[], response: unknown) => {
-    const res = {} as ResponseShape;
+  const run = async (method: string, params: Json[], response: unknown) => {
+    const res: ResponseShape = { id: 1, jsonrpc: "2.0" };
     const call = restrictedMethodsMiddleware(
       buildRequest(method, params),
-      res as never,
+      res,
       vi.fn(),
       vi.fn(),
     );
@@ -157,44 +148,48 @@ describe("the dApp receives the code the approval recorded", () => {
     mockOpenApprovalSurface.mockResolvedValue(undefined);
 
     sessionStore = {};
-    vi.mocked(browser.storage.session.get).mockImplementation(
-      async (key: unknown) => {
+    vi.spyOn(browser.storage.session, "get").mockImplementation(
+      (key: unknown) => {
         if (typeof key === "string") {
-          return key in sessionStore ? { [key]: sessionStore[key] } : {};
+          return Promise.resolve(
+            key in sessionStore ? { [key]: sessionStore[key] } : {},
+          );
         }
-        return { ...sessionStore };
+        return Promise.resolve({ ...sessionStore });
       },
     );
-    vi.mocked(browser.storage.session.set).mockImplementation(
-      async (values: unknown) => {
-        Object.assign(sessionStore, values as Record<string, unknown>);
+    vi.spyOn(browser.storage.session, "set").mockImplementation(
+      (values: unknown) => {
+        if (!isRecord(values))
+          return Promise.reject(new Error("Invalid session storage write"));
+        Object.assign(sessionStore, values);
+        return Promise.resolve();
       },
     );
     // The origin holds a grant for this account on the active chain, so a
-    // signing request reaches the approval surface rather than being
-    // refused by the precheck.
-    vi.mocked(browser.storage.local.get).mockImplementation(
-      async (key: unknown) => {
+    // signing request passes the precheck and reaches the approval surface.
+    vi.spyOn(browser.storage.local, "get").mockImplementation(
+      (key: unknown) => {
         switch (key) {
           case profileStorageKey("DAPPS"):
-            return {
+            return Promise.resolve({
               [profileStorageKey("DAPPS")]: {
                 ALL_DAPPS: {
                   [ORIGIN]: {
                     urlOrigin: ORIGIN,
                     accounts: [ACCOUNT],
-                    blockchains: [{ chainId: CHAIN_ID }],
+                    blockchains: [{ ...CHAIN, chainId: CHAIN_ID }],
                     permissions: [],
                   },
                 },
               },
-            };
+            });
           case profileStorageKey("ACCOUNTS"):
-            return {
+            return Promise.resolve({
               [profileStorageKey("ACCOUNTS")]: { ALL_ACCOUNTS: [ACCOUNT] },
-            };
+            });
           default:
-            return {};
+            return Promise.resolve({});
         }
       },
     );

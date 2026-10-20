@@ -1,3 +1,4 @@
+import type { StoredLedgerAccount as LedgerAccount } from "@/utilities/storageGuards";
 /**
  * Ledger Store - MobX state management for Ledger Hardware Wallet.
  *
@@ -35,15 +36,18 @@ import {
 } from "mobx";
 import { ledgerService } from "@/services/ledger/ledgerService";
 import { ledgerTransport } from "@/services/ledger/ledgerTransport";
-import type {
-  LedgerAccount,
-  LedgerDeviceInfo,
-} from "@/services/ledger/ledgerTypes";
+import type { LedgerDeviceInfo } from "@/services/ledger/ledgerTypes";
 import StorageUtil from "@/utilities/storageUtil";
 import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
 import { getDerivationPath } from "@/services/ledger/ledgerApdu";
 import { FeeMarketEIP1559Transaction } from "@theqrl/web3-qrl-accounts";
 import { newMLDSA87Descriptor } from "@theqrl/wallet.js";
+import {
+  isLedgerCommon,
+  isLedgerTransactionData,
+} from "./ledgerTransactionGuards";
+
+const isQip55Supported = (): boolean => LEDGER_CONFIG.QIP55_SUPPORTED;
 
 /**
  * Possible states for Ledger connection.
@@ -81,6 +85,12 @@ export interface StoreSignResult {
   rawTransaction?: string;
   error?: string;
 }
+
+const requireLedgerPath = (path: unknown): string => {
+  if (typeof path !== "string" || !path)
+    throw new Error("Ledger account has no usable derivation path");
+  return path;
+};
 
 /**
  * LedgerStore - Central state management for Ledger integration.
@@ -131,7 +141,7 @@ class LedgerStore {
       this.handleDeviceDisconnect();
     });
 
-    this.loadAccountsFromStorage();
+    void this.loadAccountsFromStorage();
   }
 
   get isConnected(): boolean {
@@ -162,7 +172,7 @@ class LedgerStore {
   }
 
   private assertQip55Supported(): void {
-    if (!LEDGER_CONFIG.QIP55_SUPPORTED) {
+    if (!isQip55Supported()) {
       throw new Error(LEDGER_ERROR_MESSAGES.QIP55_UNSUPPORTED);
     }
   }
@@ -250,7 +260,16 @@ class LedgerStore {
       runInAction(() => {
         this.accounts = storedAccounts;
         if (storedAccounts.length > 0) {
-          const maxIndex = Math.max(...storedAccounts.map((a) => a.index));
+          const maxIndex = Math.max(
+            -1,
+            ...storedAccounts.flatMap((a) =>
+              typeof a.index === "number" &&
+              Number.isSafeInteger(a.index) &&
+              a.index >= 0
+                ? [a.index]
+                : [],
+            ),
+          );
           this.nextAccountIndex = maxIndex + 1;
         }
       });
@@ -412,7 +431,9 @@ class LedgerStore {
     }
 
     try {
-      await ledgerService.verifyAddress(account.derivationPath);
+      await ledgerService.verifyAddress(
+        requireLedgerPath(account.derivationPath),
+      );
       return true;
     } catch (error) {
       console.error("[LedgerStore] Address verification failed:", error);
@@ -446,7 +467,7 @@ class LedgerStore {
     }
 
     const { publicKey } = await ledgerService.getPublicKey(
-      account.derivationPath,
+      requireLedgerPath(account.derivationPath),
     );
 
     // Update account with public key
@@ -479,7 +500,7 @@ class LedgerStore {
     fromAddress: string,
     rlpEncodedTx: string,
   ): Promise<StoreSignResult> {
-    if (!LEDGER_CONFIG.QIP55_SUPPORTED) {
+    if (!isQip55Supported()) {
       const result: StoreSignResult = {
         success: false,
         error: LEDGER_ERROR_MESSAGES.QIP55_UNSUPPORTED,
@@ -519,7 +540,7 @@ class LedgerStore {
         return result;
       }
 
-      if (!this.isConnected) {
+      if (this.connectionState !== "connected") {
         const result: StoreSignResult = {
           success: false,
           error: LEDGER_ERROR_MESSAGES.NOT_CONNECTED,
@@ -553,7 +574,7 @@ class LedgerStore {
       });
 
       const signedResult = await ledgerService.signTransaction(
-        account.derivationPath,
+        requireLedgerPath(account.derivationPath),
         rlpEncodedTx,
       );
 
@@ -607,12 +628,16 @@ class LedgerStore {
    */
   async signAndSerializeTransaction(
     fromAddress: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    txData: Record<string, any>,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    common: any,
+    txData: Record<string, unknown>,
+    common: unknown,
   ): Promise<string> {
     this.assertQip55Supported();
+    if (!isLedgerTransactionData(txData)) {
+      throw new Error("Invalid Ledger transaction data");
+    }
+    if (!isLedgerCommon(common)) {
+      throw new Error("Invalid Ledger transaction configuration");
+    }
     const unsignedTx = FeeMarketEIP1559Transaction.fromTxData(txData, {
       common,
     });
@@ -635,7 +660,8 @@ class LedgerStore {
       throw new Error("Ledger account not found");
     }
 
-    let publicKey = account.publicKey;
+    let publicKey =
+      typeof account.publicKey === "string" ? account.publicKey : "";
     if (!publicKey) {
       const { publicKey: fetchedPublicKey } =
         await this.fetchPublicKey(fromAddress);
@@ -646,22 +672,32 @@ class LedgerStore {
     }
 
     const rawValues = unsignedTx.raw();
-    const signatureBytes = Buffer.from(
-      signResult.signature!.replace("0x", ""),
-      "hex",
-    );
+    const signature: unknown = signResult.signature;
+    if (typeof signature !== "string") {
+      throw new Error("Ledger signing returned no usable signature");
+    }
+    const signatureBytes = Buffer.from(signature.replace("0x", ""), "hex");
     const publicKeyBytes = Buffer.from(publicKey.replace("0x", ""), "hex");
 
-    const signedTxValues = [
-      ...rawValues.slice(0, 9),
-      publicKeyBytes,
-      signatureBytes,
+    const signedTxValues: Parameters<
+      typeof FeeMarketEIP1559Transaction.fromValuesArray
+    >[0] = [
+      rawValues[0],
+      rawValues[1],
+      rawValues[2],
+      rawValues[3],
+      rawValues[4],
+      rawValues[5],
+      rawValues[6],
+      rawValues[7],
+      rawValues[8],
       descriptor,
+      extraParams,
+      signatureBytes,
+      publicKeyBytes,
     ];
     const signedTx = FeeMarketEIP1559Transaction.fromValuesArray(
-      signedTxValues as Parameters<
-        typeof FeeMarketEIP1559Transaction.fromValuesArray
-      >[0],
+      signedTxValues,
       { common },
     );
     const signedRawTx = signedTx.serialize();

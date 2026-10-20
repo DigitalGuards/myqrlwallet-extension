@@ -1,6 +1,6 @@
 /**
  * Helpers for fanning keystore KDF work out over multiple Web Workers so N
- * keystores decrypt concurrently instead of back to back in one thread.
+ * keystores decrypt concurrently across several threads.
  *
  * Concurrency is capped independently of core count because every in-flight
  * argon2id derivation at the production parameters (m=262144 KiB) pins
@@ -8,6 +8,13 @@
  */
 
 const MAX_KDF_WORKERS = 3;
+
+export type JobWorker<TRequest> = {
+  onmessage: ((event: MessageEvent<unknown>) => void) | null;
+  onerror: ((event: ErrorEvent) => void) | null;
+  postMessage: (request: TRequest) => void;
+  terminate: () => void;
+};
 
 export function kdfWorkerCount(itemCount: number): number {
   const cores =
@@ -39,18 +46,19 @@ export function splitIntoChunks<T>(items: T[], chunkCount: number): T[][] {
 /**
  * Post one request to a fresh worker, resolve with its single response, and
  * terminate the worker either way. Worker-level errors resolve with the
- * caller-supplied failure value so Promise.all over chunks never rejects.
+ * caller-supplied failure value. Invalid replies use the same failure path.
  */
 export function runWorkerJob<TRequest, TResponse>(
-  createWorker: () => Worker,
+  createWorker: () => JobWorker<TRequest>,
   request: TRequest,
   failureResponse: TResponse,
+  isResponse: (value: unknown) => value is TResponse,
 ): Promise<TResponse> {
   return new Promise((resolve) => {
     const worker = createWorker();
-    worker.onmessage = (event: MessageEvent<TResponse>) => {
+    worker.onmessage = (event: MessageEvent<unknown>) => {
       worker.terminate();
-      resolve(event.data);
+      resolve(isResponse(event.data) ? event.data : failureResponse);
     };
     worker.onerror = () => {
       worker.terminate();

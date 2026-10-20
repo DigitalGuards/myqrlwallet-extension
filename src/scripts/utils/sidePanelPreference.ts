@@ -1,4 +1,5 @@
 import type { WalletSettings } from "@/utilities/storageUtil";
+import { isRecord } from "@/services/explorerGuards";
 
 // The side panel loads the wallet with a URL marker so settingsStore can
 // classify the surface (see settingsStore's constructor).
@@ -9,8 +10,14 @@ export const SIDE_PANEL_PATH = "index.html?sidepanel=true";
  * and older Chromium builds have no chrome.sidePanel, and the whole feature
  * degrades to the popup behaviour the wallet shipped before.
  */
-export const isSidePanelSupported = (): boolean =>
-  typeof chrome !== "undefined" && typeof chrome.sidePanel?.open === "function";
+export const isSidePanelSupported = (): boolean => {
+  const browserApi: unknown = Reflect.get(globalThis, "chrome");
+  return (
+    isRecord(browserApi) &&
+    isRecord(browserApi.sidePanel) &&
+    typeof browserApi.sidePanel.open === "function"
+  );
+};
 
 /**
  * The side panel is the wallet's default surface. An unset preference

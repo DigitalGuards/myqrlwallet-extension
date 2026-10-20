@@ -1,11 +1,28 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
-import { StoreProvider } from "@/stores/store";
+import { StoreProvider, type StoreType } from "@/stores/store";
+import * as ScrollRegion from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Transaction } from "@theqrl/web3";
+import { Transaction, type Web3BaseWalletAccount } from "@theqrl/web3";
 import { MemoryRouter } from "react-router-dom";
 import ImportAccount from "./ImportAccount";
+import ImportMnemonicForm from "./ImportMnemonicForm/ImportMnemonicForm";
+import ImportHexSeedForm from "./ImportHexSeedForm/ImportHexSeedForm";
+import ImportEncryptedWallet from "./ImportEncryptedWallet/ImportEncryptedWallet";
+import * as ZodResolvers from "@hookform/resolvers/zod";
+
+vi.mock("@hookform/resolvers/zod", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@hookform/resolvers/zod")>();
+  return { ...actual };
+});
 
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/AccountImportSuccess/AccountImportSuccess",
@@ -13,7 +30,10 @@ vi.mock(
 );
 
 describe("ImportAccount", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -23,6 +43,57 @@ describe("ImportAccount", () => {
         </MemoryRouter>
       </StoreProvider>,
     );
+
+  it.each([
+    {
+      formName: "importAccount",
+      Component: ImportMnemonicForm,
+      message:
+        "There was an error while reading the mnemonic phrases. Error: validation unavailable",
+    },
+    {
+      formName: "importHexSeed",
+      Component: ImportHexSeedForm,
+      message: "Account could not be imported from the hex seed",
+    },
+    {
+      formName: "importEncryptedWallet",
+      Component: ImportEncryptedWallet,
+      message: "The account could not be imported from this wallet file",
+    },
+  ])(
+    "reports a rejected form validation for $formName",
+    async ({ formName, Component, message }) => {
+      const validation = vi
+        .fn<() => Promise<void>>()
+        .mockResolvedValue(undefined);
+      const resolver: ReturnType<typeof ZodResolvers.zodResolver> = async (
+        values,
+      ) => {
+        await validation();
+        return { values, errors: {} };
+      };
+      vi.spyOn(ZodResolvers, "zodResolver").mockReturnValue(resolver);
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const onImported = vi
+        .fn<(account: Web3BaseWalletAccount) => Promise<void>>()
+        .mockResolvedValue(undefined);
+      render(
+        <StoreProvider value={mockedStore()}>
+          <Component onImported={onImported} />
+        </StoreProvider>,
+      );
+      await waitFor(() => {
+        expect(validation).toHaveBeenCalled();
+      });
+      validation.mockRejectedValueOnce(new Error("validation unavailable"));
+
+      fireEvent.submit(screen.getByRole("form", { name: formName }));
+
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(onImported).not.toHaveBeenCalled();
+    },
+  );
 
   it("should render the import account component with field and button", async () => {
     renderComponent();
@@ -75,7 +146,7 @@ describe("ImportAccount", () => {
       handleOnSubmitMock;
     const button = screen.getByRole("button", { name: "Import account" });
     await userEvent.click(button);
-    await waitFor(async () => {
+    await waitFor(() => {
       expect(handleOnSubmitMock).toHaveBeenCalledTimes(1);
     });
   });
@@ -93,17 +164,14 @@ describe("ImportAccount", () => {
                   sign: (_data: string | Record<string, unknown>) => {
                     return { messageHash: "", signature: "" };
                   },
-                  signTransaction: async (_tx: Transaction) => {
-                    return {
+                  signTransaction: (_tx: Transaction) =>
+                    Promise.resolve({
                       messageHash: "",
                       rawTransaction: "",
                       signature: "",
                       transactionHash: "",
-                    };
-                  },
-                  encrypt: async () => {
-                    throw new Error("Not implemented");
-                  },
+                    }),
+                  encrypt: () => Promise.reject(new Error("Not implemented")),
                 };
               },
             },
@@ -137,20 +205,19 @@ describe("ImportAccount", () => {
         messageHash: "",
         signature: "",
       }),
-      signTransaction: async (_tx: Transaction) => ({
-        messageHash: "",
-        rawTransaction: "",
-        signature: "",
-        transactionHash: "",
-      }),
-      encrypt: async () => {
-        throw new Error("Not implemented");
-      },
+      signTransaction: (_tx: Transaction) =>
+        Promise.resolve({
+          messageHash: "",
+          rawTransaction: "",
+          signature: "",
+          transactionHash: "",
+        }),
+      encrypt: () => Promise.reject(new Error("Not implemented")),
     };
 
     const renderWithExistingAccount = (storedAddress: string) => {
-      const encryptAccount = vi.fn(async () => {});
-      const setActiveAccount = vi.fn(async () => {});
+      const encryptAccount = vi.fn(() => Promise.resolve());
+      const setActiveAccount = vi.fn(() => Promise.resolve());
       renderComponent(
         mockedStore({
           qrlStore: {
@@ -228,15 +295,14 @@ describe("ImportAccount", () => {
         messageHash: "",
         signature: "",
       }),
-      signTransaction: async (_tx: Transaction) => ({
-        messageHash: "",
-        rawTransaction: "",
-        signature: "",
-        transactionHash: "",
-      }),
-      encrypt: async () => {
-        throw new Error("Not implemented");
-      },
+      signTransaction: (_tx: Transaction) =>
+        Promise.resolve({
+          messageHash: "",
+          rawTransaction: "",
+          signature: "",
+          transactionHash: "",
+        }),
+      encrypt: () => Promise.reject(new Error("Not implemented")),
     };
 
     const renderWithExpiredSession = (
@@ -247,14 +313,12 @@ describe("ImportAccount", () => {
         ensureWalletPasswordAfterReArm?: () => Promise<void>;
       } = {},
     ) => {
-      const setActiveAccount = vi.fn(async () => {});
-      const encryptAccount = vi.fn(async () => {});
-      const lock = vi.fn(async () => {});
+      const setActiveAccount = vi.fn(() => Promise.resolve());
+      const encryptAccount = vi.fn(() => Promise.resolve());
+      const lock = vi.fn(() => Promise.resolve());
       const unlock =
         overrides.unlock ??
-        vi.fn(async () => {
-          throw new Error("unlock not mocked for this test");
-        });
+        vi.fn().mockRejectedValue(new Error("unlock not mocked for this test"));
       let ensureWalletPasswordCalls = 0;
       const ensureWalletPassword = vi.fn(async () => {
         ensureWalletPasswordCalls += 1;
@@ -340,8 +404,8 @@ describe("ImportAccount", () => {
     it("re-arms the session and completes the import in place, without losing the entered mnemonic", async () => {
       const { setActiveAccount, encryptAccount, unlock } =
         renderWithExpiredSession({
-          unlock: vi.fn(async () => "success" as const),
-          ensureWalletPasswordAfterReArm: async () => {},
+          unlock: vi.fn().mockResolvedValue("success"),
+          ensureWalletPasswordAfterReArm: () => Promise.resolve(),
         });
       await submitMnemonic();
       await screen.findByText(
@@ -367,7 +431,7 @@ describe("ImportAccount", () => {
 
     it("shows the normal wrong-password error when the re-arm password is wrong", async () => {
       renderWithExpiredSession({
-        unlock: vi.fn(async () => "wrong-password" as const),
+        unlock: vi.fn().mockResolvedValue("wrong-password"),
       });
       await submitMnemonic();
       await screen.findByText(
@@ -389,7 +453,7 @@ describe("ImportAccount", () => {
 
     it("shows an honest 'could not verify' message and keeps the pending import alive on a 'failed' re-arm result (N8)", async () => {
       renderWithExpiredSession({
-        unlock: vi.fn(async () => "failed" as const),
+        unlock: vi.fn().mockResolvedValue("failed"),
       });
       await submitMnemonic();
       await screen.findByText(
@@ -423,23 +487,224 @@ describe("ImportAccount", () => {
         messageHash: "",
         signature: "",
       }),
-      signTransaction: async (_tx: Transaction) => ({
-        messageHash: "",
-        rawTransaction: "",
-        signature: "",
-        transactionHash: "",
-      }),
-      encrypt: async () => {
-        throw new Error("Not implemented");
-      },
+      signTransaction: (_tx: Transaction) =>
+        Promise.resolve({
+          messageHash: "",
+          rawTransaction: "",
+          signature: "",
+          transactionHash: "",
+        }),
+      encrypt: () => Promise.reject(new Error("Not implemented")),
     };
 
-    it("shows the real error and does not offer a re-arm prompt", async () => {
-      const encryptAccount = vi.fn(async () => {
-        throw new Error(
-          "The wallet contains a keystore with an invalid address",
-        );
+    const mnemonic =
+      "knight paddy india glow play chew lame mature sock ill deadly olive blink marble breach hey mile mature tacit mean polo crawl khaya stud number speed viking windy jump subtle mildew sewage";
+
+    it("retries persistence in order with the same account and store receivers", async () => {
+      const steps: string[] = [];
+      const ensureWalletPassword = vi.fn<
+        StoreType["lockStore"]["ensureWalletPassword"]
+      >(() => {
+        steps.push("password");
+        return Promise.resolve();
       });
+      const encryptAccount = vi
+        .fn<StoreType["lockStore"]["encryptAccount"]>()
+        .mockImplementationOnce(() => {
+          steps.push("encrypt");
+          return Promise.reject(new Error("storage unavailable"));
+        })
+        .mockImplementation(() => {
+          steps.push("encrypt");
+          return Promise.resolve();
+        });
+      const ensureLabel = vi.fn<StoreType["accountLabelsStore"]["ensureLabel"]>(
+        () => {
+          steps.push("label");
+          return Promise.resolve();
+        },
+      );
+      const setActiveAccount = vi.fn<StoreType["qrlStore"]["setActiveAccount"]>(
+        () => {
+          steps.push("active");
+          return Promise.resolve();
+        },
+      );
+      const seedToAccount = vi.fn(() => seededAccount);
+      const store = mockedStore({
+        qrlStore: {
+          qrlInstance: { accounts: { seedToAccount } },
+          setActiveAccount,
+        },
+        lockStore: { ensureWalletPassword, encryptAccount },
+        accountLabelsStore: { ensureLabel },
+      });
+      renderComponent(store);
+      await userEvent.type(
+        screen.getByRole("textbox", { name: "mnemonicPhrases" }),
+        mnemonic,
+      );
+      await userEvent.click(
+        screen.getByRole("button", { name: "Import account" }),
+      );
+
+      expect(
+        await screen.findByText("storage unavailable"),
+      ).toBeInTheDocument();
+      expect(steps).toEqual(["password", "encrypt"]);
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      expect(
+        await screen.findByText("Mocked Account Import Success"),
+      ).toBeInTheDocument();
+      expect(steps).toEqual([
+        "password",
+        "encrypt",
+        "password",
+        "encrypt",
+        "label",
+        "active",
+      ]);
+      expect(seedToAccount).toHaveBeenCalledTimes(1);
+      expect(encryptAccount).toHaveBeenNthCalledWith(1, seededAccount);
+      expect(encryptAccount).toHaveBeenNthCalledWith(2, seededAccount);
+      expect(ensureLabel).toHaveBeenCalledWith(seededAccount.address);
+      expect(setActiveAccount).toHaveBeenCalledWith(seededAccount.address);
+      expect(ensureWalletPassword.mock.contexts).toEqual([
+        store.lockStore,
+        store.lockStore,
+      ]);
+      expect(encryptAccount.mock.contexts).toEqual([
+        store.lockStore,
+        store.lockStore,
+      ]);
+      expect(setActiveAccount.mock.contexts).toEqual([store.qrlStore]);
+    });
+
+    it("reports an unexpected retry rejection and keeps the pending import", async () => {
+      vi.spyOn(ScrollRegion, "scrollShellToTop")
+        .mockImplementationOnce(() => {})
+        .mockImplementationOnce(() => {
+          throw new Error("scroll unavailable");
+        })
+        .mockImplementation(() => {});
+      const encryptAccount = vi
+        .fn<StoreType["lockStore"]["encryptAccount"]>()
+        .mockRejectedValueOnce(new Error("storage unavailable"))
+        .mockResolvedValue(undefined);
+      const seedToAccount = vi.fn(() => seededAccount);
+      renderComponent(
+        mockedStore({
+          qrlStore: { qrlInstance: { accounts: { seedToAccount } } },
+          lockStore: { encryptAccount },
+        }),
+      );
+      await userEvent.type(
+        screen.getByRole("textbox", { name: "mnemonicPhrases" }),
+        mnemonic,
+      );
+      await userEvent.click(
+        screen.getByRole("button", { name: "Import account" }),
+      );
+      await screen.findByText("storage unavailable");
+
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(await screen.findByText("scroll unavailable")).toBeInTheDocument();
+      expect(encryptAccount).toHaveBeenCalledTimes(1);
+
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(
+        await screen.findByText("Mocked Account Import Success"),
+      ).toBeInTheDocument();
+      expect(encryptAccount).toHaveBeenCalledTimes(2);
+      expect(seedToAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports mnemonic derivation errors before persistence", async () => {
+      const encryptAccount = vi
+        .fn<StoreType["lockStore"]["encryptAccount"]>()
+        .mockResolvedValue(undefined);
+      renderComponent(
+        mockedStore({
+          qrlStore: {
+            qrlInstance: {
+              accounts: {
+                seedToAccount: () => {
+                  throw new Error("invalid mnemonic");
+                },
+              },
+            },
+          },
+          lockStore: { encryptAccount },
+        }),
+      );
+      await userEvent.type(
+        screen.getByRole("textbox", { name: "mnemonicPhrases" }),
+        mnemonic,
+      );
+      await userEvent.click(
+        screen.getByRole("button", { name: "Import account" }),
+      );
+
+      expect(
+        await screen.findByText(
+          "There was an error while reading the mnemonic phrases. Error: invalid mnemonic",
+        ),
+      ).toBeInTheDocument();
+      expect(encryptAccount).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      {
+        failure: new Error("import unavailable"),
+        detail: "Error: import unavailable",
+      },
+      { failure: "import unavailable", detail: "import unavailable" },
+    ])(
+      "preserves mnemonic import rejection text: $detail",
+      async ({ failure, detail }) => {
+        const onImported = vi
+          .fn<(account: Web3BaseWalletAccount) => Promise<void>>()
+          .mockRejectedValue(failure);
+        render(
+          <StoreProvider
+            value={mockedStore({
+              qrlStore: {
+                qrlInstance: {
+                  accounts: { seedToAccount: () => seededAccount },
+                },
+              },
+            })}
+          >
+            <ImportMnemonicForm onImported={onImported} />
+          </StoreProvider>,
+        );
+        await userEvent.type(
+          screen.getByRole("textbox", { name: "mnemonicPhrases" }),
+          mnemonic,
+        );
+        await userEvent.click(
+          screen.getByRole("button", { name: "Import account" }),
+        );
+
+        expect(
+          await screen.findByText(
+            `There was an error while reading the mnemonic phrases. ${detail}`,
+          ),
+        ).toBeInTheDocument();
+        expect(onImported).toHaveBeenCalledWith(seededAccount);
+        expect(
+          screen.getByRole("textbox", { name: "mnemonicPhrases" }),
+        ).toHaveValue(mnemonic);
+      },
+    );
+
+    it("shows the real error and does not offer a re-arm prompt", async () => {
+      const encryptAccount = vi
+        .fn()
+        .mockRejectedValue(
+          new Error("The wallet contains a keystore with an invalid address"),
+        );
       renderComponent(
         mockedStore({
           qrlStore: {

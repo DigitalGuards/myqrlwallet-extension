@@ -2,13 +2,16 @@ import { mockedStore } from "@/__mocks__/mockedStore";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import ActiveBrowserTab from "./ActiveBrowserTab";
 
 describe("ActiveBrowserTab", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -91,5 +94,25 @@ describe("ActiveBrowserTab", () => {
     ).toBeInTheDocument();
     await userEvent.click(yesButton);
     expect(mockedDisconnectFromCurrentTab).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a rejected disconnect", async () => {
+    const error = new Error("Disconnect failed");
+    const disconnectFromCurrentTab = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValue(error);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: { hasDAppConnected: true, disconnectFromCurrentTab },
+      }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Confirm Disconnect" }),
+    );
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith("Failed to disconnect dApp:", error);
+    });
   });
 });

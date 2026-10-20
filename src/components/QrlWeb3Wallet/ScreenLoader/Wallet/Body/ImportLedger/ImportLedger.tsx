@@ -22,7 +22,7 @@ import {
 import BackButton from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/BackButton/BackButton";
 import { LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
 import { ROUTES } from "@/router/router";
-import { LedgerAccount } from "@/services/ledger/ledgerTypes";
+import type { StoredLedgerAccount as LedgerAccount } from "@/utilities/storageGuards";
 import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import { useStore } from "@/stores/store";
 import StorageUtil from "@/utilities/storageUtil";
@@ -84,10 +84,18 @@ const ImportLedger = observer(() => {
   // Load previously imported account addresses from storage
   useEffect(() => {
     if (step === "select") {
-      StorageUtil.getAllAccounts().then((allAddresses) => {
-        const addressSet = new Set(allAddresses.map((a) => a.toLowerCase()));
-        setAlreadyImportedAddresses(addressSet);
-      });
+      StorageUtil.getAllAccounts()
+        .then((allAddresses) => {
+          const addressSet = new Set(allAddresses.map((a) => a.toLowerCase()));
+          setAlreadyImportedAddresses(addressSet);
+        })
+        .catch((error: unknown) => {
+          setImportError(
+            error instanceof Error
+              ? error.message
+              : t("ledger.failedToLoadAccounts"),
+          );
+        });
     }
   }, [step]);
 
@@ -96,13 +104,15 @@ const ImportLedger = observer(() => {
     if (isConnected && step === "connect") {
       setStep("select");
       setCurrentPage(0);
-      ledgerStore.fetchPageAccounts(ACCOUNTS_PER_PAGE, 0).catch((error) => {
-        setImportError(
-          error instanceof Error
-            ? error.message
-            : t("ledger.failedToLoadFromDevice"),
-        );
-      });
+      ledgerStore
+        .fetchPageAccounts(ACCOUNTS_PER_PAGE, 0)
+        .catch((error: unknown) => {
+          setImportError(
+            error instanceof Error
+              ? error.message
+              : t("ledger.failedToLoadFromDevice"),
+          );
+        });
     }
   }, [isConnected, step]);
 
@@ -149,8 +159,12 @@ const ImportLedger = observer(() => {
     }
   };
 
-  const handlePrevPage = () => goToPage(currentPage - 1);
-  const handleNextPage = () => goToPage(currentPage + 1);
+  const handlePrevPage = () => {
+    void goToPage(currentPage - 1);
+  };
+  const handleNextPage = () => {
+    void goToPage(currentPage + 1);
+  };
 
   // Handle import confirmation
   const handleImportSelected = async () => {
@@ -165,8 +179,7 @@ const ImportLedger = observer(() => {
       const newAccounts = Array.from(selectedAccountsMap.values());
 
       // Add selected accounts to the main wallet account list, naming each
-      // one straight away so the header and account list read "Ledger N"
-      // instead of the raw address until something runs syncLabels.
+      // one straight away so the header and account list read "Ledger N".
       for (const account of newAccounts) {
         await StorageUtil.addLedgerAccountToAllAccounts(account.address);
         await accountLabelsStore.ensureLabel(account.address, true);
@@ -198,13 +211,17 @@ const ImportLedger = observer(() => {
 
   // Handle finishing the import
   const handleFinish = () => {
-    navigate(ROUTES.HOME);
+    Promise.resolve(navigate(ROUTES.HOME)).catch((error: unknown) => {
+      console.error("[ImportLedger] Failed to navigate home:", error);
+    });
   };
 
   // Disconnect Ledger when leaving the page
   useEffect(() => {
     return () => {
-      ledgerStore.disconnect();
+      ledgerStore.disconnect().catch((error: unknown) => {
+        console.error("[ImportLedger] Failed to disconnect:", error);
+      });
     };
   }, []);
 
@@ -241,7 +258,9 @@ const ImportLedger = observer(() => {
           </CardContent>
           <CardFooter>
             <Button
-              onClick={handleConnect}
+              onClick={() => {
+                void handleConnect();
+              }}
               disabled={isConnecting}
               className="w-full"
             >
@@ -303,7 +322,9 @@ const ImportLedger = observer(() => {
                             ? "cursor-pointer border-primary bg-primary/5"
                             : "cursor-pointer border-border hover:bg-muted/50"
                       }`}
-                      onClick={() => toggleAccountSelection(account)}
+                      onClick={() => {
+                        toggleAccountSelection(account);
+                      }}
                     >
                       <div className="flex flex-col gap-1">
                         <AddressFingerprint
@@ -312,7 +333,10 @@ const ImportLedger = observer(() => {
                         />
                         <span className="text-xs text-muted-foreground">
                           {t("ledger.accountIndex", {
-                            index: account.index + 1,
+                            index:
+                              typeof account.index === "number"
+                                ? account.index + 1
+                                : "?",
                           })}
                           {imported && (
                             <span className="ml-2 text-xs font-medium text-green-600">
@@ -371,7 +395,9 @@ const ImportLedger = observer(() => {
               </Button>
             </div>
             <Button
-              onClick={handleImportSelected}
+              onClick={() => {
+                void handleImportSelected();
+              }}
               disabled={newlySelectedCount === 0}
               className="w-full"
             >

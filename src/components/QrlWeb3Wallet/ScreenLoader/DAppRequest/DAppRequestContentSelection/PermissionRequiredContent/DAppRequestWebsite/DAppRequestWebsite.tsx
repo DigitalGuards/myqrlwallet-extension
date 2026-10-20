@@ -1,6 +1,7 @@
 import { Card } from "@/components/UI/Card";
 import { Separator } from "@/components/UI/Separator";
 import { useStore } from "@/stores/store";
+import { isApprovalSender } from "@/utilities/approvalGuards";
 import { registrableDomain } from "@/utilities/registrableDomain";
 import { observer } from "mobx-react-lite";
 import DAppRequestFeature from "./DAppRequestFeature/DAppRequestFeature";
@@ -22,14 +23,8 @@ const DAppRequestWebsite = observer(() => {
   const { dAppRequestStore } = useStore();
   const { dAppRequestData } = dAppRequestStore;
 
-  const senderData = dAppRequestData?.requestData?.senderData as
-    | {
-        url?: string;
-        favIconUrl?: string;
-        title?: string;
-        mainFrameOrigin?: string;
-      }
-    | undefined;
+  const sender: unknown = dAppRequestData?.requestData?.senderData;
+  const senderData = isApprovalSender(sender) ? sender : undefined;
 
   const senderUrl = senderData?.url ?? "";
   let urlOrigin = senderUrl;

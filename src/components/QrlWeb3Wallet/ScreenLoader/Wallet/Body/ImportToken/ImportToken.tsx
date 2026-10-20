@@ -38,10 +38,10 @@ const createFormSchema = (t: TFunction) =>
 const ImportToken = observer(() => {
   const { t } = useTranslation();
   const { qrlStore } = useStore();
-  const { getZrc20TokenDetails } = qrlStore;
-
   const [token, setToken] =
-    useState<Awaited<ReturnType<typeof getZrc20TokenDetails>>["token"]>();
+    useState<
+      Awaited<ReturnType<typeof qrlStore.getZrc20TokenDetails>>["token"]
+    >();
   // The address under review. Fed by the manual form or a discovered-token
   // pick; both land on the same review screen before anything is stored.
   const [reviewAddress, setReviewAddress] = useState("");
@@ -70,7 +70,9 @@ const ImportToken = observer(() => {
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     setDiscoveredError("");
-    const tokenDetails = await getZrc20TokenDetails(formData.contractAddress);
+    const tokenDetails = await qrlStore.getZrc20TokenDetails(
+      formData.contractAddress,
+    );
     if (tokenDetails.error) {
       control.setError("contractAddress", { message: tokenDetails.error });
     } else {
@@ -80,7 +82,9 @@ const ImportToken = observer(() => {
   }
 
   const onReviewDiscovered = async (discovered: DiscoveredToken) => {
-    const tokenDetails = await getZrc20TokenDetails(discovered.address);
+    const tokenDetails = await qrlStore.getZrc20TokenDetails(
+      discovered.address,
+    );
     if (tokenDetails.error) {
       // Surface the chain-read failure on the manual field, prefilled with
       // the address, so the user can see what failed and retry from there.
@@ -113,8 +117,7 @@ const ImportToken = observer(() => {
             contractAddress={reviewAddress}
           />
         )}
-        {/* Hidden, not unmounted, while reviewing: the discovered picker
-            would otherwise refetch the explorer on every Cancel. */}
+        {/* Keep the picker mounted while reviewing to reuse its results on Cancel. */}
         <div hidden={!!reviewAddress}>
           <Form {...form}>
             <BackButton />
@@ -123,7 +126,14 @@ const ImportToken = observer(() => {
               name="importAccount"
               aria-label="importAccount"
               className="w-full"
-              onSubmit={handleSubmit(onSubmit)}
+              onSubmit={(event) => {
+                handleSubmit(onSubmit)(event).catch((error: unknown) => {
+                  console.error(
+                    "[ImportToken] Failed to fetch token details:",
+                    error,
+                  );
+                });
+              }}
             >
               <Card>
                 <CardHeader>

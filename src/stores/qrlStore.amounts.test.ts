@@ -4,6 +4,34 @@ vi.mock("@/configuration/releaseProfile", async (importOriginal) => ({
 }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import QrlStore from "./qrlStore";
+import Web3 from "@theqrl/web3";
+
+const { sign, transfer } = vi.hoisted(() => ({
+  sign: vi.fn<
+    () => Promise<{ transactionHash: string; rawTransaction: string }>
+  >(),
+  transfer: vi.fn(() => ({
+    estimateGas: () => Promise.resolve(45000n),
+    encodeABI: () => "0xencoded",
+  })),
+}));
+
+vi.mock("@theqrl/web3", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@theqrl/web3")>();
+  class Contract {
+    methods = { transfer };
+  }
+  return {
+    ...actual,
+    default: class {
+      qrl = {
+        Contract,
+        getTransactionCount: () => Promise.resolve(0n),
+        accounts: { signTransaction: sign },
+      };
+    },
+  };
+});
 
 vi.mock("@/functions/getHexSeedFromMnemonic", () => ({
   getHexSeedFromMnemonic: () => "test-seed",
@@ -11,6 +39,13 @@ vi.mock("@/functions/getHexSeedFromMnemonic", () => ({
 
 describe("amount conversion at the signing boundary", () => {
   beforeEach(() => {
+    sign
+      .mockReset()
+      .mockResolvedValue({
+        transactionHash: "0xhash",
+        rawTransaction: "0xraw",
+      });
+    transfer.mockClear();
     vi.spyOn(QrlStore.prototype, "initializeBlockchain").mockResolvedValue(
       undefined,
     );
@@ -29,14 +64,7 @@ describe("amount conversion at the signing boundary", () => {
     "signs native value %s using the exact original decimal string",
     async (amount, baseUnits) => {
       const store = new QrlStore();
-      const sign = vi.fn(async () => ({
-        transactionHash: "0xhash",
-        rawTransaction: "0xraw",
-      }));
-      store.qrlInstance = {
-        getTransactionCount: async () => 0n,
-        accounts: { signTransaction: sign },
-      } as never;
+      store.qrlInstance = new Web3().qrl;
       const result = await store.signNativeToken(
         "from",
         "to",
@@ -59,22 +87,7 @@ describe("amount conversion at the signing boundary", () => {
     "uses exact token base units for both estimation and signing of %s",
     async (amount, decimals, baseUnits) => {
       const store = new QrlStore();
-      const transfer = vi.fn(() => ({
-        estimateGas: async () => 45000n,
-        encodeABI: () => "0xencoded",
-      }));
-      class Contract {
-        methods = { transfer };
-      }
-      const sign = vi.fn(async () => ({
-        transactionHash: "0xhash",
-        rawTransaction: "0xraw",
-      }));
-      store.qrlInstance = {
-        Contract,
-        getTransactionCount: async () => 0n,
-        accounts: { signTransaction: sign },
-      } as never;
+      store.qrlInstance = new Web3().qrl;
       await store.getZrc20TokenGas("from", "to", amount, "contract", decimals);
       const result = await store.signZrc20Token(
         "from",
@@ -97,15 +110,7 @@ describe("amount conversion at the signing boundary", () => {
 
   it("refuses excessive token precision before creating transfer calldata or signing", async () => {
     const store = new QrlStore();
-    const transfer = vi.fn();
-    class Contract {
-      methods = { transfer };
-    }
-    const sign = vi.fn();
-    store.qrlInstance = {
-      Contract,
-      accounts: { signTransaction: sign },
-    } as never;
+    store.qrlInstance = new Web3().qrl;
     const result = await store.signZrc20Token(
       "from",
       "to",

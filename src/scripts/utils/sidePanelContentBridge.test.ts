@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
+
 import { EXTENSION_MESSAGES } from "../constants/streamConstants";
 import { handleSidePanelOpenRequest } from "./sidePanelContentBridge";
+
+const sendMessage = vi.spyOn(browser.runtime, "sendMessage");
 
 const request = (nonce: unknown = "nonce-1") => ({
   name: EXTENSION_MESSAGES.REQUEST_OPEN_SIDE_PANEL,
@@ -18,7 +21,7 @@ const setUserActivation = (isActive: boolean | undefined) => {
 describe("handleSidePanelOpenRequest", () => {
   beforeEach(() => {
     setUserActivation(true);
-    vi.mocked(browser.runtime.sendMessage).mockResolvedValue(undefined);
+    sendMessage.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -28,7 +31,7 @@ describe("handleSidePanelOpenRequest", () => {
   it("forwards the gesture from the frame that holds it", () => {
     expect(handleSidePanelOpenRequest(request(), { id: "mock-id" })).toBe(true);
 
-    expect(browser.runtime.sendMessage).toHaveBeenCalledWith({
+    expect(sendMessage).toHaveBeenCalledWith({
       name: EXTENSION_MESSAGES.OPEN_SIDE_PANEL,
       nonce: "nonce-1",
     });
@@ -40,7 +43,7 @@ describe("handleSidePanelOpenRequest", () => {
     expect(handleSidePanelOpenRequest(request(), { id: "mock-id" })).toBe(
       false,
     );
-    expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("stays silent where userActivation is unavailable", () => {
@@ -49,12 +52,12 @@ describe("handleSidePanelOpenRequest", () => {
     expect(handleSidePanelOpenRequest(request(), { id: "mock-id" })).toBe(
       false,
     );
-    expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("ignores a request from another extension", () => {
     expect(handleSidePanelOpenRequest(request(), { id: "other" })).toBe(false);
-    expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("ignores malformed messages", () => {
@@ -62,13 +65,29 @@ describe("handleSidePanelOpenRequest", () => {
     expect(handleSidePanelOpenRequest({ name: "SOMETHING_ELSE" })).toBe(false);
     expect(handleSidePanelOpenRequest(request(42))).toBe(false);
     expect(handleSidePanelOpenRequest(request(""))).toBe(false);
-    expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
+    expect(handleSidePanelOpenRequest(Object.assign([], request()))).toBe(
+      false,
+    );
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
+  it.each([null, {}, { isActive: "true" }, { isActive: 1 }])(
+    "requires a boolean active gesture (%j)",
+    (activation) => {
+      Object.defineProperty(navigator, "userActivation", {
+        value: activation,
+        configurable: true,
+      });
+
+      expect(handleSidePanelOpenRequest(request(), { id: "mock-id" })).toBe(
+        false,
+      );
+      expect(sendMessage).not.toHaveBeenCalled();
+    },
+  );
+
   it("swallows a send failure so the worker can fall back", () => {
-    vi.mocked(browser.runtime.sendMessage).mockRejectedValue(
-      new Error("no receiving end"),
-    );
+    sendMessage.mockRejectedValue(new Error("no receiving end"));
 
     expect(() =>
       handleSidePanelOpenRequest(request(), { id: "mock-id" }),

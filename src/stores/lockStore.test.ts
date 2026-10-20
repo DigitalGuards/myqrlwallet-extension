@@ -1,40 +1,53 @@
 import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
 const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { KeyStore, Web3BaseWalletAccount } from "@theqrl/web3";
 
-// ── Plain object stores (hoisting-safe) ────────────────────────────
-const localStore: Record<string, any> = {};
-const sessionStore: Record<string, any> = {};
+type StorageListener = (
+  changes: Record<string, unknown>,
+  areaName: string,
+) => void;
 
-const { mockSendMessage } = vi.hoisted(() => ({
-  mockSendMessage: vi.fn(() => Promise.resolve({} as any)),
-}));
+type TestPort = {
+  onDisconnect: { addListener: (listener: () => void) => void };
+  disconnect: () => void;
+};
 
-vi.mock("webextension-polyfill", () => ({
-  __esModule: true,
-  default: {
+type RuntimeMessage = { name: string; data?: unknown };
+
+// In-memory stores (hoisting-safe).
+const localStore = new Map<string, unknown>();
+const sessionStore = new Map<string, unknown>();
+
+const { mockSendMessage, mockBrowser } = vi.hoisted(() => {
+  const mockSendMessage = vi.fn<(_message: unknown) => Promise<unknown>>(() =>
+    Promise.resolve({}),
+  );
+  const mockBrowser = {
     storage: {
       local: {
         get: vi.fn((key: string | null) =>
           Promise.resolve(
             key === null
-              ? { ...localStore }
-              : key in localStore
-                ? { [key]: localStore[key] }
+              ? Object.fromEntries(localStore)
+              : localStore.has(key)
+                ? { [key]: localStore.get(key) }
                 : {},
           ),
         ),
-        set: vi.fn((data: Record<string, any>) => {
-          Object.assign(localStore, data);
+        set: vi.fn((data: Record<string, unknown>) => {
+          for (const [key, value] of Object.entries(data)) {
+            localStore.set(key, value);
+          }
           return Promise.resolve();
         }),
         remove: vi.fn((key: string | string[]) => {
           for (const item of Array.isArray(key) ? key : [key])
-            delete localStore[item];
+            localStore.delete(item);
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
-          for (const k of Object.keys(localStore)) delete localStore[k];
+          localStore.clear();
           return Promise.resolve();
         }),
       },
@@ -42,49 +55,75 @@ vi.mock("webextension-polyfill", () => ({
         get: vi.fn((key: string | null) =>
           Promise.resolve(
             key === null
-              ? { ...sessionStore }
-              : key in sessionStore
-                ? { [key]: sessionStore[key] }
+              ? Object.fromEntries(sessionStore)
+              : sessionStore.has(key)
+                ? { [key]: sessionStore.get(key) }
                 : {},
           ),
         ),
-        set: vi.fn((data: Record<string, any>) => {
-          Object.assign(sessionStore, data);
+        set: vi.fn((data: Record<string, unknown>) => {
+          for (const [key, value] of Object.entries(data)) {
+            sessionStore.set(key, value);
+          }
           return Promise.resolve();
         }),
         remove: vi.fn((key: string | string[]) => {
           for (const item of Array.isArray(key) ? key : [key])
-            delete sessionStore[item];
+            sessionStore.delete(item);
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
-          for (const k of Object.keys(sessionStore)) delete sessionStore[k];
+          sessionStore.clear();
           return Promise.resolve();
         }),
       },
-      onChanged: { addListener: vi.fn() },
+      onChanged: { addListener: vi.fn<(listener: StorageListener) => void>() },
     },
     runtime: {
       sendMessage: mockSendMessage,
-      connect: vi.fn(() => ({
+      connect: vi.fn<() => TestPort>(() => ({
         onDisconnect: { addListener: vi.fn() },
         disconnect: vi.fn(),
       })),
     },
-  },
+  };
+  return { mockSendMessage, mockBrowser };
+});
+
+vi.mock("webextension-polyfill", () => ({
+  __esModule: true,
+  default: mockBrowser,
 }));
 
 vi.mock("@theqrl/web3", () => ({
-  Web3BaseWalletAccount: class {},
+  Web3BaseWalletAccount: vi.fn(),
 }));
 
-const clearStore = (store: Record<string, any>) => {
-  for (const k of Object.keys(store)) delete store[k];
+const clearStore = (store: Map<string, unknown>) => {
+  store.clear();
 };
+
+const isRuntimeMessage = (value: unknown): value is RuntimeMessage =>
+  typeof value === "object" &&
+  value !== null &&
+  !Array.isArray(value) &&
+  "name" in value &&
+  typeof value.name === "string";
+
+const messagesSent = () =>
+  mockSendMessage.mock.calls.map(([message]) => {
+    if (!isRuntimeMessage(message)) {
+      throw new Error("Expected a named runtime message");
+    }
+    return message;
+  });
 
 import browser from "webextension-polyfill";
 import type { DecryptedKeyType } from "@/scripts/lockManager/lockManager";
 import { LEGACY_QRL_ADDRESS_MIGRATION_ERROR } from "@/utilities/addressUtil";
+import StorageUtil, {
+  KeystoreStorageCorruptError,
+} from "@/utilities/storageUtil";
 
 describe("LockStore – readLockState reflects the SW directly", () => {
   // No client-side resend or timestamp comparison any more (F4): decrypted
@@ -121,8 +160,8 @@ describe("LockStore – readLockState reflects the SW directly", () => {
     await store.readLockState();
 
     expect(store.isLocked).toBe(true);
-    const setKeysCalls = mockSendMessage.mock.calls.filter(
-      (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
+    const setKeysCalls = messagesSent().filter(
+      (message) => message.name === "SET_DECRYPTED_KEYS",
     );
     expect(setKeysCalls).toHaveLength(0);
   });
@@ -173,8 +212,7 @@ describe("LockStore – destructive paths", () => {
     return store;
   }
 
-  const namesSent = () =>
-    mockSendMessage.mock.calls.map((call: any) => call[0]?.name);
+  const namesSent = () => messagesSent().map((message) => message.name);
 
   describe("resetWallet", () => {
     it("delegates the wipe to the service worker", async () => {
@@ -192,16 +230,23 @@ describe("LockStore – destructive paths", () => {
       // still clear it here too when the SW cannot be reached to do its
       // own authoritative wipe.
       const store = await createLockStore();
-      sessionStore[profileStorageKey("keepAlive")] = Date.now();
-      localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
-        { address: "qaaa" },
-      ]);
+      sessionStore.set(profileStorageKey("keepAlive"), Date.now());
+      localStore.set(
+        profileStorageKey("KEYSTORES"),
+        JSON.stringify([{ address: "qaaa" }]),
+      );
+      const unrelatedLocalData = { label: "local data" };
+      const unrelatedSessionData = { label: "session data" };
+      localStore.set("UNRELATED_DATA", unrelatedLocalData);
+      sessionStore.set("UNRELATED_DATA", unrelatedSessionData);
       mockSendMessage.mockRejectedValue(new Error("SW not reachable"));
 
       await store.resetWallet();
 
-      expect(sessionStore[profileStorageKey("keepAlive")]).toBeUndefined();
-      expect(localStore[profileStorageKey("KEYSTORES")]).toBeUndefined();
+      expect(sessionStore.get(profileStorageKey("keepAlive"))).toBeUndefined();
+      expect(localStore.get(profileStorageKey("KEYSTORES"))).toBeUndefined();
+      expect(localStore.get("UNRELATED_DATA")).toBe(unrelatedLocalData);
+      expect(sessionStore.get("UNRELATED_DATA")).toBe(unrelatedSessionData);
     });
 
     it("writes the LOCKED timestamp after the wipe, not before", async () => {
@@ -214,7 +259,9 @@ describe("LockStore – destructive paths", () => {
       await store.resetWallet();
 
       expect(
-        typeof localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")],
+        typeof localStore.get(
+          profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP"),
+        ),
       ).toBe("number");
     });
   });
@@ -244,10 +291,10 @@ describe("LockStore – destructive paths", () => {
 
       await store.removeAccountKey(OTHER_KEY.address);
 
-      const scrub: any = mockSendMessage.mock.calls.find(
-        (call: any) => call[0]?.name === "LOCK_MANAGER_REMOVE_ACCOUNT_KEY",
+      const scrub = messagesSent().find(
+        (message) => message.name === "LOCK_MANAGER_REMOVE_ACCOUNT_KEY",
       );
-      expect(scrub?.[0]?.data).toBe(OTHER_KEY.address);
+      expect(scrub?.data).toBe(OTHER_KEY.address);
     });
 
     it("throws when the service worker cannot be reached", async () => {
@@ -274,7 +321,7 @@ describe("LockStore – destructive paths", () => {
       await store.lock();
 
       expect(
-        localStore[profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")],
+        localStore.get(profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")),
       ).toBeUndefined();
       expect(store.isLocked).toBe(true);
     });
@@ -297,19 +344,20 @@ describe("LockStore – storage listener ignores automated traffic (F2)", () => 
     new module.default();
     await new Promise((r) => setTimeout(r, 300));
 
-    const addListenerMock = browser.storage.onChanged.addListener as any;
+    const addListenerMock = mockBrowser.storage.onChanged.addListener;
     expect(addListenerMock).toHaveBeenCalledTimes(1);
-    return addListenerMock.mock.calls[0][0] as (
-      changes: Record<string, unknown>,
-      areaName: string,
-    ) => Promise<void>;
+    const registration = addListenerMock.mock.calls.at(0);
+    if (registration === undefined) {
+      throw new Error("Expected a storage listener registration");
+    }
+    return registration[0];
   }
 
   it("does not call readLockState for an automated keepAlive-only session write", async () => {
     const listener = await createLockStoreAndGetStorageListener();
     mockSendMessage.mockClear();
 
-    await listener(
+    listener(
       { [profileStorageKey("keepAlive")]: { newValue: Date.now() } },
       "session",
     );
@@ -321,7 +369,7 @@ describe("LockStore – storage listener ignores automated traffic (F2)", () => 
     const listener = await createLockStoreAndGetStorageListener();
     mockSendMessage.mockClear();
 
-    await listener(
+    listener(
       { [profileStorageKey("DAPP_TX_WATCHES")]: { newValue: [] } },
       "session",
     );
@@ -336,7 +384,7 @@ describe("LockStore – storage listener ignores automated traffic (F2)", () => 
     const listener = await createLockStoreAndGetStorageListener();
     mockSendMessage.mockClear();
 
-    await listener(
+    listener(
       { [profileStorageKey("_LM_CACHED_KEYS")]: { newValue: undefined } },
       "session",
     );
@@ -349,7 +397,7 @@ describe("LockStore – storage listener ignores automated traffic (F2)", () => 
     mockSendMessage.mockClear();
     mockSendMessage.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
 
-    await listener(
+    listener(
       { [profileStorageKey("SOME_FUTURE_KEY")]: { newValue: "x" } },
       "session",
     );
@@ -362,7 +410,7 @@ describe("LockStore – storage listener ignores automated traffic (F2)", () => 
     mockSendMessage.mockClear();
     mockSendMessage.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
 
-    await listener(
+    listener(
       { [profileStorageKey("LOCK_MANAGER_LOCKED_TIMESTAMP")]: { newValue: 1 } },
       "local",
     );
@@ -419,8 +467,8 @@ describe("LockStore – throttled user-activity ping (F2)", () => {
     document.dispatchEvent(new Event("pointerdown"));
     document.dispatchEvent(new Event("keydown"));
 
-    const activityPings = mockSendMessage.mock.calls.filter(
-      (call: any) => call[0]?.name === "LOCK_MANAGER_USER_ACTIVITY",
+    const activityPings = messagesSent().filter(
+      (message) => message.name === "LOCK_MANAGER_USER_ACTIVITY",
     );
     expect(activityPings).toHaveLength(1);
   });
@@ -440,7 +488,7 @@ describe("LockStore – throttled user-activity ping (F2)", () => {
     new module.default();
     await new Promise((r) => setTimeout(r, 300));
     mockSendMessage.mockClear();
-    (browser.runtime.connect as any).mockClear();
+    mockBrowser.runtime.connect.mockClear();
 
     document.dispatchEvent(new Event("pointerdown"));
     document.dispatchEvent(new Event("keydown"));
@@ -448,7 +496,7 @@ describe("LockStore – throttled user-activity ping (F2)", () => {
     document.dispatchEvent(new Event("focus"));
 
     expect(mockSendMessage).not.toHaveBeenCalled();
-    expect(browser.runtime.connect).not.toHaveBeenCalled();
+    expect(mockBrowser.runtime.connect).not.toHaveBeenCalled();
   });
 
   it("sends USER_ACTIVITY on a mouse wheel/scroll gesture (N3)", async () => {
@@ -509,8 +557,8 @@ describe("LockStore – throttled user-activity ping (F2)", () => {
 
     document.dispatchEvent(new Event("pointerdown"));
 
-    const lockPolls = mockSendMessage.mock.calls.filter(
-      (call: any) => call[0]?.name === "LOCK_MANAGER_IS_LOCKED",
+    const lockPolls = messagesSent().filter(
+      (message) => message.name === "LOCK_MANAGER_IS_LOCKED",
     );
     expect(lockPolls).toHaveLength(1);
   });
@@ -528,19 +576,21 @@ describe("LockStore – throttled user-activity ping (F2)", () => {
 
     document.dispatchEvent(new Event("pointerdown"));
 
-    const lockPolls = mockSendMessage.mock.calls.filter(
-      (call: any) => call[0]?.name === "LOCK_MANAGER_IS_LOCKED",
+    const lockPolls = messagesSent().filter(
+      (message) => message.name === "LOCK_MANAGER_IS_LOCKED",
     );
     expect(lockPolls).toHaveLength(0);
   });
 });
 
 describe("LockStore – unlock worker fan-out", () => {
-  type WorkerResponse = Record<string, unknown>;
+  type WorkerResponse = unknown;
   type WorkerBehavior = (request: {
     keystores: unknown[];
-    password: string;
-  }) => WorkerResponse | "error";
+    password?: string;
+    oldPassword?: string;
+    newPassword?: string;
+  }) => WorkerResponse;
 
   /**
    * Stub for the global Worker: each spawned instance consumes the next
@@ -558,7 +608,12 @@ describe("LockStore – unlock worker fan-out", () => {
       this.behavior = next;
       spawned += 1;
     }
-    postMessage(request: { keystores: unknown[]; password: string }) {
+    postMessage(request: {
+      keystores: unknown[];
+      password?: string;
+      oldPassword?: string;
+      newPassword?: string;
+    }) {
       queueMicrotask(() => {
         const result = this.behavior(request);
         if (result === "error") {
@@ -582,6 +637,19 @@ describe("LockStore – unlock worker fan-out", () => {
     mnemonicPhrases: "mnemonic b",
   };
 
+  const makeWorkerKeystore = (address: string, id: string): KeyStore => ({
+    address,
+    id,
+    version: 1,
+    crypto: {
+      cipher: "aes-256-gcm",
+      ciphertext: "aabb",
+      cipherparams: { iv: "1122" },
+      kdf: "argon2id",
+      kdfparams: { salt: "3344", m: 262144, t: 8, p: 1, dklen: 32 },
+    },
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     clearStore(localStore);
@@ -592,10 +660,10 @@ describe("LockStore – unlock worker fan-out", () => {
       value: 4,
       configurable: true,
     });
-    localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
-      KEYSTORE_A,
-      KEYSTORE_B,
-    ]);
+    localStore.set(
+      profileStorageKey("KEYSTORES"),
+      JSON.stringify([KEYSTORE_A, KEYSTORE_B]),
+    );
   });
 
   async function createLockStore() {
@@ -620,10 +688,12 @@ describe("LockStore – unlock worker fan-out", () => {
 
     expect(unlocked).toBe("success");
     expect(spawned).toBe(2);
-    const setKeysCall: any = mockSendMessage.mock.calls.find(
-      (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
+    const setKeysCall = messagesSent().find(
+      (message) => message.name === "SET_DECRYPTED_KEYS",
     );
-    expect(setKeysCall?.[0]?.data?.keys).toEqual([KEY_A, KEY_B]);
+    expect(setKeysCall?.data).toEqual(
+      expect.objectContaining({ keys: [KEY_A, KEY_B] }),
+    );
   });
 
   it("returns 'wrong-password' without retrying when a worker reports a wrong password", async () => {
@@ -637,14 +707,14 @@ describe("LockStore – unlock worker fan-out", () => {
 
     expect(unlocked).toBe("wrong-password");
     expect(spawned).toBe(2);
-    const setKeysCalls = mockSendMessage.mock.calls.filter(
-      (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
+    const setKeysCalls = messagesSent().filter(
+      (message) => message.name === "SET_DECRYPTED_KEYS",
     );
     expect(setKeysCalls).toHaveLength(0);
   });
 
   it("returns 'failed' (not 'wrong-password') when there are no keystores to check against (N2)", async () => {
-    localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([]);
+    localStore.set(profileStorageKey("KEYSTORES"), JSON.stringify([]));
     const store = await createLockStore();
 
     const unlocked = await store.unlock("pw");
@@ -679,15 +749,55 @@ describe("LockStore – unlock worker fan-out", () => {
   });
 
   it("requires explicit migration before decrypting a legacy-address keystore", async () => {
-    localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
-      { ...KEYSTORE_A, address: `Q${"c".repeat(40)}` },
-    ]);
+    localStore.set(
+      profileStorageKey("KEYSTORES"),
+      JSON.stringify([{ ...KEYSTORE_A, address: `Q${"c".repeat(40)}` }]),
+    );
     const store = await createLockStore();
 
     await expect(store.unlock("pw")).rejects.toThrow(
       LEGACY_QRL_ADDRESS_MIGRATION_ERROR,
     );
     expect(spawned).toBe(0);
+  });
+
+  it.each([
+    "null",
+    "{}",
+    "[null]",
+    "[{}]",
+    "not JSON",
+    JSON.stringify([{ ...KEYSTORE_A, address: "Q123" }]),
+    JSON.stringify([{ address: KEYSTORE_A.address }]),
+    JSON.stringify([{ ...KEYSTORE_A, crypto: null }]),
+    JSON.stringify([KEYSTORE_A, null]),
+  ])("preserves corrupt storage %s during password checks", async (stored) => {
+    const store = await createLockStore();
+    mockSendMessage.mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+    await store.readLockState();
+    localStore.set(profileStorageKey("KEYSTORES"), stored);
+    vi.clearAllMocks();
+
+    await expect(store.unlock("pw")).rejects.toBeInstanceOf(
+      KeystoreStorageCorruptError,
+    );
+    await expect(store.changePassword("pw", "new-pw")).rejects.toBeInstanceOf(
+      KeystoreStorageCorruptError,
+    );
+
+    expect(store.isLocked).toBe(true);
+    expect(store.hasPasswordSet).toBe(true);
+    expect(spawned).toBe(0);
+    expect(mockSendMessage).not.toHaveBeenCalled();
+    expect(localStore.get(profileStorageKey("KEYSTORES"))).toBe(stored);
+    for (const area of [
+      mockBrowser.storage.local,
+      mockBrowser.storage.session,
+    ]) {
+      expect(area.set).not.toHaveBeenCalled();
+      expect(area.remove).not.toHaveBeenCalled();
+      expect(area.clear).not.toHaveBeenCalled();
+    }
   });
 
   it("retries sequentially after an infrastructure failure and succeeds", async () => {
@@ -707,10 +817,12 @@ describe("LockStore – unlock worker fan-out", () => {
 
     expect(unlocked).toBe("success");
     expect(spawned).toBe(3);
-    const setKeysCall: any = mockSendMessage.mock.calls.find(
-      (call: any) => call[0]?.name === "SET_DECRYPTED_KEYS",
+    const setKeysCall = messagesSent().find(
+      (message) => message.name === "SET_DECRYPTED_KEYS",
     );
-    expect(setKeysCall?.[0]?.data?.keys).toEqual([KEY_A, KEY_B]);
+    expect(setKeysCall?.data).toEqual(
+      expect.objectContaining({ keys: [KEY_A, KEY_B] }),
+    );
   });
 
   it("throws a distinct error when the sequential retry also fails on infrastructure", async () => {
@@ -727,9 +839,17 @@ describe("LockStore – unlock worker fan-out", () => {
 
   it("persists upgraded keystores index-aligned with the original list", async () => {
     const store = await createLockStore();
-    const upgradedB = {
+    const upgradedB: KeyStore = {
+      version: 1,
+      id: "upgraded-b",
       address: KEYSTORE_B.address,
-      crypto: { upgraded: true },
+      crypto: {
+        cipher: "aes-256-gcm",
+        ciphertext: "ab".repeat(67),
+        cipherparams: { iv: "ab".repeat(12) },
+        kdf: "argon2id",
+        kdfparams: { m: 262144, t: 4, p: 4, dklen: 32, salt: "ab".repeat(32) },
+      },
     };
     behaviors = [
       () => ({ success: true, keys: [KEY_A], upgraded: [null] }),
@@ -739,11 +859,329 @@ describe("LockStore – unlock worker fan-out", () => {
     const unlocked = await store.unlock("pw");
 
     expect(unlocked).toBe("success");
-    expect(JSON.parse(localStore[profileStorageKey("KEYSTORES")])).toEqual([
-      KEYSTORE_A,
-      upgradedB,
+    const storedKeystores = localStore.get(profileStorageKey("KEYSTORES"));
+    if (typeof storedKeystores !== "string") {
+      throw new Error("Expected serialized keystores");
+    }
+    const keystores: unknown = JSON.parse(storedKeystores);
+    expect(keystores).toEqual([KEYSTORE_A, upgradedB]);
+  });
+
+  it.each([
+    undefined,
+    null,
+    [],
+    {},
+    { success: "true", keys: [], upgraded: [] },
+    { success: true, keys: [], upgraded: [] },
+    { success: false, wrongPassword: "true" },
+    { success: true, keys: [KEY_A], upgraded: [] },
+    {
+      success: true,
+      keys: [{ ...KEY_A, mnemonicPhrases: 1 }],
+      upgraded: [null],
+    },
+    { success: true, keys: [KEY_A], upgraded: [{}] },
+    {
+      success: true,
+      keys: [KEY_A],
+      upgraded: [makeWorkerKeystore(KEYSTORE_B.address, "wrong-account")],
+    },
+    { success: true, keys: [KEY_B, KEY_A], upgraded: [null, null] },
+  ])(
+    "rejects malformed unlock worker results without writing keys: %j",
+    async (response) => {
+      const store = await createLockStore();
+      const stored = localStore.get(profileStorageKey("KEYSTORES"));
+      behaviors = [() => response];
+      mockSendMessage.mockClear();
+      mockBrowser.storage.local.set.mockClear();
+
+      await expect(store.unlock("pw")).rejects.toThrow(/free memory/);
+
+      expect(spawned).toBe(3);
+      expect(mockSendMessage).not.toHaveBeenCalled();
+      expect(mockBrowser.storage.local.set).not.toHaveBeenCalled();
+      expect(localStore.get(profileStorageKey("KEYSTORES"))).toBe(stored);
+    },
+  );
+
+  it.each([
+    undefined,
+    null,
+    [],
+    {},
+    { success: false, wrongPassword: "true" },
+    { success: true, newKeys: [], newKeystores: [] },
+    { success: true, newKeys: [KEY_A], newKeystores: [] },
+    { success: true, newKeys: [KEY_A], newKeystores: [{}] },
+    {
+      success: true,
+      newKeys: [KEY_A],
+      newKeystores: [makeWorkerKeystore(KEYSTORE_B.address, "wrong-account")],
+    },
+    {
+      success: true,
+      newKeys: [KEY_B, KEY_A],
+      newKeystores: [
+        makeWorkerKeystore(KEYSTORE_B.address, "b"),
+        makeWorkerKeystore(KEYSTORE_A.address, "a"),
+      ],
+    },
+  ])(
+    "rejects malformed password-change results without replacing storage: %j",
+    async (response) => {
+      const store = await createLockStore();
+      const stored = localStore.get(profileStorageKey("KEYSTORES"));
+      behaviors = [() => response];
+      mockSendMessage.mockClear();
+      mockBrowser.storage.local.set.mockClear();
+
+      await expect(store.changePassword("pw", "new-pw")).resolves.toBe(
+        "failed",
+      );
+
+      expect(spawned).toBe(3);
+      expect(mockSendMessage).not.toHaveBeenCalled();
+      expect(mockBrowser.storage.local.set).not.toHaveBeenCalled();
+      expect(localStore.get(profileStorageKey("KEYSTORES"))).toBe(stored);
+    },
+  );
+
+  it("preserves password-change records and their order before installing keys", async () => {
+    const store = await createLockStore();
+    const replacementA = {
+      ...makeWorkerKeystore(KEYSTORE_A.address, "a"),
+      futureMetadata: { retained: true },
+    };
+    const replacementB = makeWorkerKeystore(KEYSTORE_B.address, "b");
+    behaviors = [
+      () => ({ success: true, newKeys: [KEY_A], newKeystores: [replacementA] }),
+      () => ({ success: true, newKeys: [KEY_B], newKeystores: [replacementB] }),
+    ];
+    mockSendMessage.mockImplementation(() => {
+      expect(localStore.get(profileStorageKey("KEYSTORES"))).toBe(
+        JSON.stringify([replacementA, replacementB]),
+      );
+      return Promise.resolve({ success: true });
+    });
+
+    await expect(store.changePassword("pw", "new-pw")).resolves.toBe("success");
+
+    expect(mockSendMessage).toHaveBeenLastCalledWith({
+      name: "SET_DECRYPTED_KEYS",
+      data: { keys: [KEY_A, KEY_B], walletPassword: "new-pw" },
+    });
+  });
+
+  it("rejects non-finite worker parameters before changing stored keystores", async () => {
+    localStore.set(
+      profileStorageKey("KEYSTORES"),
+      JSON.stringify([KEYSTORE_A]),
+    );
+    const store = await createLockStore();
+    const stored = localStore.get(profileStorageKey("KEYSTORES"));
+    const replacement = makeWorkerKeystore(KEYSTORE_A.address, "invalid-kdf");
+    replacement.crypto.kdfparams.m = NaN;
+    behaviors = [
+      () => ({
+        success: true,
+        keys: [KEY_A],
+        upgraded: [replacement],
+        newKeys: [KEY_A],
+        newKeystores: [replacement],
+      }),
+    ];
+    mockSendMessage.mockClear();
+    mockBrowser.storage.local.set.mockClear();
+
+    await expect(store.unlock("pw")).rejects.toThrow(/free memory/);
+    await expect(store.changePassword("pw", "new-pw")).resolves.toBe("failed");
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
+    expect(mockBrowser.storage.local.set).not.toHaveBeenCalled();
+    expect(localStore.get(profileStorageKey("KEYSTORES"))).toBe(stored);
+  });
+
+  it("retries malformed password-change replies sequentially and keeps the original order", async () => {
+    const store = await createLockStore();
+    const newKeystores = [
+      makeWorkerKeystore(KEYSTORE_A.address, "a"),
+      makeWorkerKeystore(KEYSTORE_B.address, "b"),
+    ];
+    behaviors = [
+      () => ({}),
+      () => ({
+        success: true,
+        newKeys: [KEY_B],
+        newKeystores: [newKeystores[1]],
+      }),
+      () => ({ success: true, newKeys: [KEY_A, KEY_B], newKeystores }),
+    ];
+
+    await expect(store.changePassword("pw", "new-pw")).resolves.toBe("success");
+
+    expect(spawned).toBe(3);
+    expect(localStore.get(profileStorageKey("KEYSTORES"))).toBe(
+      JSON.stringify(newKeystores),
+    );
+  });
+
+  it("reports a confirmed wrong password during a password change without writing", async () => {
+    const store = await createLockStore();
+    behaviors = [() => ({ success: false, wrongPassword: true })];
+    const stored = localStore.get(profileStorageKey("KEYSTORES"));
+    await expect(store.changePassword("pw", "new-pw")).resolves.toBe(
+      "wrong-password",
+    );
+    expect(spawned).toBe(2);
+    expect(localStore.get(profileStorageKey("KEYSTORES"))).toBe(stored);
+  });
+
+  it.each([undefined, null, [], {}, { isLocked: 0 }, { isLocked: "false" }])(
+    "requires an explicit unlocked acknowledgement: %j",
+    async (response) => {
+      const store = await createLockStore();
+      store.isLocked = true;
+      behaviors = [
+        () => ({ success: true, keys: [KEY_A], upgraded: [null] }),
+        () => ({ success: true, keys: [KEY_B], upgraded: [null] }),
+      ];
+      mockSendMessage
+        .mockResolvedValueOnce({ success: true })
+        .mockResolvedValueOnce(response);
+      const timestamp = vi.spyOn(StorageUtil, "updateLockStateTimeStamp");
+      try {
+        await expect(store.unlock("pw")).resolves.toBe("failed");
+        expect(store.isLocked).toBe(true);
+        expect(timestamp).not.toHaveBeenCalled();
+      } finally {
+        timestamp.mockRestore();
+      }
+    },
+  );
+
+  it("reports a failed unlock timestamp write while retaining successful verification", async () => {
+    const store = await createLockStore();
+    behaviors = [
+      () => ({ success: true, keys: [KEY_A], upgraded: [null] }),
+      () => ({ success: true, keys: [KEY_B], upgraded: [null] }),
+    ];
+    const failure = new Error("Storage unavailable");
+    const timestamp = vi
+      .spyOn(StorageUtil, "updateLockStateTimeStamp")
+      .mockRejectedValue(failure);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(store.unlock("pw")).resolves.toBe("success");
+      expect(warn).toHaveBeenCalledWith(
+        "QrlWeb3Wallet: failed to persist the unlock timestamp",
+        failure,
+      );
+    } finally {
+      timestamp.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it("persists complete password-change results and sends session keys in order", async () => {
+    const store = await createLockStore();
+    const replacement: KeyStore = {
+      version: 1,
+      id: "reencrypted-a",
+      address: KEYSTORE_A.address,
+      crypto: {
+        cipher: "aes-256-gcm",
+        ciphertext: "ab".repeat(67),
+        cipherparams: { iv: "ab".repeat(12) },
+        kdf: "argon2id",
+        kdfparams: { m: 262144, t: 4, p: 4, dklen: 32, salt: "ab".repeat(32) },
+      },
+    };
+    const second = {
+      ...replacement,
+      id: "reencrypted-b",
+      address: KEYSTORE_B.address,
+      extra: { retained: true },
+    };
+    behaviors = [
+      () => ({ success: true, newKeys: [KEY_A], newKeystores: [replacement] }),
+      () => ({ success: true, newKeys: [KEY_B], newKeystores: [second] }),
+    ];
+    const password = "néw-password".normalize("NFD");
+
+    expect(await store.changePassword("old-password", password)).toBe(
+      "success",
+    );
+
+    expect(localStore.get(profileStorageKey("KEYSTORES"))).toBe(
+      JSON.stringify([replacement, second]),
+    );
+    expect(
+      messagesSent().filter((message) => message.name === "SET_DECRYPTED_KEYS"),
+    ).toEqual([
+      {
+        name: "SET_DECRYPTED_KEYS",
+        data: {
+          keys: [KEY_A, KEY_B],
+          walletPassword: password.normalize("NFC"),
+        },
+      },
     ]);
   });
+
+  it.each([
+    { label: "missing fields", response: { success: true } },
+    {
+      label: "empty chunks",
+      response: {
+        success: true,
+        keys: [],
+        upgraded: [],
+        newKeys: [],
+        newKeystores: [],
+      },
+    },
+    {
+      label: "foreign address",
+      response: {
+        success: true,
+        keys: [KEY_B],
+        upgraded: [null],
+        newKeys: [KEY_B],
+        newKeystores: [KEYSTORE_B],
+      },
+    },
+    {
+      label: "malformed keystores",
+      response: {
+        success: true,
+        keys: [KEY_A],
+        upgraded: [KEYSTORE_A],
+        newKeys: [KEY_A],
+        newKeystores: [KEYSTORE_A],
+      },
+    },
+  ])(
+    "preserves stored keystores and session keys after $label worker replies",
+    async ({ response }) => {
+      const store = await createLockStore();
+      const stored = localStore.get(profileStorageKey("KEYSTORES"));
+      behaviors = [() => response];
+
+      await expect(store.unlock("pw")).rejects.toThrow(
+        "Unable to decrypt the wallet on this device right now.",
+      );
+      expect(await store.changePassword("pw", "new-pw")).toBe("failed");
+
+      expect(localStore.get(profileStorageKey("KEYSTORES"))).toBe(stored);
+      expect(
+        messagesSent().filter(
+          (message) => message.name === "SET_DECRYPTED_KEYS",
+        ),
+      ).toEqual([]);
+    },
+  );
 });
 
 describe("LockStore – keep-alive port only while unlocked (real-device regression fix)", () => {
@@ -765,7 +1203,7 @@ describe("LockStore – keep-alive port only while unlocked (real-device regress
 
   afterEach(() => {
     vi.useRealTimers();
-    delete (browser.runtime as any).lastError;
+    delete browser.runtime.lastError;
   });
 
   async function createLockStoreWithControllablePort(options?: {
@@ -774,7 +1212,7 @@ describe("LockStore – keep-alive port only while unlocked (real-device regress
   }) {
     const disconnectListeners: Array<() => void> = [];
     let connectCallCount = 0;
-    (browser.runtime.connect as any).mockImplementation(() => {
+    mockBrowser.runtime.connect.mockImplementation(() => {
       connectCallCount += 1;
       return {
         onDisconnect: {
@@ -794,22 +1232,23 @@ describe("LockStore – keep-alive port only while unlocked (real-device regress
     await vi.advanceTimersByTimeAsync(300);
     return {
       store,
-      fireDisconnect: () =>
-        disconnectListeners[disconnectListeners.length - 1]?.(),
+      fireDisconnect: () => {
+        disconnectListeners[disconnectListeners.length - 1]?.();
+      },
       getConnectCallCount: () => connectCallCount,
     };
   }
 
   it("reads runtime.lastError on port disconnect so it is never left unchecked", async () => {
     const { fireDisconnect } = await createLockStoreWithControllablePort();
-    (browser.runtime as any).lastError = {
+    browser.runtime.lastError = {
       message: "Could not establish connection. Receiving end does not exist.",
     };
 
     // checkForLastError() reads browser.runtime.lastError as a side effect
     // of being called at all - the assertion here is just that handling a
     // disconnect with lastError set does not throw.
-    expect(() => fireDisconnect()).not.toThrow();
+    expect(fireDisconnect).not.toThrow();
   });
 
   it("flips to locked on disconnect, with zero sendMessage or connect calls", async () => {
@@ -873,10 +1312,11 @@ describe("LockStore – keep-alive port only while unlocked (real-device regress
     const failingConnect = vi.fn(() => {
       throw new Error("Could not establish connection.");
     });
-    const workingConnect = (
-      browser.runtime.connect as any
-    ).getMockImplementation();
-    (browser.runtime.connect as any).mockImplementation(failingConnect);
+    const workingConnect = mockBrowser.runtime.connect.getMockImplementation();
+    if (workingConnect === undefined) {
+      throw new Error("Expected a connect mock implementation");
+    }
+    mockBrowser.runtime.connect.mockImplementation(failingConnect);
     mockSendMessage.mockResolvedValueOnce({
       isLocked: false,
       hasPasswordSet: true,
@@ -893,10 +1333,10 @@ describe("LockStore – keep-alive port only while unlocked (real-device regress
 
     // A fresh unlock signal starts over, and a retry that succeeds opens
     // the port.
-    (browser.runtime.connect as any).mockImplementationOnce(() => {
+    mockBrowser.runtime.connect.mockImplementationOnce(() => {
       throw new Error("Could not establish connection.");
     });
-    (browser.runtime.connect as any).mockImplementation(workingConnect);
+    mockBrowser.runtime.connect.mockImplementation(workingConnect);
     const before = getConnectCallCount();
     mockSendMessage.mockResolvedValueOnce({
       isLocked: false,
@@ -915,7 +1355,7 @@ describe("LockStore – keep-alive port only while unlocked (real-device regress
     const connect = vi.fn(() => {
       throw new Error("Could not establish connection.");
     });
-    (browser.runtime.connect as any).mockImplementation(connect);
+    mockBrowser.runtime.connect.mockImplementation(connect);
     mockSendMessage.mockResolvedValueOnce({
       isLocked: false,
       hasPasswordSet: true,
@@ -964,7 +1404,7 @@ describe("LockStore – keep-alive port only while unlocked (real-device regress
     // listener (only the other end disconnecting does) - firing it
     // manually here is just confirming there is nothing left to
     // reconnect.
-    expect(() => fireDisconnect()).not.toThrow();
+    expect(fireDisconnect).not.toThrow();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(getConnectCallCount()).toBe(afterConstruction);
   });
@@ -1004,15 +1444,16 @@ describe("LockStore – unlock still succeeds after a spurious port disconnect",
       value: 4,
       configurable: true,
     });
-    localStore[profileStorageKey("KEYSTORES")] = JSON.stringify([
-      { address: `Q${"a".repeat(128)}`, crypto: {} },
-    ]);
+    localStore.set(
+      profileStorageKey("KEYSTORES"),
+      JSON.stringify([{ address: `Q${"a".repeat(128)}`, crypto: {} }]),
+    );
   });
 
   it("unlocks against a live worker and reconnects the port", async () => {
     const disconnectListeners: Array<() => void> = [];
     let connectCallCount = 0;
-    (browser.runtime.connect as any).mockImplementation(() => {
+    mockBrowser.runtime.connect.mockImplementation(() => {
       connectCallCount += 1;
       return {
         onDisconnect: {
@@ -1039,11 +1480,14 @@ describe("LockStore – unlock still succeeds after a spurious port disconnect",
     disconnectListeners[disconnectListeners.length - 1]?.();
     expect(store.isLocked).toBe(true);
 
-    (mockSendMessage as any).mockImplementation((message: any) => {
-      if (message?.name === "SET_DECRYPTED_KEYS") {
+    mockSendMessage.mockImplementation((message) => {
+      if (!isRuntimeMessage(message)) {
+        return Promise.reject(new Error("Expected a named runtime message"));
+      }
+      if (message.name === "SET_DECRYPTED_KEYS") {
         return Promise.resolve({ success: true });
       }
-      if (message?.name === "LOCK_MANAGER_IS_LOCKED") {
+      if (message.name === "LOCK_MANAGER_IS_LOCKED") {
         return Promise.resolve({ isLocked: false, hasPasswordSet: true });
       }
       return Promise.resolve({ success: true });
@@ -1076,9 +1520,8 @@ describe("LockStore – the wallet password stays in the service worker", () => 
   }
 
   const lastMessageNamed = (name: string) =>
-    mockSendMessage.mock.calls
-      .map((call: any) => call[0])
-      .filter((message: any) => message?.name === name)
+    messagesSent()
+      .filter((message) => message.name === name)
       .pop();
 
   describe("ensureWalletPassword", () => {
@@ -1125,10 +1568,19 @@ describe("LockStore – the wallet password stays in the service worker", () => 
   });
 
   describe("encryptAccount", () => {
-    const account = {
+    const account: Web3BaseWalletAccount = {
       address: `Q${"a".repeat(128)}`,
       seed: "0xseed",
-    } as any;
+      signTransaction: vi.fn(() => {
+        throw new Error("Unexpected account.signTransaction call");
+      }),
+      sign: vi.fn(() => {
+        throw new Error("Unexpected account.sign call");
+      }),
+      encrypt: vi.fn(() => {
+        throw new Error("Unexpected account.encrypt call");
+      }),
+    };
 
     it("puts no password on the wire when the caller supplies none", async () => {
       const store = await createLockStore();
@@ -1163,4 +1615,158 @@ describe("LockStore – the wallet password stays in the service worker", () => 
       expect(lastMessageNamed("ENCRYPT_ACCOUNT")).toBeUndefined();
     });
   });
+});
+
+describe("LockStore reply boundaries", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    clearStore(localStore);
+    clearStore(sessionStore);
+    mockSendMessage
+      .mockReset()
+      .mockResolvedValue({ isLocked: true, hasPasswordSet: true });
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function createStore() {
+    const { default: LockStore } = await import("./lockStore");
+    const store = new LockStore();
+    await vi.advanceTimersByTimeAsync(50);
+    return store;
+  }
+
+  it("retries an invalid boot reply before accepting a complete lock state", async () => {
+    mockSendMessage
+      .mockResolvedValueOnce({ isLocked: false })
+      .mockResolvedValueOnce({ isLocked: false, hasPasswordSet: true });
+    const store = await createStore();
+    expect(store.isLocked).toBe(true);
+    expect(store.isLoading).toBe(true);
+    await vi.advanceTimersByTimeAsync(150);
+    expect(store.isLocked).toBe(false);
+    expect(store.hasPasswordSet).toBe(true);
+    expect(store.isLoading).toBe(false);
+    expect(store.bootAttempt).toBe(2);
+  });
+
+  it("finishes boot in the locked state when every reply is malformed", async () => {
+    mockSendMessage.mockResolvedValue({
+      isLocked: "false",
+      hasPasswordSet: false,
+    });
+    const store = await createStore();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(store.isLocked).toBe(true);
+    expect(store.hasPasswordSet).toBe(true);
+    expect(store.isLoading).toBe(false);
+    expect(mockSendMessage).toHaveBeenCalledTimes(14);
+  });
+
+  it.each([
+    undefined,
+    null,
+    [],
+    {},
+    { isLocked: false },
+    { isLocked: "false", hasPasswordSet: true },
+    { isLocked: false, hasPasswordSet: 0 },
+  ])(
+    "keeps the last confirmed lock state on a malformed poll: %j",
+    async (response) => {
+      const store = await createStore();
+      mockSendMessage.mockResolvedValueOnce(response);
+      await store.readLockState();
+      expect(store.isLocked).toBe(true);
+      expect(store.hasPasswordSet).toBe(true);
+    },
+  );
+
+  it("reports asynchronous initialization failures", async () => {
+    const failure = new Error("Storage listener unavailable");
+    mockBrowser.storage.onChanged.addListener.mockImplementationOnce(() => {
+      throw failure;
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await createStore();
+    expect(warn).toHaveBeenCalledWith(
+      "QrlWeb3Wallet: Failed to initialize the lock state",
+      failure,
+    );
+  });
+
+  it.each([undefined, null, [], {}, { isLocked: "false" }])(
+    "stays locked when the post-lock acknowledgement is malformed: %j",
+    async (response) => {
+      const store = await createStore();
+      store.isLocked = false;
+      mockSendMessage
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(response);
+      await store.lock();
+      expect(store.isLocked).toBe(true);
+    },
+  );
+
+  it.each([null, [], {}, { hasPassword: "true" }, { hasPassword: 1 }])(
+    "treats malformed password availability as unavailable: %j",
+    async (response) => {
+      const store = await createStore();
+      mockSendMessage.mockResolvedValueOnce(response);
+      await expect(store.ensureWalletPassword()).rejects.toThrow(
+        "WALLET_PASSWORD_UNAVAILABLE",
+      );
+    },
+  );
+
+  it.each([
+    undefined,
+    null,
+    [],
+    {},
+    { mnemonicPhrases: null },
+    { mnemonicPhrases: 123 },
+  ])(
+    "returns an empty mnemonic for an unusable key reply: %j",
+    async (response) => {
+      const store = await createStore();
+      mockSendMessage.mockResolvedValueOnce(response);
+      await expect(store.getMnemonicPhrases("account")).resolves.toBe("");
+    },
+  );
+
+  it("returns the requested mnemonic and preserves messaging failures", async () => {
+    const store = await createStore();
+    mockSendMessage.mockResolvedValueOnce({
+      address: "account",
+      mnemonicPhrases: "one two three",
+    });
+    await expect(store.getMnemonicPhrases("account")).resolves.toBe(
+      "one two three",
+    );
+    expect(mockSendMessage).toHaveBeenLastCalledWith({
+      name: "GET_DECRYPTED_KEY_FOR_ADDRESS",
+      data: "account",
+    });
+    const failure = new Error("Worker unavailable");
+    mockSendMessage.mockRejectedValueOnce(failure);
+    await expect(store.getMnemonicPhrases("account")).rejects.toBe(failure);
+  });
+
+  it.each([null, undefined, {}, { seed: null }, { seed: 123 }])(
+    "keeps an unusable account seed out of the encryption message: %j",
+    async (account) => {
+      const store = await createStore();
+      await store.encryptAccount(account);
+      expect(mockSendMessage).toHaveBeenLastCalledWith({
+        name: "ENCRYPT_ACCOUNT",
+        data: { seed: "" },
+      });
+    },
+  );
 });

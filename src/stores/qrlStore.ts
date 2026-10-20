@@ -1,7 +1,12 @@
+import { blockchainView } from "@/utilities/storageViews";
 import {
   BlockchainDataType,
   DEFAULT_BLOCKCHAIN,
 } from "@/configuration/qrlBlockchainConfig";
+import {
+  isAddQrlChainParameters,
+  type AddedBlockchainData,
+} from "@/utilities/approvalGuards";
 import { NATIVE_TOKEN_UNITS_OF_GAS } from "@/constants/nativeToken";
 import {
   ZRC_721_CONTRACT_ABI,
@@ -26,6 +31,7 @@ import type { GasFeeOverrides } from "@/types/gasFee";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { toCanonicalQrlAddress } from "@/utilities/addressUtil";
 import StorageUtil from "@/utilities/storageUtil";
+import { isRecord } from "@/utilities/storageGuards";
 import { assertV3Network, V3_CHAIN_ID } from "@/configuration/releaseProfile";
 import Web3, { Web3QRLInterface, utils } from "@theqrl/web3";
 import { action, makeAutoObservable, observable, runInAction } from "mobx";
@@ -43,6 +49,32 @@ type QrlAccountsType = {
   accounts: QrlAccountType[];
   isLoading: boolean;
 };
+
+const isString = (value: unknown): value is string => typeof value === "string";
+const isBoolean = (value: unknown): value is boolean =>
+  typeof value === "boolean";
+const isUnsignedBigInt = (value: unknown): value is bigint =>
+  typeof value === "bigint" && value >= 0n;
+
+const readProviderValue = <T>(
+  value: unknown,
+  isValid: (value: unknown) => value is T,
+): T => {
+  if (!isValid(value)) throw new Error("Invalid provider response");
+  return value;
+};
+
+const isRpcQuantity = (value: unknown): value is string | number | bigint =>
+  isUnsignedBigInt(value) ||
+  (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) ||
+  (typeof value === "string" && /^(?:0x[0-9a-f]+|[0-9]+)$/i.test(value));
+
+const isSignedTransaction = (
+  value: unknown,
+): value is { transactionHash: string; rawTransaction: string } =>
+  isRecord(value) &&
+  isString(value.transactionHash) &&
+  isString(value.rawTransaction);
 
 /**
  * Owned-token lookup result. `failed` separates "this account owns nothing
@@ -211,7 +243,9 @@ class QrlStore {
       getNftTokenUri: action.bound,
       signNftTransfer: action.bound,
     });
-    this.initializeBlockchain();
+    this.initializeBlockchain().catch((error: unknown) => {
+      console.error("[initializeBlockchain] Error:", error);
+    });
   }
 
   async initializeBlockchain() {
@@ -275,7 +309,9 @@ class QrlStore {
       // Backoff while the node is down: an unreachable endpoint gets
       // exponentially fewer calls, up to MAX_POLL_BACKOFF_MS apart.
       if (Date.now() < this.nextPollAllowedAt) return;
-      void this.pollBalancesAndConnection();
+      this.pollBalancesAndConnection().catch((error: unknown) => {
+        console.error("[pollBalancesAndConnection] Error:", error);
+      });
     }, BALANCE_POLL_INTERVAL_MS);
   }
 
@@ -445,11 +481,14 @@ class QrlStore {
       const accountsWithBalance: QrlAccountsType["accounts"] =
         await Promise.all(
           storedAccountsList.map(async (account) => {
-            const accountBalance =
-              (await withTimeout(
-                Promise.resolve(provider.getBalance(account)),
-                RPC_READ_TIMEOUT_MS,
-              )) ?? BigInt(0);
+            const balance: unknown = await withTimeout(
+              Promise.resolve(provider.getBalance(account)),
+              RPC_READ_TIMEOUT_MS,
+            );
+            const accountBalance = readProviderValue(
+              balance ?? 0n,
+              isUnsignedBigInt,
+            );
             return {
               accountAddress: account,
               accountBalance: getOptimalTokenBalance(
@@ -496,11 +535,14 @@ class QrlStore {
     this.initProgress = progress;
   }
 
-  async addChain(chainData: BlockchainDataType) {
-    const newChain: BlockchainDataType = {
+  async addChain(chainData: BlockchainDataType | AddedBlockchainData) {
+    if (!isAddQrlChainParameters(chainData)) {
+      throw new Error("Invalid blockchain data");
+    }
+    const newChain = {
       ...chainData,
-      chainId: chainData?.chainId?.trim(),
-      chainName: chainData?.chainName?.trim()?.substring(0, 100),
+      chainId: chainData.chainId.trim(),
+      chainName: chainData.chainName.trim().substring(0, 100),
     };
     const blockchains = await StorageUtil.getAllBlockChains();
     const chainFound = !!blockchains.find(
@@ -510,14 +552,17 @@ class QrlStore {
   }
 
   async editChain(chainData: BlockchainDataType) {
+    if (!isAddQrlChainParameters(chainData)) {
+      throw new Error("Invalid blockchain data");
+    }
     const editedChain = {
       ...chainData,
-      chainId: chainData?.chainId?.trim(),
-      chainName: chainData?.chainName?.trim()?.substring(0, 100),
+      chainId: chainData.chainId.trim(),
+      chainName: chainData.chainName.trim().substring(0, 100),
     };
     const blockchains = await StorageUtil.getAllBlockChains();
-    const updatedChainList: BlockchainDataType[] = blockchains.map((chain) =>
-      chain.chainId.toLowerCase() === editedChain?.chainId?.toLowerCase()
+    const updatedChainList = blockchains.map((chain) =>
+      chain.chainId.toLowerCase() === editedChain.chainId.toLowerCase()
         ? { ...chain, ...editedChain }
         : chain,
     );
@@ -525,7 +570,7 @@ class QrlStore {
   }
 
   async refreshBlockchainData() {
-    const blockchain = await StorageUtil.getActiveBlockChain();
+    const blockchain = blockchainView(await StorageUtil.getActiveBlockChain());
     this.qrlConnection = { ...this.qrlConnection, blockchain };
   }
 
@@ -613,7 +658,7 @@ class QrlStore {
     await StorageUtil.setKeystores(remainingKeystores);
 
     const storedActiveAccount = await StorageUtil.getActiveAccount();
-    if (storedActiveAccount?.toLowerCase() === target) {
+    if (storedActiveAccount.toLowerCase() === target) {
       await this.setActiveAccount(remainingAccounts[0]);
     } else {
       await this.fetchAccounts();
@@ -657,11 +702,11 @@ class QrlStore {
       // connection and then stalls used to leave this hanging on the
       // provider's own 30 s ceiling, holding isProbing true and the Retry
       // control disabled for the whole wait.
-      const isListening =
-        (await withTimeout(
-          Promise.resolve(provider?.net.isListening()),
-          RPC_READ_TIMEOUT_MS,
-        )) ?? false;
+      const listening: unknown = await withTimeout(
+        Promise.resolve(provider?.net.isListening()),
+        RPC_READ_TIMEOUT_MS,
+      );
+      const isListening = readProviderValue(listening ?? false, isBoolean);
       runInAction(() => {
         if (!isCurrent()) return;
         this.qrlConnection = {
@@ -700,8 +745,11 @@ class QrlStore {
       const accountsWithBalance: QrlAccountsType["accounts"] =
         await Promise.all(
           storedAccountsList.map(async (account) => {
-            const accountBalance =
-              (await provider?.getBalance(account)) ?? BigInt(0);
+            const balance: unknown = await provider?.getBalance(account);
+            const accountBalance = readProviderValue(
+              balance ?? 0n,
+              isUnsignedBigInt,
+            );
             const convertedAccountBalance = getOptimalTokenBalance(
               utils.fromPlanck(accountBalance, "quanta"),
             );
@@ -773,13 +821,14 @@ class QrlStore {
 
   private async getBaseTip(): Promise<bigint> {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tip = await (this.qrlInstance as any)?.requestManager?.send({
+      const tip: unknown = await this.qrlInstance?.requestManager.send({
         method: "qrl_maxPriorityFeePerGas",
         params: [],
       });
-      const parsed = BigInt(tip);
-      if (parsed > BigInt(0)) return parsed;
+      if (isRpcQuantity(tip)) {
+        const parsed = BigInt(tip);
+        if (parsed > BigInt(0)) return parsed;
+      }
     } catch {
       // RPC method not supported - fall back to default
     }
@@ -787,8 +836,14 @@ class QrlStore {
   }
 
   async getGasFeeData(overrides?: GasFeeOverrides) {
-    const latestBlock = await this.qrlInstance?.getBlock("latest");
-    const baseFeePerGas = latestBlock?.baseFeePerGas ?? BigInt(0);
+    const latestBlock: unknown = await this.qrlInstance?.getBlock("latest");
+    if (latestBlock != null && !isRecord(latestBlock)) {
+      throw new Error("Invalid block response");
+    }
+    const baseFeePerGas = readProviderValue(
+      latestBlock?.baseFeePerGas ?? 0n,
+      isUnsignedBigInt,
+    );
 
     if (overrides?.tier === "advanced") {
       const maxPriorityFeePerGas = overrides.maxPriorityFeePerGas ?? BigInt(0);
@@ -890,15 +945,15 @@ class QrlStore {
         chainId: V3_CHAIN_ID,
       };
       await this.assertSigningNetwork();
-      const signedTransaction =
+      const signedTransaction: unknown =
         await this.qrlInstance?.accounts.signTransaction(
           transactionObject,
           getHexSeedFromMnemonic(mnemonicPhrases),
         );
-      if (signedTransaction) {
+      if (isSignedTransaction(signedTransaction)) {
         result = {
-          transactionHash: signedTransaction.transactionHash?.toString(),
-          rawTransaction: signedTransaction.rawTransaction?.toString(),
+          transactionHash: signedTransaction.transactionHash,
+          rawTransaction: signedTransaction.rawTransaction,
           error: "",
           nonce: Number(nonce),
           maxFeePerGas: maxFeePerGas.toString(),
@@ -911,7 +966,7 @@ class QrlStore {
     } catch (error) {
       result = {
         ...result,
-        error: `Transaction could not be signed. ${error}`,
+        error: `Transaction could not be signed. ${String(error)}`,
       };
     }
 
@@ -926,23 +981,36 @@ class QrlStore {
 
     const contractAbi = ZRC_20_CONTRACT_ABI;
 
-    if (this.qrlInstance && this.qrlInstance.Contract) {
+    if (this.qrlInstance) {
       try {
         const contract = new this.qrlInstance.Contract(
           contractAbi,
           contractAddress,
         );
-        const name = (await contract.methods.name().call()) as string;
-        const symbol = (await contract.methods.symbol().call()) as string;
-        const decimals = (await contract.methods.decimals().call()) as bigint;
-        const totalSupplyUnformatted = (await contract.methods
-          .totalSupply()
-          .call()) as bigint;
+        const name = readProviderValue(
+          await contract.methods.name().call(),
+          isString,
+        );
+        const symbol = readProviderValue(
+          await contract.methods.symbol().call(),
+          isString,
+        );
+        const decimals = readProviderValue(
+          await contract.methods.decimals().call(),
+          isUnsignedBigInt,
+        );
+        const totalSupplyUnformatted = readProviderValue(
+          await contract.methods.totalSupply().call(),
+          isUnsignedBigInt,
+        );
         const totalSupply =
           Number(totalSupplyUnformatted) / Math.pow(10, Number(decimals));
-        const balanceUnformatted = (await contract.methods
-          .balanceOf(this.activeAccount.accountAddress)
-          .call()) as bigint;
+        const balanceUnformatted = readProviderValue(
+          await contract.methods
+            .balanceOf(this.activeAccount.accountAddress)
+            .call(),
+          isUnsignedBigInt,
+        );
         const balance =
           Number(balanceUnformatted) / Math.pow(10, Number(decimals));
         return {
@@ -988,24 +1056,34 @@ class QrlStore {
       error: string;
     } = { error: "" };
 
-    if (this.qrlInstance && this.qrlInstance.Contract) {
+    if (this.qrlInstance) {
       try {
         const contract = new this.qrlInstance.Contract(
           ZRC_721_CONTRACT_ABI,
           contractAddress,
         );
 
-        const isErc721 = (await contract.methods
-          .supportsInterface(ERC_721_INTERFACE_ID)
-          .call()) as boolean;
+        const isErc721 = readProviderValue(
+          await contract.methods.supportsInterface(ERC_721_INTERFACE_ID).call(),
+          isBoolean,
+        );
 
         if (isErc721) {
-          const name = (await contract.methods.name().call()) as string;
-          const symbol = (await contract.methods.symbol().call()) as string;
+          const name = readProviderValue(
+            await contract.methods.name().call(),
+            isString,
+          );
+          const symbol = readProviderValue(
+            await contract.methods.symbol().call(),
+            isString,
+          );
           const balance = Number(
-            (await contract.methods
-              .balanceOf(this.activeAccount.accountAddress)
-              .call()) as bigint,
+            readProviderValue(
+              await contract.methods
+                .balanceOf(this.activeAccount.accountAddress)
+                .call(),
+              isUnsignedBigInt,
+            ),
           );
           return {
             ...result,
@@ -1015,20 +1093,29 @@ class QrlStore {
 
         // Not ERC-721: probe for ERC-1155. name()/symbol() are not part
         // of the 1155 standard, so both are best-effort.
-        const isErc1155 = (await contract.methods
-          .supportsInterface(ERC_1155_INTERFACE_ID)
-          .call()) as boolean;
+        const isErc1155 = readProviderValue(
+          await contract.methods
+            .supportsInterface(ERC_1155_INTERFACE_ID)
+            .call(),
+          isBoolean,
+        );
 
         if (isErc1155) {
           let name = "";
           let symbol = "";
           try {
-            name = (await contract.methods.name().call()) as string;
+            name = readProviderValue(
+              await contract.methods.name().call(),
+              isString,
+            );
           } catch {
             // Optional in ERC-1155.
           }
           try {
-            symbol = (await contract.methods.symbol().call()) as string;
+            symbol = readProviderValue(
+              await contract.methods.symbol().call(),
+              isString,
+            );
           } catch {
             // Optional in ERC-1155.
           }
@@ -1070,7 +1157,7 @@ class QrlStore {
     contractAddress: string,
     standard: NFTStandard = "ZRC721",
   ): Promise<OwnedNftTokensResult> {
-    if (!this.qrlInstance || !this.qrlInstance.Contract) {
+    if (!this.qrlInstance) {
       return { tokens: [], failed: true };
     }
     const owner = this.activeAccount.accountAddress;
@@ -1087,15 +1174,21 @@ class QrlStore {
       );
 
       const balance = Number(
-        (await contract.methods.balanceOf(owner).call()) as bigint,
+        readProviderValue(
+          await contract.methods.balanceOf(owner).call(),
+          isUnsignedBigInt,
+        ),
       );
       if (balance === 0) return { tokens: [], failed: false };
 
       let isEnumerable = false;
       try {
-        isEnumerable = (await contract.methods
-          .supportsInterface(ERC_721_ENUMERABLE_INTERFACE_ID)
-          .call()) as boolean;
+        isEnumerable = readProviderValue(
+          await contract.methods
+            .supportsInterface(ERC_721_ENUMERABLE_INTERFACE_ID)
+            .call(),
+          isBoolean,
+        );
       } catch {
         isEnumerable = false;
       }
@@ -1103,9 +1196,10 @@ class QrlStore {
       if (isEnumerable) {
         const tokens: OwnedNftToken[] = [];
         for (let i = 0; i < balance; i++) {
-          const tokenId = (await contract.methods
-            .tokenOfOwnerByIndex(owner, i)
-            .call()) as bigint;
+          const tokenId = readProviderValue(
+            await contract.methods.tokenOfOwnerByIndex(owner, i).call(),
+            isUnsignedBigInt,
+          );
           tokens.push({ tokenId: tokenId.toString() });
         }
         return { tokens, failed: false };
@@ -1121,9 +1215,10 @@ class QrlStore {
       const tokens: OwnedNftToken[] = [];
       for (const candidate of discovered) {
         try {
-          const currentOwner = (await contract.methods
-            .ownerOf(BigInt(candidate.tokenId))
-            .call()) as string;
+          const currentOwner = readProviderValue(
+            await contract.methods.ownerOf(BigInt(candidate.tokenId)).call(),
+            isString,
+          );
           if (currentOwner.toLowerCase() === owner.toLowerCase()) {
             tokens.push({ tokenId: candidate.tokenId });
           }
@@ -1146,7 +1241,7 @@ class QrlStore {
     contractAddress: string,
     tokenId: string,
   ): Promise<string | undefined> {
-    if (!this.qrlInstance || !this.qrlInstance.Contract) return undefined;
+    if (!this.qrlInstance) return undefined;
     const owner = this.activeAccount.accountAddress;
     if (!owner) return undefined;
     try {
@@ -1154,9 +1249,10 @@ class QrlStore {
         ZRC_1155_CONTRACT_ABI,
         contractAddress,
       );
-      const balance = (await contract.methods
-        .balanceOf(owner, BigInt(tokenId))
-        .call()) as bigint;
+      const balance = readProviderValue(
+        await contract.methods.balanceOf(owner, BigInt(tokenId)).call(),
+        isUnsignedBigInt,
+      );
       return balance.toString();
     } catch {
       return undefined;
@@ -1167,8 +1263,9 @@ class QrlStore {
     contractAddress: string,
     owner: string,
   ): Promise<OwnedNftTokensResult> {
+    if (!this.qrlInstance) return { tokens: [], failed: true };
     try {
-      const contract = new this.qrlInstance!.Contract(
+      const contract = new this.qrlInstance.Contract(
         ZRC_1155_CONTRACT_ABI,
         contractAddress,
       );
@@ -1180,9 +1277,12 @@ class QrlStore {
       const tokens: OwnedNftToken[] = [];
       for (const candidate of discovered) {
         try {
-          const balance = (await contract.methods
-            .balanceOf(owner, BigInt(candidate.tokenId))
-            .call()) as bigint;
+          const balance = readProviderValue(
+            await contract.methods
+              .balanceOf(owner, BigInt(candidate.tokenId))
+              .call(),
+            isUnsignedBigInt,
+          );
           if (balance > 0n) {
             tokens.push({
               tokenId: candidate.tokenId,
@@ -1204,23 +1304,27 @@ class QrlStore {
     tokenId: string,
     standard: NFTStandard = "ZRC721",
   ) {
-    if (this.qrlInstance && this.qrlInstance.Contract) {
+    if (this.qrlInstance) {
       try {
         if (standard === "ZRC1155") {
           const contract = new this.qrlInstance.Contract(
             ZRC_1155_CONTRACT_ABI,
             contractAddress,
           );
-          const uri = (await contract.methods
-            .uri(BigInt(tokenId))
-            .call()) as string;
+          const uri = readProviderValue(
+            await contract.methods.uri(BigInt(tokenId)).call(),
+            isString,
+          );
           return substituteErc1155TokenId(uri, tokenId);
         }
         const contract = new this.qrlInstance.Contract(
           ZRC_721_CONTRACT_ABI,
           contractAddress,
         );
-        const uri = (await contract.methods.tokenURI(tokenId).call()) as string;
+        const uri = readProviderValue(
+          await contract.methods.tokenURI(tokenId).call(),
+          isString,
+        );
         return uri;
       } catch {
         return "";
@@ -1251,7 +1355,7 @@ class QrlStore {
       data?: string;
     } = { error: "" };
 
-    if (this.qrlInstance && this.qrlInstance.Contract) {
+    if (this.qrlInstance) {
       try {
         const transferCall =
           standard === "ZRC1155"
@@ -1270,20 +1374,24 @@ class QrlStore {
                 contractAddress,
               ).methods.safeTransferFrom(from, to, BigInt(tokenId));
         // Run all RPC calls in parallel for speed
-        const useAdvancedGas =
-          overrides?.tier === "advanced" && overrides.gasLimit;
-        const [gasFeeData, estimatedGasResult, nonce] = await Promise.all([
+        const advancedGasLimit =
+          overrides?.tier === "advanced" ? overrides.gasLimit : undefined;
+        const [gasFeeData, estimatedGas, nonce] = await Promise.all([
           this.getGasFeeData(overrides),
-          useAdvancedGas
+          advancedGasLimit
             ? Promise.resolve(null)
             : transferCall.estimateGas({ from }).catch(() => null),
-          this.qrlInstance?.getTransactionCount(from, SIGNING_NONCE_BLOCK_TAG),
+          this.qrlInstance.getTransactionCount(from, SIGNING_NONCE_BLOCK_TAG),
         ]);
         const { maxFeePerGas, maxPriorityFeePerGas } = gasFeeData;
-        let gasLimit = useAdvancedGas ? overrides!.gasLimit! : NFT_UNITS_OF_GAS;
+        let gasLimit = advancedGasLimit || NFT_UNITS_OF_GAS;
+        const estimatedGasResult: unknown = estimatedGas;
         if (estimatedGasResult !== null && estimatedGasResult !== undefined) {
           // Add 20% buffer to estimated gas
-          gasLimit = Math.ceil(Number(estimatedGasResult) * 1.2);
+          gasLimit = Math.ceil(
+            Number(readProviderValue(estimatedGasResult, isUnsignedBigInt)) *
+              1.2,
+          );
         }
         const encodedData = transferCall.encodeABI();
         const transactionObject = {
@@ -1300,16 +1408,16 @@ class QrlStore {
 
         await this.assertSigningNetwork();
 
-        const signedTransaction =
-          await this.qrlInstance?.accounts.signTransaction(
+        const signedTransaction: unknown =
+          await this.qrlInstance.accounts.signTransaction(
             transactionObject,
             getHexSeedFromMnemonic(mnemonicPhrases),
           );
 
-        if (signedTransaction) {
+        if (isSignedTransaction(signedTransaction)) {
           result = {
-            transactionHash: signedTransaction.transactionHash?.toString(),
-            rawTransaction: signedTransaction.rawTransaction?.toString(),
+            transactionHash: signedTransaction.transactionHash,
+            rawTransaction: signedTransaction.rawTransaction,
             error: "",
             nonce: Number(nonce),
             maxFeePerGas: maxFeePerGas.toString(),
@@ -1324,7 +1432,7 @@ class QrlStore {
         console.error("[signNftTransfer] Error:", error);
         result = {
           ...result,
-          error: `Transaction could not be signed. ${error}`,
+          error: `Transaction could not be signed. ${String(error)}`,
         };
       }
     } else {
@@ -1345,28 +1453,33 @@ class QrlStore {
     decimals: number,
     overrides?: GasFeeOverrides,
   ) {
-    if (this.qrlInstance && this.qrlInstance.Contract) {
+    if (this.qrlInstance) {
       const contract = new this.qrlInstance.Contract(
         ZRC_20_CONTRACT_ABI,
         contractAddress,
       );
-      const useAdvancedGasLimit =
-        overrides?.tier === "advanced" && !!overrides.gasLimit;
+      const advancedGasLimit =
+        overrides?.tier === "advanced" ? overrides.gasLimit : undefined;
       const transferCall = contract.methods.transfer(
         to,
         toTokenBaseUnits(value, decimals),
       );
       let gasLimit: number;
-      if (useAdvancedGasLimit) {
+      if (advancedGasLimit) {
         // An explicit advanced gas limit replaces the estimate, but the
         // transfer still has to be simulated: without it a transfer that
         // reverts on chain (frozen token, paused contract, blocked
         // recipient) was signed and broadcast, burning the whole limit in
         // fees. A revert here throws and the send form blocks on it.
-        await transferCall.call({ from, gas: String(overrides.gasLimit!) });
-        gasLimit = overrides.gasLimit!;
+        await transferCall.call({ from, gas: String(advancedGasLimit) });
+        gasLimit = advancedGasLimit;
       } else {
-        gasLimit = Number(await transferCall.estimateGas({ from }));
+        gasLimit = Number(
+          readProviderValue(
+            await transferCall.estimateGas({ from }),
+            isUnsignedBigInt,
+          ),
+        );
       }
       const { maxFeePerGas } = await this.getGasFeeData(overrides);
       return utils.fromPlanck(BigInt(gasLimit) * maxFeePerGas, "quanta");
@@ -1396,7 +1509,7 @@ class QrlStore {
 
     const contractAbi = ZRC_20_CONTRACT_ABI;
 
-    if (this.qrlInstance && this.qrlInstance.Contract) {
+    if (this.qrlInstance) {
       try {
         const contract = new this.qrlInstance.Contract(
           contractAbi,
@@ -1412,7 +1525,7 @@ class QrlStore {
           overrides?.tier === "advanced" && overrides.gasLimit
             ? overrides.gasLimit
             : ZRC_20_TOKEN_UNITS_OF_GAS;
-        const nonce = await this.qrlInstance?.getTransactionCount(
+        const nonce = await this.qrlInstance.getTransactionCount(
           from,
           SIGNING_NONCE_BLOCK_TAG,
         );
@@ -1431,16 +1544,16 @@ class QrlStore {
 
         await this.assertSigningNetwork();
 
-        const signedTransaction =
-          await this.qrlInstance?.accounts.signTransaction(
+        const signedTransaction: unknown =
+          await this.qrlInstance.accounts.signTransaction(
             transactionObject,
             getHexSeedFromMnemonic(mnemonicPhrases),
           );
 
-        if (signedTransaction) {
+        if (isSignedTransaction(signedTransaction)) {
           result = {
-            transactionHash: signedTransaction.transactionHash?.toString(),
-            rawTransaction: signedTransaction.rawTransaction?.toString(),
+            transactionHash: signedTransaction.transactionHash,
+            rawTransaction: signedTransaction.rawTransaction,
             error: "",
             nonce: Number(nonce),
             maxFeePerGas: maxFeePerGas.toString(),
@@ -1454,7 +1567,7 @@ class QrlStore {
       } catch (error) {
         result = {
           ...result,
-          error: `Transaction could not be signed. ${error}`,
+          error: `Transaction could not be signed. ${String(error)}`,
         };
       }
     }
@@ -1544,23 +1657,23 @@ class QrlStore {
 
       await this.assertSigningNetwork();
 
-      const signedTransaction =
+      const signedTransaction: unknown =
         await this.qrlInstance?.accounts.signTransaction(
           transactionObject,
           getHexSeedFromMnemonic(mnemonicPhrases),
         );
 
-      if (!signedTransaction) {
+      if (!isSignedTransaction(signedTransaction)) {
         throw new Error("Replacement transaction could not be signed");
       }
 
       result = {
-        transactionHash: signedTransaction.transactionHash?.toString(),
-        rawTransaction: signedTransaction.rawTransaction?.toString(),
+        transactionHash: signedTransaction.transactionHash,
+        rawTransaction: signedTransaction.rawTransaction,
         error: "",
       };
     } catch (error) {
-      result = { error: `Replacement transaction failed. ${error}` };
+      result = { error: `Replacement transaction failed. ${String(error)}` };
     }
 
     return result;
@@ -1601,8 +1714,12 @@ class QrlStore {
     await this.assertSigningNetwork();
     const pending = this.qrlInstance?.sendSignedTransaction(rawTransaction);
     if (onBroadcast && pending && typeof pending.on === "function") {
-      pending.on("transactionHash", (transactionHash) => {
-        onBroadcast(String(transactionHash));
+      pending.on("transactionHash", (transactionHash: unknown) => {
+        if (!isString(transactionHash)) {
+          console.error("[sendRawTransaction] Invalid transaction hash");
+          return;
+        }
+        onBroadcast(transactionHash);
       });
     }
     const receipt = await pending;

@@ -7,9 +7,8 @@ const { mockGetBalance, mockIsListening } = vi.hoisted(() => ({
 
 vi.mock("@theqrl/web3", () => {
   class MockWeb3 {
-    static providers = { HttpProvider: class {} };
+    static providers = { HttpProvider: vi.fn() };
     qrl = { getBalance: mockGetBalance, net: { isListening: mockIsListening } };
-    constructor(_opts: unknown) {}
   }
   return {
     __esModule: true,
@@ -85,15 +84,15 @@ const realStore = async (balance: bigint) => {
  */
 const storeWithRealBalances = (real: QrlStore): StoreType => {
   const base = mockedStore();
-  const qrlStore = Object.create(base.qrlStore) as QrlStore;
+  const qrlStore = base.qrlStore;
   Object.defineProperties(qrlStore, {
     getAccountBalance: { value: real.getAccountBalance },
     activeAccount: { value: { accountAddress: ACCOUNT } },
   });
-  return { ...base, qrlStore };
+  return base;
 };
 
-const setBalance = (real: QrlStore, accountBalance: string) =>
+const setBalance = (real: QrlStore, accountBalance: string) => {
   act(() => {
     runInAction(() => {
       real.qrlAccounts = {
@@ -102,6 +101,7 @@ const setBalance = (real: QrlStore, accountBalance: string) =>
       };
     });
   });
+};
 
 const renderWith = (store: StoreType, children: ReactNode) =>
   render(

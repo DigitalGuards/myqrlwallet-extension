@@ -6,6 +6,8 @@
 // payload is JSON holding the account mnemonic and hex seed. We only need the
 // decrypt direction here (import), so encryption is intentionally not ported.
 
+import { isRecord } from "@/utilities/storageGuards";
+
 const PBKDF2_ITERATIONS = 600000; // must match the web wallet exporter
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -88,10 +90,10 @@ export function parseEncryptedWalletFile(text: string): EncryptedWalletFile {
   } catch {
     throw new WalletFileFormatError();
   }
-  if (!parsed || typeof parsed !== "object") {
+  if (!isRecord(parsed)) {
     throw new WalletFileFormatError();
   }
-  const candidate = parsed as Record<string, unknown>;
+  const candidate = parsed;
   if (
     typeof candidate.encryptedData !== "string" ||
     typeof candidate.salt !== "string" ||
@@ -136,11 +138,15 @@ export async function decryptWalletFile(
     throw new WalletFileDecryptError();
   }
 
-  let payload: { mnemonic?: unknown; hexSeed?: unknown };
+  let payload: unknown;
   try {
     payload = JSON.parse(json);
   } catch {
     throw new WalletFileDecryptError();
+  }
+
+  if (!isRecord(payload)) {
+    throw new WalletFileFormatError("Wallet file contained no seed");
   }
 
   const hexSeed = typeof payload.hexSeed === "string" ? payload.hexSeed : "";

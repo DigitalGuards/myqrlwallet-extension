@@ -8,7 +8,7 @@ import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import RecipientPicker from "./RecipientPicker";
 
 const { localStore } = vi.hoisted(() => {
-  const localStore: Record<string, any> = {};
+  const localStore: Record<string, unknown> = {};
   return { localStore };
 });
 vi.mock("webextension-polyfill", () => ({
@@ -19,16 +19,17 @@ vi.mock("webextension-polyfill", () => ({
         get: vi.fn((key: string) =>
           Promise.resolve(key in localStore ? { [key]: localStore[key] } : {}),
         ),
-        set: vi.fn((data: Record<string, any>) => {
+        set: vi.fn((data: Record<string, unknown>) => {
           Object.assign(localStore, data);
           return Promise.resolve();
         }),
         remove: vi.fn((key: string) => {
-          delete localStore[key];
+          Reflect.deleteProperty(localStore, key);
           return Promise.resolve();
         }),
         clear: vi.fn(() => {
-          for (const k of Object.keys(localStore)) delete localStore[k];
+          for (const k of Object.keys(localStore))
+            Reflect.deleteProperty(localStore, k);
           return Promise.resolve();
         }),
       },
@@ -42,7 +43,8 @@ vi.mock("webextension-polyfill", () => ({
 
 describe("RecipientPicker", () => {
   beforeEach(() => {
-    for (const k of Object.keys(localStore)) delete localStore[k];
+    for (const k of Object.keys(localStore))
+      Reflect.deleteProperty(localStore, k);
   });
   afterEach(cleanup);
 
@@ -309,10 +311,10 @@ describe("RecipientPicker", () => {
 
     expect(screen.getByText("Account 2")).toBeInTheDocument();
 
-    const addressButton = screen.getByText(
-      formatQrlAddressFingerprint("Q20fB08fF1f1376A14C055E9F56df80563E16722b"),
-    );
-    await userEvent.click(addressButton.closest("button")!);
+    const addressButton = screen.getByRole("button", {
+      name: "Account 2: Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+    });
+    await userEvent.click(addressButton);
 
     expect(onSelect).toHaveBeenCalledWith(
       "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
@@ -336,7 +338,9 @@ describe("RecipientPicker", () => {
     );
 
     await userEvent.click(screen.getByText("Contacts"));
-    const contactButton = screen.getByText("Alice").closest("button")!;
+    const contactButton = screen.getByRole("button", {
+      name: "Alice: Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+    });
     await userEvent.click(contactButton);
 
     expect(onSelect).toHaveBeenCalledWith(
@@ -375,13 +379,9 @@ describe("RecipientPicker", () => {
     );
 
     await userEvent.click(screen.getByText("Recent"));
-    const recentButton = screen
-      .getByText(
-        formatQrlAddressFingerprint(
-          "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
-        ),
-      )
-      .closest("button")!;
+    const recentButton = screen.getByRole("button", {
+      name: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+    });
     await userEvent.click(recentButton);
 
     expect(onSelect).toHaveBeenCalledWith(
@@ -403,5 +403,46 @@ describe("RecipientPicker", () => {
     );
 
     expect(screen.getByLabelText("Open address book")).toBeInTheDocument();
+  });
+
+  it("reports contact and label load failures while keeping saved contacts selectable", async () => {
+    const failure = new Error("Storage unavailable");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onSelect = vi.fn();
+    try {
+      renderComponent(
+        onSelect,
+        mockedStore({
+          contactsStore: {
+            loadContacts: vi.fn().mockRejectedValue(failure),
+            contacts: [
+              {
+                name: "Alice",
+                address: "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+              },
+            ],
+          },
+          accountLabelsStore: {
+            syncLabels: vi.fn().mockRejectedValue(failure),
+          },
+        }),
+      );
+      await userEvent.click(screen.getByText("Contacts"));
+      await userEvent.click(
+        screen.getByRole("button", {
+          name: "Alice: Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+        }),
+      );
+      expect(onSelect).toHaveBeenCalledWith(
+        "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      );
+      expect(report).toHaveBeenCalledWith("Failed to load contacts:", failure);
+      expect(report).toHaveBeenCalledWith(
+        "Failed to sync account labels:",
+        failure,
+      );
+    } finally {
+      report.mockRestore();
+    }
   });
 });

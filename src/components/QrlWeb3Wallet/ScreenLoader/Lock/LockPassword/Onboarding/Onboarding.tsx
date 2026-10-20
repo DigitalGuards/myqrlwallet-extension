@@ -20,8 +20,6 @@ export type OnboardingStepType =
 
 const Onboarding = observer(() => {
   const { lockStore, qrlStore, accountLabelsStore } = useStore();
-  const { encryptAccount } = lockStore;
-  const { setActiveAccount } = qrlStore;
 
   const [step, setStep] = useState<OnboardingStepType>(
     ONBOARDING_STEPS.WELCOME,
@@ -54,17 +52,16 @@ const Onboarding = observer(() => {
     // pointer back, so the wallet never points at an address with no
     // keystore.
     const previousAccounts = await StorageUtil.getAllAccounts();
-    await setActiveAccount(account.address);
+    await qrlStore.setActiveAccount(account.address);
     try {
-      await encryptAccount(account, password);
+      await lockStore.encryptAccount(account, password);
     } catch (error) {
       await StorageUtil.setAllAccounts(previousAccounts).catch(() => {});
       await StorageUtil.clearActiveAccount().catch(() => {});
       qrlStore.clearAccountState();
       throw error;
     }
-    // Name it now so the header reads "Account N" immediately rather than
-    // the raw address until some other screen happens to run syncLabels.
+    // Name it now so the header reads "Account N" immediately.
     // Never let a naming failure strand onboarding after the keystore is
     // already persisted: syncLabels backstops the label later.
     await accountLabelsStore.ensureLabel(account.address).catch(() => {});
@@ -89,7 +86,7 @@ const Onboarding = observer(() => {
       />
     );
 
-  if (step === ONBOARDING_STEPS.COMPLETED) return <OnboardingCompleted />;
+  return <OnboardingCompleted />;
 });
 
 export default Onboarding;

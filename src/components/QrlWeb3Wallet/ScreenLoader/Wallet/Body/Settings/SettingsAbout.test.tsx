@@ -3,7 +3,7 @@ import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import SettingsAbout from "./SettingsAbout";
+import SettingsAbout, { getWalletVersion } from "./SettingsAbout";
 
 const EXPECTED_LINKS: Array<[string, string]> = [
   ["Privacy Policy", "https://qrlwallet.com/privacy"],
@@ -114,4 +114,29 @@ describe("SettingsAbout", () => {
       .map((link) => link.getAttribute("href"));
     expect(hrefs).toEqual(EXPECTED_LINKS.map(([, href]) => href));
   });
+
+  it("reads the manifest version with the runtime receiver intact", () => {
+    const runtime = {
+      version: "1.2.9",
+      getManifest() {
+        return { version: this.version };
+      },
+    };
+    expect(getWalletVersion({ runtime })).toBe("1.2.9");
+  });
+
+  it.each([
+    undefined,
+    null,
+    {},
+    { runtime: null },
+    { runtime: { getManifest: true } },
+    { runtime: { getManifest: () => null } },
+    { runtime: { getManifest: () => ({ version: 7 }) } },
+  ])(
+    "uses the fallback version for unavailable or malformed browser data %j",
+    (value) => {
+      expect(getWalletVersion(value)).toBe("0.4.0");
+    },
+  );
 });

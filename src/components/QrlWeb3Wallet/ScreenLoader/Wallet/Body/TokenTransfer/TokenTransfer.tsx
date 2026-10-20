@@ -28,6 +28,7 @@ import { useStore } from "@/stores/store";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { isCanonicalQrlAddress, isQrlAddress } from "@/utilities/addressUtil";
 import StorageUtil from "@/utilities/storageUtil";
+import { isRecord, isTransactionValues } from "@/utilities/storageGuards";
 import { isQrnsName, resolveQrnsName } from "@/utilities/qrnsResolver";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { utils, qrl } from "@theqrl/web3";
@@ -106,17 +107,30 @@ const createFormSchema = (t: TFunction, decimals: number) =>
 type TransferTokenDetails = {
   isZrc20Token: boolean;
   tokenContractAddress: string;
-  tokenDecimals: number;
-  tokenImage: string;
+  tokenDecimals: number | null;
+  tokenImage: unknown;
   tokenBalance: string;
   tokenBalanceBaseUnits?: string;
   tokenName: string;
   tokenSymbol: string;
 };
 
+type TransferNavigationState = {
+  shouldStartFresh?: boolean;
+  tokenDetails?: TransferTokenDetails;
+};
+
+const isTransferNavigationState = (
+  value: unknown,
+): value is TransferNavigationState =>
+  isRecord(value) &&
+  (value.shouldStartFresh === undefined ||
+    typeof value.shouldStartFresh === "boolean") &&
+  isTransactionValues({ tokenDetails: value.tokenDetails });
+
 const TokenTransfer = observer(() => {
   const { t } = useTranslation();
-  const { state } = useLocation();
+  const state: unknown = useLocation().state;
   const navigate = useNavigate();
   const {
     lockStore,
@@ -129,25 +143,13 @@ const TokenTransfer = observer(() => {
   // Quoted in the user's currency where there is a usable quote for it, in
   // dollars otherwise, so the number and its symbol always agree.
   const amountQuote = priceStore.quoteFor(settingsStore.currency);
-  const { getMnemonicPhrases } = lockStore;
-  const {
-    activeAccount,
-    signNativeToken,
-    fetchAccounts,
-    signZrc20Token,
-    sendRawTransaction,
-    qrlInstance,
-    getGasFeeData,
-    getNativeTokenGas,
-    getAccountBalance,
-    getZrc20TokenDetails,
-  } = qrlStore;
+  const { activeAccount, qrlInstance } = qrlStore;
   const { accountAddress } = activeAccount;
 
   const [isZrc20Token, setIsZrc20Token] = useState(false);
   const [tokenContractAddress, setTokenContractAddress] = useState("");
   const [tokenDecimals, setTokenDecimals] = useState(0);
-  const [tokenImage, setTokenImage] = useState(NATIVE_TOKEN.image);
+  const [tokenImage, setTokenImage] = useState<unknown>(NATIVE_TOKEN.image);
   const [tokenBalance, setTokenBalance] = useState("");
   // Exact on-chain integer balance for the selected ZRC-20. Every guard
   // and the Max button work off this; `tokenBalance` above is the
@@ -173,6 +175,14 @@ const TokenTransfer = observer(() => {
   const [qrnsResolving, setQrnsResolving] = useState(false);
   const [qrnsError, setQrnsError] = useState<string | null>(null);
   const [gasEstimateError, setGasEstimateError] = useState("");
+  const [initializationError, setInitializationError] = useState("");
+  const initializationFailed = useRef(false);
+
+  const reportInitializationError = (error: unknown) => {
+    initializationFailed.current = true;
+    console.error("[TokenTransfer] Failed to load transfer:", error);
+    setInitializationError(t("transfer.errorOccurred", { error }));
+  };
 
   const amountDecimals = isZrc20Token ? tokenDecimals : 18;
   const FormSchema = createFormSchema(t, amountDecimals);
@@ -195,8 +205,9 @@ const TokenTransfer = observer(() => {
     if (isLedgerAccount) {
       return await signNativeTokenWithLedger(formData);
     } else {
-      const mnemonicPhrases = await getMnemonicPhrases(accountAddress);
-      return await signNativeToken(
+      const mnemonicPhrases =
+        await lockStore.getMnemonicPhrases(accountAddress);
+      return await qrlStore.signNativeToken(
         accountAddress,
         formData.receiverAddress,
         formData.amount,
@@ -213,7 +224,7 @@ const TokenTransfer = observer(() => {
 
     try {
       const { maxFeePerGas, maxPriorityFeePerGas } =
-        await getGasFeeData(gasFeeOverrides);
+        await qrlStore.getGasFeeData(gasFeeOverrides);
       const gasLimit =
         gasFeeOverrides?.tier === "advanced" && gasFeeOverrides.gasLimit
           ? gasFeeOverrides.gasLimit
@@ -268,8 +279,8 @@ const TokenTransfer = observer(() => {
       // generic "could not be signed" message.
       return { error: t("transfer.errorLedgerTokenUnsupported") };
     }
-    const mnemonicPhrases = await getMnemonicPhrases(accountAddress);
-    return await signZrc20Token(
+    const mnemonicPhrases = await lockStore.getMnemonicPhrases(accountAddress);
+    return await qrlStore.signZrc20Token(
       accountAddress,
       formData.receiverAddress,
       formData.amount,
@@ -281,6 +292,7 @@ const TokenTransfer = observer(() => {
   };
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
+    if (initializationFailed.current) return;
     try {
       if (isQrnsName(formData.receiverAddress)) {
         if (!resolvedAddress) {
@@ -357,31 +369,46 @@ const TokenTransfer = observer(() => {
       );
 
       // Step 3: Broadcast in background, do not await
-      sendRawTransaction(rawTransaction).then(
-        async (receipt) => {
-          const update = transactionFailureUpdate({ receipt }, transactionHash);
-          if (update.receiptStatusVerified) {
+      void qrlStore
+        .sendRawTransaction(rawTransaction)
+        .then(
+          async (receipt) => {
+            const update = transactionFailureUpdate(
+              { receipt },
+              transactionHash,
+            );
+            if (update.receiptStatusVerified) {
+              await transactionHistoryStore.updateTransaction(
+                accountAddress,
+                transactionHash,
+                update,
+              );
+              await qrlStore.fetchAccounts();
+            }
+          },
+          async (err: unknown) => {
+            console.error("[TokenTransfer] Broadcast failed:", err);
             await transactionHistoryStore.updateTransaction(
               accountAddress,
               transactionHash,
-              update,
+              transactionFailureUpdate(err, transactionHash),
             );
-            await fetchAccounts();
-          }
-        },
-        async (err) => {
-          console.error("[TokenTransfer] Broadcast failed:", err);
-          await transactionHistoryStore.updateTransaction(
-            accountAddress,
-            transactionHash,
-            transactionFailureUpdate(err, transactionHash),
+          },
+        )
+        .catch((error: unknown) => {
+          console.error(
+            "[TokenTransfer] Failed to update broadcast history:",
+            error,
           );
-        },
-      );
+        });
 
       // Step 4: Navigate home immediately, TX is visible as "pending" in history
       await resetForm();
-      navigate(ROUTES.TRANSACTION_HISTORY);
+      void Promise.resolve(navigate(ROUTES.TRANSACTION_HISTORY)).catch(
+        (error: unknown) => {
+          console.error("[TokenTransfer] Navigation failed:", error);
+        },
+      );
     } catch (error) {
       if (isWalletLockedError(error)) {
         // The SW's decrypted keys and this surface's own isLocked belief
@@ -389,7 +416,9 @@ const TokenTransfer = observer(() => {
         // hit the real, locked state. Push the screen to the lock view
         // immediately: the dashboard would otherwise stay up with a form
         // that can only fail again (L4).
-        void lockStore.readLockState();
+        void lockStore.readLockState().catch((error: unknown) => {
+          console.error("[TokenTransfer] Failed to refresh lock state:", error);
+        });
         control.setError("amount", {
           message: t("account.walletLockedError"),
         });
@@ -402,14 +431,20 @@ const TokenTransfer = observer(() => {
   }
 
   const resetForm = async () => {
+    // Start clearing now so storage selects the network at this invocation.
+    // A pending autosave can finish after navigation and a network switch.
     await StorageUtil.clearTransactionValues();
     setSliderValue(0);
     reset({ receiverAddress: "", amount: "" });
   };
 
   const cancelTransaction = () => {
-    resetForm();
-    navigate(ROUTES.HOME);
+    void resetForm().catch((error: unknown) => {
+      console.error("[TokenTransfer] Failed to clear transfer:", error);
+    });
+    void Promise.resolve(navigate(ROUTES.HOME)).catch((error: unknown) => {
+      console.error("[TokenTransfer] Navigation failed:", error);
+    });
   };
 
   const form = useForm<z.infer<typeof FormSchema>>({
@@ -417,15 +452,21 @@ const TokenTransfer = observer(() => {
     mode: "onChange",
     reValidateMode: "onChange",
     defaultValues: async () => {
-      const storedTransactionValues = await StorageUtil.getTransactionValues();
-      return {
-        amount:
-          storedTransactionValues?.amount &&
-          new BigNumber(String(storedTransactionValues.amount)).gt(0)
-            ? new BigNumber(String(storedTransactionValues.amount)).toFixed()
-            : "",
-        receiverAddress: storedTransactionValues?.receiverAddress ?? "",
-      };
+      try {
+        const storedTransactionValues =
+          await StorageUtil.getTransactionValues();
+        return {
+          amount:
+            storedTransactionValues.amount &&
+            new BigNumber(String(storedTransactionValues.amount)).gt(0)
+              ? new BigNumber(String(storedTransactionValues.amount)).toFixed()
+              : "",
+          receiverAddress: storedTransactionValues.receiverAddress ?? "",
+        };
+      } catch (error) {
+        reportInitializationError(error);
+        return { amount: "", receiverAddress: "" };
+      }
     },
   });
   const {
@@ -435,16 +476,21 @@ const TokenTransfer = observer(() => {
     watch,
     formState: { isSubmitting, isValid },
   } = form;
+  const editingDisabled = isSubmitting || !!initializationError;
 
+  // Metadata and form defaults restore independently, preserving their writes.
   useEffect(() => {
-    (async () => {
+    void (async () => {
+      if (state != null && !isTransferNavigationState(state)) {
+        throw new Error("Invalid transfer navigation state");
+      }
       const shouldStartFresh = state?.shouldStartFresh;
       if (shouldStartFresh) {
         await resetForm();
       } else {
         const storedTransactionValues =
           await StorageUtil.getTransactionValues();
-        const tokenDetailsFromStorage = storedTransactionValues?.tokenDetails;
+        const tokenDetailsFromStorage = storedTransactionValues.tokenDetails;
         const tokenDetailsFromState = state?.tokenDetails;
         let tokenDetails: TransferTokenDetails = {
           isZrc20Token,
@@ -459,30 +505,28 @@ const TokenTransfer = observer(() => {
 
         if (tokenDetailsFromState) {
           await resetForm();
-          setIsZrc20Token(tokenDetailsFromState?.isZrc20Token);
-          setTokenContractAddress(tokenDetailsFromState?.tokenContractAddress);
-          setTokenDecimals(tokenDetailsFromState?.tokenDecimals);
-          setTokenImage(tokenDetailsFromState?.tokenImage);
-          setTokenBalance(tokenDetailsFromState?.tokenBalance);
+          setIsZrc20Token(tokenDetailsFromState.isZrc20Token);
+          setTokenContractAddress(tokenDetailsFromState.tokenContractAddress);
+          setTokenDecimals(tokenDetailsFromState.tokenDecimals ?? Number.NaN);
+          setTokenImage(tokenDetailsFromState.tokenImage);
+          setTokenBalance(tokenDetailsFromState.tokenBalance);
           setTokenBalanceBaseUnits(
-            tokenDetailsFromState?.tokenBalanceBaseUnits ?? "",
+            tokenDetailsFromState.tokenBalanceBaseUnits ?? "",
           );
-          setTokenName(tokenDetailsFromState?.tokenName);
-          setTokenSymbol(tokenDetailsFromState?.tokenSymbol);
+          setTokenName(tokenDetailsFromState.tokenName);
+          setTokenSymbol(tokenDetailsFromState.tokenSymbol);
           tokenDetails = { ...tokenDetailsFromState };
         } else if (tokenDetailsFromStorage) {
-          setIsZrc20Token(tokenDetailsFromStorage?.isZrc20Token ?? false);
-          setTokenContractAddress(
-            tokenDetailsFromStorage?.tokenContractAddress,
-          );
-          setTokenDecimals(tokenDetailsFromStorage?.tokenDecimals);
-          setTokenImage(tokenDetailsFromStorage?.tokenImage);
-          setTokenBalance(tokenDetailsFromStorage?.tokenBalance);
+          setIsZrc20Token(tokenDetailsFromStorage.isZrc20Token);
+          setTokenContractAddress(tokenDetailsFromStorage.tokenContractAddress);
+          setTokenDecimals(tokenDetailsFromStorage.tokenDecimals ?? Number.NaN);
+          setTokenImage(tokenDetailsFromStorage.tokenImage);
+          setTokenBalance(tokenDetailsFromStorage.tokenBalance);
           setTokenBalanceBaseUnits(
-            tokenDetailsFromStorage?.tokenBalanceBaseUnits ?? "",
+            tokenDetailsFromStorage.tokenBalanceBaseUnits ?? "",
           );
-          setTokenName(tokenDetailsFromStorage?.tokenName);
-          setTokenSymbol(tokenDetailsFromStorage?.tokenSymbol);
+          setTokenName(tokenDetailsFromStorage.tokenName);
+          setTokenSymbol(tokenDetailsFromStorage.tokenSymbol);
           tokenDetails = { ...tokenDetailsFromStorage };
         }
 
@@ -492,7 +536,7 @@ const TokenTransfer = observer(() => {
           tokenDetails,
         });
       }
-    })();
+    })().catch(reportInitializationError);
   }, []);
 
   // A cold open restores the token balance straight from storage, where it
@@ -502,10 +546,10 @@ const TokenTransfer = observer(() => {
   // base-unit ceiling every guard and Max work from.
   useEffect(() => {
     if (!isZrc20Token || !tokenContractAddress || !accountAddress) return;
-    let cancelled = false;
-    (async () => {
-      const details = await getZrc20TokenDetails(tokenContractAddress);
-      if (cancelled || details.error || !details.token) return;
+    const request = { cancelled: false };
+    void (async () => {
+      const details = await qrlStore.getZrc20TokenDetails(tokenContractAddress);
+      if (request.cancelled || details.error || !details.token) return;
       setTokenBalance(
         getOptimalTokenBalance(
           details.token.balance.toString(),
@@ -513,20 +557,19 @@ const TokenTransfer = observer(() => {
         ),
       );
       setTokenBalanceBaseUnits(details.token.balanceBaseUnits);
-    })();
+    })().catch((error: unknown) => {
+      console.error("[TokenTransfer] Failed to refresh token balance:", error);
+    });
     return () => {
-      cancelled = true;
+      request.cancelled = true;
     };
-  }, [
-    isZrc20Token,
-    tokenContractAddress,
-    accountAddress,
-    getZrc20TokenDetails,
-  ]);
+  }, [isZrc20Token, tokenContractAddress, accountAddress, qrlStore]);
 
   useEffect(() => {
-    const formWatchSubscription = watch(async (value) => {
-      await StorageUtil.setTransactionValues({
+    const formWatchSubscription = watch((value) => {
+      if (initializationFailed.current) return;
+      // Each event starts its own network-scoped save, even during a prior save.
+      void StorageUtil.setTransactionValues({
         ...value,
         tokenDetails: {
           isZrc20Token,
@@ -538,9 +581,13 @@ const TokenTransfer = observer(() => {
           tokenName,
           tokenSymbol,
         },
+      }).catch((error: unknown) => {
+        console.error("[TokenTransfer] Failed to save transfer:", error);
       });
     });
-    return () => formWatchSubscription.unsubscribe();
+    return () => {
+      formWatchSubscription.unsubscribe();
+    };
   }, [
     watch,
     isZrc20Token,
@@ -557,7 +604,7 @@ const TokenTransfer = observer(() => {
   // and the memo below instead, the balance guard and Max kept working off
   // whatever the balance was when their dependencies last changed, which a
   // poll or a confirmed send then left behind.
-  const nativeAccountBalance = getAccountBalance(accountAddress);
+  const nativeAccountBalance = qrlStore.getAccountBalance(accountAddress);
 
   const watchedAmount = watch("amount");
   useEffect(() => {
@@ -636,24 +683,31 @@ const TokenTransfer = observer(() => {
       setNativeGasReserve("0");
       return;
     }
-    let cancelled = false;
-    (async () => {
+    const request = { cancelled: false };
+    void (async () => {
       try {
-        const fee = await getNativeTokenGas(gasFeeOverrides);
-        if (!cancelled) setNativeGasReserve(fee || "0");
+        const fee = await qrlStore.getNativeTokenGas(gasFeeOverrides);
+        if (!request.cancelled) setNativeGasReserve(fee || "0");
       } catch {
-        if (!cancelled) setNativeGasReserve("0");
+        if (!request.cancelled) setNativeGasReserve("0");
       }
     })();
     return () => {
-      cancelled = true;
+      request.cancelled = true;
     };
-  }, [isZrc20Token, gasFeeOverrides, getNativeTokenGas]);
+  }, [isZrc20Token, gasFeeOverrides, qrlStore]);
 
   // Balance available for the amount itself. Tokens spend gas from the
   // native balance, so their full token balance is sendable.
   const maxSendable = useMemo(() => {
     if (isZrc20Token) {
+      if (
+        !Number.isInteger(tokenDecimals) ||
+        tokenDecimals < 0 ||
+        tokenDecimals > 255
+      ) {
+        return new BigNumber(0);
+      }
       // Exact, so Max spends the whole balance. The rounded display
       // value used to leave dust behind. shift moves the decimal point by
       // exact multiplication, which no rounding setting can truncate;
@@ -703,6 +757,8 @@ const TokenTransfer = observer(() => {
   // Max is a percentage of a balance that moves: raising the gas tier
   // raises the reserve, so the amount picked under the old, cheaper tier is
   // no longer sendable. Re-applied while the slider still sits at 100%.
+  // Apply at the gas event using this render's balance and form values.
+  // Metadata restoration and later gas events must retain that adjustment.
   const applyPercentageRef = useRef(applyPercentage);
   applyPercentageRef.current = applyPercentage;
   useEffect(() => {
@@ -774,7 +830,7 @@ const TokenTransfer = observer(() => {
     const nameToResolve = watchedReceiver;
 
     resolveTimerRef.current = setTimeout(() => {
-      resolveQrnsName(nameToResolve, qrnsBlockchain)
+      void resolveQrnsName(nameToResolve, qrnsBlockchain)
         .then((addr) => {
           if (cancelled) return;
           setResolvedQrns({
@@ -811,14 +867,23 @@ const TokenTransfer = observer(() => {
 
   return (
     <Form {...form}>
-      <form className="w-full" onSubmit={handleSubmit(onSubmit)}>
+      <form
+        className="w-full"
+        onSubmit={(event) => {
+          void handleSubmit(onSubmit)(event).catch((error: unknown) => {
+            control.setError("amount", {
+              message: t("transfer.errorOccurred", { error }),
+            });
+          });
+        }}
+      >
         <CircuitBackground />
         <div className="page-enter relative z-10 p-8">
           <BackButton />
           <Card className="w-full">
             <CardHeader className="flex flex-col gap-4 pb-4">
               <TokenDisplaySection
-                tokenImage={tokenImage}
+                tokenImage={typeof tokenImage === "string" ? tokenImage : ""}
                 tokenName={tokenName}
                 tokenSymbol={tokenSymbol}
               />
@@ -846,7 +911,7 @@ const TokenTransfer = observer(() => {
                               {...field}
                               aria-label={field.name}
                               autoComplete="off"
-                              disabled={isSubmitting}
+                              disabled={editingDisabled}
                               placeholder={t("transfer.receiverPlaceholder")}
                             />
                           </FormControl>
@@ -904,13 +969,13 @@ const TokenTransfer = observer(() => {
                               aria-label={field.name}
                               autoComplete="off"
                               className="pr-28"
-                              disabled={isSubmitting}
+                              disabled={editingDisabled}
                               placeholder={t("transfer.amountPlaceholder")}
                               type="text"
                               inputMode="decimal"
-                              onWheel={(e) =>
-                                (e.target as HTMLInputElement).blur()
-                              }
+                              onWheel={(e) => {
+                                e.currentTarget.blur();
+                              }}
                             />
                           </FormControl>
                           <span
@@ -939,10 +1004,10 @@ const TokenTransfer = observer(() => {
                             min={0}
                             max={100}
                             step={1}
-                            disabled={isSubmitting}
-                            onValueChange={(value) =>
-                              applyPercentage(value[0] ?? 0)
-                            }
+                            disabled={editingDisabled}
+                            onValueChange={(value) => {
+                              applyPercentage(value[0] ?? 0);
+                            }}
                           />
                           <div className="flex gap-2">
                             {[25, 50, 75, 100].map((percentage) => (
@@ -952,8 +1017,10 @@ const TokenTransfer = observer(() => {
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                disabled={isSubmitting}
-                                onClick={() => applyPercentage(percentage)}
+                                disabled={editingDisabled}
+                                onClick={() => {
+                                  applyPercentage(percentage);
+                                }}
                               >
                                 {percentage === 100
                                   ? t("transfer.max")
@@ -979,6 +1046,11 @@ const TokenTransfer = observer(() => {
                             )}
                         </FormDescription>
                         <FormMessage />
+                        {initializationError && (
+                          <p className="text-sm font-medium text-destructive">
+                            {initializationError}
+                          </p>
+                        )}
                         {balanceError && (
                           <p className="text-sm font-medium text-destructive">
                             {balanceError}
@@ -994,7 +1066,7 @@ const TokenTransfer = observer(() => {
                     from={accountAddress}
                     to={transactionReceiver}
                     value={watch().amount}
-                    disabled={isSubmitting}
+                    disabled={editingDisabled}
                     onOverridesChange={setGasFeeOverrides}
                     onGasFeeCalculated={setEstimatedGasFee}
                     onEstimateError={setGasEstimateError}
@@ -1007,14 +1079,14 @@ const TokenTransfer = observer(() => {
                 className="w-full min-w-0"
                 type="button"
                 variant="outline"
-                onClick={() => cancelTransaction()}
+                onClick={cancelTransaction}
               >
                 <X className="mr-2 h-4 w-4 shrink-0" />
                 {t("transfer.cancelButton")}
               </Button>
               <Button
                 disabled={
-                  isSubmitting ||
+                  editingDisabled ||
                   !isValid ||
                   !!balanceError ||
                   !!gasEstimateError ||

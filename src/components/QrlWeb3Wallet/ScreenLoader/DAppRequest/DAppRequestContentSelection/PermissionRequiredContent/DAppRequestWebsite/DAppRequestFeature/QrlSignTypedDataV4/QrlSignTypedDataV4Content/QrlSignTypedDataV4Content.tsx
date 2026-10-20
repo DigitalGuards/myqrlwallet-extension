@@ -31,17 +31,32 @@ import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { useEffect, useState } from "react";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
+import {
+  isTypedDataV4Params,
+  isUnknownArray,
+} from "@/utilities/approvalGuards";
+import { isRecord } from "@/utilities/storageGuards";
+import { rpcErrors } from "@theqrl/qrl-wallet-provider";
+import type { Eip712TypedData } from "@theqrl/web3-types";
 
 const MAX_INLINE_STRING_LEN = 200;
 
-const isPlainObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
+const isApprovalScalar = (
+  value: unknown,
+): value is string | number | bigint | boolean =>
+  typeof value === "string" ||
+  typeof value === "number" ||
+  typeof value === "bigint" ||
+  typeof value === "boolean";
+
+const displayApprovalScalar = (value: unknown): string | undefined =>
+  isApprovalScalar(value) || value === null ? String(value) : undefined;
 
 const tryDecimalAndHex = (v: string | number | bigint): string => {
   // For numeric types, EIP-712 frequently encodes large token values; show
   // both decimal and hex so users can recognise huge numbers (F-6).
   try {
-    const asBig = typeof v === "bigint" ? v : BigInt(v as string | number);
+    const asBig = BigInt(v);
     return `${asBig.toString(10)}  (0x${asBig.toString(16)})`;
   } catch {
     return String(v);
@@ -82,7 +97,7 @@ const TypedDataValue = ({
   depth?: number;
 }) => {
   const indent = `ml-${Math.min(depth * 2, 12)}`;
-  if (Array.isArray(value)) {
+  if (isUnknownArray(value)) {
     if (value.length === 0) {
       return <div className="font-bold text-secondary">[]</div>;
     }
@@ -99,7 +114,7 @@ const TypedDataValue = ({
       </div>
     );
   }
-  if (isPlainObject(value)) {
+  if (isRecord(value)) {
     const entries = Object.entries(value);
     if (entries.length === 0) {
       return <div className="font-bold text-secondary">{"{}"}</div>;
@@ -134,25 +149,25 @@ const QrlSignTypedDataV4Content = observer(() => {
   const { t } = useTranslation();
   const { copied, failed: copyFailed, copy } = useCopy();
   const { lockStore, qrlStore, dAppRequestStore } = useStore();
-  const { getMnemonicPhrases, readLockState } = lockStore;
   const { qrlInstance, qrlConnection } = qrlStore;
-  const activeChainId = qrlConnection?.blockchain?.chainId;
+  const activeChainId = qrlConnection.blockchain.chainId;
   const [isWalletLocked, setIsWalletLocked] = useState(false);
-  const { dAppRequestData, setOnPermissionCallBack, setCanProceed } =
-    dAppRequestStore;
+  const { dAppRequestData } = dAppRequestStore;
 
-  const params = dAppRequestData?.params;
+  const rawParams: unknown = dAppRequestData?.params;
+  const params = isTypedDataV4Params(rawParams) ? rawParams : undefined;
   const fromAddress = params?.[0] ?? "";
   const typedData = params?.[1];
-  const domain = (typedData?.domain ?? {}) as Record<string, unknown>;
-  const message = (typedData?.message ?? {}) as Record<string, unknown>;
+  const domain: Partial<Eip712TypedData["domain"]> = typedData?.domain ?? {};
+  const message = typedData?.message ?? {};
   const primaryType = typedData?.primaryType ?? "";
-  const verifyingContract = (domain?.verifyingContract as string) ?? "";
+  const verifyingContract =
+    typeof domain.verifyingContract === "string"
+      ? domain.verifyingContract
+      : "";
 
   const declaredChainId =
-    domain?.chainId !== undefined && domain?.chainId !== null
-      ? String(domain.chainId)
-      : undefined;
+    domain.chainId !== undefined ? String(domain.chainId) : undefined;
   const chainIdMissing = declaredChainId === undefined;
   const normaliseChainId = (c: string | undefined) => {
     if (c === undefined) return undefined;
@@ -164,31 +179,25 @@ const QrlSignTypedDataV4Content = observer(() => {
   };
   const chainIdMismatch =
     !chainIdMissing &&
-    activeChainId !== undefined &&
-    normaliseChainId(declaredChainId) !==
-      normaliseChainId(activeChainId.toString());
+    normaliseChainId(declaredChainId) !== normaliseChainId(activeChainId);
 
   // EIP-2612 Permit, EIP-3009 TransferWithAuthorization, Permit2,
   // and similar off-chain approvals all encode an on-chain transfer
   // authorisation as a signed struct. Surface these explicitly so users
   // do not blind-sign token allowances.
   const APPROVAL_PRIMARY_TYPE_REGEX = /permit|approval|authorization/i;
-  const isApprovalSignature = APPROVAL_PRIMARY_TYPE_REGEX.test(
-    String(primaryType),
-  );
-  const approvalSpender = (message?.spender ??
-    message?.to ??
-    message?.holder ??
-    message?.delegate) as string | undefined;
-  const approvalAmountRaw = (message?.value ??
-    message?.amount ??
-    message?.allowed) as string | number | bigint | undefined;
-  const formatApprovalAmount = (
-    v: string | number | bigint | undefined,
-  ): string | undefined => {
-    if (v === undefined) return undefined;
+  const isApprovalSignature = APPROVAL_PRIMARY_TYPE_REGEX.test(primaryType);
+  const approvalSpenderRaw =
+    message.spender ?? message.to ?? message.holder ?? message.delegate;
+  const approvalSpender = approvalSpenderRaw
+    ? displayApprovalScalar(approvalSpenderRaw)
+    : undefined;
+  const approvalAmountRaw = message.value ?? message.amount ?? message.allowed;
+  const formatApprovalAmount = (v: unknown): string | undefined => {
+    if (v === null) return "null";
+    if (!isApprovalScalar(v)) return undefined;
     try {
-      const asBig = typeof v === "bigint" ? v : BigInt(v as string | number);
+      const asBig = BigInt(v);
       const UINT256_MAX = (1n << 256n) - 1n;
       if (asBig >= UINT256_MAX - 1n) return "unlimited (uint256 max)";
       return `${asBig.toString(10)}  (0x${asBig.toString(16)})`;
@@ -197,11 +206,9 @@ const QrlSignTypedDataV4Content = observer(() => {
     }
   };
   const approvalAmount = formatApprovalAmount(approvalAmountRaw);
-  const approvalDeadline = (message?.deadline ?? message?.validBefore) as
-    | string
-    | number
-    | bigint
-    | undefined;
+  const approvalDeadline = displayApprovalScalar(
+    message.deadline ?? message.validBefore,
+  );
 
   // Registered whatever the node is doing. Signing is local, and a send
   // that needs the node fails with a real error; the callback being absent
@@ -213,6 +220,10 @@ const QrlSignTypedDataV4Content = observer(() => {
       record: ResponseRecorder,
     ) => {
       if (hasApproved) {
+        if (!params) {
+          record({ error: rpcErrors.invalidParams() });
+          return;
+        }
         const authorization =
           await revalidateAuthorizedDAppRequest(dAppRequestData);
         if (!authorization.canProceed) {
@@ -225,7 +236,7 @@ const QrlSignTypedDataV4Content = observer(() => {
         await signTypedDataV4(record);
       }
     };
-    setOnPermissionCallBack(onPermissionCallBack);
+    dAppRequestStore.setOnPermissionCallBack(onPermissionCallBack);
   }, [dAppRequestData]);
 
   const copyMessageData = () => {
@@ -234,22 +245,31 @@ const QrlSignTypedDataV4Content = observer(() => {
 
   const signTypedDataV4 = async (record: ResponseRecorder) => {
     try {
-      const mnemonicPhrases = await getMnemonicPhrases(fromAddress ?? "");
+      if (!typedData) {
+        record({ error: rpcErrors.invalidParams() });
+        return;
+      }
+      const mnemonicPhrases = await lockStore.getMnemonicPhrases(fromAddress);
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
-      const addressFromMnemonic =
-        qrlInstance?.accounts.seedToAccount(seed)?.address;
+      const account: unknown = qrlInstance?.accounts.seedToAccount(seed);
+      const addressFromMnemonic = isRecord(account)
+        ? account.address
+        : undefined;
       if (!areAddressesEquivalent(fromAddress, addressFromMnemonic)) {
         throw new Error("Mnemonic phrases did not match with the address");
       }
       const messageHash = getEncodedEip712Data(typedData, true);
-      const signature = sign(messageHash, seed)?.signature;
+      const signedMessage: unknown = sign(messageHash, seed);
+      const signature = isRecord(signedMessage)
+        ? signedMessage.signature
+        : undefined;
 
       const seedUint8Array = parseAndValidateSeed(seed);
       const extSeed = new ExtendedSeed(seedUint8Array);
       const acc = MLDSA87.newWalletFromExtendedSeed(extSeed);
       const publicKey = bytesToHex(acc.getPK());
 
-      if (signature) {
+      if (typeof signature === "string" && signature) {
         record({
           signature,
           publicKey,
@@ -265,7 +285,7 @@ const QrlSignTypedDataV4Content = observer(() => {
         // translated message here too, and give the dApp a stable
         // EIP-1193 error; the raw guard text never reaches the dApp response.
         setIsWalletLocked(true);
-        void readLockState();
+        void lockStore.readLockState();
         record({ error: walletLockedProviderError() });
         return;
       }
@@ -274,8 +294,8 @@ const QrlSignTypedDataV4Content = observer(() => {
   };
 
   useEffect(() => {
-    setCanProceed(true);
-  }, []);
+    dAppRequestStore.setCanProceed(params !== undefined);
+  }, [dAppRequestData]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -311,7 +331,7 @@ const QrlSignTypedDataV4Content = observer(() => {
                 <span className="font-semibold">
                   {t("dapp.signTypedData.spender")}:
                 </span>{" "}
-                <span className="break-all">{String(approvalSpender)}</span>
+                <span className="break-all">{approvalSpender}</span>
               </div>
             )}
             {approvalAmount && (
@@ -327,7 +347,7 @@ const QrlSignTypedDataV4Content = observer(() => {
                 <span className="font-semibold">
                   {t("dapp.signTypedData.deadline")}:
                 </span>{" "}
-                {String(approvalDeadline)}
+                {approvalDeadline}
               </div>
             )}
           </div>
@@ -359,7 +379,7 @@ const QrlSignTypedDataV4Content = observer(() => {
           </AccordionTrigger>
           <AccordionContent className="mt-2 rounded-md p-2 text-xs">
             <div className="flex flex-col gap-2">
-              {domain?.name !== undefined && (
+              {domain.name !== undefined && (
                 <div className="flex flex-col gap-1">
                   <div>{t("dapp.signTypedData.name")}</div>
                   <div className="font-bold text-secondary">
@@ -367,7 +387,7 @@ const QrlSignTypedDataV4Content = observer(() => {
                   </div>
                 </div>
               )}
-              {domain?.version !== undefined && (
+              {domain.version !== undefined && (
                 <div className="flex flex-col gap-1">
                   <div>{t("dapp.signTypedData.version")}</div>
                   <div className="font-bold text-secondary">
@@ -392,7 +412,7 @@ const QrlSignTypedDataV4Content = observer(() => {
                   />
                 </div>
               )}
-              {domain?.salt !== undefined && (
+              {domain.salt !== undefined && (
                 <div className="flex flex-col gap-1">
                   <div>{t("dapp.signTypedData.salt")}</div>
                   <div className="break-all font-bold text-secondary">

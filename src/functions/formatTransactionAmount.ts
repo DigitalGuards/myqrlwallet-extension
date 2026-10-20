@@ -31,9 +31,13 @@ export type TransactionAmountDisplay = {
 
 type DecimalParts = { sign: string; whole: string; fraction: string };
 
+function matchDecimal(input: string): (string | undefined)[] | null {
+  return DECIMAL_PATTERN.exec(input);
+}
+
 /** Splits a decimal literal into sign, whole and fraction, applying any exponent. */
 function parseDecimal(input: string): DecimalParts | null {
-  const match = DECIMAL_PATTERN.exec(input);
+  const match = matchDecimal(input);
   if (!match) return null;
 
   const [, sign, leading, trailing, bare, exponent] = match;

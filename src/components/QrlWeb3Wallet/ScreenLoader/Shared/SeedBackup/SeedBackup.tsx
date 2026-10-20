@@ -97,9 +97,11 @@ const SeedBackup = ({
   const [skipDialogOpen, setSkipDialogOpen] = useState(false);
 
   const { prefix, addressSplit } = StringUtil.getSplitAddress(account.address);
-  const hexSeed = StringUtil.getSplitAddress(account.seed ?? "", 8);
+  const hexSeed = StringUtil.getSplitAddress(account.seed, 8);
 
-  const onDownload = () => StringUtil.downloadRecoveryPhrases(account);
+  const onDownload = () => {
+    StringUtil.downloadRecoveryPhrases(account);
+  };
 
   const setAnswer = (index: number, value: string) => {
     setAnswers((prev) => prev.map((a, i) => (i === index ? value : a)));
@@ -127,6 +129,8 @@ const SeedBackup = ({
     setBusy(true);
     try {
       await onConfirmed();
+    } catch (error) {
+      console.error("Failed to save the backed-up account:", error);
     } finally {
       setBusy(false);
     }
@@ -145,7 +149,11 @@ const SeedBackup = ({
       <form
         name="confirmRecoveryPhrase"
         aria-label="confirmRecoveryPhrase"
-        onSubmit={onConfirm}
+        onSubmit={(event) => {
+          onConfirm(event).catch((error: unknown) => {
+            console.error("Failed to confirm the recovery phrase:", error);
+          });
+        }}
       >
         <Card className="animate-appear-in">
           <CardHeader>
@@ -169,7 +177,9 @@ const SeedBackup = ({
                     // to a password manager, and never corrected on entry.
                     name={`recoveryPhraseWord${position + 1}`}
                     value={answers[index]}
-                    onChange={(e) => setAnswer(index, e.target.value)}
+                    onChange={(e) => {
+                      setAnswer(index, e.target.value);
+                    }}
                     autoComplete="off"
                     autoCapitalize="off"
                     autoCorrect="off"
@@ -227,7 +237,9 @@ const SeedBackup = ({
               type="button"
               variant="outline"
               disabled={busy}
-              onClick={() => setSkipDialogOpen(true)}
+              onClick={() => {
+                setSkipDialogOpen(true);
+              }}
             >
               <TriangleAlert className="mr-2 h-4 w-4" />
               {t("seedBackup.skipButton")}
@@ -282,7 +294,9 @@ const SeedBackup = ({
         <RecoveryPhraseGrid
           words={words}
           revealed={revealed}
-          onReveal={() => setRevealed(true)}
+          onReveal={() => {
+            setRevealed(true);
+          }}
         />
         {revealed && (
           <div className="space-y-2">
@@ -290,7 +304,9 @@ const SeedBackup = ({
               type="button"
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
               aria-expanded={showHexSeed}
-              onClick={() => setShowHexSeed((value) => !value)}
+              onClick={() => {
+                setShowHexSeed((value) => !value);
+              }}
             >
               {showHexSeed ? (
                 <ChevronUp className="h-3.5 w-3.5" />
@@ -336,7 +352,9 @@ const SeedBackup = ({
           className="w-full"
           type="button"
           disabled={!revealed}
-          onClick={() => setStep("confirm")}
+          onClick={() => {
+            setStep("confirm");
+          }}
         >
           <ArrowRight className="mr-2 h-4 w-4" />
           {t("seedBackup.savedButton")}

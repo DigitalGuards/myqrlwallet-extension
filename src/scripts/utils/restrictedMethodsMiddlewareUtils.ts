@@ -1,26 +1,83 @@
 import {
-  JsonRpcRequest,
-  providerErrors,
-  rpcErrors,
-} from "@theqrl/qrl-wallet-provider";
+  isRecord,
+  isStorageIdentity,
+  isStoredBlockchain,
+} from "@/utilities/storageGuards";
+import { providerErrors, rpcErrors } from "@theqrl/qrl-wallet-provider";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import StorageUtil from "@/utilities/storageUtil";
+import {
+  isApprovalSender,
+  isStringArray,
+  isUnknownArray,
+  readApprovalParams,
+  readApprovalTransaction,
+} from "@/utilities/approvalGuards";
 import { assertV3Network, V3_CHAIN_ID } from "@/configuration/releaseProfile";
 import { MAX_SAFE_CHAIN_ID } from "@/constants/blockchain";
-import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 import {
   areAddressesEquivalent,
   isCanonicalQrlAddress,
   isQrlAddress,
+  toCanonicalQrlAddress,
 } from "@/utilities/addressUtil";
 import {
   CAVEAT_TYPES,
-  DAppRequestType,
   PARENT_CAPABILITIES,
   Permission,
 } from "../middlewares/middlewareTypes";
 import { registerDAppTransactionWatch } from "./dAppTransactionWatcher";
 import LockManager from "../lockManager/lockManager";
+
+type AuthorizationRequest = {
+  method: string;
+  params?: unknown;
+  senderData?: unknown;
+};
+
+type ChainGrant = Parameters<
+  typeof StorageUtil.setDAppsConnectedAccountsData
+>[0]["blockchains"][number];
+
+const isChainGrantList = (value: unknown): value is ChainGrant[] => {
+  if (!isUnknownArray(value)) return false;
+  for (const chain of value) {
+    if (!isStoredBlockchain(chain)) return false;
+  }
+  return true;
+};
+
+type ConnectionGrants = {
+  accounts?: string[] | null;
+  blockchains?: ChainGrant[] | null;
+};
+
+const isConnectionGrants = (value: unknown): value is ConnectionGrants =>
+  isRecord(value) &&
+  (value.accounts === undefined ||
+    value.accounts === null ||
+    isStringArray(value.accounts)) &&
+  (value.blockchains === undefined ||
+    value.blockchains === null ||
+    isChainGrantList(value.blockchains));
+
+const readConnectionGrants = (value: unknown): ConnectionGrants | undefined => {
+  if (value === undefined || value === null) return undefined;
+  if (!isConnectionGrants(value)) {
+    throw new Error("The wallet cannot read the stored dApp connection.");
+  }
+  return value;
+};
+
+const readStoredChains = (value: unknown): ChainGrant[] => {
+  if (!isChainGrantList(value)) {
+    throw new Error("The wallet cannot read the stored networks.");
+  }
+  return value;
+};
+
+const requestOrigin = (sender: unknown): string =>
+  new URL(isApprovalSender(sender) ? (sender.url ?? "") : "").origin;
 
 /**
  * `qrl_signTypedData_v4` is the Keccak-256, 32-byte-address EIP-712 layout.
@@ -40,7 +97,7 @@ const LOCKED_WALLET_REFUSAL_MESSAGE =
 
 const buildLockedWalletRefusal = () => ({
   canProceed: false,
-  proceedError: providerErrors.unauthorized({
+  proceedError: providerErrors.unauthorized<never>({
     message: LOCKED_WALLET_REFUSAL_MESSAGE,
   }),
 });
@@ -74,25 +131,25 @@ const shouldRefuseWhileLocked = async (
   }
 };
 
-const getFromAddress = (req: JsonRpcRequest<JsonRpcRequest>) => {
+const getFromAddress = (req: AuthorizationRequest): unknown => {
+  const params = readApprovalParams(req.params);
   switch (req.method) {
     case RESTRICTED_METHODS.QRL_SEND_TRANSACTION:
-      // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
-      return req.params?.[0]?.from ?? "";
+      return readApprovalTransaction(req.params)?.from ?? "";
     case RESTRICTED_METHODS.WALLET_GET_CAPABILITIES:
     case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4:
     case RESTRICTED_METHODS.QRL_SIGN_MESSAGE:
     case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA:
-      // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
-      return req.params?.[0];
+      return params?.[0];
     case RESTRICTED_METHODS.PERSONAL_SIGN:
-      // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime for this RPC method
-      return req.params?.[1];
+      return params?.[1];
+    default:
+      return undefined;
   }
 };
 
 export const checkAccountHasBeenAuthorized = async (
-  req: JsonRpcRequest<JsonRpcRequest>,
+  req: AuthorizationRequest,
   enforceWhileLocked = false,
 ) => {
   // First, and before anything derived from the request is read, so the
@@ -101,17 +158,18 @@ export const checkAccountHasBeenAuthorized = async (
     return buildLockedWalletRefusal();
   }
   const fromAddress = getFromAddress(req);
-  const urlOrigin = new URL(req?.senderData?.url ?? "").origin;
-  const connectedAccounts =
-    await StorageUtil.getDAppsConnectedAccountsData(urlOrigin);
+  const urlOrigin = requestOrigin(req.senderData);
+  const connectedAccounts = readConnectionGrants(
+    await StorageUtil.getDAppsConnectedAccountsData(urlOrigin),
+  );
   const hasAddressConnected =
-    connectedAccounts?.accounts.some((address) =>
+    connectedAccounts?.accounts?.some((address) =>
       areAddressesEquivalent(address, fromAddress),
     ) ?? false;
   return {
     canProceed: hasAddressConnected,
     proceedError: providerErrors.unauthorized({
-      message: `The requested account ${fromAddress} has not been authorized by the user.`,
+      message: `The requested account ${String(fromAddress)} has not been authorized by the user.`,
     }),
   };
 };
@@ -135,20 +193,25 @@ export const normalizeChainId = (chainId: unknown): string | undefined => {
   }
 };
 
-const getTypedDataChainId = (req: JsonRpcRequest<JsonRpcRequest>) => {
-  // @ts-expect-error - params is typed as JsonRpcParams but is an array at runtime
-  const rawTypedData = req.params?.[1];
-  if (typeof rawTypedData === "string") {
+const getTypedDataChainId = (req: AuthorizationRequest) => {
+  let typedData: unknown = readApprovalParams(req.params)?.[1];
+  if (typeof typedData === "string") {
     try {
-      return {
-        isValid: true,
-        chainId: JSON.parse(rawTypedData)?.domain?.chainId,
-      };
+      typedData = JSON.parse(typedData);
     } catch {
       return { isValid: false, chainId: undefined };
     }
   }
-  return { isValid: true, chainId: rawTypedData?.domain?.chainId };
+  if (
+    !isRecord(typedData) ||
+    (typedData.domain !== undefined && !isRecord(typedData.domain))
+  ) {
+    return { isValid: false, chainId: undefined };
+  }
+  return {
+    isValid: true,
+    chainId: isRecord(typedData.domain) ? typedData.domain.chainId : undefined,
+  };
 };
 
 /** True when the request carries constructor or call data worth running. */
@@ -158,12 +221,18 @@ const hasTransactionCalldata = (data: unknown): boolean => {
   return trimmed !== "" && trimmed !== "0x";
 };
 
+const isTransactionValue = (
+  value: unknown,
+): value is string | number | bigint =>
+  typeof value === "string" ||
+  typeof value === "number" ||
+  typeof value === "bigint";
+
 /** True when the request moves a non-zero amount. */
 const hasPositiveTransactionValue = (value: unknown): boolean => {
-  if (value === undefined || value === null || value === "") return false;
-  if (typeof value === "boolean") return false;
+  if (!isTransactionValue(value)) return false;
   try {
-    return BigInt(value as string | number | bigint) > 0n;
+    return BigInt(value) > 0n;
   } catch {
     // An unparseable amount is not a positive one. The existing parameter
     // validation and the node both reject it on its own merits.
@@ -177,7 +246,7 @@ const hasPositiveTransactionValue = (value: unknown): boolean => {
  * Sensitive requests without a declared chain are bound to the active chain.
  */
 export const checkAccountAndChainHaveBeenAuthorized = async (
-  req: JsonRpcRequest<JsonRpcRequest>,
+  req: AuthorizationRequest,
   expectedChainId?: string,
   enforceWhileLocked = false,
 ) => {
@@ -191,9 +260,16 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
   if (!accountResult.canProceed) return accountResult;
 
   if (req.method === RESTRICTED_METHODS.QRL_SEND_TRANSACTION) {
-    const transaction = (
-      req.params as unknown as Array<Record<string, unknown>>
-    )?.[0];
+    const transaction = readApprovalTransaction(req.params);
+    const value = transaction?.value;
+    if (value !== undefined && value !== null && !isTransactionValue(value)) {
+      return {
+        canProceed: false,
+        proceedError: rpcErrors.invalidParams({
+          message: "The transaction contains an invalid value.",
+        }),
+      };
+    }
     const to = transaction?.to;
     if (to !== undefined && to !== null && to !== "" && !isQrlAddress(to)) {
       return {
@@ -207,8 +283,8 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
     // A transaction with no recipient is a contract creation. With no
     // calldata there is no constructor to run, so the funded contract has no
     // code and nothing can ever move the value out of it again. The wallet
-    // refuses rather than showing an approval for a request whose only
-    // possible outcome is burning the amount (security review finding M2).
+    // refuses a request whose only possible outcome is burning the amount
+    // (security review finding M2).
     if (
       (to === undefined || to === null || to === "") &&
       !hasTransactionCalldata(transaction?.data) &&
@@ -224,15 +300,16 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
     }
   }
 
-  const origin = new URL(req?.senderData?.url ?? "").origin;
-  const connectedData = await StorageUtil.getDAppsConnectedAccountsData(origin);
+  const origin = requestOrigin(req.senderData);
+  const connectedData = readConnectionGrants(
+    await StorageUtil.getDAppsConnectedAccountsData(origin),
+  );
+  const activeChain: unknown = await StorageUtil.getActiveBlockChain();
   const activeChainId = normalizeChainId(
-    (await StorageUtil.getActiveBlockChain())?.chainId,
+    isRecord(activeChain) ? activeChain.chainId : undefined,
   );
   if (req.method === RESTRICTED_METHODS.QRL_SEND_TRANSACTION) {
-    const transaction = (
-      req.params as unknown as Array<Record<string, unknown>>
-    )?.[0];
+    const transaction = readApprovalTransaction(req.params);
     if (
       transaction &&
       Object.prototype.hasOwnProperty.call(transaction, "chainId")
@@ -327,10 +404,11 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
   };
 };
 
-export const revalidateAuthorizedDAppRequest = async (
-  request: DAppRequestType | undefined,
-) => {
-  if (request?.method === RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4) {
+export const revalidateAuthorizedDAppRequest = async (request: unknown) => {
+  if (
+    isRecord(request) &&
+    request.method === RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4
+  ) {
     return {
       canProceed: false,
       proceedError: providerErrors.unsupportedMethod({
@@ -338,7 +416,14 @@ export const revalidateAuthorizedDAppRequest = async (
       }),
     };
   }
-  if (!request?.authorizedChainId || !request.requestData?.senderData) {
+  if (
+    !isRecord(request) ||
+    typeof request.method !== "string" ||
+    typeof request.authorizedChainId !== "string" ||
+    !request.authorizedChainId ||
+    !isRecord(request.requestData) ||
+    !isApprovalSender(request.requestData.senderData)
+  ) {
     return {
       canProceed: false,
       proceedError: providerErrors.unauthorized({
@@ -353,26 +438,33 @@ export const revalidateAuthorizedDAppRequest = async (
   // (L6/L-1). This runs after the user unlocked and decides whether a
   // signature happens, so it skips that gate and answers strictly on the
   // stored grants whatever the lock state reads.
+  const authorizationRequest: AuthorizationRequest = {
+    method: request.method,
+    params: request.params,
+    senderData: request.requestData.senderData,
+  };
   const authorization = await checkAccountAndChainHaveBeenAuthorized(
-    {
-      id: request.requestId,
-      jsonrpc: "2.0",
-      method: request.method,
-      params: request.params,
-      senderData: request.requestData.senderData,
-    } as JsonRpcRequest<JsonRpcRequest>,
+    authorizationRequest,
     request.authorizedChainId,
     true,
   );
   if (!authorization.canProceed) return authorization;
   try {
-    const chain = await StorageUtil.getActiveBlockChain();
+    const chain: unknown = await StorageUtil.getActiveBlockChain();
+    if (
+      !isRecord(chain) ||
+      typeof chain.chainId !== "string" ||
+      typeof chain.defaultRpcUrl !== "string"
+    ) {
+      throw new Error("The wallet cannot read the active network.");
+    }
     if (chain.chainId.toLowerCase() !== V3_CHAIN_ID) {
       throw new Error("Select the v3 Private network.");
     }
     await assertV3Network(chain.defaultRpcUrl);
-    const currentChain = await StorageUtil.getActiveBlockChain();
+    const currentChain: unknown = await StorageUtil.getActiveBlockChain();
     if (
+      !isRecord(currentChain) ||
       currentChain.chainId !== chain.chainId ||
       currentChain.defaultRpcUrl !== chain.defaultRpcUrl
     ) {
@@ -388,12 +480,10 @@ export const revalidateAuthorizedDAppRequest = async (
   }
   return checkAccountAndChainHaveBeenAuthorized(
     {
-      id: request.requestId,
-      jsonrpc: "2.0",
       method: request.method,
       params: request.params,
       senderData: request.requestData.senderData,
-    } as JsonRpcRequest<JsonRpcRequest>,
+    },
     request.authorizedChainId,
     true,
   );
@@ -477,7 +567,6 @@ const isAcceptableUrl = (urlString: string, allowPrivateHosts = false) => {
     const url = new URL(urlString);
 
     if (
-      url === null ||
       url.hostname.length === 0 ||
       url.pathname.length === 0 ||
       url.hostname !== decodeURIComponent(url.hostname)
@@ -509,7 +598,7 @@ export const pickDefaultRpcUrl = (
   rpcUrls: unknown,
   allowPrivateHosts = false,
 ): string => {
-  if (!Array.isArray(rpcUrls)) return "";
+  if (!isUnknownArray(rpcUrls)) return "";
   return (
     rpcUrls.find(
       (rpcUrl): rpcUrl is string =>
@@ -520,10 +609,10 @@ export const pickDefaultRpcUrl = (
 };
 
 export const checkWalletAddQrlChainParams = async (
-  chainData: BlockchainDataType,
+  chainData: unknown,
   hasInternalKeys: boolean = false,
 ) => {
-  if (!chainData || typeof chainData !== "object") {
+  if (!isRecord(chainData)) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -559,12 +648,12 @@ export const checkWalletAddQrlChainParams = async (
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
-        message: `Received unexpected keys on object parameter. Unsupported keys: ${extraKeys}`,
+        message: `Received unexpected keys on object parameter. Unsupported keys: ${extraKeys.join(",")}`,
       }),
     };
   }
 
-  const chainId = chainData?.chainId;
+  const chainId = chainData.chainId;
   if (
     typeof chainId !== "string" ||
     !/^0x[1-9a-f]+[0-9a-f]*$/iu.test(chainId.toLowerCase())
@@ -572,7 +661,7 @@ export const checkWalletAddQrlChainParams = async (
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
-        message: `Expected 0x-prefixed, unpadded, non-zero hexadecimal string 'chainId'. Received: ${chainId}`,
+        message: `Expected 0x-prefixed, unpadded, non-zero hexadecimal string 'chainId'. Received: ${String(chainId)}`,
       }),
     };
   }
@@ -590,42 +679,45 @@ export const checkWalletAddQrlChainParams = async (
     };
   }
 
-  const chainName = chainData?.chainName;
+  const chainName = chainData.chainName;
   if (typeof chainName !== "string" || !chainName) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
-        message: `Expected non-empty string 'chainName'. Received: ${chainName}`,
+        message: `Expected non-empty string 'chainName'. Received: ${String(chainName)}`,
       }),
     };
   }
 
-  const rpcUrls = chainData?.rpcUrls;
+  const rpcUrls = chainData.rpcUrls;
   // Every entry has to be acceptable, because the wallet keeps the whole
   // list and can fall back to any of them. Accepting the list as soon as one
   // entry passed let a page smuggle a loopback or plain-http endpoint in
   // beside a presentable https one.
   if (
     !rpcUrls ||
-    !Array.isArray(rpcUrls) ||
+    !isUnknownArray(rpcUrls) ||
     rpcUrls.length === 0 ||
-    !rpcUrls.every((rpcUrl) => isAcceptableUrl(rpcUrl, hasInternalKeys))
+    !rpcUrls.every(
+      (rpcUrl) =>
+        typeof rpcUrl === "string" && isAcceptableUrl(rpcUrl, hasInternalKeys),
+    )
   ) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
-        message: `Expected an array of HTTPS urls on a public host for 'rpcUrls'. Received: ${rpcUrls}`,
+        message: `Expected an array of HTTPS urls on a public host for 'rpcUrls'. Received: ${String(rpcUrls)}`,
       }),
     };
   }
 
-  const nativeCurrency = chainData?.nativeCurrency;
+  const nativeCurrency = chainData.nativeCurrency;
   if (nativeCurrency !== null) {
-    if (typeof nativeCurrency !== "object" || Array.isArray(nativeCurrency)) {
+    if (!isRecord(nativeCurrency)) {
       return {
         canProceed: false,
         proceedError: rpcErrors.invalidParams({
-          message: `Expected null or object 'nativeCurrency'. Received: ${nativeCurrency}`,
+          message: `Expected null or object 'nativeCurrency'. Received: ${JSON.stringify(nativeCurrency)}`,
         }),
       };
     }
@@ -633,7 +725,7 @@ export const checkWalletAddQrlChainParams = async (
       return {
         canProceed: false,
         proceedError: rpcErrors.invalidParams({
-          message: `Expected the number 18 for 'nativeCurrency.decimals' when 'nativeCurrency' is provided. Received: ${nativeCurrency.decimals}`,
+          message: `Expected the number 18 for 'nativeCurrency.decimals' when 'nativeCurrency' is provided. Received: ${String(nativeCurrency.decimals)}`,
         }),
       };
     }
@@ -641,16 +733,16 @@ export const checkWalletAddQrlChainParams = async (
       return {
         canProceed: false,
         proceedError: rpcErrors.invalidParams({
-          message: `Expected a string 'nativeCurrency.symbol'. Received: ${nativeCurrency.symbol}`,
+          message: `Expected a string 'nativeCurrency.symbol'. Received: ${String(nativeCurrency.symbol)}`,
         }),
       };
     }
   }
-  const ticker = nativeCurrency?.symbol;
-  if (
-    ticker &&
-    (typeof ticker !== "string" || ticker.length < 1 || ticker.length > 6)
-  ) {
+  const ticker =
+    typeof nativeCurrency?.symbol === "string"
+      ? nativeCurrency.symbol
+      : undefined;
+  if (ticker && (ticker.length < 1 || ticker.length > 6)) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -659,7 +751,7 @@ export const checkWalletAddQrlChainParams = async (
     };
   }
 
-  const qrnsRegistryAddress = chainData.qrnsRegistryAddress as unknown;
+  const qrnsRegistryAddress = chainData.qrnsRegistryAddress;
   if (
     hasInternalKeys &&
     qrnsRegistryAddress !== undefined &&
@@ -676,13 +768,17 @@ export const checkWalletAddQrlChainParams = async (
     };
   }
 
-  const blockchains = await StorageUtil.getAllBlockChains();
+  const blockchains = readStoredChains(await StorageUtil.getAllBlockChains());
   const existingChain = blockchains.find((chain) => chain.chainId === chainId);
-  if (existingChain && existingChain?.nativeCurrency?.symbol !== ticker) {
+  const existingCurrency = existingChain?.nativeCurrency;
+  const existingTicker = isRecord(existingCurrency)
+    ? existingCurrency.symbol
+    : undefined;
+  if (existingChain && existingTicker !== ticker) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
-        message: `nativeCurrency.symbol does not match currency symbol for a network the user already has added with the same chainId. Received: ${ticker}`,
+        message: `nativeCurrency.symbol does not match currency symbol for a network the user already has added with the same chainId. Received: ${String(ticker)}`,
       }),
     };
   }
@@ -716,21 +812,20 @@ export const checkUrlOriginHasBeenConnected = async (
   }
   const urlOrigin = new URL(url).origin;
   const connectedAccounts =
-    (await StorageUtil.getDAppsConnectedAccountsData(urlOrigin))?.accounts ??
-    [];
+    readConnectionGrants(
+      await StorageUtil.getDAppsConnectedAccountsData(urlOrigin),
+    )?.accounts ?? [];
   const hasConnectedAccounts = connectedAccounts.length > 0;
   return {
     canProceed: hasConnectedAccounts,
-    proceedError: providerErrors.unauthorized({
+    proceedError: providerErrors.unauthorized<never>({
       message: "The dApp is not connected to MyQRLWallet.",
     }),
   };
 };
 
-export const checkWalletSwitchQrlChainParams = async (paramObject: {
-  chainId: string;
-}) => {
-  if (!paramObject || typeof paramObject !== "object") {
+export const checkWalletSwitchQrlChainParams = async (paramObject: unknown) => {
+  if (!isRecord(paramObject)) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -749,12 +844,12 @@ export const checkWalletSwitchQrlChainParams = async (paramObject: {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
-        message: `Received unexpected keys on object parameter. Unsupported keys: ${extraKeys}`,
+        message: `Received unexpected keys on object parameter. Unsupported keys: ${extraKeys.join(",")}`,
       }),
     };
   }
 
-  const chainId = paramObject?.chainId;
+  const chainId = paramObject.chainId;
   if (
     typeof chainId !== "string" ||
     !/^0x[1-9a-f]+[0-9a-f]*$/iu.test(chainId.toLowerCase())
@@ -762,7 +857,7 @@ export const checkWalletSwitchQrlChainParams = async (paramObject: {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
-        message: `Expected 0x-prefixed, unpadded, non-zero hexadecimal string 'chainId'. Received: ${chainId}`,
+        message: `Expected 0x-prefixed, unpadded, non-zero hexadecimal string 'chainId'. Received: ${String(chainId)}`,
       }),
     };
   }
@@ -780,7 +875,7 @@ export const checkWalletSwitchQrlChainParams = async (paramObject: {
     };
   }
 
-  const blockchains = await StorageUtil.getAllBlockChains();
+  const blockchains = readStoredChains(await StorageUtil.getAllBlockChains());
   const existingChain = blockchains.find(
     (chain) => chain.chainId.toLowerCase() === chainId.toLowerCase(),
   );
@@ -800,16 +895,8 @@ export const checkWalletSwitchQrlChainParams = async (paramObject: {
   };
 };
 
-export const checkWalletWatchAssetParams = async (paramObject: {
-  type: string;
-  options: {
-    address: string;
-    symbol: string;
-    decimals: number;
-    image: string;
-  };
-}) => {
-  if (!paramObject || typeof paramObject !== "object") {
+const validateWalletWatchAssetParams = (paramObject: unknown) => {
+  if (!isRecord(paramObject)) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -820,7 +907,10 @@ export const checkWalletWatchAssetParams = async (paramObject: {
     };
   }
 
-  if (!paramObject?.type || paramObject?.type?.toLowerCase() !== "zrc20") {
+  if (
+    typeof paramObject.type !== "string" ||
+    paramObject.type.toLowerCase() !== "zrc20"
+  ) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -829,10 +919,12 @@ export const checkWalletWatchAssetParams = async (paramObject: {
     };
   }
 
+  const options = paramObject.options;
   if (
-    !paramObject?.options?.address ||
-    !paramObject?.options?.decimals ||
-    !paramObject?.options?.symbol
+    !isRecord(options) ||
+    !isStorageIdentity(options.address) ||
+    !options.decimals ||
+    !options.symbol
   ) {
     return {
       canProceed: false,
@@ -842,7 +934,7 @@ export const checkWalletWatchAssetParams = async (paramObject: {
     };
   }
 
-  if (typeof paramObject?.options?.symbol !== "string") {
+  if (typeof options.symbol !== "string") {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -851,7 +943,7 @@ export const checkWalletWatchAssetParams = async (paramObject: {
     };
   }
 
-  if (paramObject?.options?.symbol?.length > 11) {
+  if (options.symbol.length > 11) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
@@ -861,8 +953,10 @@ export const checkWalletWatchAssetParams = async (paramObject: {
   }
 
   if (
-    paramObject?.options?.decimals < 0 ||
-    paramObject?.options?.decimals > 36
+    typeof options.decimals !== "number" ||
+    !Number.isFinite(options.decimals) ||
+    options.decimals < 0 ||
+    options.decimals > 36
   ) {
     return {
       canProceed: false,
@@ -878,21 +972,15 @@ export const checkWalletWatchAssetParams = async (paramObject: {
   };
 };
 
-export const checkWalletRequestPermissionParams = async (paramObject: {
-  [k: string]: unknown;
-}) => {
-  const isAnObject =
-    Boolean(paramObject) &&
-    typeof paramObject === "object" &&
-    !Array.isArray(paramObject);
-  if (!isAnObject) {
+const validateWalletRequestPermissionParams = (paramObject: unknown) => {
+  if (!isRecord(paramObject)) {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams(),
     };
   }
   const allowedCapabilities: string[] = Object.values(PARENT_CAPABILITIES);
-  const requestedCapability = Object.keys(paramObject)?.[0] ?? "";
+  const [requestedCapability = ""] = Object.keys(paramObject);
   if (!allowedCapabilities.includes(requestedCapability)) {
     return {
       canProceed: false,
@@ -908,20 +996,40 @@ export const checkWalletRequestPermissionParams = async (paramObject: {
   };
 };
 
-export const updateAccountsAndBlockchainsForUrlOrigin = async ({
+// Preserve the asynchronous validator API and rejection of serialization errors.
+export const checkWalletWatchAssetParams = (paramObject: unknown) =>
+  new Promise<ReturnType<typeof validateWalletWatchAssetParams>>((resolve) => {
+    resolve(validateWalletWatchAssetParams(paramObject));
+  });
+
+export const checkWalletRequestPermissionParams = (paramObject: unknown) =>
+  new Promise<ReturnType<typeof validateWalletRequestPermissionParams>>(
+    (resolve) => {
+      resolve(validateWalletRequestPermissionParams(paramObject));
+    },
+  );
+
+type ApprovedConnection = Pick<
+  Parameters<typeof StorageUtil.setDAppsConnectedAccountsData>[0],
+  "accounts" | "blockchains"
+> & { urlOrigin?: string | null };
+
+export const updateAccountsAndBlockchainsForUrlOrigin = async (
+  connection: ApprovedConnection,
+) => {
+  await updatePermissionsForUrlOrigin(connection);
+  return connection.accounts;
+};
+
+export const updatePermissionsForUrlOrigin = async ({
   urlOrigin,
   accounts,
   blockchains,
-}: {
-  urlOrigin: string;
-  accounts: string[];
-  blockchains: BlockchainDataType[];
-}) => {
+}: ApprovedConnection): Promise<Permission[]> => {
   const origin = new URL(urlOrigin ?? "").origin;
-  // Do not silently force-switch the globally-active chain when granting
-  // permissions. The user approved the connect, not a chain change. If the
-  // dApp needs a different chain, it can call wallet_switchQRLChain, which
-  // will surface to the user via the popup (F-3).
+  // A connection approval grants access to the selected chains. Changing the
+  // active chain requires a separate wallet_switchQRLChain approval (F-3).
+  const canonicalAccounts = accounts.map(toCanonicalQrlAddress);
   const blockchainIds = blockchains.map((blockchain) => blockchain.chainId);
   const permissions: Permission[] = [
     {
@@ -930,7 +1038,7 @@ export const updateAccountsAndBlockchainsForUrlOrigin = async ({
       caveats: [
         {
           type: CAVEAT_TYPES.RESTRICT_RETURNED_ACCOUNTS,
-          value: [...accounts],
+          value: [...canonicalAccounts],
         },
       ],
     },
@@ -951,37 +1059,26 @@ export const updateAccountsAndBlockchainsForUrlOrigin = async ({
     blockchains: [...blockchains],
     permissions,
   });
-  return accounts;
+  // Respond with the approved usable grants after the raw storage merge. Opaque
+  // stored siblings remain available to future readers and subsequent writes.
+  return canonicalAccounts.length > 0 ? permissions : [];
 };
 
 export const includeChainForUrlOrigin = async ({
   urlOrigin,
   chainId,
 }: {
-  urlOrigin: string;
-  chainId: string;
+  urlOrigin?: string | null;
+  chainId?: string | null;
 }) => {
   const origin = new URL(urlOrigin ?? "").origin;
-  const dAppConnectedData =
-    await StorageUtil.getDAppsConnectedAccountsData(origin);
-  const allBlockchains = await StorageUtil.getAllBlockChains();
+  const allBlockchains = readStoredChains(
+    await StorageUtil.getAllBlockChains(),
+  );
   const blockchain = allBlockchains.find(
-    (chain) => chain?.chainId?.toLowerCase() === chainId?.toLowerCase(),
+    (chain) => chain.chainId.toLowerCase() === chainId?.toLowerCase(),
   );
-  const isAdditionRequired = !(dAppConnectedData?.blockchains ?? []).find(
-    (chain) =>
-      chain.chainId?.toLowerCase() === blockchain?.chainId?.toLowerCase(),
-  );
-  const updatedBlockchains = [
-    ...(dAppConnectedData?.blockchains ?? []),
-    ...(isAdditionRequired && blockchain ? [blockchain] : []),
-  ];
-
-  await updateAccountsAndBlockchainsForUrlOrigin({
-    urlOrigin: origin,
-    accounts: dAppConnectedData?.accounts ?? [],
-    blockchains: updatedBlockchains,
-  });
+  if (blockchain) await StorageUtil.addDAppChain(origin, blockchain);
 };
 
 /**
@@ -995,9 +1092,9 @@ export const includeChainForUrlOrigin = async ({
 export const extractPendingDAppTransactionHash = (
   response: unknown,
 ): string | undefined => {
-  const errorData = (
-    response as { error?: { data?: { transactionHash?: unknown } } }
-  )?.error?.data;
+  const error = isRecord(response) ? response.error : undefined;
+  const errorData =
+    isRecord(error) && isRecord(error.data) ? error.data : undefined;
   return typeof errorData?.transactionHash === "string"
     ? errorData.transactionHash
     : undefined;
@@ -1016,12 +1113,10 @@ export const extractPendingDAppTransactionHash = (
 export const buildDAppSendTransactionErrorData = (
   response: unknown,
 ): Record<string, unknown> => {
-  const errorPayload = (response as { error?: unknown })?.error;
+  const errorPayload = isRecord(response) ? response.error : undefined;
   const pendingTransactionHash = extractPendingDAppTransactionHash(response);
   return {
-    ...(errorPayload && typeof errorPayload === "object"
-      ? (errorPayload as Record<string, unknown>)
-      : {}),
+    ...(isRecord(errorPayload) ? errorPayload : {}),
     ...(pendingTransactionHash && {
       transactionHash: pendingTransactionHash,
     }),
@@ -1046,7 +1141,7 @@ export const buildDAppSendTransactionErrorData = (
  * otherwise-successful response.
  */
 export const registerDAppTransactionWatchIfApproved = async (
-  req: JsonRpcRequest<JsonRpcRequest>,
+  req: AuthorizationRequest,
   transactionHash: unknown,
   authorizedChainId?: string,
 ): Promise<void> => {
@@ -1071,20 +1166,9 @@ export const excludeChainForUrlOrigin = async ({
   urlOrigin,
   chainId,
 }: {
-  urlOrigin: string;
+  urlOrigin?: string | null;
   chainId: string;
 }) => {
   const origin = new URL(urlOrigin ?? "").origin;
-  const dAppConnectedData =
-    await StorageUtil.getDAppsConnectedAccountsData(origin);
-  const updatedBlockchains =
-    dAppConnectedData?.blockchains?.filter(
-      (chain) => chain?.chainId?.toLowerCase() !== chainId.toLowerCase(),
-    ) ?? [];
-
-  await updateAccountsAndBlockchainsForUrlOrigin({
-    urlOrigin: origin,
-    accounts: dAppConnectedData?.accounts ?? [],
-    blockchains: updatedBlockchains,
-  });
+  await StorageUtil.removeDAppChain(origin, chainId);
 };

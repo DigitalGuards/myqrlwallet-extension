@@ -3,10 +3,9 @@
 // Node environment (same as keystoreCrypto.test.ts): fixture building calls
 // encryptKeystore -> @theqrl/web3-qrl-accounts, whose validator rejects
 // jsdom-realm Uint8Arrays. This also means `Worker` is undefined here, so
-// decryptBackupKeystore exercises its inline fallback path; the worker file
-// itself is trivial forwarding covered by manual QA (same posture as
-// unlockWorker).
-import { describe, expect, it } from "vitest";
+// decryptBackupKeystore exercises its inline fallback path by default.
+// Worker-boundary tests install a worker stub for response validation.
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KeyStore } from "@theqrl/web3";
 import { encryptKeystore } from "@/crypto/keystoreCrypto";
 import {
@@ -36,7 +35,9 @@ async function makeBackupFile(
 ): Promise<{ text: string; keystores: KeyStore[] }> {
   const keystores: KeyStore[] = [];
   for (let i = 0; i < count; i++) {
-    keystores.push(await encryptKeystore(SEED_HEX, password, { ...FAST_KDF, ...kdf }));
+    keystores.push(
+      await encryptKeystore(SEED_HEX, password, { ...FAST_KDF, ...kdf }),
+    );
   }
   const envelope = {
     version: "0.1.1",
@@ -49,12 +50,12 @@ async function makeBackupFile(
 }
 
 function mutateFirstKeystore(
-  text: string,
-  mutate: (ks: Record<string, unknown>) => void,
+  keystores: KeyStore[],
+  mutate: (ks: KeyStore) => unknown,
 ): string {
-  const parsed = JSON.parse(text);
-  mutate(parsed.keystores[0]);
-  return JSON.stringify(parsed);
+  return JSON.stringify({
+    keystores: keystores.map((ks, index) => (index === 0 ? mutate(ks) : ks)),
+  });
 }
 
 const V2_FILE = JSON.stringify({
@@ -68,11 +69,11 @@ const V2_FILE = JSON.stringify({
 
 describe("parseWalletImportFile routing", () => {
   it("routes a backup envelope with all keystores validated", async () => {
-    const { text } = await makeBackupFile(2, PASSWORD);
+    const { text, keystores } = await makeBackupFile(2, PASSWORD);
     const parsed = parseWalletImportFile(text);
     expect(parsed.kind).toBe("backup");
     if (parsed.kind === "backup") {
-      expect(parsed.keystores).toHaveLength(2);
+      expect(parsed.keystores).toEqual(keystores);
     }
   });
 
@@ -91,8 +92,12 @@ describe("parseWalletImportFile routing", () => {
   });
 
   it("rejects non-JSON and neither-format JSON", () => {
-    expect(() => parseWalletImportFile("not json")).toThrow(WalletFileFormatError);
-    expect(() => parseWalletImportFile('{"foo": 1}')).toThrow(WalletFileFormatError);
+    expect(() => parseWalletImportFile("not json")).toThrow(
+      WalletFileFormatError,
+    );
+    expect(() => parseWalletImportFile('{"foo": 1}')).toThrow(
+      WalletFileFormatError,
+    );
   });
 
   it("rejects an empty keystores array with WalletBackupEmptyError", () => {
@@ -103,26 +108,56 @@ describe("parseWalletImportFile routing", () => {
 });
 
 describe("parseKeystoreBackup validation", () => {
+  it("rejects malformed backup shapes without changing the input", async () => {
+    const { keystores } = await makeBackupFile(1, PASSWORD);
+    const [ks] = keystores;
+    for (const value of [null, [], "invalid", 1, false]) {
+      for (const candidate of [
+        value,
+        { ...ks, crypto: value },
+        { ...ks, crypto: { ...ks.crypto, cipherparams: value } },
+        { ...ks, crypto: { ...ks.crypto, kdfparams: value } },
+      ]) {
+        const backup = { keystores: [ks, candidate, ks] };
+        const original = structuredClone(backup);
+        expect(() => parseKeystoreBackup(backup)).toThrow(
+          WalletFileFormatError,
+        );
+        expect(backup).toEqual(original);
+      }
+    }
+  });
+
+  it("preserves every valid keystore and its position", async () => {
+    const { keystores } = await makeBackupFile(2, PASSWORD);
+    const envelope = { keystores };
+    const original = structuredClone(envelope);
+    expect(parseKeystoreBackup(envelope)).toEqual(keystores);
+    expect(envelope).toEqual(original);
+  });
+
   it("rejects unsupported version, cipher, and kdf", async () => {
-    const { text } = await makeBackupFile(1, PASSWORD);
+    const { keystores } = await makeBackupFile(1, PASSWORD);
     for (const mutate of [
-      (ks: Record<string, unknown>) => {
-        ks.version = 2;
-      },
-      (ks: Record<string, unknown>) => {
-        (ks.crypto as Record<string, unknown>).cipher = "aes-128-gcm";
-      },
-      (ks: Record<string, unknown>) => {
-        (ks.crypto as Record<string, unknown>).kdf = "pbkdf2";
-      },
+      (ks: KeyStore) => ({ ...ks, version: 2 }),
+      (ks: KeyStore) => ({
+        ...ks,
+        crypto: { ...ks.crypto, cipher: "aes-128-gcm" },
+      }),
+      (ks: KeyStore) => ({
+        ...ks,
+        crypto: { ...ks.crypto, kdf: "pbkdf2" },
+      }),
     ]) {
-      const mutated = mutateFirstKeystore(text, mutate);
-      expect(() => parseWalletImportFile(mutated)).toThrow(WalletFileFormatError);
+      const mutated = mutateFirstKeystore(keystores, mutate);
+      expect(() => parseWalletImportFile(mutated)).toThrow(
+        WalletFileFormatError,
+      );
     }
   });
 
   it("rejects out-of-bounds kdfparams at parse time", async () => {
-    const { text } = await makeBackupFile(1, PASSWORD);
+    const { keystores } = await makeBackupFile(1, PASSWORD);
     for (const params of [
       { m: 2048 },
       { m: 2097152 },
@@ -133,62 +168,74 @@ describe("parseKeystoreBackup validation", () => {
       { dklen: 8 },
       { m: 8192.5 },
     ]) {
-      const mutated = mutateFirstKeystore(text, (ks) => {
-        Object.assign(
-          (ks.crypto as Record<string, Record<string, unknown>>).kdfparams,
-          params,
-        );
-      });
-      expect(() => parseWalletImportFile(mutated)).toThrow(WalletFileFormatError);
+      const mutated = mutateFirstKeystore(keystores, (ks) => ({
+        ...ks,
+        crypto: {
+          ...ks.crypto,
+          kdfparams: { ...ks.crypto.kdfparams, ...params },
+        },
+      }));
+      expect(() => parseWalletImportFile(mutated)).toThrow(
+        WalletFileFormatError,
+      );
     }
   });
 
   it("rejects a wrong-length IV and non-hex ciphertext", async () => {
-    const { text } = await makeBackupFile(1, PASSWORD);
-    const badIv = mutateFirstKeystore(text, (ks) => {
-      (
-        (ks.crypto as Record<string, unknown>).cipherparams as Record<string, unknown>
-      ).iv = "00112233445566778899aabbccdd"; // 14 bytes
-    });
+    const { keystores } = await makeBackupFile(1, PASSWORD);
+    const badIv = mutateFirstKeystore(keystores, (ks) => ({
+      ...ks,
+      crypto: {
+        ...ks.crypto,
+        cipherparams: { iv: "00112233445566778899aabbccdd" },
+      },
+    }));
     expect(() => parseWalletImportFile(badIv)).toThrow(WalletFileFormatError);
-    const badCiphertext = mutateFirstKeystore(text, (ks) => {
-      (ks.crypto as Record<string, unknown>).ciphertext = "zz" + "00".repeat(66);
-    });
-    expect(() => parseWalletImportFile(badCiphertext)).toThrow(WalletFileFormatError);
+    const badCiphertext = mutateFirstKeystore(keystores, (ks) => ({
+      ...ks,
+      crypto: { ...ks.crypto, ciphertext: "zz" + "00".repeat(66) },
+    }));
+    expect(() => parseWalletImportFile(badCiphertext)).toThrow(
+      WalletFileFormatError,
+    );
   });
 
   it("rejects a ciphertext that is not exactly seed+tag sized", async () => {
     // 51-byte seed + 16-byte GCM tag = 67 bytes; anything else is a
-    // wrong-era or corrupt file and must fail at selection, not after a
-    // correct password.
-    const { text } = await makeBackupFile(1, PASSWORD);
+    // wrong-era or corrupt file and must fail at selection.
+    const { keystores } = await makeBackupFile(1, PASSWORD);
     for (const bytes of [66, 68, 80]) {
-      const mutated = mutateFirstKeystore(text, (ks) => {
-        (ks.crypto as Record<string, unknown>).ciphertext = "00".repeat(bytes);
-      });
-      expect(() => parseWalletImportFile(mutated)).toThrow(WalletFileFormatError);
+      const mutated = mutateFirstKeystore(keystores, (ks) => ({
+        ...ks,
+        crypto: { ...ks.crypto, ciphertext: "00".repeat(bytes) },
+      }));
+      expect(() => parseWalletImportFile(mutated)).toThrow(
+        WalletFileFormatError,
+      );
     }
   });
 
   it("rejects a salt below argon2's 8-byte minimum at parse time", async () => {
-    const { text } = await makeBackupFile(1, PASSWORD);
-    const mutated = mutateFirstKeystore(text, (ks) => {
-      (
-        (ks.crypto as Record<string, Record<string, unknown>>).kdfparams
-      ).salt = "abcd";
-    });
+    const { keystores } = await makeBackupFile(1, PASSWORD);
+    const mutated = mutateFirstKeystore(keystores, (ks) => ({
+      ...ks,
+      crypto: {
+        ...ks.crypto,
+        kdfparams: { ...ks.crypto.kdfparams, salt: "abcd" },
+      },
+    }));
     expect(() => parseWalletImportFile(mutated)).toThrow(WalletFileFormatError);
   });
 
-  it("defaults missing id/address instead of rejecting", async () => {
-    const { text } = await makeBackupFile(1, PASSWORD);
-    const stripped = mutateFirstKeystore(text, (ks) => {
-      delete ks.id;
-      delete ks.address;
+  it("defaults missing id/address", async () => {
+    const { keystores } = await makeBackupFile(1, PASSWORD);
+    const stripped = mutateFirstKeystore(keystores, (ks) => {
+      const { id: _id, address: _address, ...rest } = ks;
+      return rest;
     });
-    const keystores = parseKeystoreBackup(JSON.parse(stripped));
-    expect(keystores[0]?.id).toBeTruthy();
-    expect(keystores[0]?.address).toBe("");
+    const parsed = parseKeystoreBackup(JSON.parse(stripped));
+    expect(parsed[0]?.id).toBeTruthy();
+    expect(parsed[0]?.address).toBe("");
   });
 });
 
@@ -203,21 +250,25 @@ describe("looksLikeKeystoreBackup", () => {
 describe("decryptBackupKeystore", () => {
   it("round-trips a keystore encrypted by the extension's own crypto", async () => {
     const { keystores } = await makeBackupFile(1, PASSWORD);
-    await expect(decryptBackupKeystore(keystores[0]!, PASSWORD)).resolves.toBe(
+    await expect(decryptBackupKeystore(keystores[0], PASSWORD)).resolves.toBe(
       SEED_HEX,
     );
   }, 30000);
 
   it("honors non-default in-bounds kdf params", async () => {
-    const { keystores } = await makeBackupFile(1, PASSWORD, { m: 4096, t: 3, p: 2 });
-    await expect(decryptBackupKeystore(keystores[0]!, PASSWORD)).resolves.toBe(
+    const { keystores } = await makeBackupFile(1, PASSWORD, {
+      m: 4096,
+      t: 3,
+      p: 2,
+    });
+    await expect(decryptBackupKeystore(keystores[0], PASSWORD)).resolves.toBe(
       SEED_HEX,
     );
   }, 30000);
 
   it("rejects in-bounds dklen other than 32 before running the KDF", async () => {
     const { keystores } = await makeBackupFile(1, PASSWORD);
-    const ks = structuredClone(keystores[0]!);
+    const ks = structuredClone(keystores[0]);
     ks.crypto.kdfparams.dklen = 16;
     await expect(decryptBackupKeystore(ks, PASSWORD)).rejects.toThrow(
       WalletFileFormatError,
@@ -227,7 +278,7 @@ describe("decryptBackupKeystore", () => {
   it("maps a wrong password to WalletFileDecryptError", async () => {
     const { keystores } = await makeBackupFile(1, PASSWORD);
     await expect(
-      decryptBackupKeystore(keystores[0]!, "wrong-password"),
+      decryptBackupKeystore(keystores[0], "wrong-password"),
     ).rejects.toThrow(WalletFileDecryptError);
   }, 30000);
 
@@ -235,27 +286,115 @@ describe("decryptBackupKeystore", () => {
     // Wrong password and tampering must stay indistinguishable (the GCM tag
     // is the sole check); this pins both the class and the message.
     const { keystores } = await makeBackupFile(1, PASSWORD);
-    const ks = structuredClone(keystores[0]!);
+    const ks = structuredClone(keystores[0]);
     const flipped =
       (parseInt(ks.crypto.ciphertext.slice(0, 2), 16) ^ 0x01)
         .toString(16)
         .padStart(2, "0") + ks.crypto.ciphertext.slice(2);
     ks.crypto.ciphertext = flipped;
-    const tampered = await decryptBackupKeystore(ks, PASSWORD).catch((e) => e);
+    const tampered = await decryptBackupKeystore(ks, PASSWORD).catch(
+      (error: unknown) => error,
+    );
     const wrongPw = await decryptBackupKeystore(
-      keystores[0]!,
+      keystores[0],
       "wrong-password",
-    ).catch((e) => e);
+    ).catch((error: unknown) => error);
     expect(tampered).toBeInstanceOf(WalletFileDecryptError);
     expect(wrongPw).toBeInstanceOf(WalletFileDecryptError);
-    expect((tampered as Error).message).toBe((wrongPw as Error).message);
+    if (!(tampered instanceof Error) || !(wrongPw instanceof Error)) {
+      throw new Error("Expected both decryptions to fail with an Error");
+    }
+    expect(tampered.message).toBe(wrongPw.message);
   }, 60000);
 
   it("decrypts with an NFD-normalized variant of an NFC password", async () => {
     const nfcPassword = "pässwörd-café".normalize("NFC");
     const { keystores } = await makeBackupFile(1, nfcPassword);
     await expect(
-      decryptBackupKeystore(keystores[0]!, nfcPassword.normalize("NFD")),
+      decryptBackupKeystore(keystores[0], nfcPassword.normalize("NFD")),
     ).resolves.toBe(SEED_HEX);
   }, 30000);
+});
+
+describe("decryptBackupKeystore worker responses", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubWorker(response: unknown, fail = false) {
+    const state = { requests: new Array<unknown>(), terminations: 0 };
+    class ImportWorker {
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      postMessage(request: unknown) {
+        state.requests.push(request);
+        queueMicrotask(() => {
+          if (fail) {
+            this.onerror?.();
+          } else {
+            this.onmessage?.(
+              new MessageEvent<unknown>("message", { data: response }),
+            );
+          }
+        });
+      }
+
+      terminate() {
+        state.terminations += 1;
+      }
+    }
+    vi.stubGlobal("Worker", ImportWorker);
+    return state;
+  }
+
+  it("returns the seed, normalizes the password, and terminates the worker", async () => {
+    const { keystores } = await makeBackupFile(1, PASSWORD);
+    const password = "pässwörd-café".normalize("NFD");
+    const state = stubWorker({ success: true, hexSeed: SEED_HEX });
+    await expect(decryptBackupKeystore(keystores[0], password)).resolves.toBe(
+      SEED_HEX,
+    );
+    expect(state.requests).toEqual([
+      { keystore: keystores[0], password: password.normalize("NFC") },
+    ]);
+    expect(state.terminations).toBe(1);
+  });
+
+  it("preserves password and worker failure errors", async () => {
+    const { keystores } = await makeBackupFile(1, PASSWORD);
+    stubWorker({ success: false, wrongPassword: true });
+    await expect(decryptBackupKeystore(keystores[0], PASSWORD)).rejects.toThrow(
+      WalletFileDecryptError,
+    );
+    for (const fail of [false, true]) {
+      const state = stubWorker({ success: false, wrongPassword: false }, fail);
+      await expect(
+        decryptBackupKeystore(keystores[0], PASSWORD),
+      ).rejects.toThrow(new Error("Keystore decryption failed"));
+      expect(state.terminations).toBe(1);
+    }
+  });
+
+  it("rejects malformed worker replies as decryption failures", async () => {
+    const { keystores } = await makeBackupFile(1, PASSWORD);
+    for (const response of [
+      null,
+      undefined,
+      [],
+      "invalid",
+      {},
+      { success: "true", hexSeed: SEED_HEX },
+      { success: true },
+      { success: true, hexSeed: 123 },
+      { success: false },
+      { success: false, wrongPassword: "false" },
+    ]) {
+      const state = stubWorker(response);
+      await expect(
+        decryptBackupKeystore(keystores[0], PASSWORD),
+      ).rejects.toThrow(new Error("Keystore decryption failed"));
+      expect(state.terminations).toBe(1);
+    }
+  });
 });

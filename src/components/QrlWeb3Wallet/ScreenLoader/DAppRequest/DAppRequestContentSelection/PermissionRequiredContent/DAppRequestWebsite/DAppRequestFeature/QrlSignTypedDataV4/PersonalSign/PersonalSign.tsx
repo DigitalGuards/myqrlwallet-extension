@@ -15,7 +15,10 @@ import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { useStore } from "@/stores/store";
 import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
+import { readApprovalParams } from "@/utilities/approvalGuards";
+import { isRecord } from "@/utilities/storageGuards";
 import { sanitizeForDisplay } from "@/utilities/stringUtil";
+import { rpcErrors } from "@theqrl/qrl-wallet-provider";
 import { MLDSA87, ExtendedSeed } from "@theqrl/wallet.js";
 import { bytesToHex } from "@theqrl/web3-utils";
 import { parseAndValidateSeed } from "@theqrl/web3-qrl-accounts";
@@ -25,17 +28,23 @@ import { useTranslation } from "react-i18next";
 import { useEffect, useState } from "react";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 
+const isPersonalSignParams = (
+  value: unknown,
+): value is { 0: string; 1: string } => {
+  const params = readApprovalParams(value);
+  return typeof params?.[0] === "string" && typeof params[1] === "string";
+};
+
 const PersonalSign = observer(() => {
   const { t } = useTranslation();
   const { lockStore, qrlStore, dAppRequestStore } = useStore();
-  const { getMnemonicPhrases, readLockState } = lockStore;
   const { qrlInstance } = qrlStore;
-  const { dAppRequestData, setOnPermissionCallBack, setCanProceed } =
-    dAppRequestStore;
+  const { dAppRequestData } = dAppRequestStore;
   const [isWalletLocked, setIsWalletLocked] = useState(false);
 
-  const params = dAppRequestData?.params;
-  const rawMessage: string = params?.[0] ?? "";
+  const rawParams: unknown = dAppRequestData?.params;
+  const params = isPersonalSignParams(rawParams) ? rawParams : undefined;
+  const rawMessage = params?.[0] ?? "";
   const { text: decodedChallenge, wasHexDecoded: isHexEncoded } =
     decodePersonalSignMessage(rawMessage);
   const { sanitized: challenge, hadHidden: hasHiddenChars } =
@@ -52,6 +61,10 @@ const PersonalSign = observer(() => {
       record: ResponseRecorder,
     ) => {
       if (hasApproved) {
+        if (!params) {
+          record({ error: rpcErrors.invalidParams() });
+          return;
+        }
         const authorization =
           await revalidateAuthorizedDAppRequest(dAppRequestData);
         if (!authorization.canProceed) {
@@ -64,33 +77,40 @@ const PersonalSign = observer(() => {
         await personalSign(record);
       }
     };
-    setOnPermissionCallBack(onPermissionCallBack);
+    dAppRequestStore.setOnPermissionCallBack(onPermissionCallBack);
   }, [dAppRequestData]);
 
   const copyMessage = () => {
-    navigator.clipboard.writeText(challenge);
+    navigator.clipboard.writeText(challenge).catch((error: unknown) => {
+      console.error("Failed to copy the signing message:", error);
+    });
   };
 
   const personalSign = async (record: ResponseRecorder) => {
     try {
-      const mnemonicPhrases = await getMnemonicPhrases(fromAddress ?? "");
+      const mnemonicPhrases = await lockStore.getMnemonicPhrases(fromAddress);
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
-      const addressFromMnemonic =
-        qrlInstance?.accounts.seedToAccount(seed)?.address;
+      const account: unknown = qrlInstance?.accounts.seedToAccount(seed);
+      const addressFromMnemonic = isRecord(account)
+        ? account.address
+        : undefined;
       if (!areAddressesEquivalent(fromAddress, addressFromMnemonic)) {
         throw new Error("Mnemonic phrases did not match with the address");
       }
-      const signature = qrlInstance?.accounts.sign(
-        params?.[0],
+      const signedMessage: unknown = qrlInstance?.accounts.sign(
+        rawMessage,
         seed,
-      )?.signature;
+      );
+      const signature = isRecord(signedMessage)
+        ? signedMessage.signature
+        : undefined;
 
       const seedUint8Array = parseAndValidateSeed(seed);
       const extSeed = new ExtendedSeed(seedUint8Array);
       const acc = MLDSA87.newWalletFromExtendedSeed(extSeed);
       const publicKey = bytesToHex(acc.getPK());
 
-      if (signature && publicKey) {
+      if (typeof signature === "string" && signature && publicKey) {
         record({
           signature,
           publicKey,
@@ -106,7 +126,7 @@ const PersonalSign = observer(() => {
         // translated message here too, and give the dApp a stable
         // EIP-1193 error; the raw guard text never reaches the dApp response.
         setIsWalletLocked(true);
-        void readLockState();
+        void lockStore.readLockState();
         record({ error: walletLockedProviderError() });
         return;
       }
@@ -115,8 +135,8 @@ const PersonalSign = observer(() => {
   };
 
   useEffect(() => {
-    setCanProceed(true);
-  }, []);
+    dAppRequestStore.setCanProceed(params !== undefined);
+  }, [dAppRequestData]);
 
   return (
     <div className="flex flex-col gap-2 rounded-md p-2">

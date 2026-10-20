@@ -24,7 +24,18 @@ const QRL_TESTNET_DATA = {
   iconUrls: ["icons/chains/zond_testnet.svg"],
 };
 
-export type BlockchainBaseDataType = typeof QRL_TESTNET_DATA;
+export type BlockchainBaseDataType = {
+  chainId: string;
+  chainName: string;
+  rpcUrls: string[];
+  blockExplorerUrls?: string[] | null;
+  iconUrls?: string[] | null;
+  nativeCurrency: {
+    name?: string | null;
+    symbol: string;
+    decimals: number;
+  } | null;
+};
 
 export type BlockchainAdditionalDataType = {
   defaultRpcUrl: string;

@@ -23,6 +23,10 @@ function bytesToHex(bytes: Uint8Array): string {
 async function makeEncryptedWalletFile(
   data: { address: string; mnemonic: string; hexSeed: string },
   password: string,
+  plaintext = JSON.stringify({
+    mnemonic: data.mnemonic,
+    hexSeed: data.hexSeed,
+  }),
 ): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -44,9 +48,7 @@ async function makeEncryptedWalletFile(
     await crypto.subtle.encrypt(
       { name: "AES-GCM", iv },
       key,
-      textEncoder.encode(
-        JSON.stringify({ mnemonic: data.mnemonic, hexSeed: data.hexSeed }),
-      ),
+      textEncoder.encode(plaintext),
     ),
   );
   return JSON.stringify({
@@ -97,4 +99,86 @@ describe("walletFileImport", () => {
       parseEncryptedWalletFile(JSON.stringify({ address: "Q..." })),
     ).toThrow(WalletFileFormatError);
   });
+
+  it("rejects malformed envelopes and preserves metadata defaults", () => {
+    for (const value of [null, [], false, 1, {}]) {
+      expect(() => parseEncryptedWalletFile(JSON.stringify(value))).toThrow(
+        WalletFileFormatError,
+      );
+      for (const field of ["encryptedData", "salt", "iv"]) {
+        expect(() =>
+          parseEncryptedWalletFile(
+            JSON.stringify({
+              encryptedData: "aa",
+              salt: "bb",
+              iv: "cc",
+              [field]: value,
+            }),
+          ),
+        ).toThrow(WalletFileFormatError);
+      }
+    }
+    expect(
+      parseEncryptedWalletFile('{"encryptedData":"aa","salt":"bb","iv":"cc"}'),
+    ).toEqual({
+      address: "",
+      encryptedData: "aa",
+      salt: "bb",
+      iv: "cc",
+      version: "",
+      timestamp: 0,
+    });
+  });
+
+  it.each([
+    { plaintext: "null" },
+    { plaintext: "[]" },
+    { plaintext: "true" },
+    { plaintext: "123" },
+    { plaintext: '"text"' },
+    { plaintext: '{"hexSeed":12,"mnemonic":false}' },
+    { plaintext: "{}" },
+  ])(
+    "rejects decrypted payload $plaintext with a format error",
+    async ({ plaintext }) => {
+      const text = await makeEncryptedWalletFile(WALLET, PASSWORD, plaintext);
+      await expect(
+        decryptWalletFile(parseEncryptedWalletFile(text), PASSWORD),
+      ).rejects.toThrow(
+        new WalletFileFormatError("Wallet file contained no seed"),
+      );
+    },
+  );
+
+  it("keeps invalid decrypted JSON mapped to WalletFileDecryptError", async () => {
+    const text = await makeEncryptedWalletFile(WALLET, PASSWORD, "not JSON");
+    await expect(
+      decryptWalletFile(parseEncryptedWalletFile(text), PASSWORD),
+    ).rejects.toThrow(WalletFileDecryptError);
+  });
+
+  it.each([
+    {
+      payload: { mnemonic: WALLET.mnemonic },
+      mnemonic: WALLET.mnemonic,
+      hexSeed: "",
+    },
+    {
+      payload: { hexSeed: WALLET.hexSeed },
+      mnemonic: "",
+      hexSeed: WALLET.hexSeed,
+    },
+  ])(
+    "preserves a payload with one seed field: $payload",
+    async ({ payload, mnemonic, hexSeed }) => {
+      const text = await makeEncryptedWalletFile(
+        WALLET,
+        PASSWORD,
+        JSON.stringify(payload),
+      );
+      await expect(
+        decryptWalletFile(parseEncryptedWalletFile(text), PASSWORD),
+      ).resolves.toEqual({ address: WALLET.address, mnemonic, hexSeed });
+    },
+  );
 });

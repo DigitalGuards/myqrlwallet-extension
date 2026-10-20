@@ -1,5 +1,8 @@
+import { historyEntryView } from "@/utilities/storageViews";
 import StorageUtil from "@/utilities/storageUtil";
 import { walletSessionStorage } from "@/utilities/profileStorage";
+import { isUnknownArray } from "@/utilities/approvalGuards";
+import { isFiniteNumber, isRecord, isString } from "@/utilities/storageGuards";
 import { transactionFailureUpdate } from "@/functions/transactionOutcome";
 import { withTimeout } from "@/functions/withTimeout";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
@@ -60,11 +63,24 @@ const RECEIPT_FETCH_TIMEOUT_MS = 10 * 1000;
 // receipts and race on the read-modify-write of the watch list.
 let isAlarmHandlerRunning = false;
 
-async function getWatches(): Promise<DAppTransactionWatch[]> {
-  const stored = await walletSessionStorage.get(WATCH_STORAGE_KEY);
-  return (
-    (stored?.[WATCH_STORAGE_KEY] as DAppTransactionWatch[] | undefined) ?? []
-  );
+const isDAppTransactionWatch = (
+  value: unknown,
+): value is DAppTransactionWatch =>
+  isRecord(value) &&
+  isString(value.hash) &&
+  isString(value.account) &&
+  isString(value.chainId) &&
+  isFiniteNumber(value.startedAt);
+
+async function getWatches(): Promise<unknown[]> {
+  const stored: unknown = await walletSessionStorage.get(WATCH_STORAGE_KEY);
+  if (!isRecord(stored)) throw new Error("Invalid browser storage response");
+  const watches = stored[WATCH_STORAGE_KEY];
+  if (watches === undefined) return [];
+  if (!isUnknownArray(watches)) {
+    throw new Error("Invalid dApp transaction watch storage");
+  }
+  return watches;
 }
 
 /** Arms the alarm only if it is not already scheduled: re-creating an alarm
@@ -73,12 +89,19 @@ async function getWatches(): Promise<DAppTransactionWatch[]> {
 async function ensureWatchAlarm(): Promise<void> {
   const existing = await browser.alarms.get(DAPP_TX_WATCH_ALARM_NAME);
   if (existing) return;
-  await browser.alarms.create(DAPP_TX_WATCH_ALARM_NAME, {
+  // Browser versions expose both synchronous and promise-returning create.
+  const alarms: {
+    create: (
+      name: string,
+      info: browser.Alarms.CreateAlarmInfoType,
+    ) => void | Promise<void>;
+  } = browser.alarms;
+  await alarms.create(DAPP_TX_WATCH_ALARM_NAME, {
     periodInMinutes: WATCH_ALARM_PERIOD_MINUTES,
   });
 }
 
-async function saveWatches(watches: DAppTransactionWatch[]): Promise<void> {
+async function saveWatches(watches: unknown[]): Promise<void> {
   if (watches.length === 0) {
     await walletSessionStorage.remove(WATCH_STORAGE_KEY);
     await browser.alarms.clear(DAPP_TX_WATCH_ALARM_NAME);
@@ -100,7 +123,9 @@ export async function registerDAppTransactionWatch(watch: {
 }): Promise<void> {
   const watches = await getWatches();
   const deduped = watches.filter(
-    (existing) => existing.hash.toLowerCase() !== watch.hash.toLowerCase(),
+    (existing) =>
+      !isDAppTransactionWatch(existing) ||
+      existing.hash.toLowerCase() !== watch.hash.toLowerCase(),
   );
   deduped.push({ ...watch, startedAt: Date.now() });
   await saveWatches(deduped);
@@ -156,6 +181,8 @@ export async function handleDAppTransactionWatchAlarm(): Promise<void> {
     let activeChainId: string | undefined;
 
     for (const watch of watches) {
+      // Unreadable records remain stored for a version that understands them.
+      if (!isDAppTransactionWatch(watch)) continue;
       // Expired: dropped silently. The history screen's own poller still
       // reconciles it once it is next opened.
       if (now - watch.startedAt > WATCH_MAX_AGE_MS) {
@@ -170,7 +197,7 @@ export async function handleDAppTransactionWatchAlarm(): Promise<void> {
           continue;
         }
         qrlProperties ??= await getQrlProperties();
-        const receipt = await withTimeout(
+        const receipt: unknown = await withTimeout(
           qrlProperties.qrl.getTransactionReceipt(watch.hash),
           RECEIPT_FETCH_TIMEOUT_MS,
           `Fetching the receipt for ${watch.hash}`,
@@ -198,7 +225,7 @@ export async function handleDAppTransactionWatchAlarm(): Promise<void> {
         if (!alreadyTerminal) {
           await notifyWatchOutcome(
             watch,
-            entry,
+            entry ? historyEntryView(entry) : undefined,
             update.pendingStatus === "confirmed" ? "confirmed" : "failed",
           );
         }
@@ -218,7 +245,9 @@ export async function handleDAppTransactionWatchAlarm(): Promise<void> {
     // this tick actually resolved are removed.
     const currentWatches = await getWatches();
     const remaining = currentWatches.filter(
-      (watch) => !resolvedHashes.has(watch.hash.toLowerCase()),
+      (watch) =>
+        !isDAppTransactionWatch(watch) ||
+        !resolvedHashes.has(watch.hash.toLowerCase()),
     );
     await saveWatches(remaining);
   } finally {

@@ -1,3 +1,4 @@
+import { storedText } from "@/utilities/storageViews";
 import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import type { Contact } from "@/types/contact";
 import { Pencil, Trash2 } from "lucide-react";
@@ -15,7 +16,7 @@ const ContactItem = ({ contact, onEdit, onDelete }: ContactItemProps) => {
   return (
     <div className="flex items-center justify-between rounded-md border p-3">
       <div className="flex min-w-0 flex-col gap-1">
-        <span className="text-sm font-medium">{contact.name}</span>
+        <span className="text-sm font-medium">{storedText(contact.name)}</span>
         <AddressFingerprint
           address={contact.address}
           className="text-xs text-muted-foreground"
@@ -26,7 +27,9 @@ const ContactItem = ({ contact, onEdit, onDelete }: ContactItemProps) => {
           type="button"
           aria-label={t("contacts.editButton")}
           className="rounded p-1 text-muted-foreground transition-colors hover:text-secondary"
-          onClick={() => onEdit(contact)}
+          onClick={() => {
+            onEdit(contact);
+          }}
         >
           <Pencil size={14} />
         </button>
@@ -34,7 +37,9 @@ const ContactItem = ({ contact, onEdit, onDelete }: ContactItemProps) => {
           type="button"
           aria-label={t("contacts.deleteButton")}
           className="rounded p-1 text-muted-foreground transition-colors hover:text-destructive"
-          onClick={() => onDelete(contact.address)}
+          onClick={() => {
+            onDelete(contact.address);
+          }}
         >
           <Trash2 size={14} />
         </button>

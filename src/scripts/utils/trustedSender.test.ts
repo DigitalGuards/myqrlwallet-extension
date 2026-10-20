@@ -1,3 +1,5 @@
+import type browser from "webextension-polyfill";
+import { malformed } from "@/test-utils/malformed";
 import { describe, expect, it } from "vitest";
 import { isTrustedExtensionSender } from "./trustedSender";
 
@@ -55,8 +57,8 @@ describe("isTrustedExtensionSender", () => {
     {},
     { id: "mock-id" },
     { url: EXTENSION_PAGE },
-    { id: 7 as unknown as string, url: EXTENSION_PAGE },
-    { id: "mock-id", url: 7 as unknown as string },
+    malformed<browser.Runtime.MessageSender>({ id: 7, url: EXTENSION_PAGE }),
+    malformed<browser.Runtime.MessageSender>({ id: "mock-id", url: 7 }),
   ])("rejects an incomplete sender (%s)", (sender) => {
     expect(isTrustedExtensionSender(sender)).toBe(false);
   });

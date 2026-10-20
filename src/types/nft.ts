@@ -1,21 +1,22 @@
+import type { MetadataText } from "@/utilities/nftMetadata";
+
 export type NFTStandard = "ZRC721" | "ZRC1155";
 
 export type NFTCollectionType = {
   address: string;
   name: string;
   symbol: string;
-  standard: NFTStandard;
+  standard: NFTStandard | undefined;
   image: string;
 };
 
 export type NFTMetadata = {
-  name?: string;
-  description?: string;
-  image?: string;
-  attributes?: Array<{
-    trait_type: string;
-    value: string | number;
-  }>;
+  name?: MetadataText;
+  description?: MetadataText;
+  image?: string | null;
+  // Preserve opaque entries; the detail reader narrows optional trait labels
+  // and converts values to text independently.
+  attributes?: unknown[] | null;
 };
 
 export type NFTTokenInfo = {

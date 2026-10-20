@@ -18,7 +18,7 @@ vi.mock("qrcode.react", () => ({
 
 const renderComponent = (
   mockedStoreValues = mockedStore(),
-  locationState?: { accountAddress: string },
+  locationState?: unknown,
 ) =>
   render(
     <StoreProvider value={mockedStoreValues}>
@@ -89,4 +89,20 @@ describe("Receive", () => {
 
     expect(mockedWriteText).toHaveBeenCalledWith(ADDRESS);
   });
+
+  it.each([null, [], "account", { accountAddress: 7 }, { accountAddress: {} }])(
+    "uses the active account for malformed route state %j",
+    (locationState) => {
+      renderComponent(
+        mockedStore({
+          qrlStore: { activeAccount: { accountAddress: ADDRESS } },
+        }),
+        locationState,
+      );
+      expect(screen.getByTestId("qr-code")).toHaveAttribute(
+        "data-value",
+        ADDRESS,
+      );
+    },
+  );
 });

@@ -49,7 +49,9 @@ const TokenListItemIcon = observer(
           className={tokenIconClasses({ shouldDisplayFallback })}
           src={icon}
           alt={symbol}
-          onLoad={() => setIsLoading(false)}
+          onLoad={() => {
+            setIsLoading(false);
+          }}
           onError={() => {
             setIsLoading(false);
             setHasSrcError(true);

@@ -9,8 +9,9 @@ import {
 import QrlRequestAccountBlockchainSelection from "@/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlRequestAccount/QrlRequestAccountContent/QrlRequestAccountBlockchainSelection/QrlRequestAccountBlockchainSelection";
 import BackButton from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/BackButton/BackButton";
 import CircuitBackground from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/CircuitBackground/CircuitBackground";
-import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
+import type { StoredBlockchain as BlockchainDataType } from "@/utilities/storageGuards";
 import { ROUTES } from "@/router/router";
+import { isRecord } from "@/utilities/storageGuards";
 import { useStore } from "@/stores/store";
 import StorageUtil from "@/utilities/storageUtil";
 import { Pencil, X } from "lucide-react";
@@ -24,11 +25,10 @@ import { updateAccountsAndBlockchainsForUrlOrigin } from "@/scripts/utils/restri
 const EditDAppConnectedBlockchains = observer(() => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { state } = useLocation();
+  const state: unknown = useLocation().state;
   const { dAppRequestStore, qrlStore } = useStore();
-  const { initializeBlockchain } = qrlStore;
   const { currentTabData } = dAppRequestStore;
-  const hasState = !!state?.hasState;
+  const hasState = isRecord(state) && state.hasState === true;
 
   const [isLoadingBlockchains, setIsLoadingBlockchains] = useState(true);
   const [allBlockchains, setAllBlockchains] = useState<BlockchainDataType[]>(
@@ -43,12 +43,18 @@ const EditDAppConnectedBlockchains = observer(() => {
       const allBlockchains = await StorageUtil.getAllBlockChains();
       setAllBlockchains(allBlockchains);
       setIsLoadingBlockchains(false);
-    })();
+    })().catch((error: unknown) => {
+      console.error("Failed to load blockchains:", error);
+    });
   }, []);
 
   useEffect(() => {
     if (!hasState) {
-      navigate(ROUTES.DAPP_CONNECTIVITY);
+      Promise.resolve(navigate(ROUTES.DAPP_CONNECTIVITY)).catch(
+        (error: unknown) => {
+          console.error("Failed to return to dApp connectivity:", error);
+        },
+      );
     }
   }, [hasState]);
 
@@ -75,8 +81,12 @@ const EditDAppConnectedBlockchains = observer(() => {
       accounts: currentTabData?.connectedAccounts ?? [],
       blockchains: selectedBlockchains,
     });
-    navigate(ROUTES.DAPP_CONNECTIVITY);
-    initializeBlockchain();
+    Promise.resolve(navigate(ROUTES.DAPP_CONNECTIVITY)).catch(
+      (error: unknown) => {
+        console.error("Failed to return to dApp connectivity:", error);
+      },
+    );
+    await qrlStore.initializeBlockchain();
   };
 
   return (
@@ -106,7 +116,14 @@ const EditDAppConnectedBlockchains = observer(() => {
               type="button"
               variant="outline"
               onClick={() => {
-                navigate(ROUTES.DAPP_CONNECTIVITY);
+                Promise.resolve(navigate(ROUTES.DAPP_CONNECTIVITY)).catch(
+                  (error: unknown) => {
+                    console.error(
+                      "Failed to return to dApp connectivity:",
+                      error,
+                    );
+                  },
+                );
               }}
             >
               <X className="mr-2 h-4 w-4" />
@@ -117,7 +134,11 @@ const EditDAppConnectedBlockchains = observer(() => {
               disabled={!selectedBlockchains.length}
               type="submit"
               aria-label={t('dapp.editBlockchains')}
-              onClick={onEdit}
+              onClick={() => {
+                onEdit().catch((error: unknown) => {
+                  console.error("Failed to edit connected blockchains:", error);
+                });
+              }}
             >
               <Pencil className="mr-2 h-4 w-4" />
               {t('common.edit')}

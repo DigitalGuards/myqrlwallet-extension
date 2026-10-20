@@ -1,35 +1,33 @@
+import { storedText } from "@/utilities/storageViews";
 import { Checkbox } from "@/components/UI/Checkbox";
 import ChainIcon from "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/ChainIcon/ChainIcon";
-import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
+import type { StoredBlockchain } from "@/utilities/storageGuards";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 
-type QrlRequestAccountBlockchainSelectionProps = {
+type QrlRequestAccountBlockchainSelectionProps<T extends StoredBlockchain> = {
   isLoading: boolean;
-  allBlockchains: BlockchainDataType[];
-  selectedBlockchains: BlockchainDataType[];
-  onBlockchainSelection: (
-    selectedAccount: BlockchainDataType,
-    checked: boolean,
-  ) => void;
+  allBlockchains: T[];
+  selectedBlockchains: T[];
+  onBlockchainSelection: (selectedAccount: T, checked: boolean) => void;
 };
 
 const QrlRequestAccountBlockchainSelection = observer(
-  ({
+  <T extends StoredBlockchain>({
     isLoading,
     allBlockchains,
     selectedBlockchains,
     onBlockchainSelection,
-  }: QrlRequestAccountBlockchainSelectionProps) => {
+  }: QrlRequestAccountBlockchainSelectionProps<T>) => {
     const { t } = useTranslation();
-    const hasBlockchains = !!allBlockchains?.length;
+    const hasBlockchains = !!allBlockchains.length;
     const selectedBlockchainIds = selectedBlockchains.map(
-      (blockchain) => blockchain?.chainId,
+      (blockchain) => blockchain.chainId,
     );
 
     return (
       <div className="flex flex-col gap-4">
-        <div>{t('dapp.selectBlockchains')}</div>
+        <div>{t("dapp.selectBlockchains")}</div>
         {isLoading ? (
           <div className="flex h-12 w-full animate-pulse items-center justify-between">
             <div className="h-full w-full rounded-md bg-accent" />
@@ -37,15 +35,18 @@ const QrlRequestAccountBlockchainSelection = observer(
         ) : hasBlockchains ? (
           <div className="flex flex-col gap-3">
             {allBlockchains.map((blockchain) => (
-              <div key={blockchain.chainId} className="flex items-start space-x-3">
+              <div
+                key={blockchain.chainId}
+                className="flex items-start space-x-3"
+              >
                 <Checkbox
                   id={blockchain.chainId}
                   name={`dappBlockchain-${blockchain.chainId}`}
                   checked={selectedBlockchainIds.includes(blockchain.chainId)}
                   aria-label="blockchainCheckbox"
-                  onCheckedChange={(checked) =>
-                    onBlockchainSelection(blockchain, !!checked)
-                  }
+                  onCheckedChange={(checked) => {
+                    onBlockchainSelection(blockchain, !!checked);
+                  }}
                 />
                 <label
                   htmlFor={blockchain.chainId}
@@ -53,16 +54,20 @@ const QrlRequestAccountBlockchainSelection = observer(
                 >
                   <div className="flex gap-3">
                     <ChainIcon
-                      src={blockchain.defaultIconUrl}
-                      alt={blockchain.chainName}
+                      src={storedText(blockchain.defaultIconUrl)}
+                      alt={storedText(blockchain.chainName)}
                     />
                     <div className="flex flex-col gap-1 break-all">
-                      <span className="font-bold">{blockchain.chainName}</span>
-                      <span className="text-xm opacity-80">
-                        {t('dapp.chainId', { id: parseInt(blockchain.chainId, 16) })}
+                      <span className="font-bold">
+                        {storedText(blockchain.chainName)}
                       </span>
                       <span className="text-xm opacity-80">
-                        {blockchain.defaultRpcUrl}
+                        {t("dapp.chainId", {
+                          id: parseInt(blockchain.chainId, 16),
+                        })}
+                      </span>
+                      <span className="text-xm opacity-80">
+                        {storedText(blockchain.defaultRpcUrl)}
                       </span>
                     </div>
                   </div>
@@ -71,7 +76,7 @@ const QrlRequestAccountBlockchainSelection = observer(
             ))}
           </div>
         ) : (
-          <div>{t('dapp.noBlockchainsAvailable')}</div>
+          <div>{t("dapp.noBlockchainsAvailable")}</div>
         )}
       </div>
     );

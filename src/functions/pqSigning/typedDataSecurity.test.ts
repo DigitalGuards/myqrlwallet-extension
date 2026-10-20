@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  baseTypeName,
   computeTypedDataDigest,
+  encodeField,
+  encodeType,
+  hashStruct,
   TYPED_DATA_LIMITS,
   typedDataSchemeVersion,
+  typeHash,
+  type TypedDataPayload,
 } from "./typedData";
 
 const SIGNER = `Q${"0".repeat(128)}`;
 const LEGACY_Q40 = `Q${"0".repeat(40)}`;
 
-function payloadWith(fieldType: string, value: unknown): unknown {
+function payloadWith(fieldType: string, value: unknown): TypedDataPayload {
   return {
     types: {
       QRLDomain: [{ name: "name", type: "string" }],
@@ -20,22 +26,247 @@ function payloadWith(fieldType: string, value: unknown): unknown {
   };
 }
 
+describe("typed data base type names", () => {
+  it.each([
+    ["uint256", "uint256"],
+    ["address[]", "address"],
+    ["Struct[][3]", "Struct"],
+    ["bytes32[2][]", "bytes32"],
+    ["string", "string"],
+    ["Struct[003][]", "Struct"],
+    ["Struct[x][]", "Struct[x]"],
+    ["Struct[]x", "Struct[]x"],
+    ["Struct[3", "Struct[3"],
+    ["Struct[]\n", "Struct[]\n"],
+    ["Struct[\u0663][]", "Struct[\u0663]"],
+    ["[3][]", ""],
+    ["", ""],
+    ["A".repeat(126) + "[]", "A".repeat(126)],
+    ["[".repeat(127) + "]", "[".repeat(126)],
+  ])("preserves the suffix-stripping result for %j", (type, expected) => {
+    expect(baseTypeName(type)).toBe(expected);
+    expect(baseTypeName(type)).toBe(type.replace(/(\[\d*\])+$/, ""));
+  });
+});
+
+describe.each([
+  {
+    name: "encodeType",
+    encode: (types: unknown) => encodeType("Payload", types),
+  },
+  { name: "typeHash", encode: (types: unknown) => typeHash("Payload", types) },
+  {
+    name: "encodeField",
+    encode: (types: unknown) => encodeField("uint8", 1, types),
+  },
+  {
+    name: "hashStruct",
+    encode: (types: unknown) => hashStruct("Payload", { value: 1 }, types),
+  },
+])("$name type-map boundary", ({ encode }) => {
+  it.each([
+    { label: "null", types: null },
+    { label: "undefined", types: undefined },
+    { label: "string", types: "Payload" },
+    { label: "array", types: [] },
+    {
+      label: "array with a struct property",
+      types: Object.assign([], {
+        Payload: [{ name: "value", type: "uint8" }],
+      }),
+    },
+  ])("rejects a $label type map", ({ types }) => {
+    expect(() => encode(types)).toThrow(
+      "typed data types must be a struct map",
+    );
+  });
+
+  it.each([undefined, null, {}, [], "uint8"])(
+    "rejects an invalid struct definition: %j",
+    (definition) => {
+      expect(() => encode({ Payload: definition })).toThrow(
+        "empty or invalid struct: Payload",
+      );
+    },
+  );
+
+  it.each([
+    { label: "null", field: null },
+    { label: "undefined", field: undefined },
+    { label: "primitive", field: 1 },
+    { label: "missing name", field: { type: "uint8" } },
+    { label: "numeric name", field: { name: 1, type: "uint8" } },
+    { label: "empty name", field: { name: "", type: "uint8" } },
+    {
+      label: "array with field properties",
+      field: Object.assign([], { name: "value", type: "uint8" }),
+    },
+  ])("rejects a field with $label", ({ field }) => {
+    expect(() => encode({ Payload: [field] })).toThrow("bad field in Payload");
+  });
+
+  it.each([undefined, null, 1, ""])(
+    "rejects an invalid field type: %j",
+    (type) => {
+      expect(() => encode({ Payload: [{ name: "value", type }] })).toThrow(
+        "bad field type in Payload.value",
+      );
+    },
+  );
+
+  it("rejects a sparse struct definition", () => {
+    expect(() => encode({ Payload: new Array<unknown>(1) })).toThrow(
+      "bad field in Payload",
+    );
+  });
+});
+
+describe("typed data missing definitions and invalid field types", () => {
+  it("requires the domain and primary type definitions", () => {
+    const withoutDomain = payloadWith("uint8", 1);
+    delete withoutDomain.types["QRLDomain"];
+    expect(() => computeTypedDataDigest(withoutDomain)).toThrow(
+      "QRLDomain type is required",
+    );
+
+    const withoutPrimary = payloadWith("uint8", 1);
+    delete withoutPrimary.types["Payload"];
+    expect(() => computeTypedDataDigest(withoutPrimary)).toThrow(
+      "unknown primary type: Payload",
+    );
+  });
+
+  it.each([
+    ["Missing", "unknown type: Missing"],
+    ["uint7", "invalid int width: uint7"],
+    ["bytes0", "invalid bytesN width: bytes0"],
+    ["uint8[0]", "invalid array size: uint8[0]"],
+    ["uint8[257]", "invalid array size: uint8[257]"],
+  ])("rejects %s", (type, error) => {
+    expect(() => computeTypedDataDigest(payloadWith(type, 1))).toThrow(error);
+  });
+});
+
 describe("typed data deterministic resource limits", () => {
+  it("rejects a 1 MB field type in under 100 ms with a bounded error", () => {
+    const fieldType = "[]".repeat(512 * 1024) + "x";
+    const payload = payloadWith(fieldType, 1);
+    const expectedError = new Error(
+      `field type too long: ${fieldType.slice(0, 32)}... (length ${fieldType.length})`,
+    );
+    const started = performance.now();
+    expect(() => computeTypedDataDigest(payload)).toThrow(expectedError);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it("checks field type length before traversing dependencies or selecting a scheme", () => {
+    const fieldType = "address" + "[]".repeat(64);
+    const types = {
+      Payload: [{ name: "value", type: "uint8" }],
+      Unused: [{ name: "value", type: fieldType }],
+    };
+    expect(() => encodeType("Payload", types)).toThrow("field type too long");
+    expect(() => encodeField("uint8", 1, types)).toThrow("field type too long");
+    expect(() => hashStruct("Payload", { value: 1 }, types)).toThrow(
+      "field type too long",
+    );
+    const payload = payloadWith("uint8", 1);
+    payload.types["Unused"] = types.Unused;
+    expect(() => typedDataSchemeVersion(payload)).toThrow(
+      "field type too long",
+    );
+  });
+
+  it("accepts field types at the length cap and rejects the next character", () => {
+    const fieldType = `uint${"0".repeat(TYPED_DATA_LIMITS.maxFieldTypeLength - 5)}8`;
+    expect(computeTypedDataDigest(payloadWith(fieldType, 1))).toHaveLength(64);
+    expect(() =>
+      computeTypedDataDigest(payloadWith(fieldType + "0", 1)),
+    ).toThrow("field type too long");
+    expect(() =>
+      encodeField(fieldType + "0", 1, payloadWith("uint8", 1).types),
+    ).toThrow("field type too long");
+  });
+
+  it.each(["struct", "field", "primary", "message", "domain"])(
+    "bounds an oversized %s identifier in errors",
+    (location) => {
+      const input = "A".repeat(1024 * 1024);
+      const payload = payloadWith("uint8", 1);
+      let prefix = "";
+      switch (location) {
+        case "struct":
+          payload.types[input] = [{ name: "value", type: "uint8" }];
+          prefix = "invalid struct name";
+          break;
+        case "field":
+          payload.types["Payload"] = [{ name: input, type: "uint8" }];
+          prefix = "invalid field name in Payload";
+          break;
+        case "primary":
+          payload.primaryType = input;
+          prefix = "invalid primary type";
+          break;
+        case "message":
+          payload.message[input] = 1;
+          prefix = "unknown field in Payload";
+          break;
+        case "domain":
+          payload.domain[input] = 1;
+          prefix = "unknown field in QRLDomain";
+          break;
+      }
+      expect(() => computeTypedDataDigest(payload)).toThrow(
+        new Error(
+          `${prefix}: ${input.slice(0, 32)}... (length ${input.length})`,
+        ),
+      );
+    },
+  );
+
+  it("bounds address, integer and direct encoding errors", () => {
+    const input = "A".repeat(1024 * 1024);
+    const preview = `${input.slice(0, 32)}... (length ${input.length})`;
+    const types = payloadWith("uint8", 1).types;
+    expect(() => computeTypedDataDigest(payloadWith("address", input))).toThrow(
+      new Error(`invalid Q-address: ${preview}`),
+    );
+    expect(() => encodeType(input, types)).toThrow(
+      new Error(`unknown primary type: ${preview}`),
+    );
+    expect(() => hashStruct(input, {}, types)).toThrow(
+      new Error(`unknown struct: ${preview}`),
+    );
+    expect(() => encodeField(input, 1, types)).toThrow(
+      new Error(`field type too long: ${preview}`),
+    );
+    expect(() =>
+      computeTypedDataDigest(payloadWith("uint8", "x".repeat(80))),
+    ).toThrow(
+      new Error(`invalid uint8 string: ${"x".repeat(32)}... (length 80)`),
+    );
+    expect(() =>
+      computeTypedDataDigest(payloadWith("uint8", "9".repeat(80))),
+    ).toThrow(
+      new Error(`uint8 out of range: ${"9".repeat(32)}... (length 80)`),
+    );
+  });
+
   it("rejects unsigned top-level and type-definition display fields", () => {
     const topLevelExtra = {
-      ...(payloadWith("uint8", 1) as Record<string, unknown>),
+      ...payloadWith("uint8", 1),
       displayName: "Approve harmless login",
     };
     expect(() => computeTypedDataDigest(topLevelExtra)).toThrow(
       /unknown top-level fields/,
     );
 
-    const payload = payloadWith("uint8", 1) as {
-      types: Record<string, Array<Record<string, unknown>>>;
-    };
-    const field = payload.types["Payload"]?.[0];
+    const payload = payloadWith("uint8", 1);
+    const field = payload.types["Payload"]?.find(
+      (candidate) => candidate.name === "value",
+    );
     if (!field) throw new Error("test fixture is missing Payload.value");
-    field["displayType"] = "string";
+    Object.assign(field, { displayType: "string" });
     expect(() => computeTypedDataDigest(payload)).toThrow(/struct map/);
   });
 

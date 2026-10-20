@@ -16,9 +16,7 @@ const Lock = withSuspense(
 const DAppRequest = withSuspense(
   lazy(
     () =>
-      import(
-        "@/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequest"
-      ),
+      import("@/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequest"),
   ),
 );
 const Wallet = withSuspense(
@@ -27,17 +25,19 @@ const Wallet = withSuspense(
 
 const ScreenLoader = observer(() => {
   const { dAppRequestStore, lockStore, qrlStore } = useStore();
-  const { hasDAppRequest, readDAppRequestData } = dAppRequestStore;
-  const { isLocked, readLockState } = lockStore;
+  const { hasDAppRequest } = dAppRequestStore;
+  const { isLocked } = lockStore;
 
   const [screen, setScreen] = useState(SCREENS.LOCK);
   const wasLockedRef = useRef(true);
 
   useEffect(() => {
     (async () => {
-      await readLockState();
-      await readDAppRequestData();
-    })();
+      await lockStore.readLockState();
+      await dAppRequestStore.readDAppRequestData();
+    })().catch((error: unknown) => {
+      console.error("Failed to load the wallet screen state:", error);
+    });
   }, []);
 
   useEffect(() => {
@@ -45,7 +45,12 @@ const ScreenLoader = observer(() => {
       // Re-initialize blockchain connection after unlock so the wallet
       // doesn't stay in a "not connected" state when the service worker
       // was asleep during the initial load.
-      qrlStore.initializeBlockchain();
+      qrlStore.initializeBlockchain().catch((error: unknown) => {
+        console.error(
+          "Failed to initialize the blockchain after unlock:",
+          error,
+        );
+      });
     }
     wasLockedRef.current = isLocked;
   }, [isLocked]);
@@ -75,6 +80,7 @@ const ScreenLoader = observer(() => {
     );
 
   if (screen === SCREENS.WALLET) return <Wallet />;
+  return undefined;
 });
 
 export default ScreenLoader;

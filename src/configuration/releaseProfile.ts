@@ -1,3 +1,5 @@
+import { isRecord } from "@/utilities/storageGuards";
+
 export const V3_CHAIN_ID = "0x301825";
 export const V3_GENESIS_HASH =
   "0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4";
@@ -5,7 +7,7 @@ export const V3_RPC_URL = "https://qrlwallet.com/api/qrl-rpc/testnet";
 export const V3_STORAGE_PREFIX = `v3:${V3_CHAIN_ID}:${V3_GENESIS_HASH}:`;
 
 export const assertV3Network = async (rpcUrl: string): Promise<void> => {
-  const rpc = async (method: string, params: unknown[]) => {
+  const rpc = async (method: string, params: unknown[]): Promise<unknown> => {
     const response = await fetch(rpcUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -13,8 +15,10 @@ export const assertV3Network = async (rpcUrl: string): Promise<void> => {
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) throw new Error("The v3 network is unavailable.");
-    const payload = await response.json();
-    if (payload.error) throw new Error("The v3 network is unavailable.");
+    const payload: unknown = await response.json();
+    if (!isRecord(payload) || payload.error) {
+      throw new Error("The v3 network is unavailable.");
+    }
     return payload.result;
   };
   const [chainId, genesis] = await Promise.all([
@@ -24,7 +28,9 @@ export const assertV3Network = async (rpcUrl: string): Promise<void> => {
   if (
     typeof chainId !== "string" ||
     chainId.toLowerCase() !== V3_CHAIN_ID ||
-    genesis?.hash?.toLowerCase() !== V3_GENESIS_HASH
+    !isRecord(genesis) ||
+    typeof genesis.hash !== "string" ||
+    genesis.hash.toLowerCase() !== V3_GENESIS_HASH
   ) {
     throw new Error("The RPC does not match the pinned v3 Private network.");
   }

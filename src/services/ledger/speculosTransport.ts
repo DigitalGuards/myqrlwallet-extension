@@ -8,7 +8,7 @@
  * a TCP/HTTP interface for APDU commands.
  *
  * This transport bridges that gap by implementing the same interface as
- * ledgerTransport.ts but communicating via HTTP instead of WebHID.
+ * ledgerTransport.ts and communicating via HTTP.
  *
  * COMMUNICATION ARCHITECTURE:
  * ===========================
@@ -49,12 +49,43 @@
  */
 
 import { LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
+import {
+  isRecord,
+  isUnknownArray,
+  isNullishString,
+} from "@/services/explorerGuards";
 
 // Speculos API endpoints
 const SPECULOS_BASE_URL = "http://localhost:5000";
 const SPECULOS_APDU_ENDPOINT = `${SPECULOS_BASE_URL}/apdu`;
 const SPECULOS_BUTTON_ENDPOINT = `${SPECULOS_BASE_URL}/button`;
 const SPECULOS_EVENTS_ENDPOINT = `${SPECULOS_BASE_URL}/events`;
+
+function isSpeculosApduResponse(value: unknown): value is { data: string } {
+  return (
+    isRecord(value) &&
+    typeof value.data === "string" &&
+    /^(?:0x)?(?:[0-9a-fA-F]{2})*$/u.test(value.data)
+  );
+}
+
+type SpeculosScreenEvent = { text?: string | null };
+
+function isSpeculosScreenEvent(value: unknown): value is SpeculosScreenEvent {
+  return isRecord(value) && isNullishString(value.text);
+}
+
+function isSpeculosEventsResponse(
+  value: unknown,
+): value is { events?: SpeculosScreenEvent[] | null } {
+  return (
+    isRecord(value) &&
+    (value.events === undefined ||
+      value.events === null ||
+      (isUnknownArray(value.events) &&
+        value.events.every(isSpeculosScreenEvent)))
+  );
+}
 
 /**
  * Convert hex string to Uint8Array.
@@ -63,7 +94,7 @@ function hexToBytes(hex: string): Uint8Array {
   const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
   const bytes = new Uint8Array(cleanHex.length / 2);
   for (let i = 0; i < cleanHex.length; i += 2) {
-    bytes[i / 2] = parseInt(cleanHex.substr(i, 2), 16);
+    bytes[i / 2] = parseInt(cleanHex.slice(i, i + 2), 16);
   }
   return bytes;
 }
@@ -81,7 +112,7 @@ function bytesToHex(bytes: Uint8Array): string {
  * SpeculosTransport - HTTP-based transport for Speculos emulator.
  *
  * Implements the same interface as LedgerTransportService but uses
- * HTTP fetch() instead of WebHID to communicate with Speculos.
+ * HTTP fetch() to communicate with Speculos.
  */
 class SpeculosTransportService {
   private _isConnected: boolean = false;
@@ -141,9 +172,10 @@ class SpeculosTransportService {
   /**
    * Disconnect from Speculos.
    */
-  async disconnect(): Promise<void> {
+  disconnect(): Promise<void> {
     this._isConnected = false;
     console.log("[SpeculosTransport] Disconnected from Speculos");
+    return Promise.resolve();
   }
 
   /**
@@ -197,8 +229,11 @@ class SpeculosTransportService {
         throw new Error(`Speculos API error: ${response.status}`);
       }
 
-      const result = await response.json();
-      const responseHex = result.data as string;
+      const result: unknown = await response.json();
+      if (!isSpeculosApduResponse(result)) {
+        throw new Error("Invalid Speculos APDU response");
+      }
+      const responseHex = result.data;
 
       console.log(`[SpeculosTransport] <<< Response: ${responseHex}`);
 
@@ -296,10 +331,13 @@ class SpeculosTransportService {
   async getScreenText(): Promise<string[]> {
     try {
       const response = await fetch(`${SPECULOS_EVENTS_ENDPOINT}?stream=false`);
-      const events = await response.json();
+      const events: unknown = await response.json();
+      if (!isSpeculosEventsResponse(events)) {
+        throw new Error("Invalid Speculos events response");
+      }
       // Extract text from events
       const texts: string[] = [];
-      for (const event of events.events || []) {
+      for (const event of events.events ?? []) {
         if (event.text) {
           texts.push(event.text);
         }

@@ -1,3 +1,8 @@
+import {
+  tokenView,
+  nftCollectionView,
+  storedText,
+} from "@/utilities/storageViews";
 import { Button } from "@/components/UI/Button";
 import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
 import {
@@ -11,7 +16,7 @@ import {
   encodeFunctionSignature,
   encodeParameters,
 } from "@theqrl/web3-qrl-abi";
-import { BlockTags, type TransactionCall } from "@theqrl/web3-types";
+import { BlockTags } from "@theqrl/web3-types";
 import { useStore } from "@/stores/store";
 import type { TokenContractType } from "@/scripts/middlewares/middlewareTypes";
 import type { NFTCollectionType } from "@/types/nft";
@@ -119,7 +124,7 @@ const CalldataSummary = observer(
     // account is only a fallback for a request that omitted `from`.
     useEffect(() => {
       let isCurrent = true;
-      const owner = fromAddress || qrlStore.activeAccount?.accountAddress || "";
+      const owner = fromAddress || qrlStore.activeAccount.accountAddress || "";
       const resolveAsset = async () => {
         if (!owner || !contractAddress) return;
         try {
@@ -129,14 +134,18 @@ const CalldataSummary = observer(
           ]);
           if (!isCurrent) return;
           setToken(
-            tokens.find((entry) =>
-              areAddressesEquivalent(entry.address, contractAddress),
-            ),
+            tokens
+              .map(tokenView)
+              .find((entry) =>
+                areAddressesEquivalent(entry.address, contractAddress),
+              ),
           );
           setCollection(
-            collections.find((entry) =>
-              areAddressesEquivalent(entry.address, contractAddress),
-            ),
+            collections
+              .map(nftCollectionView)
+              .find((entry) =>
+                areAddressesEquivalent(entry.address, contractAddress),
+              ),
           );
         } catch {
           // An unreadable asset list only costs the symbol and decimals;
@@ -150,7 +159,7 @@ const CalldataSummary = observer(
       return () => {
         isCurrent = false;
       };
-    }, [contractAddress, fromAddress, qrlStore.activeAccount?.accountAddress]);
+    }, [contractAddress, fromAddress, qrlStore.activeAccount.accountAddress]);
 
     // Asks the contract itself what it is and how much of it exists, for
     // the two questions the wallet's own lists cannot always answer: is
@@ -178,7 +187,7 @@ const CalldataSummary = observer(
                 {
                   to: contractAddress,
                   data: callData,
-                } as unknown as TransactionCall,
+                },
                 BlockTags.LATEST,
               ),
               CONTRACT_PROBE_TIMEOUT_MS,
@@ -214,7 +223,7 @@ const CalldataSummary = observer(
       )?.name;
 
     const renderAddress = (label: string, address: string) => {
-      const name = contactName(address);
+      const name = storedText(contactName(address));
       return (
         <DetailRow label={label}>
           {name ? <div className="mb-1">{name}</div> : null}
@@ -227,7 +236,13 @@ const CalldataSummary = observer(
     };
 
     const renderAmount = (amount: bigint, labelKey: string) => {
-      if (token) {
+      if (
+        token &&
+        token.decimals !== null &&
+        Number.isInteger(token.decimals) &&
+        token.decimals >= 0 &&
+        token.decimals <= 255
+      ) {
         return (
           <DetailRow label={t(labelKey)}>
             {`${formatTokenBaseUnits(amount, token.decimals)} ${token.symbol}`}
@@ -250,7 +265,9 @@ const CalldataSummary = observer(
           variant="outline"
           size="sm"
           className="self-start"
-          onClick={() => setIsRawVisible((visible) => !visible)}
+          onClick={() => {
+            setIsRawVisible((visible) => !visible);
+          }}
           aria-expanded={isRawVisible}
         >
           {isRawVisible

@@ -1,3 +1,5 @@
+import StorageUtil from "@/utilities/storageUtil";
+import type QrlStore from "@/stores/qrlStore";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,20 +18,28 @@ vi.mock("@/utilities/storageUtil", async () => {
     ...originalModule,
     default: {
       ...originalModule.default,
-      getTokenContractsList: vi.fn(async () => [
-        {
-          address: "Q28c4113a9d3a2e836f28c23ed8e3c1e7c243f566",
-          image: "testImage1",
-        },
-        {
-          address: "Q978918b7b544ad491d0b294cc6ac4d7bb0ef7112",
-          image: "testImage2",
-        },
-        {
-          address: "Q0db3981cb93db985e4e3a62ff695f7a1b242dd7c",
-          image: "testImage3",
-        },
-      ]),
+      getTokenContractsList: vi.fn(() =>
+        Promise.resolve([
+          {
+            address: "Q28c4113a9d3a2e836f28c23ed8e3c1e7c243f566",
+            symbol: "TST",
+            decimals: 18,
+            image: "testImage1",
+          },
+          {
+            address: "Q978918b7b544ad491d0b294cc6ac4d7bb0ef7112",
+            symbol: "TST",
+            decimals: 18,
+            image: "testImage2",
+          },
+          {
+            address: "Q0db3981cb93db985e4e3a62ff695f7a1b242dd7c",
+            symbol: "TST",
+            decimals: 18,
+            image: "testImage3",
+          },
+        ]),
+      ),
     },
   };
 });
@@ -39,13 +49,21 @@ vi.mock(
 );
 
 describe("ZRC20Tokens", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (
     mockedStoreValues = mockedStore({
       qrlStore: {
-        getZrc20TokenDetails: async (contractAddress: string) => {
-          const tokenContracts = {
+        getZrc20TokenDetails: (contractAddress: string) => {
+          const tokenContracts: Partial<
+            Record<
+              string,
+              Awaited<ReturnType<QrlStore["getZrc20TokenDetails"]>>
+            >
+          > = {
             "0x28c4113a9d3a2e836f28c23ed8e3c1e7c243f566": {
               token: {
                 balance: 12,
@@ -83,8 +101,8 @@ describe("ZRC20Tokens", () => {
               error: "",
             },
           };
-          return (
-            tokenContracts[contractAddress as keyof typeof tokenContracts] ?? {}
+          return Promise.resolve(
+            tokenContracts[contractAddress] ?? { token: undefined, error: "" },
           );
         },
       },
@@ -116,6 +134,16 @@ describe("ZRC20Tokens", () => {
       expect(screen.getAllByText("Mocked ZRC 20 token")).toHaveLength(
         ZRC_20_ITEMS_DISPLAY_LIMIT,
       );
+    });
+  });
+
+  it("reports a rejected storage read", async () => {
+    const error = new Error("Storage unavailable");
+    vi.spyOn(StorageUtil, "getTokenContractsList").mockRejectedValueOnce(error);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComponent();
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith("Failed to load tokens:", error);
     });
   });
 });

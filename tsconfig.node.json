@@ -1,12 +1,19 @@
 {
   "compilerOptions": {
     "composite": true,
+    "lib": ["ES2020"],
+    "types": ["node"],
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
-    "strict": true
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "verbatimModuleSyntax": true
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
 }

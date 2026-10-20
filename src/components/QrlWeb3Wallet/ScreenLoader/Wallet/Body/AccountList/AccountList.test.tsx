@@ -1,7 +1,7 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import AccountList from "./AccountList";
@@ -28,7 +28,10 @@ vi.mock(
 );
 
 describe("AccountList", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
@@ -54,7 +57,7 @@ describe("AccountList", () => {
   });
 
   it("should show hidden accounts section when accounts are hidden", () => {
-    const hidden: Record<string, boolean> = {
+    const hidden: Partial<Record<string, boolean>> = {
       Q20fB08fF1f1376A14C055E9F56df80563E16722b: true,
     };
     renderComponent(
@@ -80,7 +83,7 @@ describe("AccountList", () => {
           loadHiddenAccounts: async () => {},
           hideAccount: async () => {},
           unhideAccount: async () => {},
-          isHidden: (addr: string) => !!hidden[addr],
+          isHidden: (addr: string) => hidden[addr] ?? false,
         },
       }),
     );
@@ -89,7 +92,7 @@ describe("AccountList", () => {
   });
 
   it("should expand hidden accounts section on click", async () => {
-    const hidden: Record<string, boolean> = {
+    const hidden: Partial<Record<string, boolean>> = {
       Q20fB08fF1f1376A14C055E9F56df80563E16722b: true,
     };
     renderComponent(
@@ -115,7 +118,7 @@ describe("AccountList", () => {
           loadHiddenAccounts: async () => {},
           hideAccount: async () => {},
           unhideAccount: async () => {},
-          isHidden: (addr: string) => !!hidden[addr],
+          isHidden: (addr: string) => hidden[addr] ?? false,
         },
       }),
     );
@@ -131,7 +134,7 @@ describe("AccountList", () => {
 
   it("should call unhideAccount when unhide button is clicked", async () => {
     const unhideAccount = vi.fn(() => Promise.resolve());
-    const hidden: Record<string, boolean> = {
+    const hidden: Partial<Record<string, boolean>> = {
       Q20fB08fF1f1376A14C055E9F56df80563E16722b: true,
     };
     renderComponent(
@@ -157,7 +160,7 @@ describe("AccountList", () => {
           loadHiddenAccounts: async () => {},
           hideAccount: async () => {},
           unhideAccount,
-          isHidden: (addr: string) => !!hidden[addr],
+          isHidden: (addr: string) => hidden[addr] ?? false,
         },
       }),
     );
@@ -168,5 +171,60 @@ describe("AccountList", () => {
     expect(unhideAccount).toHaveBeenCalledWith(
       "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
     );
+  });
+
+  it("reports independent failures loading labels and hidden accounts", async () => {
+    const error = new Error("storage unavailable");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const syncLabels = vi.fn().mockRejectedValue(error);
+    const loadHiddenAccounts = vi.fn().mockRejectedValue(error);
+    renderComponent(
+      mockedStore({
+        accountLabelsStore: { syncLabels },
+        hiddenAccountsStore: { loadHiddenAccounts },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "Failed to sync account labels:",
+        error,
+      );
+      expect(report).toHaveBeenCalledWith(
+        "Failed to load hidden accounts:",
+        error,
+      );
+    });
+    expect(syncLabels).toHaveBeenCalledTimes(1);
+    expect(loadHiddenAccounts).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a failed unhide and retains the hidden account", async () => {
+    const error = new Error("storage unavailable");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const unhideAccount = vi.fn().mockRejectedValue(error);
+    const store = mockedStore({
+      qrlStore: {
+        qrlAccounts: {
+          accounts: [
+            { accountAddress: "QHidden", accountBalance: "0.0 Quanta" },
+          ],
+        },
+      },
+      hiddenAccountsStore: { isHidden: () => true, unhideAccount },
+    });
+    renderComponent(store);
+
+    await userEvent.click(screen.getByText("Hidden accounts (1)"));
+    await userEvent.click(screen.getByRole("button", { name: "Unhide" }));
+
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "Failed to unhide the account:",
+        error,
+      );
+    });
+    expect(unhideAccount).toHaveBeenCalledWith("QHidden");
+    expect(screen.getByText("Mocked AccountId QHidden")).toBeInTheDocument();
   });
 });

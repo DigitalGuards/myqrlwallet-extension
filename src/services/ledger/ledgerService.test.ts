@@ -1,17 +1,22 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
+import {
+  LEDGER_CONFIG,
+  LEDGER_ERRORS,
+  LEDGER_ERROR_MESSAGES,
+} from "@/constants/ledger";
+import type { ILedgerTransport } from "./ledgerTransport";
 
 // Mock ledgerTransport
-vi.mock("./ledgerTransport", () => ({
-  ledgerTransport: {
-    isSupported: vi.fn(),
-    isConnected: vi.fn(),
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-    send: vi.fn(),
-    onDisconnect: vi.fn(),
-  },
-}));
+function createTransportMock() {
+  return {
+    isSupported: vi.fn<ILedgerTransport["isSupported"]>(),
+    isConnected: vi.fn<ILedgerTransport["isConnected"]>(),
+    connect: vi.fn<ILedgerTransport["connect"]>(),
+    disconnect: vi.fn<ILedgerTransport["disconnect"]>(),
+    send: vi.fn<ILedgerTransport["send"]>(),
+    onDisconnect: vi.fn<ILedgerTransport["onDisconnect"]>(),
+  };
+}
 
 // Mock ledgerApdu functions
 vi.mock("./ledgerApdu", () => ({
@@ -43,6 +48,7 @@ vi.mock("./ledgerApdu", () => ({
 describe("LedgerService", () => {
   // We'll use the singleton for testing
   let ledgerService: typeof import("./ledgerService").ledgerService;
+  let transport: ReturnType<typeof createTransportMock>;
 
   beforeEach(async () => {
     // Reset all mocks
@@ -52,15 +58,9 @@ describe("LedgerService", () => {
     vi.resetModules();
 
     // Re-apply mocks after reset
+    transport = createTransportMock();
     vi.doMock("./ledgerTransport", () => ({
-      ledgerTransport: {
-        isSupported: vi.fn(),
-        isConnected: vi.fn(),
-        connect: vi.fn(),
-        disconnect: vi.fn(),
-        send: vi.fn(),
-        onDisconnect: vi.fn(),
-      },
+      ledgerTransport: transport,
     }));
 
     vi.doMock("./ledgerApdu", () => ({
@@ -95,32 +95,28 @@ describe("LedgerService", () => {
   });
 
   describe("isSupported", () => {
-    it("should return true when WebHID is supported", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.isSupported as any).mockReturnValue(true);
+    it("should return true when WebHID is supported", () => {
+      transport.isSupported.mockReturnValue(true);
 
       expect(ledgerService.isSupported()).toBe(true);
     });
 
-    it("should return false when WebHID is not supported", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.isSupported as any).mockReturnValue(false);
+    it("should return false when WebHID is not supported", () => {
+      transport.isSupported.mockReturnValue(false);
 
       expect(ledgerService.isSupported()).toBe(false);
     });
   });
 
   describe("isConnected", () => {
-    it("should return true when connected", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.isConnected as any).mockReturnValue(true);
+    it("should return true when connected", () => {
+      transport.isConnected.mockReturnValue(true);
 
       expect(ledgerService.isConnected()).toBe(true);
     });
 
-    it("should return false when not connected", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.isConnected as any).mockReturnValue(false);
+    it("should return false when not connected", () => {
+      transport.isConnected.mockReturnValue(false);
 
       expect(ledgerService.isConnected()).toBe(false);
     });
@@ -128,9 +124,8 @@ describe("LedgerService", () => {
 
   describe("connect", () => {
     it("should connect and return device info on success", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.connect as any).mockResolvedValue(undefined);
-      (transport.send as any).mockResolvedValue(
+      transport.connect.mockResolvedValue(undefined);
+      transport.send.mockResolvedValue(
         Buffer.from([0x01, 0x02, 0x03, 0x90, 0x00]),
       );
 
@@ -149,9 +144,8 @@ describe("LedgerService", () => {
     });
 
     it("should throw error when wrong app is open", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.connect as any).mockResolvedValue(undefined);
-      (transport.send as any).mockRejectedValue({ statusCode: 0x6e00 });
+      transport.connect.mockResolvedValue(undefined);
+      transport.send.mockRejectedValue({ statusCode: 0x6e00 });
 
       await expect(ledgerService.connect()).rejects.toThrow(
         LEDGER_ERROR_MESSAGES.APP_NOT_OPEN,
@@ -159,28 +153,132 @@ describe("LedgerService", () => {
     });
 
     it("should throw connection error on failure", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.connect as any).mockRejectedValue(
-        new Error("Connection failed"),
-      );
+      transport.connect.mockRejectedValue(new Error("Connection failed"));
 
       await expect(ledgerService.connect()).rejects.toThrow();
     });
 
     it("should throw CONNECTION_FAILED for non-Error exceptions", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.connect as any).mockRejectedValue("some string error");
+      transport.connect.mockRejectedValue("some string error");
 
       await expect(ledgerService.connect()).rejects.toThrow(
         LEDGER_ERROR_MESSAGES.CONNECTION_FAILED,
       );
     });
+
+    it.each([
+      null,
+      undefined,
+      0x6e00,
+      {},
+      { statusCode: undefined },
+      { statusCode: null },
+      { statusCode: "28160" },
+      { statusCode: [0x6e00] },
+      Object.assign([], { statusCode: 0x6e00 }),
+    ])(
+      "uses the connection fallback for malformed errors: %j",
+      async (error) => {
+        transport.send.mockRejectedValue(error);
+
+        await expect(ledgerService.connect()).rejects.toThrow(
+          LEDGER_ERROR_MESSAGES.CONNECTION_FAILED,
+        );
+      },
+    );
+
+    it("preserves Error identity when its status code is malformed", async () => {
+      const error = Object.assign(new Error("Connection failed"), {
+        statusCode: "28160",
+      });
+      transport.send.mockRejectedValue(error);
+
+      await expect(ledgerService.connect()).rejects.toBe(error);
+    });
+  });
+
+  describe("APDU error propagation", () => {
+    beforeEach(async () => {
+      vi.doUnmock("./ledgerApdu");
+      vi.resetModules();
+      ledgerService = (await import("./ledgerService")).ledgerService;
+    });
+
+    it("preserves version response errors and their metadata", async () => {
+      transport.send.mockResolvedValue(Buffer.from([0x01, 0x02, 0x90, 0x00]));
+      const onConnect = vi.fn();
+      ledgerService.setCallbacks({ onConnect });
+
+      const connected = ledgerService.connect();
+
+      await expect(connected).rejects.toBeInstanceOf(Error);
+      await expect(connected).rejects.toMatchObject({
+        message: "Invalid version response length: expected min. 3 bytes",
+        statusCode: 0,
+        retryable: true,
+      });
+      expect(onConnect).not.toHaveBeenCalled();
+    });
+
+    it("preserves the wrong-app message from a failed APDU response", async () => {
+      transport.send.mockResolvedValue(Buffer.from([0x6e, 0x00]));
+
+      await expect(ledgerService.connect()).rejects.toThrow(
+        LEDGER_ERROR_MESSAGES.APP_NOT_OPEN,
+      );
+    });
+
+    it("preserves signing response errors and status callback order", async () => {
+      transport.send
+        .mockResolvedValueOnce(Buffer.from([0x90, 0x00]))
+        .mockResolvedValueOnce(Buffer.from([0xb0, 0x05]));
+      const onSigningStatusChange = vi.fn();
+      ledgerService.setCallbacks({ onSigningStatusChange });
+
+      const signed = ledgerService.signTransaction(
+        LEDGER_CONFIG.DEFAULT_DERIVATION_PATH,
+        "0xaabb",
+      );
+
+      await expect(signed).rejects.toBeInstanceOf(Error);
+      await expect(signed).rejects.toMatchObject({
+        message: LEDGER_ERRORS[0xb005],
+        statusCode: 0xb005,
+        retryable: false,
+      });
+      expect(onSigningStatusChange.mock.calls).toEqual([
+        ["connecting"],
+        ["awaiting_confirmation"],
+        ["error"],
+      ]);
+      expect(transport.send).toHaveBeenCalledTimes(2);
+    });
+
+    it("preserves rejection mapping and status callback order for APDU errors", async () => {
+      transport.send
+        .mockResolvedValueOnce(Buffer.from([0x90, 0x00]))
+        .mockResolvedValueOnce(Buffer.from([0x69, 0x85]));
+      const onSigningStatusChange = vi.fn();
+      ledgerService.setCallbacks({ onSigningStatusChange });
+
+      await expect(
+        ledgerService.signTransaction(
+          LEDGER_CONFIG.DEFAULT_DERIVATION_PATH,
+          "0xaabb",
+        ),
+      ).rejects.toThrow(LEDGER_ERROR_MESSAGES.USER_REJECTED);
+      expect(onSigningStatusChange.mock.calls).toEqual([
+        ["connecting"],
+        ["awaiting_confirmation"],
+        ["rejected"],
+      ]);
+      expect(transport.send).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("getAppName", () => {
     it("should return app name", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.send as any).mockResolvedValue(
+      transport.send.mockResolvedValue(
         Buffer.from([0x51, 0x52, 0x4c, 0x90, 0x00]),
       );
 
@@ -198,8 +296,7 @@ describe("LedgerService", () => {
 
   describe("disconnect", () => {
     it("should call transport disconnect", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.disconnect as any).mockResolvedValue(undefined);
+      transport.disconnect.mockResolvedValue(undefined);
 
       await ledgerService.disconnect();
 
@@ -209,8 +306,7 @@ describe("LedgerService", () => {
 
   describe("getAccounts", () => {
     it("should fetch multiple accounts with default parameters", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.send as any).mockResolvedValue(
+      transport.send.mockResolvedValue(
         Buffer.concat([
           Buffer.from([0x51]), // 'Q' prefix
           Buffer.alloc(24, 0xab),
@@ -231,8 +327,7 @@ describe("LedgerService", () => {
     });
 
     it("should fetch accounts with custom start index and count", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.send as any).mockResolvedValue(
+      transport.send.mockResolvedValue(
         Buffer.concat([
           Buffer.from([0x51]),
           Buffer.alloc(24, 0xab),
@@ -251,8 +346,7 @@ describe("LedgerService", () => {
 
   describe("getAddress", () => {
     it("should fetch address without confirmation", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.send as any).mockResolvedValue(
+      transport.send.mockResolvedValue(
         Buffer.concat([
           Buffer.from([0x51]),
           Buffer.alloc(24, 0xab),
@@ -275,8 +369,7 @@ describe("LedgerService", () => {
     });
 
     it("should fetch address with confirmation", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.send as any).mockResolvedValue(
+      transport.send.mockResolvedValue(
         Buffer.concat([
           Buffer.from([0x51]),
           Buffer.alloc(24, 0xab),
@@ -316,11 +409,10 @@ describe("LedgerService", () => {
     };
 
     it("should fetch public key and address without confirmation", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
       const responses = [ADDRESS_RESPONSE, ...buildPubkeyChunkResponses()];
-      (transport.send as any).mockReset();
+      transport.send.mockReset();
       for (const r of responses) {
-        (transport.send as any).mockResolvedValueOnce(r);
+        transport.send.mockResolvedValueOnce(r);
       }
 
       const result = await ledgerService.getPublicKey(
@@ -343,11 +435,10 @@ describe("LedgerService", () => {
     });
 
     it("should fetch public key with confirmation", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
       const responses = [ADDRESS_RESPONSE, ...buildPubkeyChunkResponses()];
-      (transport.send as any).mockReset();
+      transport.send.mockReset();
       for (const r of responses) {
-        (transport.send as any).mockResolvedValueOnce(r);
+        transport.send.mockResolvedValueOnce(r);
       }
 
       await ledgerService.getPublicKey("m/44'/238'/0'/0/0", true);
@@ -365,8 +456,7 @@ describe("LedgerService", () => {
 
   describe("verifyAddress", () => {
     it("should verify address with confirmation on device", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.send as any).mockResolvedValue(
+      transport.send.mockResolvedValue(
         Buffer.concat([
           Buffer.from([0x51]),
           Buffer.alloc(24, 0xab),
@@ -392,12 +482,11 @@ describe("LedgerService", () => {
     const mockDerivationPath = "m/44'/238'/0'/0/0";
 
     it("should sign transaction and return result", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
       const signatureChunk = Buffer.concat([
         Buffer.alloc(100, 0xaa),
         Buffer.from([0x90, 0x00]),
       ]);
-      (transport.send as any).mockResolvedValue(signatureChunk);
+      transport.send.mockResolvedValue(signatureChunk);
 
       const result = await ledgerService.signTransaction(
         mockDerivationPath,
@@ -411,12 +500,11 @@ describe("LedgerService", () => {
     });
 
     it("should send path in first phase", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
       const signatureChunk = Buffer.concat([
         Buffer.alloc(100, 0xaa),
         Buffer.from([0x90, 0x00]),
       ]);
-      (transport.send as any).mockResolvedValue(signatureChunk);
+      transport.send.mockResolvedValue(signatureChunk);
 
       await ledgerService.signTransaction(mockDerivationPath, mockTxHex);
 
@@ -432,12 +520,11 @@ describe("LedgerService", () => {
     });
 
     it("should send last transaction chunk with P1=0x02", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
       const signatureChunk = Buffer.concat([
         Buffer.alloc(100, 0xaa),
         Buffer.from([0x90, 0x00]),
       ]);
-      (transport.send as any).mockResolvedValue(signatureChunk);
+      transport.send.mockResolvedValue(signatureChunk);
 
       await ledgerService.signTransaction(mockDerivationPath, mockTxHex);
 
@@ -453,12 +540,11 @@ describe("LedgerService", () => {
     });
 
     it("should fetch all signature chunks", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
       const signatureChunk = Buffer.concat([
         Buffer.alloc(100, 0xaa),
         Buffer.from([0x90, 0x00]),
       ]);
-      (transport.send as any).mockResolvedValue(signatureChunk);
+      transport.send.mockResolvedValue(signatureChunk);
 
       await ledgerService.signTransaction(mockDerivationPath, mockTxHex);
 
@@ -469,10 +555,8 @@ describe("LedgerService", () => {
     });
 
     it("should handle user rejection", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-
       // First call succeeds, second fails with rejection
-      (transport.send as any)
+      transport.send
         .mockResolvedValueOnce(Buffer.from([0x90, 0x00])) // Path accepted
         .mockRejectedValueOnce({ statusCode: 0x6985 }); // User rejected
 
@@ -482,8 +566,7 @@ describe("LedgerService", () => {
     });
 
     it("should handle signing error", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.send as any).mockRejectedValue(new Error("Signing failed"));
+      transport.send.mockRejectedValue(new Error("Signing failed"));
 
       await expect(
         ledgerService.signTransaction(mockDerivationPath, mockTxHex),
@@ -491,12 +574,11 @@ describe("LedgerService", () => {
     });
 
     it("should accept Buffer as transaction input", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
       const signatureChunk = Buffer.concat([
         Buffer.alloc(100, 0xaa),
         Buffer.from([0x90, 0x00]),
       ]);
-      (transport.send as any).mockResolvedValue(signatureChunk);
+      transport.send.mockResolvedValue(signatureChunk);
 
       const txBuffer = Buffer.from([0xaa, 0xbb, 0xcc, 0xdd]);
 
@@ -506,7 +588,6 @@ describe("LedgerService", () => {
     });
 
     it("should call signing status callbacks on success", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
       const onSigningStatusChange = vi.fn();
       ledgerService.setCallbacks({ onSigningStatusChange });
 
@@ -514,7 +595,7 @@ describe("LedgerService", () => {
         Buffer.alloc(100, 0xaa),
         Buffer.from([0x90, 0x00]),
       ]);
-      (transport.send as any).mockResolvedValue(signatureChunk);
+      transport.send.mockResolvedValue(signatureChunk);
 
       await ledgerService.signTransaction(mockDerivationPath, mockTxHex);
 
@@ -526,11 +607,10 @@ describe("LedgerService", () => {
     });
 
     it("should send intermediate chunks with P1=0x01 for multi-chunk data", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
       const { splitIntoChunks } = await import("./ledgerApdu");
 
       // Make splitIntoChunks return 3 chunks
-      (splitIntoChunks as any).mockReturnValueOnce([
+      vi.mocked(splitIntoChunks).mockReturnValueOnce([
         Buffer.alloc(100, 0x01),
         Buffer.alloc(100, 0x02),
         Buffer.alloc(50, 0x03),
@@ -540,7 +620,7 @@ describe("LedgerService", () => {
         Buffer.alloc(100, 0xaa),
         Buffer.from([0x90, 0x00]),
       ]);
-      (transport.send as any).mockResolvedValue(signatureChunk);
+      transport.send.mockResolvedValue(signatureChunk);
 
       await ledgerService.signTransaction(mockDerivationPath, mockTxHex);
 
@@ -565,11 +645,10 @@ describe("LedgerService", () => {
     });
 
     it("should call rejected callback on user rejection", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
       const onSigningStatusChange = vi.fn();
       ledgerService.setCallbacks({ onSigningStatusChange });
 
-      (transport.send as any)
+      transport.send
         .mockResolvedValueOnce(Buffer.from([0x90, 0x00]))
         .mockRejectedValueOnce({ statusCode: 0x6985 });
 
@@ -582,11 +661,10 @@ describe("LedgerService", () => {
     });
 
     it("should call error callback on non-rejection error with callbacks", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
       const onSigningStatusChange = vi.fn();
       ledgerService.setCallbacks({ onSigningStatusChange });
 
-      (transport.send as any).mockRejectedValue(new Error("Signing failed"));
+      transport.send.mockRejectedValue(new Error("Signing failed"));
 
       await expect(
         ledgerService.signTransaction(mockDerivationPath, mockTxHex),
@@ -597,13 +675,46 @@ describe("LedgerService", () => {
     });
 
     it("should throw SIGNING_FAILED for non-Error exceptions", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-
-      (transport.send as any).mockRejectedValue({ statusCode: 0x1234 });
+      transport.send.mockRejectedValue({ statusCode: 0x1234 });
 
       await expect(
         ledgerService.signTransaction(mockDerivationPath, mockTxHex),
       ).rejects.toThrow(LEDGER_ERROR_MESSAGES.SIGNING_FAILED);
+    });
+
+    it.each([
+      null,
+      undefined,
+      0x6985,
+      {},
+      { statusCode: undefined },
+      { statusCode: null },
+      { statusCode: "27013" },
+      { statusCode: [0x6985] },
+      Object.assign([], { statusCode: 0x6985 }),
+    ])("uses the signing fallback for malformed errors: %j", async (error) => {
+      transport.send.mockRejectedValue(error);
+      const onSigningStatusChange = vi.fn();
+      ledgerService.setCallbacks({ onSigningStatusChange });
+
+      await expect(
+        ledgerService.signTransaction(mockDerivationPath, mockTxHex),
+      ).rejects.toThrow(LEDGER_ERROR_MESSAGES.SIGNING_FAILED);
+      expect(onSigningStatusChange.mock.calls).toEqual([
+        ["connecting"],
+        ["error"],
+      ]);
+    });
+
+    it("preserves Error identity when its rejection status is malformed", async () => {
+      const error = Object.assign(new Error("Signing failed"), {
+        statusCode: "27013",
+      });
+      transport.send.mockRejectedValue(error);
+
+      await expect(
+        ledgerService.signTransaction(mockDerivationPath, mockTxHex),
+      ).rejects.toBe(error);
     });
   });
 
@@ -614,9 +725,8 @@ describe("LedgerService", () => {
       ledgerService.setCallbacks({ onConnect });
 
       // Verify by triggering connect
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
-      (transport.connect as any).mockResolvedValue(undefined);
-      (transport.send as any).mockResolvedValue(
+      transport.connect.mockResolvedValue(undefined);
+      transport.send.mockResolvedValue(
         Buffer.from([0x01, 0x02, 0x03, 0x90, 0x00]),
       );
 
@@ -627,15 +737,18 @@ describe("LedgerService", () => {
   });
 
   describe("disconnect callback", () => {
-    it("should call onDisconnect callback when device disconnects", async () => {
-      const { ledgerTransport: transport } = await import("./ledgerTransport");
+    it("should call onDisconnect callback when device disconnects", () => {
       const onDisconnect = vi.fn();
 
       ledgerService.setCallbacks({ onDisconnect });
 
       // Get the handler registered in constructor
-      const disconnectHandler = (transport.onDisconnect as any).mock
-        .calls[0][0];
+      expect(transport.onDisconnect).toHaveBeenCalledOnce();
+      const disconnectCall = transport.onDisconnect.mock.lastCall;
+      if (!disconnectCall) {
+        throw new Error("Expected a registered disconnect handler");
+      }
+      const [disconnectHandler] = disconnectCall;
 
       // Simulate disconnect
       disconnectHandler();

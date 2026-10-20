@@ -1,16 +1,14 @@
 import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { describe, expect, it, vi } from "vitest";
-import browser from "webextension-polyfill";
 import {
   appendSenderDataMiddleware,
   MessageSenderWithOrigin,
 } from "./appendSenderDataMiddleware";
 
-const buildReq = (): JsonRpcRequest => ({
+const buildReq = (): JsonRpcRequest<JsonRpcRequest> => ({
   id: 1,
   jsonrpc: "2.0",
   method: "qrl_requestAccounts",
-  params: [],
 });
 
 const buildSender = (
@@ -28,19 +26,19 @@ const buildSender = (
     title: "Trusted DApp",
     url: "https://trusted.example/app",
     favIconUrl: "https://trusted.example/favicon.ico",
-  } as browser.Tabs.Tab,
+  },
   ...overrides,
 });
 
 describe("appendSenderDataMiddleware", () => {
-  it("attributes the request to the frame URL, not the top-level tab URL", () => {
+  it("attributes the request to the frame URL", () => {
     const req = buildReq();
     const next = vi.fn();
     const sender = buildSender();
 
     appendSenderDataMiddleware({ sender })(
-      req as never,
-      {} as never,
+      req,
+      { id: req.id, jsonrpc: "2.0" },
       next,
       () => {},
     );
@@ -55,8 +53,8 @@ describe("appendSenderDataMiddleware", () => {
     const sender = buildSender();
 
     appendSenderDataMiddleware({ sender })(
-      req as never,
-      {} as never,
+      req,
+      { id: req.id, jsonrpc: "2.0" },
       () => {},
       () => {},
     );
@@ -73,8 +71,8 @@ describe("appendSenderDataMiddleware", () => {
     const sender = buildSender({ origin: undefined });
 
     appendSenderDataMiddleware({ sender })(
-      req as never,
-      {} as never,
+      req,
+      { id: req.id, jsonrpc: "2.0" },
       () => {},
       () => {},
     );
@@ -87,8 +85,8 @@ describe("appendSenderDataMiddleware", () => {
     const sender = buildSender({ origin: "null" });
 
     appendSenderDataMiddleware({ sender })(
-      req as never,
-      {} as never,
+      req,
+      { id: req.id, jsonrpc: "2.0" },
       () => {},
       () => {},
     );
@@ -104,8 +102,8 @@ describe("appendSenderDataMiddleware", () => {
     });
 
     appendSenderDataMiddleware({ sender })(
-      req as never,
-      {} as never,
+      req,
+      { id: req.id, jsonrpc: "2.0" },
       () => {},
       () => {},
     );

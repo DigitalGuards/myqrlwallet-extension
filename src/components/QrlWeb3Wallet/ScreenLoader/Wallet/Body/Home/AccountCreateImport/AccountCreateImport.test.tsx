@@ -1,7 +1,9 @@
+import type StorageUtil from "@/utilities/storageUtil";
+import { discoverTokens } from "@/services/assetDiscovery";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import AccountCreateImport from "./AccountCreateImport";
@@ -9,29 +11,34 @@ import AccountCreateImport from "./AccountCreateImport";
 const { mockGetTokenContractsList, mockGetNFTCollectionsList } = vi.hoisted(
   () => ({
     mockGetTokenContractsList: vi
-      .fn()
+      .fn<typeof StorageUtil.getTokenContractsList>()
       .mockResolvedValue([
-        { address: "Qd180388b9a863728fdc2e865d5fea87ce100eb2f", image: "" },
+        {
+          address: "Qd180388b9a863728fdc2e865d5fea87ce100eb2f",
+          image: "",
+          symbol: "TST",
+          decimals: 18,
+        },
       ]),
-    mockGetNFTCollectionsList: vi.fn().mockResolvedValue([]),
+    mockGetNFTCollectionsList: vi
+      .fn<typeof StorageUtil.getNFTCollectionsList>()
+      .mockResolvedValue([]),
   }),
 );
 
 vi.mock("@/utilities/storageUtil", () => ({
   __esModule: true,
   default: {
-    getTokenContractsList: (...args: any[]) =>
-      mockGetTokenContractsList(...args),
-    getNFTCollectionsList: (...args: any[]) =>
-      mockGetNFTCollectionsList(...args),
+    getTokenContractsList: mockGetTokenContractsList,
+    getNFTCollectionsList: mockGetNFTCollectionsList,
   },
 }));
 
 // Keep the suite hermetic: the discovery effect would otherwise fetch the
 // live explorer API for the fixture address on every active-account test.
 vi.mock("@/services/assetDiscovery", () => ({
-  discoverTokens: vi.fn(async () => []),
-  discoverNftCollections: vi.fn(async () => []),
+  discoverTokens: vi.fn(() => Promise.resolve([])),
+  discoverNftCollections: vi.fn(() => Promise.resolve([])),
   MAX_DISCOVERED_TOKENS: 50,
   MAX_DISCOVERED_COLLECTIONS: 50,
 }));
@@ -43,8 +50,14 @@ vi.mock(
 describe("AccountCreateImport", () => {
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     mockGetTokenContractsList.mockResolvedValue([
-      { address: "Qd180388b9a863728fdc2e865d5fea87ce100eb2f", image: "" },
+      {
+        address: "Qd180388b9a863728fdc2e865d5fea87ce100eb2f",
+        image: "",
+        symbol: "TST",
+        decimals: 18,
+      },
     ]);
     mockGetNFTCollectionsList.mockResolvedValue([]);
   });
@@ -244,6 +257,65 @@ describe("AccountCreateImport", () => {
     });
     expect(
       screen.queryByRole("link", { name: "View all NFT collections" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reports a rejected asset discovery read", async () => {
+    const error = new Error("Discovery unavailable");
+    vi.mocked(discoverTokens).mockRejectedValueOnce(error);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComponent();
+    await waitFor(() => {
+      expect(report).toHaveBeenCalledWith(
+        "Failed to discover account assets:",
+        error,
+      );
+    });
+    expect(
+      screen.queryByText(/found on this address/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("ignores the previous account's delayed asset discovery", async () => {
+    type Tokens = Awaited<ReturnType<typeof discoverTokens>>;
+    let finish: ((tokens: Tokens) => void) | undefined;
+    const pending = new Promise<Tokens>((resolve) => {
+      finish = resolve;
+    });
+    vi.mocked(discoverTokens).mockReturnValueOnce(pending);
+    const view = renderComponent();
+    await waitFor(() => {
+      expect(discoverTokens).toHaveBeenCalled();
+    });
+    view.rerender(
+      <StoreProvider
+        value={mockedStore({
+          qrlStore: {
+            activeAccount: { accountAddress: `Q${"b".repeat(128)}` },
+          },
+        })}
+      >
+        <MemoryRouter>
+          <TooltipProvider>
+            <AccountCreateImport />
+          </TooltipProvider>
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+    await act(async () => {
+      finish?.([
+        {
+          address: `Q${"c".repeat(128)}`,
+          name: "Old token",
+          symbol: "OLD",
+          decimals: 18,
+        },
+      ]);
+      await pending;
+    });
+    expect(screen.getByText("Active account")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Review and add/i }),
     ).not.toBeInTheDocument();
   });
 });

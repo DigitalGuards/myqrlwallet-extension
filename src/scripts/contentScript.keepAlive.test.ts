@@ -37,9 +37,11 @@ vi.mock("@theqrl/qrl-wallet-provider/object-multiplex", () => ({
   },
 }));
 vi.mock("@theqrl/qrl-wallet-provider/post-message-stream", () => ({
-  WindowPostMessageStream: class {},
+  WindowPostMessageStream: vi.fn(function () {}),
 }));
-vi.mock("extension-port-stream", () => ({ ExtensionPortStream: class {} }));
+vi.mock("extension-port-stream", () => ({
+  ExtensionPortStream: vi.fn(function () {}),
+}));
 vi.mock("readable-stream", () => ({ pipeline: vi.fn() }));
 vi.mock("./utils/providerConnectionLifecycle", () => ({
   createProviderChannelBridge: () => ({

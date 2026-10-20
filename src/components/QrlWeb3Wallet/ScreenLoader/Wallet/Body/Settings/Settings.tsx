@@ -52,7 +52,13 @@ const Settings = () => {
                 className={`flex w-full items-center justify-between px-6 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
                   index < MENU_ITEMS.length - 1 ? "border-b" : ""
                 }`}
-                onClick={() => navigate(item.route)}
+                onClick={() => {
+                  Promise.resolve(navigate(item.route)).catch(
+                    (error: unknown) => {
+                      console.error("Failed to open settings:", error);
+                    },
+                  );
+                }}
               >
                 <span className="flex items-center gap-3">
                   <item.icon className="h-4 w-4 text-muted-foreground" />

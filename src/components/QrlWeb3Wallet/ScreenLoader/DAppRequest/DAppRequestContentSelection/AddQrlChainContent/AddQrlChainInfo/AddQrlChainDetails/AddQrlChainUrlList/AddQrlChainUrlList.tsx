@@ -15,6 +15,7 @@ const AddQrlChainUrlList = ({ title, urlList }: AddQrlChainUrlListProps) => {
         ))}
       </div>
     );
+  return undefined;
 };
 
 export default AddQrlChainUrlList;

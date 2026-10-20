@@ -26,7 +26,6 @@ vi.mock("@theqrl/web3", () => ({
       },
     };
   }),
-  Web3BaseWalletAccount: class {},
 }));
 vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/Lock/LockPassword/Onboarding/AddOrImportAccount/AccountAddressDisplay/AccountAddressDisplay",
@@ -44,14 +43,22 @@ vi.mock(
       error,
     }: {
       account: Web3BaseWalletAccount;
-      onConfirmed: () => void;
+      onConfirmed: () => void | Promise<void>;
       onBack?: () => void;
       error?: string;
     }) => (
       <div>
         <div>Mocked Seed Backup for {account.address}</div>
         {error && <div>{error}</div>}
-        <button onClick={onConfirmed}>Confirm backup</button>
+        <button
+          onClick={() => {
+            Promise.resolve(onConfirmed()).catch((error: unknown) => {
+              console.error("Backup confirmation failed:", error);
+            });
+          }}
+        >
+          Confirm backup
+        </button>
         <button onClick={onBack}>Back</button>
       </div>
     ),
@@ -117,12 +124,12 @@ describe("AddOrImportAccount", () => {
       screen.getByRole("button", { name: "Confirm backup" }),
     );
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(mockedAddAnAccountToWallet).toHaveBeenCalledWith({
         address: "MockedNewAddress",
         seed: "MockedNewSeed",
-      }),
-    );
+      });
+    });
     expect(mockedSelectStep).toHaveBeenCalledWith(ONBOARDING_STEPS.COMPLETED);
   });
 
@@ -148,9 +155,9 @@ describe("AddOrImportAccount", () => {
     const mockedSelectStep = vi.fn();
     renderComponent(noAccountStore(), {
       selectStep: mockedSelectStep,
-      addAnAccountToWallet: vi.fn(async () => {
-        throw new Error("storage full");
-      }),
+      addAnAccountToWallet: vi
+        .fn()
+        .mockRejectedValue(new Error("storage full")),
     });
 
     await userEvent.click(
@@ -201,12 +208,12 @@ describe("AddOrImportAccount", () => {
     );
     await userEvent.click(importButton);
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(mockedAddAnAccountToWallet).toHaveBeenCalledWith({
         address: "MockedAddress",
         seed: "MockedSeed",
-      }),
-    );
+      });
+    });
   });
 
   it("should return from the import card to the choose screen", async () => {
