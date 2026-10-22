@@ -568,7 +568,7 @@
   "settings.preferences.gasAggressive": "Высокая",
   "settings.data.title": "Данные",
   "settings.data.exportDescription": "Экспортируйте зашифрованные хранилища ключей в резервный файл JSON. Расшифрованные ключи и пароли в него не включаются.",
-  "settings.data.exportButton": "Экспортировать резервную копию",
+  "settings.data.exportButton": "Экспорт копии",
   "settings.data.exportingButton": "Экспорт...",
   "settings.data.resetDescription": "Удалите все аккаунты и все данные кошелька с этого устройства. Средства останутся в блокчейне, но без фразы восстановления или резервной копии вернуть доступ будет невозможно.",
   "settings.data.resetButton": "Сбросить кошелёк",
