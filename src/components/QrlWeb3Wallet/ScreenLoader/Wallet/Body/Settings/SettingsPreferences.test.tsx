@@ -50,6 +50,26 @@ describe("SettingsPreferences", () => {
     ).toBeInTheDocument();
   });
 
+  it("lists all five languages by their own names", async () => {
+    renderComponent();
+    await userEvent.click(screen.getByRole("combobox", { name: "Language" }));
+
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent),
+    ).toEqual(["English", "Español", "Deutsch", "Русский", "简体中文"]);
+  });
+
+  it.each([
+    ["Русский", "ru"],
+    ["简体中文", "zh-CN"],
+  ])("selects %s", async (label, language) => {
+    const setLanguage = vi.fn(() => Promise.resolve());
+    renderComponent(mockedStore({ settingsStore: { setLanguage } }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Language" }));
+    await userEvent.click(screen.getByRole("option", { name: label }));
+    expect(setLanguage).toHaveBeenCalledWith(language);
+  });
+
   it("should call setCurrency when selecting a currency", async () => {
     const setCurrency = vi.fn(() => Promise.resolve());
     renderComponent(mockedStore({ settingsStore: { setCurrency } }));
