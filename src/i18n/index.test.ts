@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import en from "./locales/en.json";
 import es from "./locales/es.json";
 import de from "./locales/de.json";
+import ru from "./locales/ru.json";
+import zhCN from "./locales/zh-CN.json";
 
 const { init, instance } = vi.hoisted(() => {
   const init = vi.fn<() => Promise<unknown>>();
@@ -28,9 +30,12 @@ describe("translation initialization", () => {
         en: { translation: en },
         es: { translation: es },
         de: { translation: de },
+        ru: { translation: ru },
+        "zh-CN": { translation: zhCN },
       },
       lng: "en",
       fallbackLng: "en",
+      supportedLngs: ["en", "es", "de", "ru", "zh-CN"],
       interpolation: { escapeValue: false },
       react: { useSuspense: false },
     });

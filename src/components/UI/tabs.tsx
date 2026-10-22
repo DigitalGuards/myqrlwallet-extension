@@ -7,12 +7,16 @@ const Tabs = TabsPrimitive.Root;
 
 const TabsList = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.List>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
->(({ className, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List> & {
+    wrapLabels?: boolean;
+  }
+>(({ className, wrapLabels = false, ...props }, ref) => (
   <TabsPrimitive.List
     ref={ref}
     className={cn(
       "inline-flex h-10 items-center justify-center rounded-lg bg-muted/60 p-1 text-muted-foreground",
+      wrapLabels &&
+        "h-auto min-h-10 items-stretch [&>[role=tab]]:min-w-0 [&>[role=tab]]:whitespace-normal [&>[role=tab]]:px-1",
       className,
     )}
     {...props}
