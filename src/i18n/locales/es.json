@@ -442,7 +442,7 @@
   "importAccount.readError": "Hubo un error al leer la frase de recuperación.",
   "importAccount.importing": "Importando cuenta",
   "importAccount.button": "Importar cuenta",
-  "importAccount.tabMnemonic": "Frase de recuperación",
+  "importAccount.tabMnemonic": "Frase semilla",
   "account.passwordUnavailable": "Su sesión desbloqueada expiró y aún no se guardó nada.",
   "account.sessionPasswordExpired": "Su sesión desbloqueada expiró.",
   "account.reArmPrompt": "Ingrese su contraseña para continuar sin perder su progreso.",

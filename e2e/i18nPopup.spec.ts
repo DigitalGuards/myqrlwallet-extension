@@ -4,7 +4,9 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import de from "../src/i18n/locales/de.json" with { type: "json" };
 import en from "../src/i18n/locales/en.json" with { type: "json" };
+import es from "../src/i18n/locales/es.json" with { type: "json" };
 import ru from "../src/i18n/locales/ru.json" with { type: "json" };
 import zhCN from "../src/i18n/locales/zh-CN.json" with { type: "json" };
 import {
@@ -100,11 +102,83 @@ const openPreferences = async (page: Page, copy: typeof en) => {
     .click();
 };
 
+const expectPopupLayout = async (page: Page) => {
+  const layout = await page.evaluate(() => {
+    const root = document.querySelector('[role="dialog"]') ?? document.body;
+    const tolerance = 0.5;
+    const outsideViewport = [root, ...root.querySelectorAll("*")]
+      .filter((element) => {
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        // Screen-reader text is intentionally clipped out of the visual layout.
+        return (
+          element.checkVisibility() &&
+          style.visibility === "visible" &&
+          style.getPropertyValue("clip") === "auto" &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      })
+      .flatMap((element) => {
+        const rect = element.getBoundingClientRect();
+        // Import forms scroll vertically. Modal contents must fit both axes.
+        return rect.left < -tolerance ||
+          rect.right > innerWidth + tolerance ||
+          (root !== document.body &&
+            (rect.top < -tolerance || rect.bottom > innerHeight + tolerance))
+          ? [
+              {
+                tag: element.tagName,
+                text: element.textContent.slice(0, 80),
+                left: rect.left,
+                right: rect.right,
+                top: rect.top,
+                bottom: rect.bottom,
+              },
+            ]
+          : [];
+      });
+    const tabs = [...root.querySelectorAll('[role="tab"]')].map((tab) => {
+      const bounds = tab.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(tab);
+      const lines = [...range.getClientRects()];
+      return {
+        text: tab.textContent,
+        lines: new Set(lines.map((line) => line.top)).size,
+        overflows:
+          tab.scrollWidth > tab.clientWidth + 1 ||
+          tab.scrollHeight > tab.clientHeight + 1 ||
+          lines.some(
+            (line) =>
+              line.left < bounds.left - tolerance ||
+              line.right > bounds.right + tolerance ||
+              line.top < bounds.top - tolerance ||
+              line.bottom > bounds.bottom + tolerance,
+          ),
+      };
+    });
+    return { outsideViewport, tabs };
+  });
+  expect
+    .soft(layout.outsideViewport, "Elements must fit the popup viewport")
+    .toEqual([]);
+  for (const tab of layout.tabs) {
+    expect.soft(tab.overflows, `Tab label must fit: ${tab.text}`).toBe(false);
+    expect
+      .soft(tab.lines, `Tab label must use at most two lines: ${tab.text}`)
+      .toBeLessThanOrEqual(2);
+  }
+};
+
 for (const { language, label, copy } of [
+  { language: "en", label: "English", copy: en },
+  { language: "es", label: "Español", copy: es },
+  { language: "de", label: "Deutsch", copy: de },
   { language: "ru", label: "Русский", copy: ru },
   { language: "zh-CN", label: "简体中文", copy: zhCN },
 ]) {
-  test(`${language} persists across popup reloads and translates approvals`, async () => {
+  test(`${language} persists, fits import and reset layouts, and translates approvals`, async () => {
     const fixture = await startFixture();
     const profile = await mkdtemp(path.join(tmpdir(), "wallet-language-"));
     const context = await chromium.launchPersistentContext(profile, {
@@ -230,6 +304,18 @@ for (const { language, label, copy } of [
       ).toBeVisible();
 
       const capture = async (screen: string) => {
+        await popup.evaluate(async () => {
+          await document.fonts.ready;
+          await Promise.all(
+            document
+              .getAnimations()
+              .filter(
+                (animation) =>
+                  animation.effect?.getComputedTiming().iterations !== Infinity,
+              )
+              .map((animation) => animation.finished),
+          );
+        });
         expect(popup.viewportSize()).toEqual(POPUP_SIZE);
         expect(
           await popup.evaluate(() => document.documentElement.scrollWidth),
@@ -244,6 +330,58 @@ for (const { language, label, copy } of [
         }
       };
       await capture("home");
+      await popup
+        .getByRole("link", { name: copy["home.importAccount"], exact: true })
+        .click();
+      for (const { name, screen } of [
+        { name: copy["importAccount.tabMnemonic"], screen: "import-mnemonic" },
+        { name: copy["importAccount.tabHexSeed"], screen: "import-hex" },
+        { name: copy["importAccount.tabWalletFile"], screen: "import-file" },
+      ]) {
+        const tab = popup.getByRole("tab", { name, exact: true });
+        await tab.click();
+        await expect(tab).toHaveAttribute("aria-selected", "true");
+        await expect(tab).toBeInViewport({ ratio: 1 });
+        await expect(popup.getByRole("tab")).toHaveCount(3);
+        await capture(screen);
+        await expectPopupLayout(popup);
+      }
+      await popup.getByRole("link", { name: "MyQRLWallet Logo" }).click();
+      await popup.getByTestId("ellipsis-icon").click();
+      await popup
+        .getByRole("menuitem", { name: copy["header.settings"], exact: true })
+        .click();
+      await popup
+        .getByRole("button", { name: copy["settings.data"], exact: true })
+        .click();
+      await popup
+        .getByRole("button", {
+          name: copy["settings.data.resetButton"],
+          exact: true,
+        })
+        .click();
+      const resetDialog = popup.getByRole("dialog", {
+        name: copy["resetWallet.title"],
+        exact: true,
+      });
+      await expect(resetDialog).toBeVisible();
+      const resetButton = resetDialog.getByRole("button", {
+        name: copy["resetWallet.confirmButton"],
+        exact: true,
+      });
+      await expect(resetButton).toBeDisabled();
+      await capture("reset-dialog");
+      await expectPopupLayout(popup);
+      await resetDialog
+        .getByRole("textbox")
+        .fill(copy["resetWallet.confirmWord"]);
+      await expect(resetButton).toBeEnabled();
+      await expectPopupLayout(popup);
+      await resetDialog
+        .getByRole("button", { name: copy["common.cancel"], exact: true })
+        .click();
+      await expect(resetDialog).toBeHidden();
+      await popup.getByRole("link", { name: "MyQRLWallet Logo" }).click();
       await openPreferences(popup, copy);
       await popup
         .getByRole("combobox", {

@@ -442,7 +442,7 @@
   "importAccount.readError": "Beim Lesen der Wiederherstellungsphrase ist ein Fehler aufgetreten.",
   "importAccount.importing": "Konto wird importiert",
   "importAccount.button": "Konto importieren",
-  "importAccount.tabMnemonic": "Wiederherstellungsphrase",
+  "importAccount.tabMnemonic": "Seed-Phrase",
   "account.passwordUnavailable": "Ihre entsperrte Sitzung ist abgelaufen, es wurde noch nichts gespeichert.",
   "account.sessionPasswordExpired": "Ihre entsperrte Sitzung ist abgelaufen.",
   "account.reArmPrompt": "Gib dein Passwort ein, um fortzufahren, ohne deinen Fortschritt zu verlieren.",
