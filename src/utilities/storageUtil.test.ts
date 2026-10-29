@@ -471,10 +471,7 @@ describe("StorageUtil", () => {
         isCustomChain: true,
         nativeCurrency: { name: "QRL", symbol: "QRL", decimals: 18 },
       };
-      await StorageUtil.setAllBlockChains([
-        staleBuiltin,
-        customWithQrlSymbol,
-      ]);
+      await StorageUtil.setAllBlockChains([staleBuiltin, customWithQrlSymbol]);
       const result = await StorageUtil.getAllBlockChains();
       expect(result[0].nativeCurrency).toEqual({
         name: "Quanta",
@@ -562,9 +559,7 @@ describe("StorageUtil", () => {
       "rejects an invalid QRNS registry before persistence (%s)",
       async (qrnsRegistryAddress) => {
         await expect(
-          StorageUtil.setAllBlockChains([
-            { ...chain1, qrnsRegistryAddress },
-          ]),
+          StorageUtil.setAllBlockChains([{ ...chain1, qrnsRegistryAddress }]),
         ).rejects.toThrow("128 hexadecimal characters");
         expect(localStore[profileStorageKey("BLOCKCHAINS")]).toBeUndefined();
       },
@@ -695,6 +690,22 @@ describe("StorageUtil", () => {
       await StorageUtil.setTokenContractsList(ACCOUNT, token1);
       const result = await StorageUtil.getTokenContractsList(ACCOUNT);
       expect(result).toEqual([token1]);
+    });
+
+    it("reads the requested token chain even when the active chain changes", async () => {
+      await StorageUtil.setTokenContractsList(ACCOUNT, token1);
+      const original = await StorageUtil.getActiveBlockChain();
+      const active = vi
+        .spyOn(StorageUtil, "getActiveBlockChain")
+        .mockResolvedValue({ ...original, chainId: "0x2" });
+      try {
+        expect(await StorageUtil.getTokenContractsList(ACCOUNT)).toEqual([]);
+        expect(
+          await StorageUtil.getTokenContractsList(ACCOUNT, original.chainId),
+        ).toEqual([token1]);
+      } finally {
+        active.mockRestore();
+      }
     });
 
     it("should return empty array when no tokens stored", async () => {

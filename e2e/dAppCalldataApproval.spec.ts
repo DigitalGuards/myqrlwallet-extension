@@ -1,3 +1,5 @@
+import vaultVectors from "../src/functions/pqSigning/__fixtures__/quantaVault/typed-data-v2.json" with { type: "json" };
+import approvals from "../src/functions/pqSigning/__fixtures__/quantaVault/vault-approvals.json" with { type: "json" };
 import {
   beginFixtureRequest,
   closeFixtureServer,
@@ -126,7 +128,8 @@ const beginRequest = async (page: Page, method: string, params: unknown[]) => {
   });
 };
 
-test("puts a decoded token approval in words on the approval screen", async () => {
+test("reviews contract calls and QuantaVault approvals at popup and side panel widths", async () => {
+  test.setTimeout(240_000);
   if (SHOT_DIR) await mkdir(SHOT_DIR, { recursive: true });
   const fixture = await startFixtureServer();
   const profile = await mkdtemp(path.join(tmpdir(), "myqrlwallet-shots-"));
@@ -392,14 +395,197 @@ test("puts a decoded token approval in words on the approval screen", async () =
     await capture("approve-single-nft-360.png");
     await rejectApproval();
 
-    // A selector the wallet does not know says so instead of inventing a
-    // summary, and keeps the raw bytes one click away.
+    // An unknown selector receives a generic contract-interaction label
+    // with its raw bytes one click away.
     await openApproval(`0xdeadbeef${"00".repeat(64)}`, TOKEN_CONTRACT);
     await expect(extensionPage.getByText("Contract interaction")).toBeVisible();
     await expect(extensionPage.getByText("0xdeadbeef")).toBeVisible();
     await expect(
       extensionPage.getByRole("button", { name: "Show raw data" }),
     ).toBeVisible();
+    await rejectApproval();
+
+    const base = vaultVectors.schemeVectors.find(
+      (vector) => vector.label === "empty-call",
+    );
+    const approval = approvals.schemeVectors.find(
+      (vector) => vector.label === "approval-empty",
+    );
+    if (!base || !approval) throw new Error("Missing vault vectors");
+    const tx = {
+      ...base.payload.message,
+      to: TOKEN_CONTRACT,
+      data: call(
+        "approve(address,uint256)",
+        ["address", "uint256"],
+        [SPENDER, "1234500000000000000"],
+      ),
+      value: "1000000000000000001",
+      operation: 0,
+      txGas: "0",
+      baseGas: "0",
+      validUntil: MAX_UINT256.toString(),
+    };
+    const vaultPayload = {
+      ...base.payload,
+      domain: { ...base.payload.domain, chainId: "3151909" },
+      message: tx,
+    };
+    const openVault = async (payload: unknown, canApprove: boolean) => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await beginRequest(dAppPage, "qrl_signTypedData", [
+          CHECKSUM_ACCOUNT,
+          payload,
+        ]);
+        const visible = await extensionPage
+          .getByRole("button", { name: "Yes", exact: true })
+          .waitFor({ state: "visible", timeout: 6_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (visible) {
+          if (canApprove)
+            await expect(
+              extensionPage.getByRole("button", { name: "Yes", exact: true }),
+            ).toBeEnabled();
+          else
+            await expect(
+              extensionPage.getByRole("button", { name: "Yes", exact: true }),
+            ).toBeDisabled();
+          return;
+        }
+        await extensionPage.waitForTimeout(APPROVAL_COOLDOWN_WAIT_MS);
+      }
+      throw new Error("Vault approval did not open");
+    };
+
+    await openVault(vaultPayload, true);
+    await expect(
+      extensionPage.getByText("Approve a vault transaction", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      extensionPage.getByText("1.2345 MQW", { exact: true }),
+    ).toBeAttached();
+    await expect(
+      extensionPage.getByText("1.000000000000000001 Quanta", { exact: true }),
+    ).toBeAttached();
+    await expect(
+      extensionPage.getByText(/browser-reported page origin/),
+    ).toBeAttached();
+    await expect(extensionPage.locator("details")).not.toHaveAttribute("open");
+
+    await rejectApproval();
+    // The action popup's existing intrinsic minimum is 368px. The panel
+    // also exercises the review at 360px without changing the wallet shell.
+    for (const { surface, width, height } of [
+      { surface: "popup", width: 368, height: 600 },
+      { surface: "panel", width: 360, height: 800 },
+      { surface: "panel", width: 480, height: 800 },
+    ]) {
+      if (extensionPage.isClosed()) extensionPage = await context.newPage();
+      await extensionPage.setViewportSize({ width, height });
+      await extensionPage.goto(
+        `chrome-extension://${extensionId}/index.html${surface === "panel" ? "?sidepanel=true" : ""}`,
+      );
+      await expect(
+        extensionPage.getByRole("heading", { name: "Active account" }),
+      ).toBeVisible();
+      await openVault(vaultPayload, true);
+      for (const theme of ["dark", "light"]) {
+        await extensionPage.evaluate(
+          (dark) => document.documentElement.classList.toggle("dark", dark),
+          theme === "dark",
+        );
+        const review = extensionPage.getByTestId("vault-review");
+        await expect(review).toBeVisible();
+        await review.scrollIntoViewIfNeeded();
+        const layout = await review.evaluate((element) => ({
+          scrolls: element.scrollHeight > element.clientHeight,
+          fits: element.scrollWidth <= element.clientWidth,
+          viewportFits:
+            document.documentElement.scrollWidth <= window.innerWidth,
+        }));
+        expect(layout).toEqual({
+          scrolls: true,
+          fits: true,
+          viewportFits: true,
+        });
+        await capture(`vault-${surface}-${width}-${theme}.png`);
+        await review.evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
+        await expect(
+          extensionPage.getByText("Refund receiver", { exact: true }),
+        ).toBeVisible();
+        await capture(`vault-${surface}-${width}-${theme}-refund.png`);
+        await review.evaluate((element) => {
+          element.scrollTop = 0;
+        });
+      }
+      await extensionPage
+        .getByText("Raw message JSON", { exact: true })
+        .click();
+      await expect(extensionPage.locator("details")).toHaveAttribute("open");
+      await expect(extensionPage.locator("details")).toContainText('"nonce"');
+      await rejectApproval();
+    }
+
+    // Reuse the mounted side panel across a blocked request and its clean successor.
+    await openVault(
+      { ...vaultPayload, message: { ...tx, baseGas: "1" } },
+      false,
+    );
+    await expect(
+      extensionPage.getByText(/Refund fields must be zero/),
+    ).toBeAttached();
+    await rejectApproval();
+    const nested = {
+      ...approval.payload,
+      domain: { ...approval.payload.domain, chainId: "0x301825" },
+      message: { ...approval.payload.message, tx: { ...tx, gasPrice: "1" } },
+    };
+    await openVault(nested, false);
+    await expect(
+      extensionPage.getByText("On behalf of outer vault", { exact: true }),
+    ).toBeAttached();
+    await rejectApproval();
+
+    const packedEntry = `00${TOKEN_CONTRACT.slice(1)}${"0".repeat(128)}${BigInt(
+      (tx.data.length - 2) / 2,
+    )
+      .toString(16)
+      .padStart(128, "0")}${tx.data.slice(2)}`;
+    const batch = {
+      ...vaultPayload,
+      message: {
+        ...tx,
+        operation: 1,
+        data: call(
+          "multiSend(bytes)",
+          ["bytes"],
+          [`0x${packedEntry.repeat(12)}`],
+        ),
+      },
+    };
+    await openVault(batch, true);
+    await expect(
+      extensionPage.getByText(/full control of the vault/),
+    ).toBeAttached();
+    const review = extensionPage.getByTestId("vault-review");
+    await review.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(
+      extensionPage.getByText("Enclosed call 12", { exact: true }),
+    ).toBeAttached();
+    await expect(
+      extensionPage.getByText("Refund receiver", { exact: true }),
+    ).toBeVisible();
+    expect(
+      await review.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
+    await capture("vault-long-batch-panel.png");
     await rejectApproval();
   } finally {
     await context.close();
