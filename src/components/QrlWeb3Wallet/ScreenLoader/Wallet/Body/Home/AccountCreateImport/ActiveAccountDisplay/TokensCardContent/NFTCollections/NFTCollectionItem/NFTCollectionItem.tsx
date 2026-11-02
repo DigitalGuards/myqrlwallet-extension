@@ -149,13 +149,13 @@ const NFTCollectionItem = observer(
               className={`shrink-0 ${getRandomTailwindTextColor(collection.symbol)}`}
               size={32}
             />
-            <div className="flex w-full flex-col gap-1">
-              <div className="text-xs font-bold">
+            <div className="flex w-full min-w-0 flex-col gap-1">
+              <div className="text-xs font-bold [overflow-wrap:anywhere]">
                 {ownedCount !== undefined
                   ? t("nft.ownedNfts", { count: ownedCount })
                   : displayName}
               </div>
-              <div className="text-xs">
+              <div className="text-xs [overflow-wrap:anywhere]">
                 {ownedCount !== undefined && displayName}
                 {collection.standard === "ZRC1155" && (
                   <span className="ml-1 text-muted-foreground">ZRC-1155</span>
