@@ -541,7 +541,7 @@
   "settings.security.60minutes": "60 минут",
   "settings.security.never": "Никогда",
   "settings.security.showBalanceLabel": "Показывать баланс и цену токена",
-  "settings.security.showBalanceDescription": "Для отображения цен токенов используется API CoinGecko. Если CoinGecko отклоняет запрос, используется обозреватель ZondScan. При отключении этой функции запросы к внешним API не выполняются, а стоимость в обычных валютах не отображается.",
+  "settings.security.showBalanceDescription": "Стоимость в обычных валютах отображается только в основной сети QRL. Там для отображения цен токенов используется API CoinGecko. Если CoinGecko отклоняет запрос, используется обозреватель ZondScan. При отключении этой функции запросы цен не выполняются, а стоимость в обычных валютах не отображается.",
   "settings.security.coingeckoLink": "API CoinGecko",
   "settings.security.changePassword": "Изменить пароль",
   "settings.security.currentPassword": "Текущий пароль",

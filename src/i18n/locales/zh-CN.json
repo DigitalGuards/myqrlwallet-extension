@@ -541,7 +541,7 @@
   "settings.security.60minutes": "60 分钟",
   "settings.security.never": "永不",
   "settings.security.showBalanceLabel": "显示余额和代币价格",
-  "settings.security.showBalanceDescription": "我们使用 CoinGecko API 显示代币价格；当 CoinGecko 拒绝请求时，会改用 ZondScan 区块浏览器。关闭后，不会调用外部 API，也不会显示法币估值。",
+  "settings.security.showBalanceDescription": "法币估值仅在 QRL 主网上显示。在主网上，我们使用 CoinGecko API 显示代币价格；当 CoinGecko 拒绝请求时，会改用 ZondScan 区块浏览器。关闭后，不会请求价格，也不会显示法币估值。",
   "settings.security.coingeckoLink": "CoinGecko API",
   "settings.security.changePassword": "修改密码",
   "settings.security.currentPassword": "当前密码",

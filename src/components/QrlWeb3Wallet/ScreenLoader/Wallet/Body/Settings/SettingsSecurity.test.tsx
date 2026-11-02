@@ -96,6 +96,14 @@ describe("SettingsSecurity", () => {
     expect(screen.getByText(/CoinGecko API/)).toBeInTheDocument();
   });
 
+  it("says fiat values show on QRL mainnet only", () => {
+    renderComponent();
+
+    expect(
+      screen.getByText(/^Fiat values show on QRL mainnet only\./),
+    ).toBeInTheDocument();
+  });
+
   it("should call setShowBalanceAndPrice when toggling checkbox", async () => {
     const setShowBalanceAndPrice = vi.fn(() => Promise.resolve());
     const setRefreshEnabled = vi.fn();

@@ -17,7 +17,6 @@ import {
   assertPinnedIdentity,
   requireSigningNetwork,
 } from "@/configuration/pinnedNetworks";
-import { V3_CHAIN_ID } from "@/configuration/releaseProfile";
 import { MAX_SAFE_CHAIN_ID } from "@/constants/blockchain";
 import {
   areAddressesEquivalent,
@@ -1138,8 +1137,10 @@ export const buildDAppSendTransactionErrorData = (
  * service worker's own watcher, so both still happen whether or not that
  * surface is still open.
  *
- * A no-op for any response without a usable hash or sender, and safe to
- * await unconditionally: every failure is caught and logged internally.
+ * A no-op for any response without a usable hash, sender or authorized
+ * chain, and safe to await unconditionally: every failure is caught and
+ * logged internally. A watch is only ever filed under the chain the
+ * request was authorized for.
  * This runs from restrictedMethodsMiddleware's `finally`, where an
  * uncaught throw here would stop `end()` from ever running and void an
  * otherwise-successful response.
@@ -1153,10 +1154,11 @@ export const registerDAppTransactionWatchIfApproved = async (
     if (typeof transactionHash !== "string" || !transactionHash) return;
     const from = getFromAddress(req);
     if (typeof from !== "string" || !from) return;
+    if (typeof authorizedChainId !== "string" || !authorizedChainId) return;
     await registerDAppTransactionWatch({
       hash: transactionHash,
       account: from,
-      chainId: authorizedChainId ?? V3_CHAIN_ID,
+      chainId: authorizedChainId,
     });
   } catch (error) {
     console.error(

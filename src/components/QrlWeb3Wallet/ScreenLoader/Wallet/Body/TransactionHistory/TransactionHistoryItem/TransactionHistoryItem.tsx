@@ -1,3 +1,4 @@
+import { isFiatChain } from "@/configuration/pinnedNetworks";
 import { formatFiatCompact } from "@/functions/formatFiat";
 import { formatTransactionAmount } from "@/functions/formatTransactionAmount";
 import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
@@ -74,8 +75,12 @@ const TransactionHistoryItem = observer(
     const exactAmount = displayAmount?.exact ?? String(amount);
 
     const { currency } = settingsStore;
+    // The entry's own chain has to be the pinned mainnet too: history can
+    // still hold entries from the chain that was active before a switch.
     const showFiat =
-      settingsStore.showBalanceAndPrice && qrlStore.isFiatNetwork;
+      settingsStore.showBalanceAndPrice &&
+      qrlStore.isFiatNetwork &&
+      isFiatChain({ chainId: transaction.chainId });
     const { price: qrlPrice, currency: quoteCurrency } =
       priceStore.quoteFor(currency);
     const fiatDisplay =

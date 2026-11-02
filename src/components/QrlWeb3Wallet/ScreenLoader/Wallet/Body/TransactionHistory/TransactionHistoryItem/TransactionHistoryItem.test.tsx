@@ -203,7 +203,9 @@ describe("TransactionHistoryItem", () => {
     expect(screen.getByText("Confirmed")).toBeInTheDocument();
   });
 
-  it("should display fiat value on the pinned mainnet when price is available", () => {
+  // The positive case, an entry on a pinned mainnet, lives in
+  // fiatPerEntry.pinnedMainnet.test.tsx: no build pins mainnet yet.
+  it("should not display fiat value for an entry while mainnet is dormant, even on a fiat network", () => {
     const storeWithPrice = mockedStore({
       priceStore: {
         getPrice: () => 1.5,
@@ -230,8 +232,7 @@ describe("TransactionHistoryItem", () => {
       </StoreProvider>,
     );
 
-    // 10 QRL * $1.50 = $15.00 → should show ≈ $15.00
-    expect(screen.getByText(/≈/)).toBeInTheDocument();
+    expect(screen.queryByText(/≈/)).not.toBeInTheDocument();
   });
 
   it("should not display fiat value on the testnet, even with a price", () => {
