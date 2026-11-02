@@ -1,4 +1,4 @@
-import { V3_CHAIN_ID } from "@/configuration/releaseProfile";
+import { signingNetworkFor } from "@/configuration/pinnedNetworks";
 import { Button } from "@/components/UI/Button";
 import { Label } from "@/components/UI/Label";
 import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
@@ -441,7 +441,7 @@ const QrlSendTransactionForContent = observer(
       if (
         qrlInstance !== qrlStore.qrlInstance ||
         blockchain !== qrlStore.qrlConnection.blockchain ||
-        blockchain.chainId.toLowerCase() !== V3_CHAIN_ID
+        signingNetworkFor(blockchain) === null
       ) {
         throw new Error("The network changed. Review the request again.");
       }
@@ -703,7 +703,9 @@ const QrlSendTransactionForContent = observer(
           SIGNING_NONCE_BLOCK_TAG,
         );
         const transactionObject: TransactionObject = {
-          chainId: V3_CHAIN_ID,
+          // ensureSigningContext only lets this chain sign when it resolves
+          // to a pinned network, whose chain ID is this one.
+          chainId: blockchain.chainId.toLowerCase(),
           from,
           ...(to && { to }),
           // Use Web3's defaults for null optional fields.
@@ -740,7 +742,7 @@ const QrlSendTransactionForContent = observer(
         await ensureSigningContext();
         if (isLedgerAccount) {
           const common = Common.custom({
-            chainId: Number(BigInt(V3_CHAIN_ID)),
+            chainId: Number(BigInt(transactionObject.chainId)),
           });
 
           const txData: Record<string, unknown> = {
@@ -900,7 +902,9 @@ const QrlSendTransactionForContent = observer(
           SIGNING_NONCE_BLOCK_TAG,
         );
         const transactionObject: TransactionObject = {
-          chainId: V3_CHAIN_ID,
+          // ensureSigningContext only lets this chain sign when it resolves
+          // to a pinned network, whose chain ID is this one.
+          chainId: blockchain.chainId.toLowerCase(),
           from,
           to,
           gas,
@@ -936,7 +940,7 @@ const QrlSendTransactionForContent = observer(
         await ensureSigningContext();
         if (isLedgerAccount) {
           const common = Common.custom({
-            chainId: Number(BigInt(V3_CHAIN_ID)),
+            chainId: Number(BigInt(transactionObject.chainId)),
           });
 
           const txData = {

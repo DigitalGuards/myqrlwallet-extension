@@ -1,3 +1,4 @@
+import { pinnedMainnet } from "./pinnedNetworks";
 import { V3_CHAIN_ID, V3_RPC_URL } from "./releaseProfile";
 
 // The wallet backend's CF-fronted HTTPS JSON-RPC proxy: does server-side
@@ -53,6 +54,39 @@ export type BlockchainAdditionalDataType = {
 export type BlockchainDataType = BlockchainBaseDataType &
   BlockchainAdditionalDataType;
 
+const QRL_MAINNET_ICON = "icons/chains/zond_mainnet.svg";
+
+const buildMainnetBlockchain = (): BlockchainDataType | null => {
+  const mainnet = pinnedMainnet();
+  if (mainnet === null) return null;
+  const explorers = mainnet.explorer === null ? [] : [mainnet.explorer];
+  return {
+    chainId: mainnet.chainId,
+    chainName: "QRL Mainnet",
+    rpcUrls: [mainnet.rpcUrl],
+    blockExplorerUrls: explorers,
+    nativeCurrency: {
+      name: "Quanta",
+      symbol: "Quanta",
+      decimals: 18,
+    },
+    iconUrls: [QRL_MAINNET_ICON],
+    defaultRpcUrl: mainnet.rpcUrl,
+    defaultBlockExplorerUrl: mainnet.explorer ?? "",
+    defaultIconUrl: QRL_MAINNET_ICON,
+    isTestnet: false,
+    defaultWsRpcUrl: "",
+    isCustomChain: false,
+  };
+};
+
+/**
+ * The built-in mainnet chain. It exists only in a build that pins both the
+ * mainnet chain ID and genesis hash; until then it is null and the chain
+ * list holds the v3 testnet alone.
+ */
+export const QRL_MAINNET_BLOCKCHAIN = buildMainnetBlockchain();
+
 export const QRL_BLOCKCHAINS: BlockchainDataType[] = [
   {
     ...QRL_TESTNET_DATA,
@@ -63,6 +97,7 @@ export const QRL_BLOCKCHAINS: BlockchainDataType[] = [
     defaultWsRpcUrl: "",
     isCustomChain: false,
   },
+  ...(QRL_MAINNET_BLOCKCHAIN === null ? [] : [QRL_MAINNET_BLOCKCHAIN]),
 ];
 
 export const DEFAULT_BLOCKCHAIN = QRL_BLOCKCHAINS[0];

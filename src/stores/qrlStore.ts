@@ -32,7 +32,11 @@ import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { toCanonicalQrlAddress } from "@/utilities/addressUtil";
 import StorageUtil from "@/utilities/storageUtil";
 import { isRecord } from "@/utilities/storageGuards";
-import { assertV3Network, V3_CHAIN_ID } from "@/configuration/releaseProfile";
+import {
+  assertPinnedIdentity,
+  isFiatChain,
+  requireSigningNetwork,
+} from "@/configuration/pinnedNetworks";
 import Web3, { Web3QRLInterface, utils } from "@theqrl/web3";
 import { action, makeAutoObservable, observable, runInAction } from "mobx";
 
@@ -97,6 +101,9 @@ export type ConnectionProbeResult = {
 };
 
 export type InitPhaseType = "chain" | "network" | "accounts" | "session";
+
+const chainIdentityKey = (chain: BlockchainDataType): string =>
+  `${chain.chainId.toLowerCase()} ${chain.defaultRpcUrl}`;
 
 /** Startup phase reporting so the Home loader can show real progress. */
 export type InitProgressType = {
@@ -186,6 +193,11 @@ class QrlStore {
     phase: "chain",
   };
   private balancePollInterval: ReturnType<typeof setInterval> | null = null;
+  /** Chain ID and RPC of the chain whose node last passed the pinned
+   *  identity check. Cleared on any failed probe, and stale the moment a
+   *  chain with another ID or RPC becomes active. Kept as a string so the
+   *  comparison never depends on MobX handing back the same proxy. */
+  private verifiedIdentity = "";
   private balanceRequestId = 0;
   private initializationEpoch = 0;
   private ticksSinceConnectionProbe = 0;
@@ -709,6 +721,7 @@ class QrlStore {
       const isListening = readProviderValue(listening ?? false, isBoolean);
       runInAction(() => {
         if (!isCurrent()) return;
+        this.verifiedIdentity = chainIdentityKey(blockchain);
         this.qrlConnection = {
           ...this.qrlConnection,
           isConnected: isListening,
@@ -717,6 +730,7 @@ class QrlStore {
     } catch {
       runInAction(() => {
         if (!isCurrent()) return;
+        this.verifiedIdentity = "";
         this.qrlConnection = { ...this.qrlConnection, isConnected: false };
       });
     } finally {
@@ -942,9 +956,9 @@ class QrlStore {
         maxFeePerGas: `0x${maxFeePerGas.toString(16)}`,
         maxPriorityFeePerGas: `0x${maxPriorityFeePerGas.toString(16)}`,
         type: 2,
-        chainId: V3_CHAIN_ID,
+        chainId: this.signingChainId(),
       };
-      await this.assertSigningNetwork();
+      await this.assertSigningNetwork(transactionObject.chainId);
       const signedTransaction: unknown =
         await this.qrlInstance?.accounts.signTransaction(
           transactionObject,
@@ -1403,10 +1417,10 @@ class QrlStore {
           maxFeePerGas: `0x${maxFeePerGas.toString(16)}`,
           maxPriorityFeePerGas: `0x${maxPriorityFeePerGas.toString(16)}`,
           type: 2,
-          chainId: V3_CHAIN_ID,
+          chainId: this.signingChainId(),
         };
 
-        await this.assertSigningNetwork();
+        await this.assertSigningNetwork(transactionObject.chainId);
 
         const signedTransaction: unknown =
           await this.qrlInstance.accounts.signTransaction(
@@ -1539,10 +1553,10 @@ class QrlStore {
           maxFeePerGas: `0x${maxFeePerGas.toString(16)}`,
           maxPriorityFeePerGas: `0x${maxPriorityFeePerGas.toString(16)}`,
           type: 2,
-          chainId: V3_CHAIN_ID,
+          chainId: this.signingChainId(),
         };
 
-        await this.assertSigningNetwork();
+        await this.assertSigningNetwork(transactionObject.chainId);
 
         const signedTransaction: unknown =
           await this.qrlInstance.accounts.signTransaction(
@@ -1622,7 +1636,7 @@ class QrlStore {
           maxFeePerGas: `0x${finalMaxFee.toString(16)}`,
           maxPriorityFeePerGas: `0x${finalPriorityFee.toString(16)}`,
           type: 2,
-          chainId: V3_CHAIN_ID,
+          chainId: this.signingChainId(),
         };
       } else {
         // Any token/NFT entry carries a contract address; the real
@@ -1650,12 +1664,12 @@ class QrlStore {
           maxFeePerGas: `0x${finalMaxFee.toString(16)}`,
           maxPriorityFeePerGas: `0x${finalPriorityFee.toString(16)}`,
           type: 2,
-          chainId: V3_CHAIN_ID,
+          chainId: this.signingChainId(),
           ...(originalTx.data && { data: originalTx.data }),
         };
       }
 
-      await this.assertSigningNetwork();
+      await this.assertSigningNetwork(transactionObject.chainId);
 
       const signedTransaction: unknown =
         await this.qrlInstance?.accounts.signTransaction(
@@ -1683,16 +1697,39 @@ class QrlStore {
     return await this.qrlInstance?.getTransactionReceipt(txHash);
   }
 
-  private async assertSigningNetwork() {
+  /**
+   * True when fiat values may show: the active chain is the pinned mainnet
+   * and its node passed the identity check on the latest probe. Always
+   * false on the v3 testnet, on custom chains and while mainnet is dormant.
+   */
+  get isFiatNetwork(): boolean {
+    const { blockchain, isConnected } = this.qrlConnection;
+    return (
+      isConnected &&
+      this.verifiedIdentity !== "" &&
+      this.verifiedIdentity === chainIdentityKey(blockchain) &&
+      isFiatChain(blockchain)
+    );
+  }
+
+  /**
+   * The chain ID a transaction for the active chain carries: the pinned
+   * network's own. assertSigningNetwork checks it again, against the node,
+   * before anything is signed.
+   */
+  private signingChainId(): string {
+    return requireSigningNetwork(this.qrlConnection.blockchain).chainId;
+  }
+
+  private async assertSigningNetwork(expectedChainId?: string) {
     const provider = this.qrlInstance;
     const chain = this.qrlConnection.blockchain;
-    if (chain.chainId.toLowerCase() !== V3_CHAIN_ID) {
-      throw new Error("Select the v3 Private network.");
-    }
-    await assertV3Network(chain.defaultRpcUrl);
+    const network = requireSigningNetwork(chain);
+    await assertPinnedIdentity(chain.defaultRpcUrl, network);
     if (
       provider !== this.qrlInstance ||
-      chain !== this.qrlConnection.blockchain
+      chain !== this.qrlConnection.blockchain ||
+      (expectedChainId !== undefined && expectedChainId !== network.chainId)
     ) {
       throw new Error("The network changed. Review the request again.");
     }

@@ -13,7 +13,11 @@ import {
   readApprovalParams,
   readApprovalTransaction,
 } from "@/utilities/approvalGuards";
-import { assertV3Network, V3_CHAIN_ID } from "@/configuration/releaseProfile";
+import {
+  assertPinnedIdentity,
+  requireSigningNetwork,
+} from "@/configuration/pinnedNetworks";
+import { V3_CHAIN_ID } from "@/configuration/releaseProfile";
 import { MAX_SAFE_CHAIN_ID } from "@/constants/blockchain";
 import {
   areAddressesEquivalent,
@@ -458,10 +462,10 @@ export const revalidateAuthorizedDAppRequest = async (request: unknown) => {
     ) {
       throw new Error("The wallet cannot read the active network.");
     }
-    if (chain.chainId.toLowerCase() !== V3_CHAIN_ID) {
-      throw new Error("Select the v3 Private network.");
-    }
-    await assertV3Network(chain.defaultRpcUrl);
+    await assertPinnedIdentity(
+      chain.defaultRpcUrl,
+      requireSigningNetwork(chain),
+    );
     const currentChain: unknown = await StorageUtil.getActiveBlockChain();
     if (
       !isRecord(currentChain) ||

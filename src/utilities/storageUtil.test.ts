@@ -54,6 +54,7 @@ vi.mock("webextension-polyfill", () => ({
 }));
 
 vi.mock("@/configuration/qrlBlockchainConfig", () => ({
+  QRL_MAINNET_BLOCKCHAIN: null,
   LEGACY_TESTNET_RPC: "http://209.250.255.226:8545",
   QRL_TESTNET_RPC_PROXY: "https://qrlwallet.com/api/qrl-rpc/testnet",
   DEFAULT_BLOCKCHAIN: {

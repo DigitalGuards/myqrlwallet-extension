@@ -56,6 +56,8 @@ const mockedStoreValues: StoreType = {
       phase: "session",
     },
     qrlInstance: undefined,
+    // The default chain is the v3 testnet, which never shows fiat values.
+    isFiatNetwork: false,
     fetchAccounts: () => Promise.resolve(),
     fetchQrlConnection: () => Promise.resolve(),
     probeConnectionNow: () =>
