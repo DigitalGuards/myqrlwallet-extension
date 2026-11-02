@@ -611,7 +611,7 @@
   "contacts.deleteButton": "Удалить",
   "contacts.cancelButton": "Отмена",
   "importToken.title": "Импортировать токен",
-  "importToken.contractAddress": "Адрес контракта",
+  "importToken.contractAddress": "Адрес контракта токена",
   "importToken.contractAddressPlaceholder": "Адрес контракта",
   "importToken.contractAddressDescription": "Вставьте адрес контракта токена",
   "importToken.importButton": "Получить сведения о токене",

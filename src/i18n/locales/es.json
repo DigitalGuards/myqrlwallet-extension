@@ -611,7 +611,7 @@
   "contacts.deleteButton": "Eliminar",
   "contacts.cancelButton": "Cancelar",
   "importToken.title": "Importar token",
-  "importToken.contractAddress": "Dirección del Contrato",
+  "importToken.contractAddress": "Dirección del contrato del token",
   "importToken.contractAddressPlaceholder": "Dirección del contrato",
   "importToken.contractAddressDescription": "Pega la dirección del contrato del token",
   "importToken.importButton": "Obtener detalles del token",

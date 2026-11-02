@@ -611,7 +611,7 @@
   "contacts.deleteButton": "Delete",
   "contacts.cancelButton": "Cancel",
   "importToken.title": "Import token",
-  "importToken.contractAddress": "Contract Address",
+  "importToken.contractAddress": "Token contract address",
   "importToken.contractAddressPlaceholder": "Contract address",
   "importToken.contractAddressDescription": "Paste the token's contract address",
   "importToken.importButton": "Fetch token details",

@@ -611,7 +611,7 @@
   "contacts.deleteButton": "删除",
   "contacts.cancelButton": "取消",
   "importToken.title": "导入代币",
-  "importToken.contractAddress": "合约地址",
+  "importToken.contractAddress": "代币合约地址",
   "importToken.contractAddressPlaceholder": "合约地址",
   "importToken.contractAddressDescription": "粘贴代币合约地址",
   "importToken.importButton": "获取代币详情",

@@ -108,7 +108,9 @@ describe("ImportToken", () => {
     expect(
       within(panel).getByRole("textbox", { name: "contractAddress" }),
     ).toBeInTheDocument();
-    expect(within(panel).getByText("Contract Address")).toBeInTheDocument();
+    expect(
+      within(panel).getByText("Token contract address"),
+    ).toBeInTheDocument();
     expect(
       within(panel).getByRole("button", { name: "Fetch token details" }),
     ).toBeDisabled();
