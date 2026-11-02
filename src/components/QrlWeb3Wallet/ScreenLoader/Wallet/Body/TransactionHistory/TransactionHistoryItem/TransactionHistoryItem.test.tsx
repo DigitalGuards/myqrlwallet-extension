@@ -203,7 +203,7 @@ describe("TransactionHistoryItem", () => {
     expect(screen.getByText("Confirmed")).toBeInTheDocument();
   });
 
-  it("should display fiat value when price is available", () => {
+  it("should display fiat value on the pinned mainnet when price is available", () => {
     const storeWithPrice = mockedStore({
       priceStore: {
         getPrice: () => 1.5,
@@ -217,6 +217,7 @@ describe("TransactionHistoryItem", () => {
         showBalanceAndPrice: true,
         currency: "USD",
       },
+      qrlStore: { isFiatNetwork: true },
     });
 
     render(
@@ -231,6 +232,36 @@ describe("TransactionHistoryItem", () => {
 
     // 10 QRL * $1.50 = $15.00 → should show ≈ $15.00
     expect(screen.getByText(/≈/)).toBeInTheDocument();
+  });
+
+  it("should not display fiat value on the testnet, even with a price", () => {
+    const storeOnTestnet = mockedStore({
+      priceStore: {
+        getPrice: () => 1.5,
+        quoteFor: (currency: string) => ({
+          price: 1.5,
+          currency,
+          change24h: 0,
+        }),
+      },
+      settingsStore: {
+        showBalanceAndPrice: true,
+        currency: "USD",
+      },
+      qrlStore: { isFiatNetwork: false },
+    });
+
+    render(
+      <StoreProvider value={storeOnTestnet}>
+        <MemoryRouter>
+          <TransactionHistoryItem
+            transaction={makeSampleEntry({ amount: 10 })}
+          />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    expect(screen.queryByText(/≈/)).not.toBeInTheDocument();
   });
 
   it("should not display fiat value when showBalanceAndPrice is false", () => {

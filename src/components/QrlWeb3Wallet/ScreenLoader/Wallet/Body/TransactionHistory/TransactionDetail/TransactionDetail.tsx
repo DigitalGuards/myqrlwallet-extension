@@ -421,7 +421,10 @@ const TransactionDetail = observer(() => {
   const { price: qrlPrice, currency: quoteCurrency } =
     priceStore.quoteFor(currency);
   const showFiat =
-    showBalanceAndPrice && qrlPrice > 0 && !transaction.isZrc20Token;
+    showBalanceAndPrice &&
+    qrlStore.isFiatNetwork &&
+    qrlPrice > 0 &&
+    !transaction.isZrc20Token;
   const fiatAmount = showFiat
     ? formatFiatCompact(amount, qrlPrice, quoteCurrency)
     : "";

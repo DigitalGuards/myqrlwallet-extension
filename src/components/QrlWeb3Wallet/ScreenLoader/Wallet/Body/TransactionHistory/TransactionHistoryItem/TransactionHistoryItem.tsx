@@ -73,11 +73,13 @@ const TransactionHistoryItem = observer(
     const compactAmount = displayAmount?.compact ?? String(amount);
     const exactAmount = displayAmount?.exact ?? String(amount);
 
-    const { showBalanceAndPrice, currency } = settingsStore;
+    const { currency } = settingsStore;
+    const showFiat =
+      settingsStore.showBalanceAndPrice && qrlStore.isFiatNetwork;
     const { price: qrlPrice, currency: quoteCurrency } =
       priceStore.quoteFor(currency);
     const fiatDisplay =
-      showBalanceAndPrice && qrlPrice > 0 && !transaction.isZrc20Token
+      showFiat && qrlPrice > 0 && !transaction.isZrc20Token
         ? formatFiatCompact(amount, qrlPrice, quoteCurrency)
         : "";
 

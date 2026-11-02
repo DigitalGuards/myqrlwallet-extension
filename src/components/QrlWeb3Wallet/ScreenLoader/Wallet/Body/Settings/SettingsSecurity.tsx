@@ -57,7 +57,7 @@ const createChangePasswordSchema = (t: TFunction) =>
 
 const SettingsSecurity = observer(() => {
   const navigate = useNavigate();
-  const { settingsStore, lockStore, priceStore } = useStore();
+  const { settingsStore, lockStore, priceStore, qrlStore } = useStore();
   const { t } = useTranslation();
   const {
     autoLockMinutes,
@@ -153,8 +153,9 @@ const SettingsSecurity = observer(() => {
       console.error("Failed to save balance display preference:", error);
     });
     // One chokepoint: the store decides whether turning this back on needs
-    // a refresh right now or can wait for the next tick.
-    priceStore.setRefreshEnabled(enabled);
+    // a refresh right now or can wait for the next tick. Quotes are only
+    // fetched where fiat values show, on the pinned mainnet.
+    priceStore.setRefreshEnabled(enabled && qrlStore.isFiatNetwork);
   };
 
   return (

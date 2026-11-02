@@ -1,9 +1,6 @@
 import {
   closeFixtureServer,
-  fixtureSettings,
-  removeStoredValue,
   readRpcBody,
-  readStoredValue,
   reportFixtureError,
   writeStorage,
 } from "./fixtureHelpers";
@@ -57,8 +54,8 @@ const rpcResult = (method: string): unknown => {
     case "net_listening":
       return true;
     case "qrl_getBalance":
-      // 1,000 Quanta, so the fiat estimate on the Home card is a real
-      // number rather than a zero that any price would produce.
+      // 1,000 Quanta, a non-zero balance that any available price would
+      // turn into a visible fiat estimate.
       return "0x3635c9adc5dea00000";
     case "qrl_blockNumber":
       return "0x1";
@@ -199,8 +196,6 @@ const COINGECKO_QUOTES = JSON.stringify({
   "quantum-resistant-ledger": {
     usd: 0.5,
     usd_24h_change: 3.41,
-    eur: 0.45,
-    eur_24h_change: 3.2,
   },
 });
 
@@ -210,12 +205,12 @@ const EXPLORER_OVERVIEW = JSON.stringify({
 });
 
 /**
- * The fiat estimate under the balance is the one thing on the Home card
- * that depends on a third party, and CoinGecko's keyless endpoint refuses
- * whole networks outright. Both halves are checked here: the quote painting
- * at all, and the explorer standing in when CoinGecko says no.
+ * Fiat values belong to the pinned QRL mainnet alone, so test Quanta are
+ * never priced. The v3 testnet Home card shows the balance and no fiat
+ * estimate, and the wallet asks neither price source for a quote, even
+ * with the price setting on and a quote available to anyone who asked.
  */
-test("the Home card shows a fiat estimate, with the explorer standing in for a blocked CoinGecko", async () => {
+test("the testnet Home card shows no fiat estimate and requests no price", async () => {
   const node = await startFixtureNode();
   const profile = await mkdtemp(path.join(tmpdir(), "myqrlwallet-fiat-"));
   const context = await chromium.launchPersistentContext(profile, {
@@ -224,19 +219,10 @@ test("the Home card shows a fiat estimate, with the explorer standing in for a b
     args: LAUNCH_ARGS,
   });
 
-  let coinGeckoBlocked = false;
+  let coinGeckoCalls = 0;
   let explorerCalls = 0;
   await context.route("https://api.coingecko.com/**", async (route) => {
-    if (coinGeckoBlocked) {
-      // Exactly what CoinGecko's CDN answers for a blocked network.
-      await route.fulfill({
-        status: 403,
-        contentType: "text/html",
-        headers: { "Access-Control-Allow-Origin": "*" },
-        body: "<html><body>Request blocked.</body></html>",
-      });
-      return;
-    }
+    coinGeckoCalls += 1;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -262,7 +248,7 @@ test("the Home card shows a fiat estimate, with the explorer standing in for a b
     await seedWalletStorage(serviceWorker, `${node.origin}/rpc`);
     await completeOnboarding(context, extensionId);
 
-    // 1,000 Quanta at 0.50 USD.
+    // 1,000 Quanta on the v3 testnet.
     const wallet = await context.newPage();
     await wallet.setViewportSize({ width: 360, height: 760 });
     await wallet.goto(
@@ -271,8 +257,14 @@ test("the Home card shows a fiat estimate, with the explorer standing in for a b
     await expect(
       wallet.getByRole("heading", { name: "Active account" }),
     ).toBeVisible();
-    await expect(wallet.getByText("\u2248 $500.00")).toBeVisible();
-    await expect(wallet.getByText("3.41%")).toBeVisible();
+    await expect(
+      wallet.getByText("1,000.00", { exact: true }).first(),
+    ).toBeVisible();
+    // Long enough for a price fetch armed at startup to have gone out.
+    await wallet.waitForTimeout(2_000);
+    await expect(wallet.getByText(/\u2248/)).toHaveCount(0);
+    await expect(wallet.getByText("3.41%")).toHaveCount(0);
+    expect(coinGeckoCalls).toBe(0);
     expect(explorerCalls).toBe(0);
 
     // The three actions stay on one row at the narrowest supported panel.
@@ -284,38 +276,6 @@ test("the Home card shows a fiat estimate, with the explorer standing in for a b
       );
     expect(actionTops).toHaveLength(3);
     expect(new Set(actionTops).size).toBe(1);
-    await wallet.close();
-
-    // CoinGecko now refuses every request, and a fresh surface has no
-    // cached quote to fall back on. The explorer carries the same market
-    // data, so the fiat line survives. The currency is switched to euros
-    // first, which the explorer does not quote: the estimate has to fall
-    // back to dollars, symbol included, and the estimate stays on screen.
-    coinGeckoBlocked = true;
-    await removeStoredValue(
-      serviceWorker,
-      "local",
-      `${STORAGE_PREFIX}:PRICE_CACHE`,
-    );
-    const settingsKey = `${STORAGE_PREFIX}:SETTINGS`;
-    const settings = fixtureSettings(
-      await readStoredValue(serviceWorker, "local", settingsKey),
-    );
-    await writeStorage(serviceWorker, "local", {
-      [settingsKey]: { ...settings, currency: "EUR" },
-    });
-
-    const blocked = await context.newPage();
-    await blocked.setViewportSize({ width: 360, height: 760 });
-    await blocked.goto(
-      `chrome-extension://${extensionId}/index.html?sidepanel=true`,
-    );
-    await expect(
-      blocked.getByRole("heading", { name: "Active account" }),
-    ).toBeVisible();
-    // 1,000 Quanta at the explorer's 0.25 USD.
-    await expect(blocked.getByText("\u2248 $250.00")).toBeVisible();
-    expect(explorerCalls).toBeGreaterThan(0);
   } finally {
     await context.close();
     await node.close();

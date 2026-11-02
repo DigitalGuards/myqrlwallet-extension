@@ -54,7 +54,10 @@ type DataLifecycleStores = {
   >;
   qrlStore: Pick<
     QrlStore,
-    "setPollingAllowed" | "pollBalancesAndConnection" | "probeConnectionNow"
+    | "setPollingAllowed"
+    | "pollBalancesAndConnection"
+    | "probeConnectionNow"
+    | "isFiatNetwork"
   > & {
     qrlInstance?: object;
     qrlConnection: Pick<
@@ -73,7 +76,9 @@ type DataLifecycleStores = {
  * every tick and CoinGecko every minute, for a screen showing nothing but
  * the password prompt. Prices additionally waited on the stored setting:
  * reading showBalanceAndPrice at construction time always read the `true`
- * default, so the fetch ran even with the setting off.
+ * default, so the fetch ran even with the setting off. Prices also wait on
+ * the network: only the pinned mainnet shows fiat values, so the v3
+ * testnet, custom chains and a dormant mainnet fetch no quotes at all.
  */
 export function wireDataLifecycle(store: DataLifecycleStores) {
   const { lockStore, priceStore, qrlStore, settingsStore } = store;
@@ -138,7 +143,10 @@ export function wireDataLifecycle(store: DataLifecycleStores) {
       if (disposed) return;
       disposers.push(
         reaction(
-          () => settingsStore.showBalanceAndPrice && !lockStore.isLocked,
+          () =>
+            settingsStore.showBalanceAndPrice &&
+            !lockStore.isLocked &&
+            qrlStore.isFiatNetwork,
           (shouldRefresh) => {
             // setRefreshEnabled owns the "refresh now or wait for the
             // tick" decision, so this wiring and the settings toggle
