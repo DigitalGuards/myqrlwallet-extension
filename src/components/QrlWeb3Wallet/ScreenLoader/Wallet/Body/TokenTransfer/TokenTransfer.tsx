@@ -1034,6 +1034,7 @@ const TokenTransfer = observer(() => {
                           {t("transfer.amountDescription")}
                           {!isZrc20Token &&
                             settingsStore.showBalanceAndPrice &&
+                            qrlStore.isFiatNetwork &&
                             amountQuote.price > 0 &&
                             amountForDisplay(field.value || "0").gt(0) && (
                               <span className="ml-1 font-numeric text-muted-foreground">

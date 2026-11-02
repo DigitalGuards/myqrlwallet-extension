@@ -203,7 +203,9 @@ describe("TransactionHistoryItem", () => {
     expect(screen.getByText("Confirmed")).toBeInTheDocument();
   });
 
-  it("should display fiat value when price is available", () => {
+  // The positive case, an entry on a pinned mainnet, lives in
+  // fiatPerEntry.pinnedMainnet.test.tsx: no build pins mainnet yet.
+  it("should not display fiat value for an entry while mainnet is dormant, even on a fiat network", () => {
     const storeWithPrice = mockedStore({
       priceStore: {
         getPrice: () => 1.5,
@@ -217,6 +219,7 @@ describe("TransactionHistoryItem", () => {
         showBalanceAndPrice: true,
         currency: "USD",
       },
+      qrlStore: { isFiatNetwork: true },
     });
 
     render(
@@ -229,8 +232,37 @@ describe("TransactionHistoryItem", () => {
       </StoreProvider>,
     );
 
-    // 10 QRL * $1.50 = $15.00 → should show ≈ $15.00
-    expect(screen.getByText(/≈/)).toBeInTheDocument();
+    expect(screen.queryByText(/≈/)).not.toBeInTheDocument();
+  });
+
+  it("should not display fiat value on the testnet, even with a price", () => {
+    const storeOnTestnet = mockedStore({
+      priceStore: {
+        getPrice: () => 1.5,
+        quoteFor: (currency: string) => ({
+          price: 1.5,
+          currency,
+          change24h: 0,
+        }),
+      },
+      settingsStore: {
+        showBalanceAndPrice: true,
+        currency: "USD",
+      },
+      qrlStore: { isFiatNetwork: false },
+    });
+
+    render(
+      <StoreProvider value={storeOnTestnet}>
+        <MemoryRouter>
+          <TransactionHistoryItem
+            transaction={makeSampleEntry({ amount: 10 })}
+          />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+
+    expect(screen.queryByText(/≈/)).not.toBeInTheDocument();
   });
 
   it("should not display fiat value when showBalanceAndPrice is false", () => {

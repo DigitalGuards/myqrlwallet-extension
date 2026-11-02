@@ -1,4 +1,7 @@
-import { V3_CHAIN_ID } from "@/configuration/releaseProfile";
+import {
+  requireSigningNetwork,
+  signingNetworkFor,
+} from "@/configuration/pinnedNetworks";
 import { Button } from "@/components/UI/Button";
 import { Label } from "@/components/UI/Label";
 import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
@@ -38,7 +41,10 @@ import {
 } from "@theqrl/web3-errors";
 import { isHexStrict } from "@theqrl/web3-validator";
 import { BlockTags, type Transaction } from "@theqrl/web3-types";
-import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
+import {
+  normalizeChainId,
+  revalidateAuthorizedDAppRequest,
+} from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import { TimeoutError, withTimeout } from "@/functions/withTimeout";
 import {
   capSimulationTimeoutMs,
@@ -438,10 +444,20 @@ const QrlSendTransactionForContent = observer(
           new Error("The request is no longer authorized.")
         );
       }
+      // Revalidation proves the stored active chain is the authorized one.
+      // This surface signs for the chain it holds in memory, which can
+      // trail a switch made elsewhere, so that chain has to resolve to the
+      // authorized chain too.
+      const signingNetwork = signingNetworkFor(blockchain);
+      const authorizedChainId = normalizeChainId(
+        dAppRequestData?.authorizedChainId,
+      );
       if (
         qrlInstance !== qrlStore.qrlInstance ||
         blockchain !== qrlStore.qrlConnection.blockchain ||
-        blockchain.chainId.toLowerCase() !== V3_CHAIN_ID
+        signingNetwork === null ||
+        authorizedChainId === undefined ||
+        normalizeChainId(signingNetwork.chainId) !== authorizedChainId
       ) {
         throw new Error("The network changed. Review the request again.");
       }
@@ -703,7 +719,9 @@ const QrlSendTransactionForContent = observer(
           SIGNING_NONCE_BLOCK_TAG,
         );
         const transactionObject: TransactionObject = {
-          chainId: V3_CHAIN_ID,
+          // The pinned network's own chain ID. ensureSigningContext checks
+          // it against the authorized chain before anything is signed.
+          chainId: requireSigningNetwork(blockchain).chainId,
           from,
           ...(to && { to }),
           // Use Web3's defaults for null optional fields.
@@ -740,7 +758,7 @@ const QrlSendTransactionForContent = observer(
         await ensureSigningContext();
         if (isLedgerAccount) {
           const common = Common.custom({
-            chainId: Number(BigInt(V3_CHAIN_ID)),
+            chainId: Number(BigInt(transactionObject.chainId)),
           });
 
           const txData: Record<string, unknown> = {
@@ -900,7 +918,9 @@ const QrlSendTransactionForContent = observer(
           SIGNING_NONCE_BLOCK_TAG,
         );
         const transactionObject: TransactionObject = {
-          chainId: V3_CHAIN_ID,
+          // The pinned network's own chain ID. ensureSigningContext checks
+          // it against the authorized chain before anything is signed.
+          chainId: requireSigningNetwork(blockchain).chainId,
           from,
           to,
           gas,
@@ -936,7 +956,7 @@ const QrlSendTransactionForContent = observer(
         await ensureSigningContext();
         if (isLedgerAccount) {
           const common = Common.custom({
-            chainId: Number(BigInt(V3_CHAIN_ID)),
+            chainId: Number(BigInt(transactionObject.chainId)),
           });
 
           const txData = {

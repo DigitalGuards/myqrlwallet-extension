@@ -2,6 +2,7 @@ import {
   DEFAULT_BLOCKCHAIN,
   LEGACY_TESTNET_RPC,
   QRL_BLOCKCHAINS,
+  QRL_MAINNET_BLOCKCHAIN,
   QRL_TESTNET_RPC_PROXY,
 } from "@/configuration/qrlBlockchainConfig";
 import type {
@@ -499,7 +500,7 @@ const StorageUtil = {
     // currency fields are not editable for non-custom chains, so rewriting
     // the old default cannot clobber a user value. Custom chains keep
     // whatever symbol the user or dApp provided.
-    return chains.map((chain) => {
+    const migratedChains = chains.map((chain) => {
       let migrated = sanitizeQrnsRegistry(chain, false);
       if (
         !migrated.isCustomChain &&
@@ -528,6 +529,21 @@ const StorageUtil = {
       }
       return migrated;
     });
+    // Once a build pins mainnet, lists stored before it gain the built-in
+    // mainnet entry, appended so the order users already see is kept. A
+    // record already holding that chain ID (a custom chain added earlier)
+    // stays as the user left it. Built-in chains cannot be deleted, so the
+    // entry never needs to be appended twice.
+    const mainnet = QRL_MAINNET_BLOCKCHAIN;
+    if (
+      mainnet !== null &&
+      !migratedChains.some(
+        (chain) => chain.chainId.toLowerCase() === mainnet.chainId,
+      )
+    ) {
+      migratedChains.push(mainnet);
+    }
+    return migratedChains;
   },
 
   /**

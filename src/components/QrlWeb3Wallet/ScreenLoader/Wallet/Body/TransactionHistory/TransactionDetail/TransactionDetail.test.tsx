@@ -1,4 +1,5 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
+import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
 import { StoreProvider, type StoreType } from "@/stores/store";
 import { historyEntryView } from "@/utilities/storageViews";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
@@ -52,7 +53,7 @@ const sampleTransaction: TransactionHistoryEntry = {
   effectiveGasPrice: "1000000000",
   status: true,
   timestamp: 1700000000000,
-  chainId: "0x1",
+  chainId: "0x301825",
 };
 
 const pendingTransaction: TransactionHistoryEntry = {
@@ -291,7 +292,65 @@ describe("TransactionDetail", () => {
     renderComponent(sampleTransaction);
 
     await userEvent.click(screen.getByText("View on Block Explorer"));
-    expect(createTab).toHaveBeenCalled();
+    expect(createTab).toHaveBeenCalledWith({
+      url: "https://zondscan.com/tx/0xabc123def456",
+    });
+  });
+
+  describe("explorer link for a chain zondscan does not index", () => {
+    const CUSTOM_CHAIN_ID = "0x1";
+    const storeOnCustomChain = (defaultBlockExplorerUrl: string) =>
+      mockedStore({
+        qrlStore: {
+          qrlConnection: {
+            blockchain: {
+              ...DEFAULT_BLOCKCHAIN,
+              chainId: CUSTOM_CHAIN_ID,
+              defaultBlockExplorerUrl,
+              isCustomChain: true,
+            },
+          },
+        },
+      });
+
+    it("links to the active chain's own https explorer", async () => {
+      renderComponent(
+        { ...sampleTransaction, chainId: CUSTOM_CHAIN_ID },
+        storeOnCustomChain("https://explorer.example/scan/"),
+      );
+
+      await userEvent.click(screen.getByText("View on Block Explorer"));
+      expect(createTab).toHaveBeenCalledWith({
+        url: "https://explorer.example/scan/tx/0xabc123def456",
+      });
+    });
+
+    it.each([
+      ["an empty explorer", ""],
+      ["a plain http explorer", "http://explorer.example"],
+      ["a malformed explorer", "not a url"],
+      ["the QRL 1.0 explorer", "https://explorer.theqrl.org"],
+    ])("shows no link for %s", (_label, explorerUrl) => {
+      renderComponent(
+        { ...sampleTransaction, chainId: CUSTOM_CHAIN_ID },
+        storeOnCustomChain(explorerUrl),
+      );
+
+      expect(
+        screen.queryByText("View on Block Explorer"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows no link for an entry from a chain other than the active one", () => {
+      renderComponent(
+        { ...sampleTransaction, chainId: "0x2" },
+        storeOnCustomChain("https://explorer.example"),
+      );
+
+      expect(
+        screen.queryByText("View on Block Explorer"),
+      ).not.toBeInTheDocument();
+    });
   });
 
   // ── Pending transaction tests ──

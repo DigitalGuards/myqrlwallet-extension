@@ -1,10 +1,23 @@
+import { pinnedMainnet } from "./pinnedNetworks";
+
 /**
  * Explorer API bases for explorer-side asset discovery, keyed by chain id.
  * Discovery is a convenience layer on top of the zondscan indexer; chains
  * without an entry (custom chains, mainnet until an indexer exists) simply
- * skip discovery and fall back to manual contract-address import.
+ * skip discovery and fall back to manual contract-address import. The
+ * mainnet entry comes from the mainnet pin, and appears once the pin names
+ * an explorer serving the zondscan API.
  */
-const EXPLORER_API_BASES = new Map([["0x301825", "https://zondscan.com"]]);
+const buildExplorerApiBases = (): Map<string, string> => {
+  const bases = new Map([["0x301825", "https://zondscan.com"]]);
+  const mainnet = pinnedMainnet();
+  if (mainnet !== null && mainnet.explorer !== null) {
+    bases.set(mainnet.chainId, mainnet.explorer);
+  }
+  return bases;
+};
+
+const EXPLORER_API_BASES = buildExplorerApiBases();
 
 export const getExplorerApiBase = (chainId: unknown): string | undefined =>
   typeof chainId === "string"

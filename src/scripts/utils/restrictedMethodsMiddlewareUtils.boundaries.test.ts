@@ -244,6 +244,35 @@ describe("authorization input boundaries", () => {
     expect(assertNetwork).not.toHaveBeenCalled();
   });
 
+  it.each(["0x301825", "0x1b3a7"])(
+    "refuses a dApp signature for chain %s on the mainnet RPC while mainnet pins are null",
+    async (chainId) => {
+      const mainnetRpcChain = {
+        chainId,
+        defaultRpcUrl: "https://qrlwallet.com/api/qrl-rpc/mainnet",
+      };
+      readGrants.mockResolvedValue({
+        accounts: [ACCOUNT],
+        blockchains: [mainnetRpcChain],
+      });
+      readChains.mockResolvedValue([mainnetRpcChain]);
+      readActiveChain.mockResolvedValue(mainnetRpcChain);
+      expect(
+        await revalidateAuthorizedDAppRequest({
+          ...approval(),
+          authorizedChainId: chainId,
+        }),
+      ).toMatchObject({
+        canProceed: false,
+        proceedError: {
+          code: 4900,
+          message: "Select a supported QRL network.",
+        },
+      });
+      expect(assertNetwork).not.toHaveBeenCalled();
+    },
+  );
+
   it("rechecks grants after pinned network validation", async () => {
     assertNetwork.mockImplementation(() => {
       readGrants.mockResolvedValue({ accounts: [], blockchains: [CHAIN] });

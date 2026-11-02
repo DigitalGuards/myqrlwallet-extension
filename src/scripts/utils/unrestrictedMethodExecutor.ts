@@ -26,10 +26,9 @@ import {
   type ProviderNetworkIdentity,
 } from "@/utilities/providerNetwork";
 import {
-  assertV3Network,
-  V3_CHAIN_ID,
-  V3_GENESIS_HASH,
-} from "@/configuration/releaseProfile";
+  assertPinnedIdentity,
+  requireSigningNetwork,
+} from "@/configuration/pinnedNetworks";
 import Web3, { FMT_BYTES, FMT_NUMBER } from "@theqrl/web3";
 import { Web3RequestManager } from "@theqrl/web3-core";
 import { qrlRpcMethods } from "@theqrl/web3-rpc-methods";
@@ -132,12 +131,8 @@ export const executeUnrestrictedMethod = async (
   }
   if (req.method === UNRESTRICTED_METHODS.QRL_WALLET_CAPABILITIES) {
     const chain = readActiveChain(await StorageUtil.getActiveBlockChain());
-    if (
-      typeof chain.chainId !== "string" ||
-      chain.chainId.toLowerCase() !== V3_CHAIN_ID
-    )
-      throw new Error("Select the v3 Private network.");
-    await assertV3Network(storedText(chain.defaultRpcUrl));
+    const network = requireSigningNetwork(chain);
+    await assertPinnedIdentity(storedText(chain.defaultRpcUrl), network);
     const currentChain = readActiveChain(
       await StorageUtil.getActiveBlockChain(),
     );
@@ -151,8 +146,8 @@ export const executeUnrestrictedMethod = async (
     }
     return {
       addressScheme: "qip55-64",
-      chainId: V3_CHAIN_ID,
-      genesisHash: V3_GENESIS_HASH,
+      chainId: network.chainId,
+      genesisHash: network.genesisHash,
     };
   }
   const { provider, qrl } = await getQrlProperties();
@@ -323,10 +318,12 @@ export const executeUnrestrictedMethod = async (
     );
     return filterIdentifier;
   } else if (method === UNRESTRICTED_METHODS.QRL_SEND_RAW_TRANSACTION) {
-    await assertV3Network(
-      storedText(
-        readActiveChain(await StorageUtil.getActiveBlockChain()).defaultRpcUrl,
-      ),
+    // Broadcasts only to a pinned network: the active chain must resolve to
+    // one, and its node must report that network's identity.
+    const chain = readActiveChain(await StorageUtil.getActiveBlockChain());
+    await assertPinnedIdentity(
+      storedText(chain.defaultRpcUrl),
+      requireSigningNetwork(chain),
     );
     const [rawTransaction] = readRpcParams(req.params);
     const receipt: unknown = await qrl.sendSignedTransaction(
