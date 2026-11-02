@@ -636,6 +636,7 @@
   "discovery.tokenPickerHint": "Обозреватель обнаружил их на этом адресе. Откройте токен и проверьте его сведения перед импортом.",
   "discovery.truncated": "Показаны первые {{limit}} найденных результатов.",
   "discovery.addSelected": "Добавить выбранные ({{count}})",
+  "discovery.tokenAddFailed": "Не удалось прочитать {{names}} из блокчейна. Эти токены не будут добавлены в кошелёк.",
   "discovery.adding": "Добавление...",
   "discovery.itemCount_one": "{{count}} объект",
   "discovery.itemCount_other": "{{count}} объекта",

@@ -4,7 +4,9 @@ import { StoreProvider } from "@/stores/store";
 import type StorageUtil from "@/utilities/storageUtil";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { ROUTES } from "@/router/router";
+import { formatQrlAddressFingerprint } from "@/utilities/addressUtil";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DiscoveredTokens from "./DiscoveredTokens";
 
@@ -15,6 +17,24 @@ const DISCOVERED = {
   symbol: "TEST",
   decimals: 18,
 };
+const SECOND = {
+  address: `Q${"fedcba9876543210".repeat(8)}`,
+  name: "Second Token",
+  symbol: "SEC",
+  decimals: 6,
+};
+const chainToken = (symbol: string, decimals: bigint) => ({
+  token: {
+    name: "Chain Name",
+    symbol,
+    decimals,
+    totalSupply: 1000,
+    balance: 1,
+    balanceBaseUnits: "1",
+    image: "",
+  },
+  error: "",
+});
 
 const { getTokenContractsList, setTokenContractsList } = vi.hoisted(() => ({
   getTokenContractsList: vi.fn<typeof StorageUtil.getTokenContractsList>(),
@@ -34,14 +54,20 @@ vi.mock("@/utilities/storageUtil", () => ({
 }));
 
 describe("DiscoveredTokens", () => {
-  const onReview = vi.fn<(token: typeof DISCOVERED) => Promise<void>>();
+  const getZrc20TokenDetails =
+    vi.fn<ReturnType<typeof mockedStore>["qrlStore"]["getZrc20TokenDetails"]>();
 
   const component = (accountAddress: string) => (
     <StoreProvider
-      value={mockedStore({ qrlStore: { activeAccount: { accountAddress } } })}
+      value={mockedStore({
+        qrlStore: { activeAccount: { accountAddress }, getZrc20TokenDetails },
+      })}
     >
-      <MemoryRouter>
-        <DiscoveredTokens onReview={onReview} />
+      <MemoryRouter initialEntries={[ROUTES.IMPORT_TOKEN]}>
+        <Routes>
+          <Route path={ROUTES.IMPORT_TOKEN} element={<DiscoveredTokens />} />
+          <Route path={ROUTES.HOME} element={<div>Home screen</div>} />
+        </Routes>
       </MemoryRouter>
     </StoreProvider>
   );
@@ -51,7 +77,10 @@ describe("DiscoveredTokens", () => {
   beforeEach(() => {
     vi.mocked(discoverTokens).mockResolvedValue([DISCOVERED]);
     getTokenContractsList.mockReset().mockResolvedValue([]);
-    onReview.mockReset().mockResolvedValue(undefined);
+    setTokenContractsList.mockReset().mockResolvedValue(undefined);
+    getZrc20TokenDetails
+      .mockReset()
+      .mockResolvedValue(chainToken("CHAIN", BigInt(9)));
   });
 
   afterEach(() => {
@@ -60,25 +89,141 @@ describe("DiscoveredTokens", () => {
     vi.restoreAllMocks();
   });
 
-  it("lists a discovered token with its contract address", async () => {
+  it("lists a discovered token with its name, symbol and address fingerprint", async () => {
     renderComponent();
 
-    expect(await screen.findByText(CONTRACT_ADDRESS)).toBeInTheDocument();
-    expect(screen.getByText("Test Token")).toBeInTheDocument();
+    expect(await screen.findByText("Test Token")).toBeInTheDocument();
+    expect(screen.getByText("(TEST)")).toBeInTheDocument();
+    expect(
+      screen.getByText(formatQrlAddressFingerprint(CONTRACT_ADDRESS)),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
   });
 
-  it("opens the review screen before storing a picked token", async () => {
+  it("keeps Add selected disabled until a token is picked", async () => {
+    renderComponent();
+
+    const checkbox = await screen.findByRole("checkbox");
+    expect(
+      screen.getByRole("button", { name: "Add selected (0)" }),
+    ).toBeDisabled();
+    await userEvent.click(checkbox);
+    expect(
+      screen.getByRole("button", { name: "Add selected (1)" }),
+    ).toBeEnabled();
+    await userEvent.click(checkbox);
+    expect(
+      screen.getByRole("button", { name: "Add selected (0)" }),
+    ).toBeDisabled();
+    expect(setTokenContractsList).not.toHaveBeenCalled();
+  });
+
+  it("reads every pick from the chain and stores the chain values", async () => {
+    vi.mocked(discoverTokens).mockResolvedValue([DISCOVERED, SECOND]);
+    getZrc20TokenDetails.mockImplementation((address) =>
+      Promise.resolve(
+        address === SECOND.address
+          ? chainToken("SEC2", BigInt(8))
+          : chainToken("TEST2", BigInt(12)),
+      ),
+    );
     renderComponent();
 
     await userEvent.click(
-      await screen.findByRole("button", { name: "Review Test Token" }),
+      await screen.findByRole("checkbox", { name: /Test Token/ }),
+    );
+    await userEvent.click(screen.getByRole("checkbox", { name: /Second/ }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add selected (2)" }),
     );
 
-    await waitFor(() => {
-      expect(onReview).toHaveBeenCalledWith(DISCOVERED);
+    expect(await screen.findByText("Home screen")).toBeInTheDocument();
+    expect(getZrc20TokenDetails).toHaveBeenCalledWith(CONTRACT_ADDRESS);
+    expect(getZrc20TokenDetails).toHaveBeenCalledWith(SECOND.address);
+    expect(setTokenContractsList).toHaveBeenCalledTimes(2);
+    expect(setTokenContractsList).toHaveBeenCalledWith(`Q${"a".repeat(128)}`, {
+      address: CONTRACT_ADDRESS,
+      symbol: "TEST2",
+      decimals: 12,
+      image: "",
     });
-    expect(setTokenContractsList).not.toHaveBeenCalled();
+    expect(setTokenContractsList).toHaveBeenCalledWith(`Q${"a".repeat(128)}`, {
+      address: SECOND.address,
+      symbol: "SEC2",
+      decimals: 8,
+      image: "",
+    });
   });
+
+  it("writes picks one at a time", async () => {
+    vi.mocked(discoverTokens).mockResolvedValue([DISCOVERED, SECOND]);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    setTokenContractsList.mockImplementation(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+    });
+    renderComponent();
+
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: /Test Token/ }),
+    );
+    await userEvent.click(screen.getByRole("checkbox", { name: /Second/ }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add selected (2)" }),
+    );
+
+    expect(await screen.findByText("Home screen")).toBeInTheDocument();
+    expect(setTokenContractsList).toHaveBeenCalledTimes(2);
+    expect(maxInFlight).toBe(1);
+  });
+
+  it.each([
+    ["an error", () => Promise.resolve({ token: undefined, error: "Nope" })],
+    ["no token", () => Promise.resolve({ token: undefined, error: "" })],
+    ["a rejection", () => Promise.reject(new Error("RPC down"))],
+  ])(
+    "keeps a pick out of the wallet when its chain read returns %s",
+    async (_label, read) => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.mocked(discoverTokens).mockResolvedValue([DISCOVERED, SECOND]);
+      getZrc20TokenDetails.mockImplementation((address) =>
+        address === CONTRACT_ADDRESS
+          ? read()
+          : Promise.resolve(chainToken("SEC", BigInt(6))),
+      );
+      renderComponent();
+
+      await userEvent.click(
+        await screen.findByRole("checkbox", { name: /Test Token/ }),
+      );
+      await userEvent.click(screen.getByRole("checkbox", { name: /Second/ }));
+      await userEvent.click(
+        screen.getByRole("button", { name: "Add selected (2)" }),
+      );
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Could not read Test Token from the chain.",
+      );
+      expect(setTokenContractsList).toHaveBeenCalledTimes(1);
+      expect(setTokenContractsList).toHaveBeenCalledWith(
+        `Q${"a".repeat(128)}`,
+        expect.objectContaining({ address: SECOND.address }),
+      );
+      // The added token leaves the list; the failed one stays picked for a
+      // retry.
+      expect(screen.queryByText("Second Token")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("checkbox", { name: /Test Token/ }),
+      ).toBeChecked();
+      expect(
+        screen.getByRole("button", { name: "Add selected (1)" }),
+      ).toBeEnabled();
+      expect(screen.queryByText("Home screen")).not.toBeInTheDocument();
+    },
+  );
 
   it("hides tokens the account already imported", async () => {
     getTokenContractsList.mockResolvedValue([
@@ -96,7 +241,7 @@ describe("DiscoveredTokens", () => {
       expect(discoverTokens).toHaveBeenCalled();
       expect(getTokenContractsList).toHaveBeenCalled();
     });
-    expect(screen.queryByText(CONTRACT_ADDRESS)).not.toBeInTheDocument();
+    expect(screen.queryByText("Test Token")).not.toBeInTheDocument();
     expect(container).toBeEmptyDOMElement();
   });
   it("says the list is capped when the explorer filled it", async () => {
@@ -145,28 +290,6 @@ describe("DiscoveredTokens", () => {
       expect(setTokenContractsList).not.toHaveBeenCalled();
     },
   );
-
-  it("reports a failed review and enables a retry", async () => {
-    const error = new Error("Review failed");
-    const report = vi.spyOn(console, "error").mockImplementation(() => {});
-    onReview.mockRejectedValueOnce(error);
-    renderComponent();
-
-    const button = await screen.findByRole("button", {
-      name: "Review Test Token",
-    });
-    await userEvent.click(button);
-    await waitFor(() => {
-      expect(report).toHaveBeenCalledWith(
-        "[DiscoveredTokens] Failed to review token:",
-        error,
-      );
-    });
-    expect(button).toBeEnabled();
-    await userEvent.click(button);
-    expect(onReview).toHaveBeenCalledTimes(2);
-    expect(setTokenContractsList).not.toHaveBeenCalled();
-  });
 
   it("ignores a late response for the previous account", async () => {
     let finish = (_tokens: (typeof DISCOVERED)[]) => {};

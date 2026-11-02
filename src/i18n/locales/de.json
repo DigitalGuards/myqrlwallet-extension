@@ -636,6 +636,7 @@
   "discovery.tokenPickerHint": "Der Explorer sieht diese auf dieser Adresse. Öffne einen Token, um seine Details vor dem Import zu prüfen.",
   "discovery.truncated": "Es werden die ersten {{limit}} gefundenen angezeigt.",
   "discovery.addSelected": "Auswahl hinzufügen ({{count}})",
+  "discovery.tokenAddFailed": "{{names}} konnte nicht von der Chain gelesen werden. Diese Token bleiben aus deiner Wallet.",
   "discovery.adding": "Wird hinzugefügt...",
   "discovery.itemCount_one": "{{count}} Stück",
   "discovery.itemCount_other": "{{count}} Stück",

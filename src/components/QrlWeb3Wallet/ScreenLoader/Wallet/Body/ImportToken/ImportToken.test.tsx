@@ -2,9 +2,16 @@ import { mockedStore } from "@/__mocks__/mockedStore";
 import { discoverTokens } from "@/services/assetDiscovery";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import type StorageUtil from "@/utilities/storageUtil";
 import ImportToken from "./ImportToken";
 
 const DISCOVERED_ADDRESS = `Q${"0123456789abcdef".repeat(8)}`;
@@ -14,16 +21,21 @@ vi.mock("@/services/assetDiscovery", () => ({
   MAX_DISCOVERED_TOKENS: 50,
 }));
 
+const { setTokenContractsList } = vi.hoisted(() => ({
+  setTokenContractsList: vi.fn<typeof StorageUtil.setTokenContractsList>(),
+}));
+
 vi.mock("@/utilities/storageUtil", () => ({
   default: {
     getTokenContractsList: vi.fn().mockResolvedValue([]),
-    setTokenContractsList: vi.fn().mockResolvedValue(undefined),
+    setTokenContractsList,
   },
 }));
 
 describe("ImportToken", () => {
   beforeEach(() => {
     vi.mocked(discoverTokens).mockResolvedValue([]);
+    setTokenContractsList.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -71,7 +83,41 @@ describe("ImportToken", () => {
     expect(fetchTokenButton).toBeEnabled();
   });
 
-  it("opens the same review screen for a discovered token as for a manual import", async () => {
+  it("shows discovered tokens and the manual import in one panel", async () => {
+    vi.mocked(discoverTokens).mockResolvedValue([
+      {
+        address: DISCOVERED_ADDRESS,
+        name: "Discovered Token",
+        symbol: "DSC",
+        decimals: 18,
+      },
+    ]);
+    renderComponent();
+
+    const checkbox = await screen.findByRole("checkbox", {
+      name: /Discovered Token/,
+    });
+    const panel = checkbox.closest<HTMLElement>(".surface-glass");
+    if (!panel) throw new Error("import panel missing");
+    expect(
+      within(panel).getByRole("heading", { name: "Import token" }),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByRole("button", { name: "Add selected (0)" }),
+    ).toBeDisabled();
+    expect(
+      within(panel).getByRole("textbox", { name: "contractAddress" }),
+    ).toBeInTheDocument();
+    expect(within(panel).getByText("Contract Address")).toBeInTheDocument();
+    expect(
+      within(panel).getByRole("button", { name: "Fetch token details" }),
+    ).toBeDisabled();
+    expect(
+      screen.getAllByRole("heading", { name: "Import token" }),
+    ).toHaveLength(1);
+  });
+
+  it("adds a picked discovered token without submitting the manual form", async () => {
     vi.mocked(discoverTokens).mockResolvedValue([
       {
         address: DISCOVERED_ADDRESS,
@@ -87,6 +133,7 @@ describe("ImportToken", () => {
         decimals: BigInt(18),
         totalSupply: 1000,
         balance: 42,
+        balanceBaseUnits: "42",
         image: "",
       },
       error: "",
@@ -94,61 +141,84 @@ describe("ImportToken", () => {
     renderComponent(mockedStore({ qrlStore: { getZrc20TokenDetails } }));
 
     await userEvent.click(
-      await screen.findByRole("button", { name: "Review Discovered Token" }),
+      await screen.findByRole("checkbox", { name: /Discovered Token/ }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add selected (1)" }),
     );
 
+    await waitFor(() => {
+      expect(setTokenContractsList).toHaveBeenCalledWith(expect.any(String), {
+        address: DISCOVERED_ADDRESS,
+        symbol: "DSC",
+        decimals: 18,
+        image: "",
+      });
+    });
+    expect(getZrc20TokenDetails).toHaveBeenCalledTimes(1);
     expect(getZrc20TokenDetails).toHaveBeenCalledWith(DISCOVERED_ADDRESS);
+    // The validation message of the empty manual field never shows: the
+    // pick does not submit the form.
+    expect(
+      screen.queryByText("Contract address is required"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reviews a manually entered address before importing it", async () => {
+    const getZrc20TokenDetails = vi.fn().mockResolvedValue({
+      token: {
+        name: "Manual Token",
+        symbol: "MAN",
+        decimals: BigInt(18),
+        totalSupply: 1000,
+        balance: 42,
+        balanceBaseUnits: "42",
+        image: "",
+      },
+      error: "",
+    });
+    renderComponent(mockedStore({ qrlStore: { getZrc20TokenDetails } }));
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "contractAddress" }),
+      DISCOVERED_ADDRESS,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Fetch token details" }),
+    );
+
     expect(
       await screen.findByRole("button", { name: "Import" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Copy full address" }),
-    ).toBeInTheDocument();
-    // The picker stays mounted but hidden behind the review card.
-    expect(
-      screen.getByText("Discovered Token", { ignore: "[hidden] *" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("42.0 DSC")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("textbox", { name: "contractAddress" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("42.0 MAN")).toBeInTheDocument();
+    expect(setTokenContractsList).not.toHaveBeenCalled();
 
-    // Cancel returns to the picker without importing anything.
+    // Cancel returns to the form without importing anything.
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(
-      await screen.findByRole("button", { name: "Review Discovered Token" }),
-    ).toBeInTheDocument();
+      await screen.findByRole("textbox", { name: "contractAddress" }),
+    ).toHaveValue("");
+    expect(setTokenContractsList).not.toHaveBeenCalled();
   });
 
-  it("surfaces a failed chain read for a discovered token on the manual field", async () => {
-    vi.mocked(discoverTokens).mockResolvedValue([
-      {
-        address: DISCOVERED_ADDRESS,
-        name: "Broken Token",
-        symbol: "BRK",
-        decimals: 18,
-      },
-    ]);
+  it("shows a failed chain read for a manual address on the field", async () => {
     const getZrc20TokenDetails = vi.fn().mockResolvedValue({
       token: undefined,
       error: "Contract does not look like a ZRC-20 token",
     });
     renderComponent(mockedStore({ qrlStore: { getZrc20TokenDetails } }));
 
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "contractAddress" }),
+      DISCOVERED_ADDRESS,
+    );
     await userEvent.click(
-      await screen.findByRole("button", { name: "Review Broken Token" }),
+      screen.getByRole("button", { name: "Fetch token details" }),
     );
 
     expect(
       await screen.findByText("Contract does not look like a ZRC-20 token"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("textbox", { name: "contractAddress" }),
-    ).toHaveValue(DISCOVERED_ADDRESS);
-    // The prefilled address is valid input, so a retry is one click away.
-    expect(
-      screen.getByRole("button", { name: "Fetch token details" }),
-    ).toBeEnabled();
     expect(
       screen.queryByRole("button", { name: "Import" }),
     ).not.toBeInTheDocument();
