@@ -3,9 +3,17 @@ import { discoverTokens } from "@/services/assetDiscovery";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
+import { ROUTES } from "@/router/router";
 import AccountCreateImport from "./AccountCreateImport";
 
 const { mockGetTokenContractsList, mockGetNFTCollectionsList } = vi.hoisted(
@@ -116,22 +124,22 @@ describe("AccountCreateImport", () => {
       }),
     );
 
-    expect(screen.getAllByRole("heading", { level: 3 })[0]).toHaveTextContent(
-      "Active account",
-    );
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Active account" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByText("Mocked Active Account Display"),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { level: 3 })[1]).toHaveTextContent(
+    expect(screen.getAllByRole("heading", { level: 3 })[0]).toHaveTextContent(
       "Tokens",
     );
     expect(
       screen.getByRole("button", { name: "Import token" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { level: 3 })[2]).toHaveTextContent(
+    expect(screen.getAllByRole("heading", { level: 3 })[1]).toHaveTextContent(
       "NFT Collections",
     );
-    expect(screen.getAllByRole("heading", { level: 3 })[3]).toHaveTextContent(
+    expect(screen.getAllByRole("heading", { level: 3 })[2]).toHaveTextContent(
       "Add accounts",
     );
     expect(screen.getByRole("paragraph")).toHaveTextContent(
@@ -157,6 +165,47 @@ describe("AccountCreateImport", () => {
     expect(importButton).toBeEnabled();
     expect(connectLedgerButton).toBeInTheDocument();
     expect(connectLedgerButton).toBeEnabled();
+  });
+
+  it("puts the active account heading above the balance card with the network badge beside it", () => {
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          activeAccount: {
+            accountAddress: "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1",
+          },
+          qrlConnection: {
+            isLoading: false,
+            isConnected: true,
+            blockchain: { chainName: "Test Chain Name" },
+          },
+        },
+      }),
+    );
+
+    const heading = screen.getByRole("heading", {
+      level: 2,
+      name: "Active account",
+    });
+    const headingRow = heading.parentElement;
+    if (!headingRow) throw new Error("heading row missing");
+    const badge = within(headingRow).getByRole("link", {
+      name: /Test Chain Name/,
+    });
+    expect(badge).toHaveAttribute("href", ROUTES.CHAIN_CONNECTIVITY);
+    // The heading row sits outside the card that holds the balance and the
+    // Send / History / Receive actions.
+    const balance = screen.getByText("Mocked Active Account Display");
+    expect(headingRow).not.toContainElement(balance);
+    const card = balance.closest<HTMLElement>(".surface-ember");
+    if (!card) throw new Error("balance card missing");
+    expect(card).not.toContainElement(heading);
+    expect(
+      within(card).getByRole("button", { name: "Send" }),
+    ).toBeInTheDocument();
+    expect(
+      within(card).getByRole("button", { name: "Receive" }),
+    ).toBeInTheDocument();
   });
 
   it("should have the connect ledger button link to the import ledger route", () => {

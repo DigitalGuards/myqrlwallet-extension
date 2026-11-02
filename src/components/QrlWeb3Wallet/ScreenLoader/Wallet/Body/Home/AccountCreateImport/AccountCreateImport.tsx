@@ -35,6 +35,7 @@ import StorageUtil from "@/utilities/storageUtil";
 import { ZRC_20_ITEMS_DISPLAY_LIMIT } from "@/constants/zrc20Token";
 import { NFT_ITEMS_DISPLAY_LIMIT } from "@/constants/nftToken";
 import { cn } from "@/utilities/stylingUtil";
+import ChainBadge from "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Header/ChainBadge/ChainBadge";
 
 // Send / History / Receive share one row down to a 320px side panel, so
 // they carry tighter metrics than a full-width button and grow back to the
@@ -111,12 +112,18 @@ const AccountCreateImport = observer(() => {
     <div className="page-enter flex flex-col gap-8">
       {hasActiveAccount && (
         <>
+          {/* The page heading sits above the card with the network badge on
+              its right, the arrangement the web wallet uses. The header
+              chip shows only the chain icon; this one names the chain. */}
+          <div className="-mb-4 flex min-w-0 items-center justify-between gap-3">
+            <h2 className="min-w-0 text-2xl font-semibold leading-tight tracking-tight [overflow-wrap:anywhere]">
+              {t("home.activeAccount")}
+            </h2>
+            <ChainBadge />
+          </div>
           <Card className="surface-ember relative w-full overflow-hidden [background:linear-gradient(180deg,hsl(var(--primary)/0.06),transparent_46%),hsl(var(--card)/0.45)]">
             <div className="relative z-10">
-              <CardHeader>
-                <CardTitle>{t("home.activeAccount")}</CardTitle>
-              </CardHeader>
-              <CardContent>
+              <CardContent className="pt-6">
                 <ActiveAccountDisplay />
               </CardContent>
               {/* One row at every supported width. A previous fix gave
