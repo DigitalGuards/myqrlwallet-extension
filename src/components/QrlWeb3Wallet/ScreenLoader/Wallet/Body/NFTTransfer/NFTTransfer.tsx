@@ -440,13 +440,13 @@ const NFTTransfer = observer(() => {
                     </div>
                   )}
                 </div>
-                <div className="flex flex-col gap-1">
-                  <div className="text-sm font-bold">
+                <div className="flex min-w-0 flex-col gap-1">
+                  <div className="text-sm font-bold [overflow-wrap:anywhere]">
                     {metadataTextChildren(
                       nftName || `${collectionName} #${tokenId}`,
                     )}
                   </div>
-                  <div className="text-xs text-muted-foreground">
+                  <div className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
                     Token #{tokenId}
                     {is1155 && ownedBalance ? ` · ×${ownedBalance}` : ""}
                   </div>
