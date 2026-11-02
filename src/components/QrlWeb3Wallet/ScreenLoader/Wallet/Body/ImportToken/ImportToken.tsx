@@ -130,7 +130,6 @@ const ImportToken = observer(() => {
                         <FormControl>
                           <Input
                             {...field}
-                            aria-label={field.name}
                             autoComplete="off"
                             disabled={isSubmitting}
                             placeholder={t(
@@ -149,7 +148,7 @@ const ImportToken = observer(() => {
                 <CardFooter>
                   <Button
                     disabled={isSubmitting || !isValid}
-                    className="w-full"
+                    className="h-auto min-h-10 w-full whitespace-normal py-2"
                     type="submit"
                   >
                     {isSubmitting ? (

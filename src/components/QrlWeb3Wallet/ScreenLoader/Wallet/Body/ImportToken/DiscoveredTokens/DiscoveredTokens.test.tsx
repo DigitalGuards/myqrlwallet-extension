@@ -225,6 +225,41 @@ describe("DiscoveredTokens", () => {
     },
   );
 
+  it("reports a pick whose storage write fails and keeps it for a retry", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(discoverTokens).mockResolvedValue([DISCOVERED, SECOND]);
+    getZrc20TokenDetails.mockImplementation((address) =>
+      Promise.resolve(
+        address === CONTRACT_ADDRESS
+          ? chainToken("CHAIN", BigInt(9))
+          : chainToken("SEC", BigInt(6)),
+      ),
+    );
+    setTokenContractsList.mockImplementation((_account, token) =>
+      token.address === CONTRACT_ADDRESS
+        ? Promise.reject(new Error("storage full"))
+        : Promise.resolve(undefined),
+    );
+    renderComponent();
+
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: /Test Token/ }),
+    );
+    await userEvent.click(screen.getByRole("checkbox", { name: /Second/ }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add selected (2)" }),
+    );
+
+    // One failure reads in the singular.
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not read Test Token from the chain. That token stays out of your wallet.",
+    );
+    expect(setTokenContractsList).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Second Token")).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /Test Token/ })).toBeChecked();
+    expect(screen.queryByText("Home screen")).not.toBeInTheDocument();
+  });
+
   it("hides tokens the account already imported", async () => {
     getTokenContractsList.mockResolvedValue([
       {

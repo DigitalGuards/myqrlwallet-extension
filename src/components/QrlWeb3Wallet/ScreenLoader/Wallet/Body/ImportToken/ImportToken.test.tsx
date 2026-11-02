@@ -60,7 +60,9 @@ describe("ImportToken", () => {
     expect(
       screen.getByText("Paste the token's contract address"),
     ).toBeInTheDocument();
-    const inputField = screen.getByRole("textbox", { name: "contractAddress" });
+    const inputField = screen.getByRole("textbox", {
+      name: "Token contract address",
+    });
     expect(inputField).toBeInTheDocument();
     const fetchTokenButton = screen.getByRole("button", {
       name: "Fetch token details",
@@ -72,7 +74,9 @@ describe("ImportToken", () => {
   it("should enable the fetch token button in the component after entering token contract address", async () => {
     renderComponent();
 
-    const inputField = screen.getByRole("textbox", { name: "contractAddress" });
+    const inputField = screen.getByRole("textbox", {
+      name: "Token contract address",
+    });
     const fetchTokenButton = screen.getByRole("button", {
       name: "Fetch token details",
     });
@@ -106,7 +110,7 @@ describe("ImportToken", () => {
       within(panel).getByRole("button", { name: "Add selected (0)" }),
     ).toBeDisabled();
     expect(
-      within(panel).getByRole("textbox", { name: "contractAddress" }),
+      within(panel).getByRole("textbox", { name: "Token contract address" }),
     ).toBeInTheDocument();
     expect(
       within(panel).getByText("Token contract address"),
@@ -182,7 +186,7 @@ describe("ImportToken", () => {
     renderComponent(mockedStore({ qrlStore: { getZrc20TokenDetails } }));
 
     await userEvent.type(
-      screen.getByRole("textbox", { name: "contractAddress" }),
+      screen.getByRole("textbox", { name: "Token contract address" }),
       DISCOVERED_ADDRESS,
     );
     await userEvent.click(
@@ -198,7 +202,7 @@ describe("ImportToken", () => {
     // Cancel returns to the form without importing anything.
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(
-      await screen.findByRole("textbox", { name: "contractAddress" }),
+      await screen.findByRole("textbox", { name: "Token contract address" }),
     ).toHaveValue("");
     expect(setTokenContractsList).not.toHaveBeenCalled();
   });
@@ -211,7 +215,7 @@ describe("ImportToken", () => {
     renderComponent(mockedStore({ qrlStore: { getZrc20TokenDetails } }));
 
     await userEvent.type(
-      screen.getByRole("textbox", { name: "contractAddress" }),
+      screen.getByRole("textbox", { name: "Token contract address" }),
       DISCOVERED_ADDRESS,
     );
     await userEvent.click(
@@ -234,7 +238,7 @@ describe("ImportToken", () => {
       .mockRejectedValueOnce(error);
     renderComponent(mockedStore({ qrlStore: { getZrc20TokenDetails } }));
     await userEvent.type(
-      screen.getByRole("textbox", { name: "contractAddress" }),
+      screen.getByRole("textbox", { name: "Token contract address" }),
       DISCOVERED_ADDRESS,
     );
     await userEvent.click(

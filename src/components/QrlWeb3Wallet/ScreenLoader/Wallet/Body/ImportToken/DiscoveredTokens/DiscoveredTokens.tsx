@@ -114,12 +114,18 @@ const DiscoveredTokens = observer(() => {
           failed.push(pick.name || pick.symbol || pick.address);
           continue;
         }
-        await StorageUtil.setTokenContractsList(accountAddress, {
-          address: pick.address,
-          symbol: token.symbol,
-          decimals: parseInt(token.decimals.toString()),
-          image: "",
-        });
+        try {
+          await StorageUtil.setTokenContractsList(accountAddress, {
+            address: pick.address,
+            symbol: token.symbol,
+            decimals: parseInt(token.decimals.toString()),
+            image: "",
+          });
+        } catch (writeError: unknown) {
+          console.error("[DiscoveredTokens] Failed to save token:", writeError);
+          failed.push(pick.name || pick.symbol || pick.address);
+          continue;
+        }
         added.add(pick.address.toLowerCase());
       }
       if (failed.length === 0) {
@@ -155,8 +161,14 @@ const DiscoveredTokens = observer(() => {
         </p>
       )}
       {failedNames.length > 0 && (
-        <p className="text-sm font-medium text-destructive" role="alert">
-          {t("discovery.tokenAddFailed", { names: failedNames.join(", ") })}
+        <p
+          className="text-sm font-medium text-destructive [overflow-wrap:anywhere]"
+          role="alert"
+        >
+          {t("discovery.tokenAddFailed", {
+            count: failedNames.length,
+            names: failedNames.join(", "),
+          })}
         </p>
       )}
       <ul className="flex max-h-60 flex-col gap-2 overflow-y-auto">
@@ -199,7 +211,7 @@ const DiscoveredTokens = observer(() => {
       </ul>
       <Button
         type="button"
-        className="w-full"
+        className="h-auto min-h-10 w-full whitespace-normal py-2"
         disabled={selected.size === 0 || isAdding}
         onClick={() => {
           addSelected().catch((error: unknown) => {

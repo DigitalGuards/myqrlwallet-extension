@@ -109,17 +109,22 @@ const AccountCreateImport = observer(() => {
   // "Connect Ledger", so three solid blocks of brand blue do not compete
   // with it in the narrow side panel.
   return (
-    <div className="page-enter flex flex-col gap-8">
+    <div className="page-enter flex w-full min-w-0 flex-col gap-8">
       {hasActiveAccount && (
         <>
           {/* The page heading sits above the card with the network badge on
               its right, the arrangement the web wallet uses. The header
               chip shows only the chain icon; this one names the chain. */}
           <div className="-mb-4 flex min-w-0 items-center justify-between gap-3">
-            <h2 className="min-w-0 text-2xl font-semibold leading-tight tracking-tight [overflow-wrap:anywhere]">
+            {/* The heading keeps whole words (its minimum width is its
+                longest word); the badge takes the remaining space and
+                truncates a long chain name. */}
+            <h2 className="break-words text-2xl font-semibold leading-tight tracking-tight">
               {t("home.activeAccount")}
             </h2>
-            <ChainBadge />
+            <div className="flex min-w-0 justify-end">
+              <ChainBadge />
+            </div>
           </div>
           <Card className="surface-ember relative w-full overflow-hidden [background:linear-gradient(180deg,hsl(var(--primary)/0.06),transparent_46%),hsl(var(--card)/0.45)]">
             <div className="relative z-10">
@@ -193,7 +198,11 @@ const AccountCreateImport = observer(() => {
                 </div>
               )}
               <Link className="w-full" to={ROUTES.IMPORT_TOKEN}>
-                <Button className="w-full" type="button" variant="outline">
+                <Button
+                  className="h-auto min-h-10 w-full whitespace-normal py-2"
+                  type="button"
+                  variant="outline"
+                >
                   {discoveredTokenCount > 0 ? (
                     <>
                       <Plus className="mr-2 h-4 w-4" />
@@ -209,7 +218,11 @@ const AccountCreateImport = observer(() => {
               </Link>
               {tokenCount > ZRC_20_ITEMS_DISPLAY_LIMIT && (
                 <Link className="w-full" to={ROUTES.ALL_ZRC_20_TOKENS}>
-                  <Button className="w-full" type="button" variant="outline">
+                  <Button
+                    className="h-auto min-h-10 w-full whitespace-normal py-2"
+                    type="button"
+                    variant="outline"
+                  >
                     <Logs className="mr-2 h-4 w-4" />
                     {t("home.viewAllTokens")}
                   </Button>
@@ -234,7 +247,11 @@ const AccountCreateImport = observer(() => {
                 </div>
               )}
               <Link className="w-full" to={ROUTES.IMPORT_NFT_COLLECTION}>
-                <Button className="w-full" type="button" variant="outline">
+                <Button
+                  className="h-auto min-h-10 w-full whitespace-normal py-2"
+                  type="button"
+                  variant="outline"
+                >
                   {discoveredCollectionCount > 0 ? (
                     <>
                       <Plus className="mr-2 h-4 w-4" />
@@ -250,7 +267,11 @@ const AccountCreateImport = observer(() => {
               </Link>
               {nftCollectionsCount > NFT_ITEMS_DISPLAY_LIMIT && (
                 <Link className="w-full" to={ROUTES.ALL_NFT_COLLECTIONS}>
-                  <Button className="w-full" type="button" variant="outline">
+                  <Button
+                    className="h-auto min-h-10 w-full whitespace-normal py-2"
+                    type="button"
+                    variant="outline"
+                  >
                     <Logs className="mr-2 h-4 w-4" />
                     {t("home.viewAllNftCollections")}
                   </Button>
@@ -267,19 +288,31 @@ const AccountCreateImport = observer(() => {
         </CardHeader>
         <CardFooter className="flex-col gap-4">
           <Link className="w-full" to={ROUTES.CREATE_ACCOUNT}>
-            <Button className="w-full" type="button" variant="outline">
+            <Button
+              className="h-auto min-h-10 w-full whitespace-normal py-2"
+              type="button"
+              variant="outline"
+            >
               <Plus className="mr-2 h-4 w-4" />
               {t("home.createAccount")}
             </Button>
           </Link>
           <Link className="w-full" to={ROUTES.IMPORT_ACCOUNT}>
-            <Button className="w-full" type="button" variant="outline">
+            <Button
+              className="h-auto min-h-10 w-full whitespace-normal py-2"
+              type="button"
+              variant="outline"
+            >
               <Download className="mr-2 h-4 w-4" />
               {t("home.importAccount")}
             </Button>
           </Link>
           <Link className="w-full" to={ROUTES.IMPORT_LEDGER}>
-            <Button className="w-full" type="button" variant="outline">
+            <Button
+              className="h-auto min-h-10 w-full whitespace-normal py-2"
+              type="button"
+              variant="outline"
+            >
               <Usb className="mr-2 h-4 w-4" />
               {t("home.connectLedger")}
             </Button>

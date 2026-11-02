@@ -193,6 +193,11 @@ describe("AccountCreateImport", () => {
       name: /Test Chain Name/,
     });
     expect(badge).toHaveAttribute("href", ROUTES.CHAIN_CONNECTIVITY);
+    // A long custom chain name truncates inside a shrinkable badge, so the
+    // heading keeps whole words at the 320px side-panel width.
+    expect(badge).toHaveClass("min-w-0");
+    expect(within(badge).getByText("Test Chain Name")).toHaveClass("truncate");
+    expect(heading).not.toHaveClass("min-w-0");
     // The heading row sits outside the card that holds the balance and the
     // Send / History / Receive actions.
     const balance = screen.getByText("Mocked Active Account Display");
