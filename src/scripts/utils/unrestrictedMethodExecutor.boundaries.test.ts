@@ -746,6 +746,45 @@ describe("unrestricted storage boundaries", () => {
   });
 });
 
+describe("pinned networks while mainnet is dormant", () => {
+  const MAINNET_RPC_CHAIN = {
+    chainId: V3_CHAIN_ID,
+    defaultRpcUrl: "https://qrlwallet.com/api/qrl-rpc/mainnet",
+  };
+
+  it.each([V3_CHAIN_ID, "0x1b3a7"])(
+    "refuses wallet capabilities for chain %s on the mainnet RPC",
+    async (chainId) => {
+      getActiveChain.mockResolvedValue({ ...MAINNET_RPC_CHAIN, chainId });
+      await expect(
+        executeUnrestrictedMethod(request(METHODS.QRL_WALLET_CAPABILITIES)),
+      ).rejects.toThrow("Select a supported QRL network.");
+      expect(assertNetwork).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses a raw broadcast through the mainnet RPC", async () => {
+    getActiveChain.mockResolvedValue(MAINNET_RPC_CHAIN);
+    await expect(
+      executeUnrestrictedMethod(
+        request(METHODS.QRL_SEND_RAW_TRANSACTION, ["0x0102"]),
+      ),
+    ).rejects.toThrow("Select a supported QRL network.");
+    expect(assertNetwork).not.toHaveBeenCalled();
+    expect(rpc.sendSignedTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses a raw broadcast on a chain outside the pinned networks", async () => {
+    getActiveChain.mockResolvedValue({ ...CHAIN, chainId: "0x1" });
+    await expect(
+      executeUnrestrictedMethod(
+        request(METHODS.QRL_SEND_RAW_TRANSACTION, ["0x0102"]),
+      ),
+    ).rejects.toThrow("Select a supported QRL network.");
+    expect(rpc.sendSignedTransaction).not.toHaveBeenCalled();
+  });
+});
+
 describe("Web3 creation-call compatibility", () => {
   it.each([{ data: "0x6080" }, { to: null, data: "0x6080" }])(
     "forwards a creation simulation through the installed Web3 library (%s)",

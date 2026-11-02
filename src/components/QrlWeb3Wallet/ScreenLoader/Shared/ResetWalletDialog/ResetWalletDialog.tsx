@@ -120,7 +120,7 @@ const ResetWalletDialog = observer(
           <DialogFooter className="flex flex-row gap-4">
             <DialogClose asChild>
               <Button
-                className="w-full"
+                className="h-auto min-h-10 flex-1"
                 type="button"
                 variant="outline"
                 disabled={isResetting}
@@ -130,7 +130,7 @@ const ResetWalletDialog = observer(
               </Button>
             </DialogClose>
             <Button
-              className="w-full"
+              className="h-auto min-h-10 min-w-0"
               type="button"
               variant="destructive"
               disabled={!isConfirmed || isResetting}
@@ -144,7 +144,7 @@ const ResetWalletDialog = observer(
               ) : (
                 <Trash2 className="mr-2 h-4 w-4 shrink-0" />
               )}
-              <span className="truncate">
+              <span className="overflow-hidden whitespace-normal [overflow-wrap:anywhere]">
                 {isResetting
                   ? t("resetWallet.resetting")
                   : t("resetWallet.confirmButton")}

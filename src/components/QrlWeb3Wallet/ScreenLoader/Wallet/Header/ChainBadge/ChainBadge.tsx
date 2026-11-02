@@ -8,6 +8,7 @@ import {
 } from "@/components/UI/Tooltip";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
+import { cn } from "@/utilities/stylingUtil";
 import { cva } from "class-variance-authority";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -60,18 +61,24 @@ const ChainBadge = observer(
     const { chainName } = blockchain;
 
     return (
-      <Link className="shrink-0" to={ROUTES.CHAIN_CONNECTIVITY}>
+      <Link
+        className={displayChainName ? "min-w-0 max-w-full" : "shrink-0"}
+        to={ROUTES.CHAIN_CONNECTIVITY}
+      >
         <Tooltip delayDuration={0}>
           <TooltipTrigger asChild>
             <Button
               variant="outline"
               size="sm"
               disabled={isDisabled || isLoading}
-              className={badgeButtonClasses({
-                isActive:
-                  pathName === ROUTES.CHAIN_CONNECTIVITY ||
-                  pathName === ROUTES.ADD_EDIT_CHAIN,
-              })}
+              className={cn(
+                badgeButtonClasses({
+                  isActive:
+                    pathName === ROUTES.CHAIN_CONNECTIVITY ||
+                    pathName === ROUTES.ADD_EDIT_CHAIN,
+                }),
+                "max-w-full",
+              )}
             >
               <Card
                 className={connectivityStatusClasses({
@@ -80,7 +87,9 @@ const ChainBadge = observer(
                 })}
               />
               <ChainBadgeIcon />
-              {displayChainName && chainName}
+              {displayChainName && (
+                <span className="min-w-0 truncate">{chainName}</span>
+              )}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">

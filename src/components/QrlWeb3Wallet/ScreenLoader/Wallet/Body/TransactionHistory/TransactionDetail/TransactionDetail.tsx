@@ -2,6 +2,7 @@ import { Button } from "@/components/UI/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { Separator } from "@/components/UI/Separator";
 import { getExplorerApiBase } from "@/configuration/assetDiscoveryConfig";
+import { isFiatChain } from "@/configuration/pinnedNetworks";
 import { NATIVE_TOKEN_UNITS_OF_GAS } from "@/constants/nativeToken";
 import { formatFiatCompact } from "@/functions/formatFiat";
 import { formatTransactionAmount } from "@/functions/formatTransactionAmount";
@@ -107,6 +108,32 @@ const STATUS_BADGE_CONFIG: Record<
 const DEFAULT_BADGE_CONFIG = {
   className: "bg-muted text-muted-foreground",
   labelKey: "txDetail.statusUnknown",
+};
+
+/**
+ * The active chain's own block explorer, for an entry on that chain, as an
+ * https base without a trailing slash. Undefined for an entry on another
+ * chain, a chain without an explorer, or one that is not https. The QRL 1.0
+ * explorer indexes no QRL 2.0 chain, so it never gets a link either.
+ */
+const LEGACY_EXPLORER_HOST = "explorer.theqrl.org";
+
+const chainExplorerBase = (
+  activeChain: { chainId: string; defaultBlockExplorerUrl: string },
+  entryChainId: string,
+): string | undefined => {
+  if (activeChain.chainId.toLowerCase() !== entryChainId.toLowerCase()) {
+    return undefined;
+  }
+  try {
+    const url = new URL(activeChain.defaultBlockExplorerUrl);
+    if (url.protocol !== "https:" || url.hostname === LEGACY_EXPLORER_HOST) {
+      return undefined;
+    }
+    return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return undefined;
+  }
 };
 
 const TransactionDetail = observer(() => {
@@ -420,8 +447,14 @@ const TransactionDetail = observer(() => {
   const { showBalanceAndPrice, currency } = settingsStore;
   const { price: qrlPrice, currency: quoteCurrency } =
     priceStore.quoteFor(currency);
+  // The entry's own chain has to be the pinned mainnet too: history can
+  // still hold entries from the chain that was active before a switch.
   const showFiat =
-    showBalanceAndPrice && qrlPrice > 0 && !transaction.isZrc20Token;
+    showBalanceAndPrice &&
+    qrlStore.isFiatNetwork &&
+    isFiatChain({ chainId: transaction.chainId }) &&
+    qrlPrice > 0 &&
+    !transaction.isZrc20Token;
   const fiatAmount = showFiat
     ? formatFiatCompact(amount, qrlPrice, quoteCurrency)
     : "";
@@ -444,12 +477,15 @@ const TransactionDetail = observer(() => {
   });
 
   // Chains indexed by zondscan link there (the web explorer and its API
-  // share an origin); anything else falls back to the legacy explorer.
-  const explorerBase = getExplorerApiBase(transaction.chainId);
-  const hashWithoutPrefix = transactionHash.replace(/^0x/, "");
+  // share an origin). Any other chain links to its own block explorer when
+  // the entry belongs to the active chain and that explorer is an https
+  // URL; otherwise there is no link.
+  const explorerBase =
+    getExplorerApiBase(transaction.chainId) ??
+    chainExplorerBase(qrlStore.qrlConnection.blockchain, transaction.chainId);
   const explorerTxUrl = explorerBase
     ? `${explorerBase}/tx/${transactionHash}`
-    : `https://explorer.theqrl.org/tx/${hashWithoutPrefix}`;
+    : undefined;
 
   const openInExplorer = () => {
     if (explorerTxUrl) {

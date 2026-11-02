@@ -44,7 +44,7 @@ const AccountId = observer(
       settingsStore.currency,
     );
     const fiatDisplay =
-      settingsStore.showBalanceAndPrice && price > 0
+      settingsStore.showBalanceAndPrice && qrlStore.isFiatNetwork && price > 0
         ? formatFiatCompact(numericBalance, price, quoteCurrency)
         : "";
 

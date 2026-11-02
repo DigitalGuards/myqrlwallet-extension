@@ -101,7 +101,7 @@ const NFTDetail = () => {
         <BackButton />
         <Card>
           <CardHeader>
-            <CardTitle>
+            <CardTitle className="[overflow-wrap:anywhere]">
               {metadataTextChildren(
                 metadata?.name || `${collectionName} #${tokenId}`,
               )}
@@ -139,35 +139,35 @@ const NFTDetail = () => {
             )}
 
             <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-1">
+              <div className="flex min-w-0 flex-col gap-1">
                 <div className="text-sm">{t("nft.collectionName")}</div>
-                <div className="text-sm font-bold text-secondary">
+                <div className="text-sm font-bold text-secondary [overflow-wrap:anywhere]">
                   {collectionName}
                 </div>
               </div>
-              <div className="flex flex-col gap-1">
+              <div className="flex min-w-0 flex-col gap-1">
                 <div className="text-sm">{t("nft.tokenId")}</div>
-                <div className="text-sm font-bold text-secondary">
+                <div className="text-sm font-bold text-secondary [overflow-wrap:anywhere]">
                   #{tokenId}
                 </div>
               </div>
-              <div className="flex flex-col gap-1">
+              <div className="flex min-w-0 flex-col gap-1">
                 <div className="text-sm">{t("nft.standard")}</div>
-                <div className="text-sm font-bold text-secondary">
+                <div className="text-sm font-bold text-secondary [overflow-wrap:anywhere]">
                   {standard === "ZRC1155" ? "ZRC-1155" : "ZRC-721"}
                 </div>
               </div>
               {balance && (
-                <div className="flex flex-col gap-1">
+                <div className="flex min-w-0 flex-col gap-1">
                   <div className="text-sm">{t("nft.ownedCount")}</div>
-                  <div className="font-numeric text-sm font-bold text-secondary">
+                  <div className="font-numeric text-sm font-bold text-secondary [overflow-wrap:anywhere]">
                     {balance}
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="flex flex-col gap-1">
+            <div className="flex min-w-0 flex-col gap-1">
               <div className="text-sm">{t("nft.contractAddress")}</div>
               <CopyableAddress
                 address={contractAddress}

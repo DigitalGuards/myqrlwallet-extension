@@ -173,10 +173,25 @@ describe("SettingsStore", () => {
   });
 
   describe("setLanguage", () => {
-    it("should update language", async () => {
-      await store.setLanguage("pl");
+    it.each(["en", "es", "de", "ru", "zh-CN"])(
+      "applies and persists %s",
+      async (language) => {
+        await store.whenSettingsLoaded();
+        const change = vi.spyOn(i18n, "changeLanguage");
+        await store.setLanguage(language);
+        expect(store.language).toBe(language);
+        expect(change).toHaveBeenCalledWith(language);
+        expect(await StorageUtil.getSettings()).toMatchObject({ language });
+      },
+    );
 
-      expect(store.language).toBe("pl");
+    it("falls back to English for an unsupported selection", async () => {
+      await store.whenSettingsLoaded();
+      const change = vi.spyOn(i18n, "changeLanguage");
+      await store.setLanguage("pl");
+      expect(store.language).toBe("en");
+      expect(change).toHaveBeenCalledWith("en");
+      expect(await StorageUtil.getSettings()).toMatchObject({ language: "en" });
     });
 
     it("should persist to storage", async () => {
@@ -292,10 +307,38 @@ describe("SettingsStore", () => {
   });
 
   describe("loadSettings (via constructor)", () => {
+    it.each(["en", "es", "de", "ru", "zh-CN"])(
+      "restores the stored language %s",
+      async (language) => {
+        await store.whenSettingsLoaded();
+        await StorageUtil.setSettings({ language });
+        const change = vi.spyOn(i18n, "changeLanguage");
+        const loaded = new SettingsStore();
+        await loaded.whenSettingsLoaded();
+        expect(loaded.language).toBe(language);
+        expect(change).toHaveBeenCalledWith(language);
+      },
+    );
+
+    it.each(["pl", "fr", "zh-TW", "ru-RU", "future-language"])(
+      "falls back to English for the unsupported stored language %s",
+      async (language) => {
+        await store.whenSettingsLoaded();
+        await store.setLanguage("ru");
+        await StorageUtil.setSettings({ language });
+        const change = vi.spyOn(i18n, "changeLanguage");
+        const loaded = new SettingsStore();
+        await loaded.whenSettingsLoaded();
+        expect(loaded.language).toBe("en");
+        expect(change).toHaveBeenCalledWith("en");
+        expect(i18n.t("settings.preferences.languageLabel")).toBe("Language");
+      },
+    );
+
     it("reports a language load rejection and finishes loading the other settings", async () => {
       await store.whenSettingsLoaded();
       await StorageUtil.setSettings({
-        language: "fr",
+        language: "ru",
         currency: "GBP",
         notificationsEnabled: false,
       });
@@ -306,7 +349,7 @@ describe("SettingsStore", () => {
 
       await loaded.whenSettingsLoaded();
 
-      expect(loaded.language).toBe("fr");
+      expect(loaded.language).toBe("ru");
       expect(loaded.currency).toBe("GBP");
       expect(loaded.notificationsEnabled).toBe(false);
       expect(report).toHaveBeenCalledWith("Failed to change language:", error);
@@ -334,7 +377,7 @@ describe("SettingsStore", () => {
         themePreference: "dark",
         autoLockMinutes: 30,
         currency: "GBP",
-        language: "fr",
+        language: "zh-CN",
       });
 
       const newStore = new SettingsStore();
@@ -345,7 +388,7 @@ describe("SettingsStore", () => {
       expect(newStore.themePreference).toBe("dark");
       expect(newStore.autoLockMinutes).toBe(30);
       expect(newStore.currency).toBe("GBP");
-      expect(newStore.language).toBe("fr");
+      expect(newStore.language).toBe("zh-CN");
     });
 
     it("should keep defaults when no settings in storage", async () => {

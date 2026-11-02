@@ -100,11 +100,13 @@ export const GasFeeNotice = observer(
       });
     }, [from, to, value, overrides]);
 
-    const { showBalanceAndPrice, currency } = settingsStore;
+    const { currency } = settingsStore;
+    const showFiat =
+      settingsStore.showBalanceAndPrice && qrlStore.isFiatNetwork;
     const { price: qrlPrice, currency: quoteCurrency } =
       priceStore.quoteFor(currency);
     const fiatGas =
-      showBalanceAndPrice && qrlPrice > 0 && gasFee.rawAmount
+      showFiat && qrlPrice > 0 && gasFee.rawAmount
         ? formatFiatCompact(gasFee.rawAmount, qrlPrice, quoteCurrency)
         : "";
 

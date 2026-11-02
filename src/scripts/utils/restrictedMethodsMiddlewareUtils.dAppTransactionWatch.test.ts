@@ -40,15 +40,28 @@ describe("registerDAppTransactionWatchIfApproved", () => {
     });
   });
 
-  it("falls back to the pinned v3 chain id when none was authorized", async () => {
+  it.each([undefined, ""])(
+    "registers no watch when no chain was authorized (%j)",
+    async (authorizedChainId) => {
+      await registerDAppTransactionWatchIfApproved(
+        sendTransactionRequest(ACCOUNT),
+        "0xtxhash",
+        authorizedChainId,
+      );
+
+      expect(mockRegisterWatch).not.toHaveBeenCalled();
+    },
+  );
+
+  it("files the watch under a pinned mainnet chain when that was authorized", async () => {
     await registerDAppTransactionWatchIfApproved(
       sendTransactionRequest(ACCOUNT),
       "0xtxhash",
-      undefined,
+      "0x1b3a7",
     );
 
     expect(mockRegisterWatch).toHaveBeenCalledWith(
-      expect.objectContaining({ chainId: "0x301825" }),
+      expect.objectContaining({ chainId: "0x1b3a7" }),
     );
   });
 

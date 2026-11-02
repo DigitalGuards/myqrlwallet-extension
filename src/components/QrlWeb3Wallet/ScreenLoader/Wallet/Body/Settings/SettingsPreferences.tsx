@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/UI/Select";
 import { Separator } from "@/components/UI/Separator";
+import { LANGUAGE_OPTIONS } from "@/i18n/languages";
 import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
 import type { GasTier } from "@/types/gasFee";
@@ -19,11 +20,6 @@ import { useNavigate } from "react-router-dom";
 import CircuitBackground from "../../../Shared/CircuitBackground/CircuitBackground";
 
 const CURRENCY_OPTIONS = ["USD", "EUR", "PLN", "GBP", "CHF", "JPY"];
-const LANGUAGE_OPTIONS = [
-  { value: "en", label: "English" },
-  { value: "es", label: "Español" },
-  { value: "de", label: "Deutsch" },
-];
 
 const SettingsPreferences = observer(() => {
   const navigate = useNavigate();

@@ -12,10 +12,10 @@ import {
   FormDescription,
   FormField,
   FormItem,
+  FormLabel,
   FormMessage,
 } from "@/components/UI/Form";
 import { Input } from "@/components/UI/Input";
-import type { DiscoveredToken } from "@/services/assetDiscovery";
 import { useStore } from "@/stores/store";
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { TFunction } from "i18next";
@@ -42,13 +42,11 @@ const ImportToken = observer(() => {
     useState<
       Awaited<ReturnType<typeof qrlStore.getZrc20TokenDetails>>["token"]
     >();
-  // The address under review. Fed by the manual form or a discovered-token
-  // pick; both land on the same review screen before anything is stored.
+  // The manually entered address under review. Discovered tokens are
+  // picked and added from the list above the form, each one read from the
+  // chain first; a manual address shows its chain-read details here before
+  // anything is stored.
   const [reviewAddress, setReviewAddress] = useState("");
-  // Chain-read failure for a discovered token. Kept outside react-hook-form
-  // on purpose: setError flips isValid false and would leave the fetch
-  // button disabled until the user edits the (already correct) address.
-  const [discoveredError, setDiscoveredError] = useState("");
 
   const FormSchema = createFormSchema(t);
 
@@ -63,13 +61,11 @@ const ImportToken = observer(() => {
   const {
     handleSubmit,
     control,
-    setValue,
     formState: { isSubmitting, isValid },
     reset,
   } = form;
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
-    setDiscoveredError("");
     const tokenDetails = await qrlStore.getZrc20TokenDetails(
       formData.contractAddress,
     );
@@ -81,27 +77,8 @@ const ImportToken = observer(() => {
     }
   }
 
-  const onReviewDiscovered = async (discovered: DiscoveredToken) => {
-    const tokenDetails = await qrlStore.getZrc20TokenDetails(
-      discovered.address,
-    );
-    if (tokenDetails.error) {
-      // Surface the chain-read failure on the manual field, prefilled with
-      // the address, so the user can see what failed and retry from there.
-      setValue("contractAddress", discovered.address, {
-        shouldDirty: true,
-        shouldValidate: true,
-      });
-      setDiscoveredError(tokenDetails.error);
-      return;
-    }
-    setToken(tokenDetails.token);
-    setReviewAddress(discovered.address);
-  };
-
   const onCancelImport = () => {
     reset({ contractAddress: "" });
-    setDiscoveredError("");
     setToken(undefined);
     setReviewAddress("");
   };
@@ -121,7 +98,8 @@ const ImportToken = observer(() => {
         <div hidden={!!reviewAddress}>
           <Form {...form}>
             <BackButton />
-            <DiscoveredTokens onReview={onReviewDiscovered} />
+            {/* One panel, as in the web wallet: the discovered tokens to
+                pick from, then the manual contract address import. */}
             <form
               name="importAccount"
               aria-label="importAccount"
@@ -139,16 +117,19 @@ const ImportToken = observer(() => {
                 <CardHeader>
                   <CardTitle>{t("importToken.title")}</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-8">
+                <CardContent className="space-y-6">
+                  <DiscoveredTokens />
                   <FormField
                     control={control}
                     name="contractAddress"
                     render={({ field }) => (
                       <FormItem>
+                        <FormLabel>
+                          {t("importToken.contractAddress")}
+                        </FormLabel>
                         <FormControl>
                           <Input
                             {...field}
-                            aria-label={field.name}
                             autoComplete="off"
                             disabled={isSubmitting}
                             placeholder={t(
@@ -160,14 +141,6 @@ const ImportToken = observer(() => {
                           {t("importToken.contractAddressDescription")}
                         </FormDescription>
                         <FormMessage />
-                        {discoveredError && (
-                          <p
-                            className="text-sm font-medium text-destructive"
-                            role="alert"
-                          >
-                            {discoveredError}
-                          </p>
-                        )}
                       </FormItem>
                     )}
                   />
@@ -175,7 +148,7 @@ const ImportToken = observer(() => {
                 <CardFooter>
                   <Button
                     disabled={isSubmitting || !isValid}
-                    className="w-full"
+                    className="h-auto min-h-10 w-full whitespace-normal py-2"
                     type="submit"
                   >
                     {isSubmitting ? (

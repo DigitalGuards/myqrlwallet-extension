@@ -25,7 +25,9 @@ const ActiveAccountDisplay = observer(() => {
   const { activeAccount, getAccountBalance, qrlConnection } = qrlStore;
   const { accountAddress } = activeAccount;
   const { areBalancesStale } = qrlConnection;
-  const { showBalanceAndPrice, currency } = settingsStore;
+  const { currency } = settingsStore;
+  // Fiat values show on the pinned mainnet alone, and only when wanted.
+  const showFiat = settingsStore.showBalanceAndPrice && qrlStore.isFiatNetwork;
 
   const { t } = useTranslation();
   const { copied: copiedAddress, failed: copyFailed, copy } = useCopy();
@@ -45,10 +47,10 @@ const ActiveAccountDisplay = observer(() => {
     change24h,
   } = priceStore.quoteFor(currency);
   const fiatDisplay =
-    showBalanceAndPrice && price > 0
+    showFiat && price > 0
       ? formatFiatCompact(numericBalance, price, quoteCurrency)
       : "";
-  const showChange = showBalanceAndPrice && price > 0 && change24h !== 0;
+  const showChange = showFiat && price > 0 && change24h !== 0;
 
   return (
     <div className="flex flex-col items-center gap-2 text-center">

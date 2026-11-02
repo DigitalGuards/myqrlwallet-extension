@@ -72,7 +72,9 @@ export const GasFeeSelector = observer(
       ],
       [t],
     );
-    const { defaultGasTier, showBalanceAndPrice, currency } = settingsStore;
+    const { defaultGasTier, currency } = settingsStore;
+    const showFiat =
+      settingsStore.showBalanceAndPrice && qrlStore.isFiatNetwork;
     const { price: qrlPrice, currency: quoteCurrency } =
       priceStore.quoteFor(currency);
 
@@ -384,7 +386,7 @@ export const GasFeeSelector = observer(
                     ) : cost ? (
                       <>
                         <span>{getOptimalGasFee(cost)}</span>
-                        {showBalanceAndPrice && qrlPrice > 0 && (
+                        {showFiat && qrlPrice > 0 && (
                           <span className="text-[10px]">
                             {formatFiatCompact(cost, qrlPrice, quoteCurrency)}
                           </span>
@@ -442,7 +444,7 @@ export const GasFeeSelector = observer(
                 {showAdvanced && advancedCost && (
                   <div className="flex flex-col items-end text-right font-numeric text-xs text-muted-foreground">
                     <span>{getOptimalGasFee(advancedCost)}</span>
-                    {showBalanceAndPrice && qrlPrice > 0 && (
+                    {showFiat && qrlPrice > 0 && (
                       <span className="text-[10px]">
                         {formatFiatCompact(
                           advancedCost,

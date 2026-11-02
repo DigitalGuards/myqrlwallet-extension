@@ -96,6 +96,14 @@ describe("SettingsSecurity", () => {
     expect(screen.getByText(/CoinGecko API/)).toBeInTheDocument();
   });
 
+  it("says fiat values show on QRL mainnet only", () => {
+    renderComponent();
+
+    expect(
+      screen.getByText(/^Fiat values show on QRL mainnet only\./),
+    ).toBeInTheDocument();
+  });
+
   it("should call setShowBalanceAndPrice when toggling checkbox", async () => {
     const setShowBalanceAndPrice = vi.fn(() => Promise.resolve());
     const setRefreshEnabled = vi.fn();
@@ -114,13 +122,14 @@ describe("SettingsSecurity", () => {
     expect(setShowBalanceAndPrice).toHaveBeenCalledWith(false);
   });
 
-  it("should start auto-refresh when enabling balance display", async () => {
+  it("should start auto-refresh when enabling balance display on the pinned mainnet", async () => {
     const setShowBalanceAndPrice = vi.fn(() => Promise.resolve());
     const setRefreshEnabled = vi.fn();
     renderComponent(
       mockedStore({
         settingsStore: { showBalanceAndPrice: false, setShowBalanceAndPrice },
         priceStore: { setRefreshEnabled },
+        qrlStore: { isFiatNetwork: true },
       }),
     );
 
@@ -131,6 +140,26 @@ describe("SettingsSecurity", () => {
 
     expect(setShowBalanceAndPrice).toHaveBeenCalledWith(true);
     expect(setRefreshEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps price polling off when enabling balance display on the testnet", async () => {
+    const setShowBalanceAndPrice = vi.fn(() => Promise.resolve());
+    const setRefreshEnabled = vi.fn();
+    renderComponent(
+      mockedStore({
+        settingsStore: { showBalanceAndPrice: false, setShowBalanceAndPrice },
+        priceStore: { setRefreshEnabled },
+        qrlStore: { isFiatNetwork: false },
+      }),
+    );
+
+    await userEvent.click(
+      screen.getByLabelText("Show balance and token price"),
+    );
+
+    // The preference is still saved for a later mainnet session.
+    expect(setShowBalanceAndPrice).toHaveBeenCalledWith(true);
+    expect(setRefreshEnabled).toHaveBeenCalledExactlyOnceWith(false);
   });
 
   it("should stop auto-refresh when disabling balance display", async () => {

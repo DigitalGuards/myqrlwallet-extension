@@ -1,5 +1,6 @@
 import { DEFAULT_AUTO_LOCK_MINUTES } from "@/configuration/autoLockConfig";
 import i18n from "@/i18n";
+import { resolveLanguage } from "@/i18n/languages";
 import { LOCK_MANAGER_MESSAGES } from "@/scripts/lockManager/lockManager";
 import {
   resolveSidePanelPreferred,
@@ -138,8 +139,8 @@ class SettingsStore {
         this.currency = settings.currency;
       }
       if (settings.language) {
-        this.language = settings.language;
-        i18n.changeLanguage(settings.language).catch((error: unknown) => {
+        this.language = resolveLanguage(settings.language);
+        i18n.changeLanguage(this.language).catch((error: unknown) => {
           console.error("Failed to change language:", error);
         });
       }
@@ -223,8 +224,8 @@ class SettingsStore {
   }
 
   async setLanguage(language: string) {
-    this.language = language;
-    i18n.changeLanguage(language).catch((error: unknown) => {
+    this.language = resolveLanguage(language);
+    i18n.changeLanguage(this.language).catch((error: unknown) => {
       console.error("Failed to change language:", error);
     });
     await this.#persistSettings(["language"]);

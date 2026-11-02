@@ -138,14 +138,20 @@ vi.mock("@/functions/getHexSeedFromMnemonic", () => ({
   getHexSeedFromMnemonic: vi.fn(() => "0xhexseed"),
 }));
 
-vi.mock("@/scripts/utils/restrictedMethodsMiddlewareUtils", () => ({
-  revalidateAuthorizedDAppRequest: vi.fn(() =>
-    Promise.resolve({
-      canProceed: true,
-      proceedError: undefined,
-    }),
-  ),
-}));
+vi.mock(
+  "@/scripts/utils/restrictedMethodsMiddlewareUtils",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/scripts/utils/restrictedMethodsMiddlewareUtils")
+    >()),
+    revalidateAuthorizedDAppRequest: vi.fn(() =>
+      Promise.resolve({
+        canProceed: true,
+        proceedError: undefined,
+      }),
+    ),
+  }),
+);
 
 // No mocking here: this checks a real crypto invariant the Ledger-signing
 // path in QrlSendTransactionForContent relies on (F2). The mnemonic path
@@ -269,6 +275,7 @@ describe("QrlSendTransactionForContent", () => {
       dAppRequestStore: {
         dAppRequestData: {
           params: [overrides.requestParams || zndTransferRequest],
+          authorizedChainId: "0x301825",
         },
         setOnPermissionCallBack: (cb) => {
           // The store hands every permission callback a recorder bound to
@@ -1716,6 +1723,7 @@ describe("QrlSendTransactionForContent", () => {
         store.dAppRequestStore.dAppRequestData = {
           method: "qrl_sendTransaction",
           params,
+          authorizedChainId: "0x301825",
         };
         renderComponent(store, {
           transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
@@ -1743,6 +1751,7 @@ describe("QrlSendTransactionForContent", () => {
         store.dAppRequestStore.dAppRequestData = {
           method: "qrl_sendTransaction",
           params: { 0: { ...zndTransferRequest, value } },
+          authorizedChainId: "0x301825",
         };
         renderComponent(store, {
           transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
@@ -2651,7 +2660,10 @@ describe("QrlSendTransactionForContent fee pinning", () => {
         },
       },
       dAppRequestStore: {
-        dAppRequestData: { params: [requestParams] },
+        dAppRequestData: {
+          params: [requestParams],
+          authorizedChainId: "0x301825",
+        },
         setOnPermissionCallBack: (callback) => {
           approve = () => callback(true, addToResponseData);
         },
@@ -2787,7 +2799,10 @@ describe("QrlSendTransactionForContent fee pinning", () => {
         },
       },
       dAppRequestStore: {
-        dAppRequestData: { params: [transferRequest] },
+        dAppRequestData: {
+          params: [transferRequest],
+          authorizedChainId: "0x301825",
+        },
         setOnPermissionCallBack: (callback) => {
           approve = () => callback(true, addToResponseData);
         },

@@ -23,6 +23,7 @@ const makeStores = (options?: {
   isCacheStale?: boolean;
   isConnected?: boolean;
   areBalancesStale?: boolean;
+  isFiatNetwork?: boolean;
 }) => {
   const lockStore = observable({ isLocked: options?.isLocked ?? true });
   const settingsStore = observable(
@@ -35,6 +36,9 @@ const makeStores = (options?: {
   const qrlStore = observable(
     {
       qrlInstance: {},
+      // A pinned, verified mainnet unless a case says otherwise: these
+      // cases are about the lock and the setting.
+      isFiatNetwork: options?.isFiatNetwork ?? true,
       qrlConnection: {
         isConnected: options?.isConnected ?? false,
         areBalancesStale: options?.areBalancesStale ?? false,
@@ -194,6 +198,51 @@ describe("data lifecycle wiring", () => {
     });
     expect(priceStore.setRefreshEnabled).toHaveBeenLastCalledWith(true);
   });
+  it("never polls prices on the testnet, unlocked and with the setting on", async () => {
+    const { wire, lockStore, settingsStore, priceStore } = makeStores({
+      isLocked: false,
+      showBalanceAndPrice: true,
+      isCacheStale: true,
+      isFiatNetwork: false,
+    });
+    await wire();
+    runInAction(() => {
+      lockStore.isLocked = true;
+    });
+    runInAction(() => {
+      lockStore.isLocked = false;
+    });
+    runInAction(() => {
+      settingsStore.showBalanceAndPrice = false;
+    });
+    runInAction(() => {
+      settingsStore.showBalanceAndPrice = true;
+    });
+
+    expect(priceStore.setRefreshEnabled).toHaveBeenCalledExactlyOnceWith(false);
+    expect(priceStore.fetchPrices).not.toHaveBeenCalled();
+  });
+
+  it("follows the active network into and out of the pinned mainnet", async () => {
+    const { wire, qrlStore, priceStore } = makeStores({
+      isLocked: false,
+      showBalanceAndPrice: true,
+      isFiatNetwork: false,
+    });
+    await wire();
+    expect(priceStore.setRefreshEnabled).toHaveBeenLastCalledWith(false);
+
+    runInAction(() => {
+      qrlStore.isFiatNetwork = true;
+    });
+    expect(priceStore.setRefreshEnabled).toHaveBeenLastCalledWith(true);
+
+    runInAction(() => {
+      qrlStore.isFiatNetwork = false;
+    });
+    expect(priceStore.setRefreshEnabled).toHaveBeenLastCalledWith(false);
+  });
+
   it("arms the price reaction even when the settings read failed", async () => {
     // A failed load resolves with the defaults, so the wiring below still
     // has to run: without it the price refresh is dead for the session.

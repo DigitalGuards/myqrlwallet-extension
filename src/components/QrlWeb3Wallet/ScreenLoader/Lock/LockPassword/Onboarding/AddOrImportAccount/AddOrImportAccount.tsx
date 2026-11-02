@@ -145,7 +145,7 @@ const AddOrImportAccount = observer(
               inside the card. Without it the panel widens past the popup. */}
           <CardContent className="min-w-0">
             <Tabs defaultValue="mnemonic" className="w-full min-w-0">
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList wrapLabels className="grid w-full grid-cols-3">
                 <TabsTrigger value="mnemonic">
                   {t("importAccount.tabMnemonic")}
                 </TabsTrigger>
