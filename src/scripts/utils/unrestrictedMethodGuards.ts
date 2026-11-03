@@ -35,12 +35,13 @@ type RpcTransaction = {
         : Transaction[Field] | null;
 };
 
-// Web3 1.0.3 treats null transaction fields, including nested
-// common/customChain metadata, as unset and accepts creation calls
-// with an omitted recipient. Nested metadata fields can also be omitted.
-// Simulation also passes chain and hardfork strings through without applying
-// the literal restrictions in its published signing types.
-// This local view retains the input and method context for Web3 to normalize.
+// Web3 treats null transaction fields, including nested common/customChain
+// metadata, as unset and accepts creation calls with an omitted recipient.
+// Nested metadata fields can also be omitted. Simulation also passes chain
+// and hardfork strings through without applying the literal restrictions in
+// its published signing types. prepareRpcTransactionInput below reconciles
+// the fields web3 2.0.0 started refusing; everything else is left for Web3
+// to normalize.
 export type RpcTransactionContext = {
   call(
     transaction: RpcTransaction,
@@ -157,6 +158,77 @@ export const isRpcTransaction = (value: unknown): value is RpcTransaction => {
     (isUnsetRpcField(value.chain) || typeof value.chain === "string") &&
     (isUnsetRpcField(value.hardfork) || typeof value.hardfork === "string")
   );
+};
+
+const withoutNullFields = <T extends object>(record: T): T => {
+  const copy = { ...record };
+  for (const [key, field] of Object.entries(copy)) {
+    if (field === null) Reflect.deleteProperty(copy, key);
+  }
+  return copy;
+};
+
+const RPC_QUANTITY_FIELDS = [
+  "value",
+  "gas",
+  "gasLimit",
+  "type",
+  "maxFeePerGas",
+  "maxPriorityFeePerGas",
+  "nonce",
+  "chainId",
+  "networkId",
+] as const satisfies readonly (keyof RpcTransaction)[];
+
+/**
+ * Reconciles a dApp's qrl_estimateGas / qrl_call object with
+ * @theqrl/web3 2.0.0, so the node receives the same request it did on 1.0.3.
+ *
+ * 2.0.0 checks these objects locally before they reach the node, and it
+ * treats four kinds of input differently from 1.0.3:
+ *
+ * - `gasPrice` throws InvalidPropertiesForTransactionTypeError. 1.0.3
+ *   dropped the field from the request, so it is removed here.
+ * - `gas` and `gasLimit` that differ throw. 1.0.3 sent `gasLimit` as `gas`,
+ *   so `gasLimit` is folded into `gas` the same way.
+ * - An integral JS number above Number.MAX_SAFE_INTEGER throws
+ *   InvalidNumberError. 1.0.3 sent its exact value as a hex quantity, so it
+ *   is converted to that hex string. A fractional or negative number is
+ *   left as it is: 1.0.3 sent those on as values the node refuses
+ *   (-32602), and 2.0.0 either does the same or refuses them itself.
+ * - null fields, including those inside `common` and its `customChain`,
+ *   are sent as null. 1.0.3 left them out of the request, so they are
+ *   removed.
+ *
+ * The input is not modified; a prepared copy is returned.
+ */
+export const prepareRpcTransactionInput = (
+  transaction: RpcTransaction,
+): RpcTransaction => {
+  const prepared = withoutNullFields(transaction);
+  Reflect.deleteProperty(prepared, "gasPrice");
+  if (prepared.common) {
+    const common = withoutNullFields(prepared.common);
+    if (common.customChain) {
+      common.customChain = withoutNullFields(common.customChain);
+    }
+    prepared.common = common;
+  }
+  for (const key of RPC_QUANTITY_FIELDS) {
+    const field = prepared[key];
+    if (
+      typeof field === "number" &&
+      Number.isInteger(field) &&
+      field > Number.MAX_SAFE_INTEGER
+    ) {
+      prepared[key] = `0x${BigInt(field).toString(16)}`;
+    }
+  }
+  if (prepared.gasLimit !== undefined) {
+    prepared.gas = prepared.gasLimit;
+    delete prepared.gasLimit;
+  }
+  return prepared;
 };
 
 export const readRpcParameter = <T>(

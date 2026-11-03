@@ -256,6 +256,37 @@ describe.each([
     expect(send).toHaveBeenCalledOnce();
   });
 
+  // @theqrl/web3 2.0.0 refuses these locally; 1.0.3 sent the requests below.
+  it.each<{ input: Record<string, Json>; sent: Record<string, Json> }>([
+    {
+      input: { gasPrice: "0x3b9aca00", data: "0x" },
+      sent: { data: "0x" },
+    },
+    { input: { gasPrice: null }, sent: {} },
+    {
+      input: { gas: "0x5208", gasLimit: "0x6000" },
+      sent: { gas: "0x6000" },
+    },
+    { input: { gasLimit: "0x5208" }, sent: { gas: "0x5208" } },
+    { input: { value: 1e18 }, sent: { value: "0xde0b6b3a7640000" } },
+    { input: { gasLimit: 1e18 }, sent: { gas: "0xde0b6b3a7640000" } },
+  ])("sends $input as 1.0.3 did, as $sent", async ({ input, sent }) => {
+    const send = mockRpc(result);
+    const transaction = { to: ADDRESS, ...input };
+    const snapshot = structuredClone(transaction);
+
+    await expect(
+      executeUnrestrictedMethod({ method, params: [transaction] }),
+    ).resolves.toBe(result);
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        method,
+        params: [{ to: ADDRESS, ...sent }, "latest"],
+      }),
+    );
+    expect(transaction).toEqual(snapshot);
+  });
+
   describe.each([
     { field: "chain", metadata: (value: Json) => ({ chain: value }) },
     { field: "hardfork", metadata: (value: Json) => ({ hardfork: value }) },

@@ -16,6 +16,7 @@ import {
   isRpcNumberArray,
   isRpcString,
   isRpcTransaction,
+  prepareRpcTransactionInput,
   readRpcParameter,
   readRpcParams,
   type RpcBlockContext,
@@ -276,7 +277,9 @@ export const executeUnrestrictedMethod = async (
     const [estimateGasParam] = readRpcParams(req.params);
     const transactionContext: RpcTransactionContext = qrl;
     const estimatedGas = await transactionContext.estimateGas(
-      readRpcParameter(estimateGasParam, isRpcTransaction),
+      prepareRpcTransactionInput(
+        readRpcParameter(estimateGasParam, isRpcTransaction),
+      ),
     );
     return "0x".concat(estimatedGas.toString(16));
   } else if (method === UNRESTRICTED_METHODS.QRL_FEE_HISTORY) {
@@ -351,7 +354,9 @@ export const executeUnrestrictedMethod = async (
     const [transactionObj, blockParam] = readRpcParams(req.params);
     const transactionContext: RpcTransactionContext = qrl;
     const qrlCallResponse = await transactionContext.call(
-      readRpcParameter(transactionObj, isRpcTransaction),
+      prepareRpcTransactionInput(
+        readRpcParameter(transactionObj, isRpcTransaction),
+      ),
       readRpcParameter(blockParam, isOptionalRpcNumber),
     );
     return qrlCallResponse;

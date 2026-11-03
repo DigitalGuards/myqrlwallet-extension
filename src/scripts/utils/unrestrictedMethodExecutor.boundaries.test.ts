@@ -217,6 +217,9 @@ describe("unrestricted RPC parameter boundaries", () => {
       target: "call",
       result: "0x1234",
       expected: "0x1234",
+      // A null recipient is left out, as @theqrl/web3 1.0.3 did on the wire
+      // (prepareRpcTransactionInput); creation reads the same either way.
+      forwarded: [{ data: "0x6080" }, "latest"],
     },
     {
       method: METHODS.QRL_GET_CODE,
@@ -452,7 +455,15 @@ describe("unrestricted RPC parameter boundaries", () => {
       rpc.estimateGas.mockResolvedValue(21000n);
       rpc.call.mockResolvedValue("0x1234");
       await executeUnrestrictedMethod(request(method, [transaction]));
-      expect(rpc[target].mock.calls[0]?.[0]).toBe(transaction);
+      // Web3 gets a prepared copy (prepareRpcTransactionInput): every field
+      // and extension field is kept, and gasLimit is folded into gas, as
+      // @theqrl/web3 1.0.3 sent it. The dApp's object is left untouched.
+      const { gasLimit, ...rest } = transaction;
+      expect(rpc[target].mock.calls[0]?.[0]).not.toBe(transaction);
+      expect(rpc[target].mock.calls[0]?.[0]).toEqual({
+        ...rest,
+        gas: gasLimit,
+      });
       expect(serialize()).toBe(snapshot);
     },
   );
