@@ -1,6 +1,7 @@
 import { Buffer } from "buffer";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import Web3 from "@theqrl/web3";
+import { echoRpcResult } from "@/test-utils/rpcReply";
+import { HttpProvider } from "@theqrl/web3-providers-http";
 import type { Bytes } from "@theqrl/web3-types";
 import { toChecksumAddress } from "@theqrl/web3-utils";
 import { JsonRpcEngine } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
@@ -107,8 +108,8 @@ const expectRpcRoundTrip = async (
   const params = makeParams();
   const snapshot = structuredClone(expectedInput ?? params);
   const send = vi
-    .spyOn(Web3.providers.HttpProvider.prototype, "request")
-    .mockResolvedValue({ jsonrpc: "2.0", id: 1, result });
+    .spyOn(HttpProvider.prototype, "request")
+    .mockImplementation(echoRpcResult(result));
   const expectedRequest: unknown = expect.objectContaining({
     method,
     params: expectedParams,
@@ -189,7 +190,7 @@ describe.each([
         { to: ADDRESS, accessList: [{ address: ADDRESS, storageKeys: [key] }] },
       ];
       const send = vi
-        .spyOn(Web3.providers.HttpProvider.prototype, "request")
+        .spyOn(HttpProvider.prototype, "request")
         .mockRejectedValue(new Error("Access-list RPC unavailable"));
       const params = makeParams();
       await expect(
@@ -256,7 +257,7 @@ describe.each([
   it.each([null, false, 17, {}, [17], new Uint16Array(32), undefined])(
     "rejects malformed nested storage keys (%s) before RPC",
     async (key) => {
-      const send = vi.spyOn(Web3.providers.HttpProvider.prototype, "request");
+      const send = vi.spyOn(HttpProvider.prototype, "request");
       const params = [
         {
           to: ADDRESS,
@@ -283,11 +284,13 @@ describe.each([
 describe.each(byteInputs)(
   "other RPC byte boundaries: $name",
   ({ make, hex, key }) => {
+    // @theqrl/web3 2.0.0 refuses a reply for a hash other than the requested
+    // one, so the mocked node answers for the normalized hash.
     it.each<{ method: string; result: Json }>([
-      { method: METHODS.QRL_GET_TRANSACTION_BY_HASH, result: { hash: HEX } },
+      { method: METHODS.QRL_GET_TRANSACTION_BY_HASH, result: { hash: key } },
       {
         method: METHODS.QRL_GET_TRANSACTION_RECEIPT,
-        result: { transactionHash: HEX },
+        result: { transactionHash: key },
       },
     ])("normalizes the hash for $method", async ({ method, result }) => {
       await expectRpcRoundTrip(method, () => [make()], [key], result);

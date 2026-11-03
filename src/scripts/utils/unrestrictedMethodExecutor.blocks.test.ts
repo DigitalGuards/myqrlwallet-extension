@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import Web3 from "@theqrl/web3";
+import { echoRpcResult } from "@/test-utils/rpcReply";
+import { HttpProvider } from "@theqrl/web3-providers-http";
 import { JsonRpcEngine } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
 import { V3_CHAIN_ID } from "@/configuration/releaseProfile";
 import { UNRESTRICTED_METHODS as METHODS } from "../constants/requestConstants";
@@ -29,13 +30,14 @@ describe.each([
     method: METHODS.QRL_GET_BLOCK_BY_HASH,
     rpcMethod: METHODS.QRL_GET_BLOCK_BY_HASH,
     extraParams: [true],
-    result: { number: "0x1" },
+    // @theqrl/web3 2.0.0 refuses a block whose hash is not the requested one.
+    result: { number: "0x1", hash: HASH },
   },
   {
     method: METHODS.QRL_GET_BLOCK_BY_NUMBER,
     rpcMethod: METHODS.QRL_GET_BLOCK_BY_HASH,
     extraParams: [false],
-    result: { number: "0x1" },
+    result: { number: "0x1", hash: HASH },
   },
   {
     method: METHODS.QRL_GET_BLOCK_TRANSACTION_COUNT_BY_HASH,
@@ -70,8 +72,8 @@ describe.each([
       "preserves block hash input %s and the method result",
       async (hash) => {
         const send = vi
-          .spyOn(Web3.providers.HttpProvider.prototype, "request")
-          .mockResolvedValue({ jsonrpc: "2.0", id: 1, result });
+          .spyOn(HttpProvider.prototype, "request")
+          .mockImplementation(echoRpcResult(result));
         const params = [hash, ...extraParams];
         const snapshot = params.map((param) =>
           param instanceof Uint8Array ? new Uint8Array(param) : param,
@@ -93,7 +95,7 @@ describe.each([
     it.each([null, {}, false, [17], new Uint16Array(32)])(
       "rejects malformed block identifiers (%s) before RPC",
       async (block) => {
-        const send = vi.spyOn(Web3.providers.HttpProvider.prototype, "request");
+        const send = vi.spyOn(HttpProvider.prototype, "request");
 
         await expect(
           executeUnrestrictedMethod({
@@ -122,13 +124,13 @@ describe.each([
       const error = new Error("RPC refused the transaction lookup.");
       const report = vi.spyOn(console, "error").mockImplementation(() => {});
       const send = vi
-        .spyOn(Web3.providers.HttpProvider.prototype, "request")
-        .mockReturnValue(
+        .spyOn(HttpProvider.prototype, "request")
+        .mockImplementation((payload) =>
           rpcPending.then(() => {
             if (outcome === "failure") {
               throw error;
             }
-            return { jsonrpc: "2.0", id: 1, result };
+            return echoRpcResult(result)(payload);
           }),
         );
       const engine = new JsonRpcEngine();

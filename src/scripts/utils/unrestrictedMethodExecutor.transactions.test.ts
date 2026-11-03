@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import Web3 from "@theqrl/web3";
+import { echoRpcResult } from "@/test-utils/rpcReply";
+import { HttpProvider } from "@theqrl/web3-providers-http";
 import type { Transaction } from "@theqrl/web3-types";
 import { toChecksumAddress } from "@theqrl/web3-utils";
 import { JsonRpcEngine } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
@@ -53,8 +54,8 @@ const nullableFields = [
 
 const mockRpc = (result: string) =>
   vi
-    .spyOn(Web3.providers.HttpProvider.prototype, "request")
-    .mockResolvedValue({ jsonrpc: "2.0", id: 1, result });
+    .spyOn(HttpProvider.prototype, "request")
+    .mockImplementation(echoRpcResult(result));
 
 afterEach(() => {
   vi.restoreAllMocks();

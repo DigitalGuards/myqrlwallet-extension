@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { echoRpcResult } from "@/test-utils/rpcReply";
 import { UNRESTRICTED_METHODS as METHODS } from "../constants/requestConstants";
 import { V3_CHAIN_ID, V3_GENESIS_HASH } from "@/configuration/releaseProfile";
 import { executeUnrestrictedMethod } from "./unrestrictedMethodExecutor";
@@ -794,7 +795,7 @@ describe("Web3 creation-call compatibility", () => {
       const provider = new Web3.providers.HttpProvider("https://rpc.example");
       const send = vi
         .spyOn(provider, "request")
-        .mockResolvedValue({ jsonrpc: "2.0", id: 1, result: "0x1234" });
+        .mockImplementation(echoRpcResult("0x1234"));
       const web3 = new Web3({ provider });
       const callContext: RpcTransactionContext = web3.qrl;
       await expect(callContext.call(transaction, "latest")).resolves.toBe(
