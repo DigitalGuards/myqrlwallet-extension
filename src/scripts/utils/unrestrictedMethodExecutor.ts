@@ -16,6 +16,7 @@ import {
   isRpcNumberArray,
   isRpcString,
   isRpcTransaction,
+  prepareRpcTransactionInput,
   readRpcParameter,
   readRpcParams,
   type RpcBlockContext,
@@ -32,6 +33,8 @@ import {
 import Web3, { FMT_BYTES, FMT_NUMBER } from "@theqrl/web3";
 import { Web3RequestManager } from "@theqrl/web3-core";
 import { qrlRpcMethods } from "@theqrl/web3-rpc-methods";
+import { bytesToHex, numberToHex } from "@theqrl/web3-utils";
+import { isBlockTag, validator } from "@theqrl/web3-validator";
 import type { BaseProvider } from "@theqrl/qrl-wallet-provider/providers";
 import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
 import { prepareQip55LogFilter } from "./qip55LogFilter";
@@ -276,7 +279,9 @@ export const executeUnrestrictedMethod = async (
     const [estimateGasParam] = readRpcParams(req.params);
     const transactionContext: RpcTransactionContext = qrl;
     const estimatedGas = await transactionContext.estimateGas(
-      readRpcParameter(estimateGasParam, isRpcTransaction),
+      prepareRpcTransactionInput(
+        readRpcParameter(estimateGasParam, isRpcTransaction),
+      ),
     );
     return "0x".concat(estimatedGas.toString(16));
   } else if (method === UNRESTRICTED_METHODS.QRL_FEE_HISTORY) {
@@ -351,7 +356,9 @@ export const executeUnrestrictedMethod = async (
     const [transactionObj, blockParam] = readRpcParams(req.params);
     const transactionContext: RpcTransactionContext = qrl;
     const qrlCallResponse = await transactionContext.call(
-      readRpcParameter(transactionObj, isRpcTransaction),
+      prepareRpcTransactionInput(
+        readRpcParameter(transactionObj, isRpcTransaction),
+      ),
       readRpcParameter(blockParam, isOptionalRpcNumber),
     );
     return qrlCallResponse;
@@ -385,11 +392,27 @@ export const executeUnrestrictedMethod = async (
     return getSerializableObject(logs);
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_PROOF) {
     const [address, storageKeys, blockNumber] = readRpcParams(req.params);
-    const proof = await qrl.getProof(
+    // @theqrl/web3 2.0.0's getProof refuses a storage key shorter than 32
+    // bytes before RPC. go-qrl left-pads such a key and answers, and 1.0.3
+    // sent it on, so the request goes out raw, as qrl_getLogs does. Its
+    // params are built and checked the way 1.0.3 built them, at any key
+    // length: keys as hex, the block as a tag or hex quantity.
+    const block =
+      readRpcParameter(blockNumber, isOptionalRpcNumber) ?? "latest";
+    const params = [
       readRpcParameter(address, isRpcString),
-      readRpcParameter(storageKeys, isRpcBytesArray),
-      readRpcParameter(blockNumber, isOptionalRpcNumber),
-    );
+      readRpcParameter(storageKeys, isRpcBytesArray).map((key) =>
+        bytesToHex(key),
+      ),
+      typeof block === "string" && isBlockTag(block)
+        ? block
+        : numberToHex(block),
+    ];
+    validator.validate(["address", "bytes[]", "blockNumberOrTag"], params);
+    const proof: unknown = await new Web3RequestManager(provider).send({
+      method: "qrl_getProof",
+      params,
+    });
     return getSerializableObject(proof);
   } else if (method === UNRESTRICTED_METHODS.QRL_GET_STORAGE_AT) {
     const [address, storageSlot, blockNumber] = readRpcParams(req.params);

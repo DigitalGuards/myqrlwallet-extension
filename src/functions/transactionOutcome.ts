@@ -1,4 +1,5 @@
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
+import { HttpStatusError } from "@theqrl/web3-errors";
 
 const isReceiptQuantity = (value: unknown): value is string | number | bigint =>
   typeof value === "string" ||
@@ -67,12 +68,19 @@ export function transactionFailureUpdate(
     }
   }
   if (error && typeof error === "object") {
-    const rpcError =
-      "innerError" in error &&
-      error.innerError &&
-      typeof error.innerError === "object"
+    // @theqrl/web3 2.0.0 reports a non-2xx reply as an HttpStatusError whose
+    // innerError is the ResponseError carrying the node's error, one level
+    // deeper than 1.0.3's ResponseError held it.
+    const reply =
+      error instanceof HttpStatusError && error.innerError
         ? error.innerError
         : error;
+    const rpcError =
+      "innerError" in reply &&
+      reply.innerError &&
+      typeof reply.innerError === "object"
+        ? reply.innerError
+        : reply;
     // These JSON-RPC codes explicitly reject the request or transaction.
     if (
       "code" in rpcError &&

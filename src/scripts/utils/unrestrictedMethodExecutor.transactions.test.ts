@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import Web3 from "@theqrl/web3";
+import { echoRpcResult } from "@/test-utils/rpcReply";
+import { HttpProvider } from "@theqrl/web3-providers-http";
 import type { Transaction } from "@theqrl/web3-types";
 import { toChecksumAddress } from "@theqrl/web3-utils";
 import { JsonRpcEngine } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
@@ -53,8 +54,8 @@ const nullableFields = [
 
 const mockRpc = (result: string) =>
   vi
-    .spyOn(Web3.providers.HttpProvider.prototype, "request")
-    .mockResolvedValue({ jsonrpc: "2.0", id: 1, result });
+    .spyOn(HttpProvider.prototype, "request")
+    .mockImplementation(echoRpcResult(result));
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -253,6 +254,49 @@ describe.each([
       }),
     ).rejects.toThrow("RPC unavailable");
     expect(send).toHaveBeenCalledOnce();
+  });
+
+  // @theqrl/web3 2.0.0 refuses these locally; 1.0.3 sent the requests below.
+  it.each<{ input: Record<string, Json>; sent: Record<string, Json> }>([
+    {
+      input: { gasPrice: "0x3b9aca00", data: "0x" },
+      sent: { data: "0x" },
+    },
+    { input: { gasPrice: null }, sent: {} },
+    {
+      input: { gas: "0x5208", gasLimit: "0x6000" },
+      sent: { gas: "0x6000" },
+    },
+    { input: { gasLimit: "0x5208" }, sent: { gas: "0x5208" } },
+    { input: { value: 1e18 }, sent: { value: "0xde0b6b3a7640000" } },
+    { input: { gasLimit: 1e18 }, sent: { gas: "0xde0b6b3a7640000" } },
+  ])("sends $input as 1.0.3 did, as $sent", async ({ input, sent }) => {
+    const send = mockRpc(result);
+    const transaction = { to: ADDRESS, ...input };
+    const snapshot = structuredClone(transaction);
+
+    await expect(
+      executeUnrestrictedMethod({ method, params: [transaction] }),
+    ).resolves.toBe(result);
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        method,
+        params: [{ to: ADDRESS, ...sent }, "latest"],
+      }),
+    );
+    expect(transaction).toEqual(snapshot);
+  });
+
+  it("refuses a fractional quantity before RPC, which the node refused too", async () => {
+    const send = mockRpc(result);
+
+    await expect(
+      executeUnrestrictedMethod({
+        method,
+        params: [{ to: ADDRESS, nonce: 1.5 }],
+      }),
+    ).rejects.toThrow("nonce: 1.5");
+    expect(send).not.toHaveBeenCalled();
   });
 
   describe.each([

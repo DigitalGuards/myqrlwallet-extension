@@ -83,11 +83,14 @@ const requestOrigin = (sender: unknown): string =>
   new URL(isApprovalSender(sender) ? (sender.url ?? "") : "").origin;
 
 /**
- * `qrl_signTypedData_v4` is the Keccak-256, 32-byte-address EIP-712 layout.
- * Only `qrl_signTypedData` (QRL-SIGN-TYPED-v1 / v2) carries QIP-55 addresses.
+ * `qrl_signTypedData_v4` is the method @theqrl/web3's signTypedData sends:
+ * a Keccak-256 digest over its own typed-data layout (QRLTypedData with a
+ * QRLTypedDataDomain since @theqrl/web3 2.0.0). The wallet signs typed data
+ * only through `qrl_signTypedData` (QRL-SIGN-TYPED-v1 / v2), so the v4
+ * method is refused before any approval surface opens.
  */
 export const UNSUPPORTED_TYPED_DATA_V4_MESSAGE =
-  "qrl_signTypedData_v4 cannot encode QIP-55 addresses. Use qrl_signTypedData, which signs the QRL-SIGN-TYPED-v2 layout.";
+  "qrl_signTypedData_v4 is not supported by this wallet. Use qrl_signTypedData, which signs the QRL-SIGN-TYPED-v2 layout.";
 
 /**
  * The single answer every authorization precheck gives while the wallet is
@@ -560,6 +563,22 @@ const isPrivateOrLoopbackHost = (hostname: string): boolean => {
   return isPrivateIpv4Address(host);
 };
 
+const urlHasCredentials = (url: URL) =>
+  url.username !== "" || url.password !== "";
+
+/**
+ * True when the URL carries a user name or password. @theqrl/web3 2.0.0
+ * refuses such a URL when it builds the provider, and browsers refuse to
+ * fetch one, so the wallet never accepts it as an RPC endpoint.
+ */
+export const hasUrlCredentials = (urlString: string): boolean => {
+  try {
+    return urlHasCredentials(new URL(urlString));
+  } catch {
+    return false;
+  }
+};
+
 /**
  * @param allowPrivateHosts true only for the wallet's own add-chain form,
  * where the user typed the URL themselves and running a local node is a
@@ -572,7 +591,8 @@ const isAcceptableUrl = (urlString: string, allowPrivateHosts = false) => {
     if (
       url.hostname.length === 0 ||
       url.pathname.length === 0 ||
-      url.hostname !== decodeURIComponent(url.hostname)
+      url.hostname !== decodeURIComponent(url.hostname) ||
+      urlHasCredentials(url)
     ) {
       return false;
     }

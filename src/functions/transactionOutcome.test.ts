@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { HttpStatusError, ResponseError } from "@theqrl/web3-errors";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { needsReceipt, transactionFailureUpdate } from "./transactionOutcome";
 
@@ -43,6 +44,38 @@ describe("receipt evidence", () => {
       submissionRejected: true,
     });
     expect(needsReceipt({ ...historyEntry, ...update })).toBe(false);
+  });
+
+  // The shape @theqrl/web3 2.0.0 gives a refusal sent with a non-2xx status:
+  // the node's error sits inside the ResponseError an HttpStatusError wraps.
+  const httpRefusal = (status: number, code: number) =>
+    new HttpStatusError(
+      status,
+      "Bad Request",
+      undefined,
+      new ResponseError({
+        jsonrpc: "2.0",
+        id: 1,
+        error: { code, message: "invalid argument 0" },
+      }),
+    );
+
+  it("distinguishes explicit request rejection sent with a non-2xx status", () => {
+    expect(transactionFailureUpdate(httpRefusal(400, -32602), "0xabc")).toEqual(
+      { pendingStatus: "failed", status: false, submissionRejected: true },
+    );
+  });
+
+  it("keeps other errors sent with a non-2xx status reconcilable", () => {
+    expect(transactionFailureUpdate(httpRefusal(500, -32000), "0xabc")).toEqual(
+      { pendingStatus: "unknown", status: false },
+    );
+    expect(
+      transactionFailureUpdate(
+        new HttpStatusError(502, "Bad Gateway"),
+        "0xabc",
+      ),
+    ).toEqual({ pendingStatus: "unknown", status: false });
   });
 
   it.each([0n, 0, false, "0x0", "0", "false"])(

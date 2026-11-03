@@ -14,6 +14,10 @@ vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSendTransaction/QrlSendTransaction",
   () => ({ default: () => <div>Mocked Qrl Send Transaction</div> }),
 );
+vi.mock(
+  "@/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSignTypedDataV4/QrlSignTypedDataV4",
+  () => ({ default: () => <div>Mocked Signature Request</div> }),
+);
 
 describe("DAppRequestFeature", () => {
   afterEach(cleanup);
@@ -48,8 +52,35 @@ describe("DAppRequestFeature", () => {
       }),
     );
 
+    expect(screen.getByText("Mocked Qrl Send Transaction")).toBeInTheDocument();
+  });
+
+  it("renders the signature request for personal_sign", () => {
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          dAppRequestData: { method: RESTRICTED_METHODS.PERSONAL_SIGN },
+        },
+      }),
+    );
+
+    expect(screen.getByText("Mocked Signature Request")).toBeInTheDocument();
+  });
+
+  it("renders nothing for qrl_signTypedData_v4, which the middleware refuses", () => {
+    const { container } = renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          dAppRequestData: {
+            method: RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4,
+          },
+        },
+      }),
+    );
+
     expect(
-      screen.getByText("Mocked Qrl Send Transaction"),
-    ).toBeInTheDocument();
+      screen.queryByText("Mocked Signature Request"),
+    ).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 });

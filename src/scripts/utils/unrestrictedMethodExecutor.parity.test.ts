@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import Web3 from "@theqrl/web3";
+import { echoRpcResult } from "@/test-utils/rpcReply";
+import { HttpProvider } from "@theqrl/web3-providers-http";
 import { toChecksumAddress } from "@theqrl/web3-utils";
 import { JsonRpcEngine } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
 import type { Json } from "@theqrl/qrl-wallet-provider/utils";
@@ -78,8 +79,8 @@ describe.each([
         };
         const snapshot = structuredClone(transaction);
         const send = vi
-          .spyOn(Web3.providers.HttpProvider.prototype, "request")
-          .mockResolvedValue({ jsonrpc: "2.0", id: 1, result });
+          .spyOn(HttpProvider.prototype, "request")
+          .mockImplementation(echoRpcResult(result));
 
         await expect(
           executeUnrestrictedMethod({ method, params: [transaction] }),
@@ -109,7 +110,7 @@ describe.each([
       const snapshot = structuredClone(transaction);
       const error = new Error("Simulation RPC unavailable");
       const send = vi
-        .spyOn(Web3.providers.HttpProvider.prototype, "request")
+        .spyOn(HttpProvider.prototype, "request")
         .mockRejectedValue(error);
 
       await expect(
@@ -163,12 +164,8 @@ describe.each([
       "returns the legacy empty result for block $block and every index representation",
       async ({ block, rpcBlock, byHash }) => {
         const send = vi
-          .spyOn(Web3.providers.HttpProvider.prototype, "request")
-          .mockResolvedValue({
-            jsonrpc: "2.0",
-            id: 1,
-            result: { hash: HASH, value: "0x1" },
-          });
+          .spyOn(HttpProvider.prototype, "request")
+          .mockImplementation(echoRpcResult({ hash: HASH, value: "0x1" }));
         for (const index of [0, 0n, "0x0"]) {
           send.mockClear();
           const params = [block, index];
@@ -198,9 +195,9 @@ describe.each([
           completeRpc = resolve;
         });
         const send = vi
-          .spyOn(Web3.providers.HttpProvider.prototype, "request")
-          .mockReturnValue(
-            release.then(() => ({ jsonrpc: "2.0", id: 1, result: rpcResult })),
+          .spyOn(HttpProvider.prototype, "request")
+          .mockImplementation((payload) =>
+            release.then(() => echoRpcResult(rpcResult)(payload)),
           );
         let settled = false;
         const pending = run(["latest", "0x0"]).then((response) => {

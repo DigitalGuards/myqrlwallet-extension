@@ -1,6 +1,7 @@
 import { Buffer } from "buffer";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import Web3 from "@theqrl/web3";
+import { echoRpcResult } from "@/test-utils/rpcReply";
+import { HttpProvider } from "@theqrl/web3-providers-http";
 import type { Bytes } from "@theqrl/web3-types";
 import { toChecksumAddress } from "@theqrl/web3-utils";
 import { JsonRpcEngine } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
@@ -107,8 +108,8 @@ const expectRpcRoundTrip = async (
   const params = makeParams();
   const snapshot = structuredClone(expectedInput ?? params);
   const send = vi
-    .spyOn(Web3.providers.HttpProvider.prototype, "request")
-    .mockResolvedValue({ jsonrpc: "2.0", id: 1, result });
+    .spyOn(HttpProvider.prototype, "request")
+    .mockImplementation(echoRpcResult(result));
   const expectedRequest: unknown = expect.objectContaining({
     method,
     params: expectedParams,
@@ -163,18 +164,18 @@ describe.each([
         ],
         extension: { retain: ["first", "second"] },
       });
-      // Web3 normalizes the original nested key arrays in place on origin/dev.
       const accessList = [
         { address: ADDRESS, storageKeys: [OTHER_KEY, key, OTHER_KEY] },
         { address: OTHER_ADDRESS, storageKeys: [key, key] },
         { address: ADDRESS, storageKeys: [] },
       ];
+      // @theqrl/web3 2.0.0 normalizes a copy, so the dApp's own key arrays
+      // stay as sent. 1.0.3 rewrote them in place.
       await expectRpcRoundTrip(
         method,
         () => [transaction()],
         [{ to: ADDRESS, accessList }, "latest"],
         result,
-        [{ ...transaction(), accessList }],
       );
     });
 
@@ -189,7 +190,7 @@ describe.each([
         { to: ADDRESS, accessList: [{ address: ADDRESS, storageKeys: [key] }] },
       ];
       const send = vi
-        .spyOn(Web3.providers.HttpProvider.prototype, "request")
+        .spyOn(HttpProvider.prototype, "request")
         .mockRejectedValue(new Error("Access-list RPC unavailable"));
       const params = makeParams();
       await expect(
@@ -201,7 +202,9 @@ describe.each([
           params: [...normalizedParams, "latest"],
         }),
       );
-      expect(params).toEqual(normalizedParams);
+      // 2.0.0 leaves the dApp's key arrays as sent (1.0.3 normalized them
+      // in place).
+      expect(params).toEqual(makeParams());
 
       send.mockClear();
       const middlewareParams = makeParams();
@@ -218,7 +221,7 @@ describe.each([
           params: [...normalizedParams, "latest"],
         }),
       );
-      expect(middlewareParams).toEqual(normalizedParams);
+      expect(middlewareParams).toEqual(makeParams());
     });
   });
 
@@ -248,7 +251,6 @@ describe.each([
         () => [{ to: ADDRESS, accessList: make() }],
         [{ to: ADDRESS, accessList: expected }, "latest"],
         result,
-        [{ to: ADDRESS, accessList: expected }],
       );
     },
   );
@@ -256,7 +258,7 @@ describe.each([
   it.each([null, false, 17, {}, [17], new Uint16Array(32), undefined])(
     "rejects malformed nested storage keys (%s) before RPC",
     async (key) => {
-      const send = vi.spyOn(Web3.providers.HttpProvider.prototype, "request");
+      const send = vi.spyOn(HttpProvider.prototype, "request");
       const params = [
         {
           to: ADDRESS,
@@ -283,16 +285,19 @@ describe.each([
 describe.each(byteInputs)(
   "other RPC byte boundaries: $name",
   ({ make, hex, key }) => {
+    // @theqrl/web3 2.0.0 refuses a reply for a hash other than the requested
+    // one, so the mocked node answers for the normalized hash.
     it.each<{ method: string; result: Json }>([
-      { method: METHODS.QRL_GET_TRANSACTION_BY_HASH, result: { hash: HEX } },
+      { method: METHODS.QRL_GET_TRANSACTION_BY_HASH, result: { hash: key } },
       {
         method: METHODS.QRL_GET_TRANSACTION_RECEIPT,
-        result: { transactionHash: HEX },
+        result: { transactionHash: key },
       },
     ])("normalizes the hash for $method", async ({ method, result }) => {
       await expectRpcRoundTrip(method, () => [make()], [key], result);
     });
 
+    // A short key goes out unpadded, as 1.0.3 sent it; go-qrl left-pads it.
     it("normalizes mixed proof keys and preserves order and duplicates", async () => {
       await expectRpcRoundTrip(
         METHODS.QRL_GET_PROOF,
@@ -303,3 +308,88 @@ describe.each(byteInputs)(
     });
   },
 );
+
+describe("qrl_getProof wire format", () => {
+  it.each([
+    { block: 5, sent: "0x5" },
+    { block: "0x05", sent: "0x5" },
+    { block: "5", sent: "0x5" },
+    { block: "0x10", sent: "0x10" },
+    { block: "latest", sent: "latest" },
+    { block: "pending", sent: "pending" },
+    { block: "earliest", sent: "earliest" },
+    { block: "safe", sent: "safe" },
+    { block: "finalized", sent: "finalized" },
+  ])("sends the block $block as $sent", async ({ block, sent }) => {
+    await expectRpcRoundTrip(
+      METHODS.QRL_GET_PROOF,
+      () => [ADDRESS, [HEX], block],
+      [ADDRESS, [HEX], sent],
+      { storageProof: [] },
+    );
+  });
+
+  it("sends uppercase and 0X-prefixed keys as lowercase 0x hex", async () => {
+    await expectRpcRoundTrip(
+      METHODS.QRL_GET_PROOF,
+      () => [ADDRESS, [`0x${"AB".repeat(32)}`, `0X${"ab".repeat(32)}`]],
+      [ADDRESS, [`0x${"ab".repeat(32)}`, `0x${"ab".repeat(32)}`], "latest"],
+      { storageProof: [] },
+    );
+  });
+
+  it("forwards a key longer than 32 bytes for the node to judge", async () => {
+    const longKey = `0x${"11".repeat(64)}`;
+    await expectRpcRoundTrip(
+      METHODS.QRL_GET_PROOF,
+      () => [ADDRESS, [longKey]],
+      [ADDRESS, [longKey], "latest"],
+      { storageProof: [] },
+    );
+  });
+
+  it("returns the node's proof as the node sent it", async () => {
+    const proof = {
+      address: ADDRESS,
+      accountProof: [`0xf9${"ab".repeat(80)}`],
+      balance: "0x1bc16d674ec80000",
+      codeHash: `0x${"c5".repeat(32)}`,
+      nonce: "0x5",
+      storageHash: `0x${"56".repeat(32)}`,
+      storageProof: [
+        { key: "0x11", value: "0x0", proof: [`0xf8${"cd".repeat(40)}`] },
+      ],
+    };
+    await expectRpcRoundTrip(
+      METHODS.QRL_GET_PROOF,
+      () => [ADDRESS, ["0x11"], "latest"],
+      [ADDRESS, ["0x11"], "latest"],
+      proof,
+    );
+  });
+
+  // 1.0.3 refused each of these before RPC too, except the lowercase q
+  // address: the address check follows 2.0.0's rules, as the wrapped
+  // getProof did on this branch.
+  it.each([
+    { name: "odd-length key", params: [ADDRESS, ["0x0"]] },
+    { name: "key without 0x", params: [ADDRESS, ["abcd"]] },
+    { name: "non-hex key", params: [ADDRESS, ["0xzz"]] },
+    { name: "negative block", params: [ADDRESS, [HEX], -1] },
+    { name: "fractional block", params: [ADDRESS, [HEX], 1.5] },
+    { name: "unknown block tag", params: [ADDRESS, [HEX], "committed"] },
+    { name: "lowercase q address", params: [`q${ADDRESS.slice(1)}`, [HEX]] },
+    { name: "short address", params: [`Q${"a".repeat(40)}`, [HEX]] },
+  ])("refuses a $name before RPC", async ({ params }) => {
+    const send = vi.spyOn(HttpProvider.prototype, "request");
+    const snapshot = structuredClone(params);
+    await expect(
+      executeUnrestrictedMethod({ method: METHODS.QRL_GET_PROOF, params }),
+    ).rejects.toThrow("Web3 validator found");
+    await expect(
+      handleMiddlewareRequest(METHODS.QRL_GET_PROOF, params),
+    ).resolves.toMatchObject({ id: 1, jsonrpc: "2.0", error: { code: 4200 } });
+    expect(send).not.toHaveBeenCalled();
+    expect(structuredClone(params)).toEqual(snapshot);
+  });
+});
