@@ -267,11 +267,20 @@ class QrlStore {
     this.setInitProgress({ active: true, fraction: 0.06, phase: "chain" });
     await this.refreshBlockchainData();
     if (epoch !== this.initializationEpoch) return;
-    const qrlHttpProvider = new Web3.providers.HttpProvider(
-      this.qrlConnection.blockchain.defaultRpcUrl || "http://localhost",
-    );
-    const { qrl } = new Web3({ provider: qrlHttpProvider });
-    this.qrlInstance = qrl;
+    try {
+      const qrlHttpProvider = new Web3.providers.HttpProvider(
+        this.qrlConnection.blockchain.defaultRpcUrl || "http://localhost",
+      );
+      const { qrl } = new Web3({ provider: qrlHttpProvider });
+      this.qrlInstance = qrl;
+    } catch (error) {
+      // @theqrl/web3 2.0.0 refuses some URLs when it builds the provider,
+      // such as one carrying a user name or password. The previous chain's
+      // provider must not stay in use, so this chain gets none: it shows as
+      // disconnected and startup still runs to the end, clearing the loader.
+      this.qrlInstance = undefined;
+      console.error("[initializeBlockchain] Cannot use the RPC URL:", error);
+    }
 
     this.setInitProgress({ active: true, fraction: 0.18, phase: "network" });
     await this.fetchQrlConnection();
