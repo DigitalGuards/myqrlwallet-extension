@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { seedToAccount } from "@theqrl/web3-qrl-accounts";
 import {
   decryptWalletFile,
   parseEncryptedWalletFile,
@@ -181,4 +182,28 @@ describe("walletFileImport", () => {
       ).resolves.toEqual({ address: WALLET.address, mnemonic, hexSeed });
     },
   );
+
+  // The web wallet's importer reads the seed with or without 0x, and
+  // @theqrl/web3 1.0.3 did too; 2.0.0 parses only a lowercase 0x prefix.
+  const EXTENDED_SEED_BODY =
+    "0100000580a227e1b6d5a89df7723a71e9c03535e9447ec6d160b68c0ba845c68a05c59226cce711eb3db312c022ccf9577be7";
+  it.each([
+    { form: "0x-prefixed", stored: `0x${EXTENDED_SEED_BODY}` },
+    { form: "unprefixed", stored: EXTENDED_SEED_BODY },
+    { form: "0X-prefixed", stored: `0X${EXTENDED_SEED_BODY}` },
+  ])("returns a $form hex seed in the form web3 parses", async ({ stored }) => {
+    const text = await makeEncryptedWalletFile(
+      WALLET,
+      PASSWORD,
+      JSON.stringify({ hexSeed: stored }),
+    );
+    const { hexSeed } = await decryptWalletFile(
+      parseEncryptedWalletFile(text),
+      PASSWORD,
+    );
+    expect(hexSeed).toBe(`0x${EXTENDED_SEED_BODY}`);
+    expect(seedToAccount(hexSeed).address).toBe(
+      seedToAccount(`0x${EXTENDED_SEED_BODY}`).address,
+    );
+  });
 });
