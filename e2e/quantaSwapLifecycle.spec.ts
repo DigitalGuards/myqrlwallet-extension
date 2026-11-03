@@ -292,9 +292,11 @@ test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect",
         `chrome-extension://${extensionId}/index.html${query}`,
       );
       await expect(surface.locator("#root")).not.toBeEmpty();
+      // The shell no longer carries a "v3 Private" line; the header's
+      // network chip names the network.
       await expect(
         surface.getByText("v3 Private", { exact: true }),
-      ).toBeVisible();
+      ).toHaveCount(0);
       await surface.close();
     }
     expect(pageErrors).toEqual([]);
