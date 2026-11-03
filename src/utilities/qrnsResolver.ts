@@ -57,16 +57,16 @@ export const normalizeQrnsName = (name: string): string => {
   const labels = lowered.split(".");
   for (const label of labels) {
     if (label === "") {
-      throw new QrnsNameError(`QRNS name contains an empty label: ${name}`);
+      throw new QrnsNameError(`QNS name contains an empty label: ${name}`);
     }
     if (!/^[a-z0-9-]+$/.test(label)) {
       throw new QrnsNameError(
-        "QRNS labels accept only ASCII letters a-z, digits, and hyphens",
+        "QNS labels accept only ASCII letters a-z, digits, and hyphens",
       );
     }
     if (/^..--/.test(label)) {
       throw new QrnsNameError(
-        `QRNS label uses a reserved double-hyphen pattern: ${label}`,
+        `QNS label uses a reserved double-hyphen pattern: ${label}`,
       );
     }
   }
@@ -85,7 +85,7 @@ const namehash = (name: string): string => {
 
 const encodeBytes32Argument = (value: string): string => {
   if (!/^0x[0-9a-f]{64}$/.test(value)) {
-    throw new Error("QRNS namehash must be a 32-byte lowercase hex value");
+    throw new Error("QNS namehash must be a 32-byte lowercase hex value");
   }
   return `${value.slice(2)}${"0".repeat(64)}`;
 };
@@ -96,11 +96,11 @@ const decodeNativeAddress = (
 ): string | null => {
   if (result === "0x") return null;
   if (typeof result !== "string" || !/^0x[0-9a-fA-F]*$/.test(result)) {
-    throw new Error(`QRNS ${source} returned a non-hex qrl_call result`);
+    throw new Error(`QNS ${source} returned a non-hex qrl_call result`);
   }
   if (result.length !== 2 + QRL_ADDRESS_HEX_LENGTH) {
     throw new Error(
-      `QRNS ${source} returned ${(result.length - 2) / 2} address bytes; expected 64`,
+      `QNS ${source} returned ${(result.length - 2) / 2} address bytes; expected 64`,
     );
   }
 
@@ -114,10 +114,10 @@ const validateRpcUrl = (rpcUrl: string): void => {
   try {
     parsed = new URL(rpcUrl);
   } catch {
-    throw new Error("QRNS requires a valid HTTP RPC URL");
+    throw new Error("QNS requires a valid HTTP RPC URL");
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("QRNS requires a valid HTTP RPC URL");
+    throw new Error("QNS requires a valid HTTP RPC URL");
   }
 };
 
@@ -159,7 +159,7 @@ export const isQrnsName = (input: string): boolean => {
 /**
  * Resolve through the native Hyperion QNS interface used by @qns/sdk.
  *
- * The web3 QRNS helper calls addr(bytes32,uint256), while the native resolver
+ * The web3 QNS helper calls addr(bytes32,uint256), while the native resolver
  * exposes addr(bytes32). This adapter sends the two exact qrl_call frames
  * directly. A canonical per-chain registry is mandatory, so the stale web3
  * default registry placeholder can never be selected implicitly.
@@ -178,18 +178,18 @@ export async function resolveQrnsName(
     registryAddress === null ||
     registryAddress === ""
   ) {
-    throw new Error("QRNS is not configured for this chain");
+    throw new Error("QNS is not configured for this chain");
   }
   if (!isCanonicalQrlAddress(registryAddress)) {
     throw new Error(
-      "QRNS registry must be a canonical uppercase-Q address with 128 hexadecimal characters and a valid checksum",
+      "QNS registry must be a canonical uppercase-Q address with 128 hexadecimal characters and a valid checksum",
     );
   }
   validateRpcUrl(rpcUrl);
 
   const normalizedName = normalizeQrnsName(name);
   if (!normalizedName.endsWith(QRNS_SUFFIX)) {
-    throw new QrnsNameError("QRNS names used by the wallet must end in .qrl");
+    throw new QrnsNameError("QNS names used by the wallet must end in .qrl");
   }
 
   const encodedNode = encodeBytes32Argument(namehash(normalizedName));
@@ -197,13 +197,13 @@ export async function resolveQrnsName(
 
   const expectedChainId = normalizeChainId(chainId);
   if (!expectedChainId) {
-    throw new Error("QRNS requires a valid selected chain ID");
+    throw new Error("QNS requires a valid selected chain ID");
   }
   const connectedChainId = normalizeChainId(
     await requestManager.send({ method: "qrl_chainId", params: [] }),
   );
   if (connectedChainId !== expectedChainId) {
-    throw new Error("QRNS RPC chain does not match the selected chain");
+    throw new Error("QNS RPC chain does not match the selected chain");
   }
 
   const registryCode: unknown = await requestManager.send({
@@ -211,7 +211,7 @@ export async function resolveQrnsName(
     params: [registryAddress, "latest"],
   });
   if (!hasDeployedBytecode(registryCode)) {
-    throw new Error("QRNS registry is not deployed on the selected chain");
+    throw new Error("QNS registry is not deployed on the selected chain");
   }
 
   const resolverResult = await qrlCall(
@@ -221,7 +221,7 @@ export async function resolveQrnsName(
   );
   const resolverAddress = decodeNativeAddress(resolverResult, "registry");
   if (!resolverAddress) {
-    throw new Error(`QRNS name has no resolver: ${normalizedName}`);
+    throw new Error(`QNS name has no resolver: ${normalizedName}`);
   }
 
   const addressResult = await qrlCall(
@@ -231,7 +231,7 @@ export async function resolveQrnsName(
   );
   const resolvedAddress = decodeNativeAddress(addressResult, "resolver");
   if (!resolvedAddress) {
-    throw new Error(`QRNS name has no address record: ${normalizedName}`);
+    throw new Error(`QNS name has no address record: ${normalizedName}`);
   }
   return resolvedAddress;
 }

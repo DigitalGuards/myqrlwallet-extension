@@ -5,6 +5,9 @@ export const V3_GENESIS_HASH =
   "0xd15407991193e6c23b733dc6bf9c628deaff8f9b6e252aa0d60030952b3e3ea4";
 export const V3_RPC_URL = "https://qrlwallet.com/api/qrl-rpc/testnet";
 export const V3_STORAGE_PREFIX = `v3:${V3_CHAIN_ID}:${V3_GENESIS_HASH}:`;
+/** The QNS registry on the v3 testnet, the same one qrlwallet.com resolves .qrl names with. */
+export const V3_QNS_REGISTRY =
+  "Qcfc5f3242cE7d413F308D4181fd45D441d535298d78fd2d26833c2650408f636B46590dc10D23221480eFac958705Ba6C266eEB16B5aeafA64202715Adc84424";
 
 export const MAINNET_RPC_URL = "https://qrlwallet.com/api/qrl-rpc/mainnet";
 
