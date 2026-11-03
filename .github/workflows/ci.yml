@@ -1,40 +1,54 @@
 name: CI
 
-# Lint, test, and build qrl-web3-wallet on push/PR.
+# Lint, test and build the extension.
 #
-# Release artifacts (the Chrome extension .zip) are produced separately by
-# `build.yaml`, which fires on `release: created` and uploads to the GitHub
-# Release. semantic-release in `release.yml` triggers that flow.
+# Every pull request into dev or main runs the full gate, and that run is the
+# test of the change: merged commits do not run CI again. A weekly run on dev
+# and manual dispatch surface drift from the registry, the clock or external
+# pins. GitHub runs scheduled workflows from the default branch (main), so the
+# weekly run takes this file from main and checks out dev.
+#
+# Releases are cut by hand: the extension zip is built locally and attached to
+# the GitHub release. chrome-web-store.yml uploads that zip to the Chrome Web
+# Store and release-announcement.yml announces the release on Discord.
 
 on:
-  push:
-    branches: [main, master, dev]
   pull_request:
-    branches: [main, master, dev]
+    branches: [main, dev]
+  schedule:
+    # Mondays at 03:00 UTC.
+    - cron: "0 3 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # Empty means the ref of the triggering event.
+  CHECKOUT_REF: ${{ github.event_name == 'schedule' && 'dev' || '' }}
+
+# Actions are pinned by commit SHA (resolved 2026-11-03), so a rewritten tag
+# cannot inject code. A bump updates the SHA and the version comment together.
 jobs:
-  build:
-    name: Lint, Test, Build
+  lint:
+    name: Lint and types
     runs-on: ubuntu-latest
+    # These steps took 1.5 min at p90 over the last 30 runs.
+    timeout-minutes: 5
     steps:
       - name: Checkout
-        # actions/checkout v6 (resolved 2026-08-17). Mutable tags are not
-        # used: any future bump must update the SHA explicitly so that a
-        # tag-rewrite cannot inject untrusted code.
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The lint ratchet compares its allowances with a base commit.
           fetch-depth: 0
+          ref: ${{ env.CHECKOUT_REF }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22.x"
           cache: "npm"
@@ -45,14 +59,15 @@ jobs:
       - name: Audit production dependencies
         run: node scripts/audit-gate.mjs
 
-      - name: Lint
-        run: npm run lint
-
+      # The ratchet lints the whole tree with the configuration of npm run
+      # lint and fails on any finding outside its allowances, including
+      # warnings and unused disable directives, so CI runs ESLint once. On a
+      # failure, npm run lint prints the findings with line numbers.
       - name: Check lint ratchet
         env:
-          LINT_RATCHET_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.event.before || '' }}
+          LINT_RATCHET_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: |
-          if [ -n "$LINT_RATCHET_BASE" ] && [ "$LINT_RATCHET_BASE" != "0000000000000000000000000000000000000000" ]; then
+          if [ -n "$LINT_RATCHET_BASE" ]; then
             git fetch --no-tags origin "$LINT_RATCHET_BASE"
           else
             git fetch --no-tags origin +refs/heads/dev:refs/remotes/origin/dev
@@ -61,35 +76,117 @@ jobs:
               LINT_RATCHET_BASE="$(git rev-parse HEAD^1)"
             fi
           fi
-          npm run lint:ratchet -- --base-ref "$LINT_RATCHET_BASE"
+          if ! npm run lint:ratchet -- --base-ref "$LINT_RATCHET_BASE"; then
+            echo "::group::ESLint findings"
+            npm run lint || true
+            echo "::endgroup::"
+            exit 1
+          fi
 
       - name: Typecheck build tools
         run: npx tsc --noEmit -p tsconfig.node.json --composite false
 
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    # 8 min at p90 before the rawWriters split.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.x"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
       - name: Test
         run: npm test
+
+  e2e:
+    name: Build and browser integration
+    runs-on: ubuntu-latest
+    # 4.6 min at p90 over the last 30 runs.
+    timeout-minutes: 10
+    env:
+      # Immutable QuantaSwap origin/dev commit tested by this extension
+      # composition. The build cache key uses it too.
+      QUANTASWAP_REF: 46a8c7b43dd47f65049d1e663b9775e6f7c2cc62
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Checkout tested QuantaSwap frontend
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: DigitalGuards/QuantaSwap
+          ref: ${{ env.QUANTASWAP_REF }}
+          path: quantaswap
+
+      # Both lockfiles key this npm cache, so it also holds the QuantaSwap
+      # packages.
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.x"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            quantaswap/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
 
       - name: Build
         run: npm run build
 
-      - name: Checkout tested QuantaSwap frontend
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Restore QuantaSwap frontend build
+        id: quantaswap-dist
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          repository: DigitalGuards/QuantaSwap
-          # Immutable origin/dev commit tested by this extension composition.
-          ref: 46a8c7b43dd47f65049d1e663b9775e6f7c2cc62
-          path: quantaswap
+          path: quantaswap/frontend/dist
+          key: quantaswap-dist-${{ runner.os }}-${{ env.QUANTASWAP_REF }}-${{ hashFiles('quantaswap/frontend/package-lock.json') }}
 
+      # e2e/quantaSwapUi.spec.ts loads ethers from these node_modules, so the
+      # install also runs when the build comes from the cache.
       - name: Install QuantaSwap frontend dependencies
         working-directory: quantaswap/frontend
         run: npm ci --no-audit --no-fund
 
       - name: Build QuantaSwap frontend
+        if: steps.quantaswap-dist.outputs.cache-hit != 'true'
         working-directory: quantaswap/frontend
         run: npm run build
 
+      - name: Read the Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Every spec launches channel "chromium", the full Chromium build, so
+      # the headless shell is left out.
+      - name: Restore Chromium
+        id: chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+
+      - name: Install Chromium system dependencies
+        timeout-minutes: 5
+        run: npx playwright install-deps chromium
+
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        if: steps.chromium.outputs.cache-hit != 'true'
+        timeout-minutes: 5
+        run: npx playwright install --no-shell chromium
 
       - name: Browser integration
         run: npx playwright test

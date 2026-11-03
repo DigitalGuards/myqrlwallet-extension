@@ -42,7 +42,7 @@ CI runs `node scripts/audit-gate.mjs` after `npm ci`. The gate checks production
 
 Production TypeScript, unit tests, mocks and browser integration tests use the same strict typed linting. Every linted TypeScript file belongs to a tsconfig project, including tests and build tools.
 
-The sorted block at the end of `eslint.config.js` lists all remaining findings, including tests, by exact file and rule. Entries may only be removed as cleanup slices shrink the ratchet to zero. After completing a cleanup slice, run `npm run lint:ratchet:update`; regeneration refuses new pairs. CI runs `npm run lint:ratchet` after lint to catch stale entries. Rules disabled for an existing pair cover that entire file, so review new changes in those files for additional debt.
+The sorted block at the end of `eslint.config.js` lists all remaining findings, including tests, by exact file and rule. Entries may only be removed as cleanup slices shrink the ratchet to zero. After completing a cleanup slice, run `npm run lint:ratchet:update`; regeneration refuses new pairs. CI lints with `npm run lint:ratchet` alone: it lints the whole tree with the configuration of `npm run lint`, fails on new findings and stale entries, and accepts only removals against the pull request base. Rules disabled for an existing pair cover that entire file, so review new changes in those files for additional debt.
 
 Browser tests exercise the built extension, including popup, side panel, expanded tab, account import, provider discovery, permission changes and service-worker restart recovery. The composition test uses the exact QuantaSwap revision pinned in CI.
 
