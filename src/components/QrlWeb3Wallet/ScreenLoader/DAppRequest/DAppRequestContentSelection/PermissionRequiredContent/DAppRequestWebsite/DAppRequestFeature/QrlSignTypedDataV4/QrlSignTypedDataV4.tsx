@@ -16,8 +16,8 @@ const QrlSignTypedDataV4 = observer(() => {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <div className="text-2xl font-bold">{t('dapp.signature.title')}</div>
-        <div>{t('dapp.signature.description')}</div>
+        <div className="text-2xl font-bold">{t("dapp.signature.title")}</div>
+        <div>{t("dapp.signature.description")}</div>
       </div>
       <div className="flex flex-col gap-4">
         {isPersonalSign && <PersonalSign />}
