@@ -1760,10 +1760,11 @@ describe("QrlSendTransactionForContent", () => {
           await invokePermissionCallback(true);
         });
 
+        // Every form reaches web3 as the same exact hex quantity.
         expect(
           store.qrlStore.qrlInstance?.accounts.signTransaction,
         ).toHaveBeenCalledWith(
-          objectContaining({ value, gas: zndTransferRequest.gas }),
+          objectContaining({ value: "0x30", gas: zndTransferRequest.gas }),
           "0xhexseed",
         );
         expect(record).toHaveBeenCalledWith({ transactionHash: "0xtxhash" });
@@ -2041,11 +2042,15 @@ describe("QrlSendTransactionForContent", () => {
           });
           await act(async () => invokePermissionCallback(true));
 
+          // Web3 gets each quantity as the exact hex of what the screen
+          // showed (BigInt of the request), whatever form the dApp used.
+          const asHex = (quantity: string | number | null | undefined) =>
+            quantity == null ? undefined : `0x${BigInt(quantity).toString(16)}`;
           expect(signer).toHaveBeenCalledTimes(1);
           expect(signer).toHaveBeenCalledWith(
             objectContaining({
-              value: requestParams.value ?? undefined,
-              gas: requestParams.gas ?? undefined,
+              value: asHex(requestParams.value),
+              gas: asHex(requestParams.gas),
             }),
             EXTENDED_SEED,
           );
@@ -2055,13 +2060,10 @@ describe("QrlSendTransactionForContent", () => {
           expect(simulations).toHaveLength(1);
           const expectedSimulation: Record<string, unknown> = {};
           if (requestParams.value != null) {
-            expectedSimulation.value =
-              requestParams.value === ""
-                ? ""
-                : `0x${BigInt(requestParams.value).toString(16)}`;
+            expectedSimulation.value = asHex(requestParams.value);
           }
           if (requestParams.gas != null) {
-            expectedSimulation.gas = `0x${BigInt(requestParams.gas).toString(16)}`;
+            expectedSimulation.gas = asHex(requestParams.gas);
           }
           expect(simulations[0]?.[0].params).toEqual([
             objectContaining(expectedSimulation),

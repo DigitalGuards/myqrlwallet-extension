@@ -141,6 +141,18 @@ const readTransactionQuantity = (value: unknown): TransactionQuantity => {
   return value;
 };
 
+/**
+ * A dApp quantity as the exact hex string this screen showed for it.
+ *
+ * The screen reads gas and value with BigInt(), and @theqrl/web3 1.0.3
+ * signed that same number. 2.0.0 refuses several forms BigInt reads: an
+ * empty value, binary strings ("0b110000") and JS numbers above
+ * Number.MAX_SAFE_INTEGER (InvalidNumberError, InvalidGas). Web3 gets the
+ * hex form, so what is signed stays what was approved.
+ */
+const toHexQuantity = (value: TransactionQuantity): string =>
+  `0x${BigInt(value).toString(16)}`;
+
 type ApprovalTransaction = {
   from?: string | null;
   to?: string | null;
@@ -366,7 +378,7 @@ const QrlSendTransactionForContent = observer(
               from: request.from ?? undefined,
               ...(request.to ? { to: request.to } : {}),
               ...(request.data ? { data: request.data } : {}),
-              ...(request.value ? { value: request.value } : {}),
+              ...(request.value ? { value: toHexQuantity(request.value) } : {}),
             },
             BlockTags.PENDING,
           );
@@ -726,8 +738,8 @@ const QrlSendTransactionForContent = observer(
           ...(to && { to }),
           // Use Web3's defaults for null optional fields.
           data: data ?? undefined,
-          gas: gas ?? undefined,
-          value: value ?? undefined,
+          gas: gas == null ? undefined : toHexQuantity(gas),
+          value: value == null ? undefined : toHexQuantity(value),
           nonce: qrlInstance ? readTransactionQuantity(nonce) : undefined,
         };
         pendingTransactionObject = transactionObject;
@@ -923,8 +935,8 @@ const QrlSendTransactionForContent = observer(
           chainId: requireSigningNetwork(blockchain).chainId,
           from,
           to,
-          gas,
-          value,
+          gas: toHexQuantity(gas),
+          value: toHexQuantity(value),
           nonce: qrlInstance ? readTransactionQuantity(nonce) : undefined,
         };
         pendingTransactionObject = transactionObject;
