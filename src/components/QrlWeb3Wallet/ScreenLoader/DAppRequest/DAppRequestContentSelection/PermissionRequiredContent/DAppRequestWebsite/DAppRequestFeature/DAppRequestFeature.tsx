@@ -16,7 +16,6 @@ const DAppRequestFeature = observer(() => {
       return <QrlRequestAccount />;
     case RESTRICTED_METHODS.QRL_SEND_TRANSACTION:
       return <QrlSendTransaction />;
-    case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA_V4:
     case RESTRICTED_METHODS.PERSONAL_SIGN:
       return <QrlSignTypedDataV4 />;
     case RESTRICTED_METHODS.QRL_SIGN_MESSAGE:
