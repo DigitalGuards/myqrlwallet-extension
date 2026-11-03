@@ -301,7 +301,7 @@ describe("dApp chain authorization", () => {
   });
 });
 
-describe("custom-chain QRNS registry validation", () => {
+describe("custom-chain QNS registry validation", () => {
   const chain = {
     chainName: "Local QRL",
     chainId: "0x301825",
@@ -323,7 +323,7 @@ describe("custom-chain QRNS registry validation", () => {
     `q${CHECKSUM_ACCOUNT.slice(1)}`,
     `0x${CHECKSUM_ACCOUNT.slice(1)}`,
     `Q${CHECKSUM_ACCOUNT.slice(1).toLowerCase()}`,
-  ])("rejects a non-QIP-55 QRNS registry (%s)", async (qrnsRegistryAddress) => {
+  ])("rejects a non-QIP-55 QNS registry (%s)", async (qrnsRegistryAddress) => {
     const result = await checkWalletAddQrlChainParams(
       { ...chain, qrnsRegistryAddress },
       true,
@@ -336,7 +336,7 @@ describe("custom-chain QRNS registry validation", () => {
   });
 
   it.each([undefined, null, "", CHECKSUM_ACCOUNT])(
-    "accepts an empty or canonical QRNS registry (%s)",
+    "accepts an empty or canonical QNS registry (%s)",
     async (qrnsRegistryAddress) => {
       const result = await checkWalletAddQrlChainParams(
         { ...chain, qrnsRegistryAddress },

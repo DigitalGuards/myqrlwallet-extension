@@ -1351,8 +1351,17 @@ describe("TokenTransfer", () => {
     expect(sendQuantaButton).toBeEnabled();
   });
 
-  it("fails closed with a clear state when QRNS is not configured", async () => {
-    renderComponent();
+  it("fails closed with a clear state when QNS is not configured", async () => {
+    // A custom chain without a registry (the built-in testnet ships one).
+    renderComponent(
+      mockedStore({
+        qrlStore: {
+          qrlConnection: {
+            blockchain: { qrnsRegistryAddress: undefined },
+          },
+        },
+      }),
+    );
     await waitForEditing();
 
     await userEvent.type(
@@ -1361,13 +1370,13 @@ describe("TokenTransfer", () => {
     );
 
     expect(
-      await screen.findByText("QRNS is not configured for this chain"),
+      await screen.findByText("QNS is not configured for this chain"),
     ).toBeInTheDocument();
     expect(mockResolveQrnsName).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Send Quanta" })).toBeDisabled();
   });
 
-  it("binds a configured QRNS result to native signing", async () => {
+  it("binds a configured QNS result to native signing", async () => {
     mockResolveQrnsName.mockResolvedValue(ACCOUNT_B);
     const mockSignNativeToken = vi.fn().mockResolvedValue(successSignResult);
 
@@ -1434,7 +1443,7 @@ describe("TokenTransfer", () => {
     });
   });
 
-  it("uses the bound QRNS address for ZRC-20 gas estimation", async () => {
+  it("uses the bound QNS address for ZRC-20 gas estimation", async () => {
     mockResolveQrnsName.mockResolvedValue(ACCOUNT_B);
     const mockGetZrc20TokenGas = vi.fn().mockResolvedValue("0.001");
 
@@ -1486,7 +1495,7 @@ describe("TokenTransfer", () => {
     );
   });
 
-  it("ignores an older in-flight QRNS result after the name changes", async () => {
+  it("ignores an older in-flight QNS result after the name changes", async () => {
     const alice = deferred<string>();
     const bob = deferred<string>();
     mockResolveQrnsName

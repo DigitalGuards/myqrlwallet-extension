@@ -139,8 +139,18 @@ describe("NFTTransfer", () => {
     expect(sendButton).toBeDisabled();
   });
 
-  it("fails closed when the active chain has no QRNS registry", async () => {
-    renderComponent();
+  it("fails closed when the active chain has no QNS registry", async () => {
+    // A custom chain without a registry (the built-in testnet ships one).
+    renderComponent(
+      defaultState,
+      mockedStore({
+        qrlStore: {
+          qrlConnection: {
+            blockchain: { qrnsRegistryAddress: undefined },
+          },
+        },
+      }),
+    );
 
     await userEvent.type(
       screen.getByRole("textbox", { name: "receiverAddress" }),
@@ -148,13 +158,13 @@ describe("NFTTransfer", () => {
     );
 
     expect(
-      await screen.findByText("QRNS is not configured for this chain"),
+      await screen.findByText("QNS is not configured for this chain"),
     ).toBeInTheDocument();
     expect(mockResolveQrnsName).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Send NFT" })).toBeDisabled();
   });
 
-  it("uses the current configured QRNS result for NFT signing", async () => {
+  it("uses the current configured QNS result for NFT signing", async () => {
     mockResolveQrnsName.mockResolvedValue(RESOLVED_ACCOUNT);
     const mockSignNftTransfer = vi.fn().mockResolvedValue({
       transactionHash: "0xtxhash",
@@ -274,7 +284,7 @@ describe("NFTTransfer", () => {
     expect(updateTransaction).not.toHaveBeenCalled();
   });
 
-  it("ignores an older in-flight QRNS result after the name changes", async () => {
+  it("ignores an older in-flight QNS result after the name changes", async () => {
     const alice = deferred<string>();
     const bob = deferred<string>();
     mockResolveQrnsName

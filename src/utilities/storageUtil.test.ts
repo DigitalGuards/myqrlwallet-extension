@@ -1,4 +1,8 @@
-import { V3_STORAGE_PREFIX } from "@/configuration/releaseProfile";
+import {
+  V3_CHAIN_ID,
+  V3_QNS_REGISTRY,
+  V3_STORAGE_PREFIX,
+} from "@/configuration/releaseProfile";
 const profileStorageKey = (key: string) => `${V3_STORAGE_PREFIX}${key}`;
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
@@ -472,10 +476,7 @@ describe("StorageUtil", () => {
         isCustomChain: true,
         nativeCurrency: { name: "QRL", symbol: "QRL", decimals: 18 },
       };
-      await StorageUtil.setAllBlockChains([
-        staleBuiltin,
-        customWithQrlSymbol,
-      ]);
+      await StorageUtil.setAllBlockChains([staleBuiltin, customWithQrlSymbol]);
       const result = await StorageUtil.getAllBlockChains();
       expect(result[0].nativeCurrency).toEqual({
         name: "Quanta",
@@ -488,6 +489,36 @@ describe("StorageUtil", () => {
         symbol: "QRL",
         decimals: 18,
       });
+    });
+
+    it("fills the v3 QNS registry on a stored built-in testnet that lacks one", async () => {
+      const v3Builtin = {
+        ...chain1,
+        chainId: V3_CHAIN_ID,
+        isCustomChain: false,
+      };
+      const ownRegistry = toChecksumAddress(`Q${"a".repeat(128)}`);
+      const customV3 = {
+        ...chain2,
+        chainId: "0x3",
+        isCustomChain: true,
+      };
+      await StorageUtil.setAllBlockChains([v3Builtin, customV3]);
+      let result = await StorageUtil.getAllBlockChains();
+      expect(result[0].qrnsRegistryAddress).toBe(V3_QNS_REGISTRY);
+      // Custom chains keep their own registry setting.
+      expect(result[1].qrnsRegistryAddress).toBeUndefined();
+
+      // A registry already stored on the built-in chain stays as it is.
+      await StorageUtil.setAllBlockChains([
+        { ...v3Builtin, qrnsRegistryAddress: ownRegistry },
+      ]);
+      result = await StorageUtil.getAllBlockChains();
+      expect(result[0].qrnsRegistryAddress).toBe(ownRegistry);
+    });
+
+    it("ships the v3 QNS registry as a canonical QIP-55 address", () => {
+      expect(toChecksumAddress(V3_QNS_REGISTRY)).toBe(V3_QNS_REGISTRY);
     });
 
     it("should return default blockchains when none stored", async () => {
@@ -527,7 +558,7 @@ describe("StorageUtil", () => {
       expect(result.chainId).toBe("0x1");
     });
 
-    it("persists a canonical QIP-55 QRNS registry", async () => {
+    it("persists a canonical QIP-55 QNS registry", async () => {
       await StorageUtil.setAllBlockChains([
         { ...chain1, qrnsRegistryAddress: ACCOUNT },
       ]);
@@ -541,7 +572,7 @@ describe("StorageUtil", () => {
     });
 
     it.each([undefined, null, ""])(
-      "stores an absent QRNS registry without a field (%s)",
+      "stores an absent QNS registry without a field (%s)",
       async (qrnsRegistryAddress) => {
         await StorageUtil.setAllBlockChains([
           { ...chain1, qrnsRegistryAddress },
@@ -560,12 +591,10 @@ describe("StorageUtil", () => {
       `0x${ACCOUNT.slice(1)}`,
       `Q${ACCOUNT.slice(1).toLowerCase()}`,
     ])(
-      "rejects an invalid QRNS registry before persistence (%s)",
+      "rejects an invalid QNS registry before persistence (%s)",
       async (qrnsRegistryAddress) => {
         await expect(
-          StorageUtil.setAllBlockChains([
-            { ...chain1, qrnsRegistryAddress },
-          ]),
+          StorageUtil.setAllBlockChains([{ ...chain1, qrnsRegistryAddress }]),
         ).rejects.toThrow("128 hexadecimal characters");
         expect(localStore[profileStorageKey("BLOCKCHAINS")]).toBeUndefined();
       },
@@ -578,7 +607,7 @@ describe("StorageUtil", () => {
       `0x${ACCOUNT.slice(1)}`,
       `Q${ACCOUNT.slice(1).toLowerCase()}`,
     ])(
-      "hides a stored noncanonical QRNS registry without rewriting it (%s)",
+      "hides a stored noncanonical QNS registry without rewriting it (%s)",
       async (qrnsRegistryAddress) => {
         localStore[profileStorageKey("BLOCKCHAINS")] = {
           ALL_BLOCKCHAINS: [{ ...chain1, qrnsRegistryAddress }],
@@ -797,7 +826,7 @@ describe("StorageUtil", () => {
       expect(result?.accounts).toEqual([ACCOUNT]);
     });
 
-    it("stores and returns only a canonical QRNS registry for dApp chains", async () => {
+    it("stores and returns only a canonical QNS registry for dApp chains", async () => {
       await StorageUtil.setDAppsConnectedAccountsData({
         ...connectedData,
         blockchains: [{ ...connectedChain, qrnsRegistryAddress: ACCOUNT }],
@@ -818,7 +847,7 @@ describe("StorageUtil", () => {
     });
 
     it.each([undefined, null, ""])(
-      "stores an absent dApp-chain QRNS registry without a field (%s)",
+      "stores an absent dApp-chain QNS registry without a field (%s)",
       async (qrnsRegistryAddress) => {
         await StorageUtil.setDAppsConnectedAccountsData({
           ...connectedData,
@@ -845,7 +874,7 @@ describe("StorageUtil", () => {
       `0x${ACCOUNT.slice(1)}`,
       `Q${ACCOUNT.slice(1).toLowerCase()}`,
     ])(
-      "rejects a noncanonical QRNS registry before storing a dApp chain (%s)",
+      "rejects a noncanonical QNS registry before storing a dApp chain (%s)",
       async (qrnsRegistryAddress) => {
         await expect(
           StorageUtil.setDAppsConnectedAccountsData({
@@ -857,7 +886,7 @@ describe("StorageUtil", () => {
       },
     );
 
-    it("hides a noncanonical QRNS registry from a stored dApp chain without rewriting it", async () => {
+    it("hides a noncanonical QNS registry from a stored dApp chain without rewriting it", async () => {
       const registryAddress = `q${ACCOUNT.slice(1)}`;
       localStore[profileStorageKey("DAPPS")] = {
         ALL_DAPPS: {
