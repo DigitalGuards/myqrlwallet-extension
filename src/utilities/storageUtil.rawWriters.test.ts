@@ -1408,7 +1408,7 @@ describe("round 3 real grant callers", () => {
 
 describe("targeted field boundaries", () => {
   it.each([undefined, null, ""])(
-    "clears an existing QRNS registry with %j",
+    "clears an existing QNS registry with %j",
     async (qrnsRegistryAddress) => {
       const f = fixture(false, 1);
       set(

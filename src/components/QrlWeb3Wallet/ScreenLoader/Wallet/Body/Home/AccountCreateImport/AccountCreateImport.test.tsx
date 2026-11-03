@@ -13,7 +13,6 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
-import { ROUTES } from "@/router/router";
 import AccountCreateImport from "./AccountCreateImport";
 
 const { mockGetTokenContractsList, mockGetNFTCollectionsList } = vi.hoisted(
@@ -167,7 +166,51 @@ describe("AccountCreateImport", () => {
     expect(connectLedgerButton).toBeEnabled();
   });
 
-  it("puts the active account heading above the balance card with the network badge beside it", () => {
+  it.each([
+    ["opened normally", false, "after"],
+    ["opened from the account list", true, "before"],
+  ])(
+    "places Add accounts, when %s, %s the active account",
+    (_label, addAccountsFirst, position) => {
+      render(
+        <StoreProvider
+          value={mockedStore({
+            qrlStore: {
+              activeAccount: {
+                accountAddress: "Q205046e6A6E159eD6ACedE46A36CAD6D449C80A1",
+              },
+            },
+          })}
+        >
+          <MemoryRouter
+            initialEntries={[
+              {
+                pathname: "/",
+                state: addAccountsFirst ? { addAccountsFirst: true } : null,
+              },
+            ]}
+          >
+            <TooltipProvider>
+              <AccountCreateImport />
+            </TooltipProvider>
+          </MemoryRouter>
+        </StoreProvider>,
+      );
+
+      const addAccounts = screen.getByText("Add accounts");
+      const heading = screen.getByRole("heading", {
+        level: 2,
+        name: "Active account",
+      });
+      const addAccountsComesFirst =
+        (addAccounts.compareDocumentPosition(heading) &
+          Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0;
+      expect(addAccountsComesFirst).toBe(position === "before");
+    },
+  );
+
+  it("puts the active account heading above the balance card with no second network badge", () => {
     renderComponent(
       mockedStore({
         qrlStore: {
@@ -187,21 +230,13 @@ describe("AccountCreateImport", () => {
       level: 2,
       name: "Active account",
     });
-    const headingRow = heading.parentElement;
-    if (!headingRow) throw new Error("heading row missing");
-    const badge = within(headingRow).getByRole("link", {
-      name: /Test Chain Name/,
-    });
-    expect(badge).toHaveAttribute("href", ROUTES.CHAIN_CONNECTIVITY);
-    // A long custom chain name truncates inside a shrinkable badge, so the
-    // heading keeps whole words at the 320px side-panel width.
-    expect(badge).toHaveClass("min-w-0");
-    expect(within(badge).getByText("Test Chain Name")).toHaveClass("truncate");
-    expect(heading).not.toHaveClass("min-w-0");
-    // The heading row sits outside the card that holds the balance and the
+    // The header's network chip names the network; Home shows it once.
+    expect(
+      screen.queryByRole("link", { name: /Test Chain Name/ }),
+    ).not.toBeInTheDocument();
+    // The heading sits outside the card that holds the balance and the
     // Send / History / Receive actions.
     const balance = screen.getByText("Mocked Active Account Display");
-    expect(headingRow).not.toContainElement(balance);
     const card = balance.closest<HTMLElement>(".surface-ember");
     if (!card) throw new Error("balance card missing");
     expect(card).not.toContainElement(heading);

@@ -25,7 +25,7 @@ import {
   Usb,
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import ActiveAccountDisplay from "./ActiveAccountDisplay/ActiveAccountDisplay";
 import TokensCardContent from "./ActiveAccountDisplay/TokensCardContent/TokensCardContent";
@@ -35,7 +35,7 @@ import StorageUtil from "@/utilities/storageUtil";
 import { ZRC_20_ITEMS_DISPLAY_LIMIT } from "@/constants/zrc20Token";
 import { NFT_ITEMS_DISPLAY_LIMIT } from "@/constants/nftToken";
 import { cn } from "@/utilities/stylingUtil";
-import ChainBadge from "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Header/ChainBadge/ChainBadge";
+import { wantsAddAccountsFirst } from "../homeNavigation";
 
 // Send / History / Receive share one row down to a 320px side panel, so
 // they carry tighter metrics than a full-width button and grow back to the
@@ -108,24 +108,61 @@ const AccountCreateImport = observer(() => {
   // outline variant, matching "Import an existing account" and
   // "Connect Ledger", so three solid blocks of brand blue do not compete
   // with it in the narrow side panel.
+  // Opened from the account list, Home leads with "Add accounts".
+  const location = useLocation();
+  const addAccountsFirst = wantsAddAccountsFirst(location.state);
+  const addAccountsCard = (
+    <Card className="w-full">
+      <CardHeader>
+        <CardTitle>{t("home.addAccounts")}</CardTitle>
+        <CardDescription>{t("home.addAccountsDescription")}</CardDescription>
+      </CardHeader>
+      <CardFooter className="flex-col gap-4">
+        <Link className="w-full" to={ROUTES.CREATE_ACCOUNT}>
+          <Button
+            className="h-auto min-h-10 w-full whitespace-normal py-2"
+            type="button"
+            variant="outline"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            {t("home.createAccount")}
+          </Button>
+        </Link>
+        <Link className="w-full" to={ROUTES.IMPORT_ACCOUNT}>
+          <Button
+            className="h-auto min-h-10 w-full whitespace-normal py-2"
+            type="button"
+            variant="outline"
+          >
+            <Download className="mr-2 h-4 w-4" />
+            {t("home.importAccount")}
+          </Button>
+        </Link>
+        <Link className="w-full" to={ROUTES.IMPORT_LEDGER}>
+          <Button
+            className="h-auto min-h-10 w-full whitespace-normal py-2"
+            type="button"
+            variant="outline"
+          >
+            <Usb className="mr-2 h-4 w-4" />
+            {t("home.connectLedger")}
+          </Button>
+        </Link>
+      </CardFooter>
+    </Card>
+  );
+
   return (
     <div className="page-enter flex w-full min-w-0 flex-col gap-8">
+      {addAccountsFirst && addAccountsCard}
       {hasActiveAccount && (
         <>
-          {/* The page heading sits above the card with the network badge on
-              its right, the arrangement the web wallet uses. The header
-              chip shows only the chain icon; this one names the chain. */}
-          <div className="-mb-4 flex min-w-0 items-center justify-between gap-3">
-            {/* The heading keeps whole words (its minimum width is its
-                longest word); the badge takes the remaining space and
-                truncates a long chain name. */}
-            <h2 className="break-words text-2xl font-semibold leading-tight tracking-tight">
-              {t("home.activeAccount")}
-            </h2>
-            <div className="flex min-w-0 justify-end">
-              <ChainBadge />
-            </div>
-          </div>
+          {/* The page heading sits above the card, as in the web wallet.
+              The header's network chip already names the network, so the
+              heading row carries no second badge. */}
+          <h2 className="-mb-4 break-words text-2xl font-semibold leading-tight tracking-tight">
+            {t("home.activeAccount")}
+          </h2>
           <Card className="surface-ember relative w-full overflow-hidden [background:linear-gradient(180deg,hsl(var(--primary)/0.06),transparent_46%),hsl(var(--card)/0.45)]">
             <div className="relative z-10">
               <CardContent className="pt-6">
@@ -281,44 +318,7 @@ const AccountCreateImport = observer(() => {
           </Card>
         </>
       )}
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle>{t("home.addAccounts")}</CardTitle>
-          <CardDescription>{t("home.addAccountsDescription")}</CardDescription>
-        </CardHeader>
-        <CardFooter className="flex-col gap-4">
-          <Link className="w-full" to={ROUTES.CREATE_ACCOUNT}>
-            <Button
-              className="h-auto min-h-10 w-full whitespace-normal py-2"
-              type="button"
-              variant="outline"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              {t("home.createAccount")}
-            </Button>
-          </Link>
-          <Link className="w-full" to={ROUTES.IMPORT_ACCOUNT}>
-            <Button
-              className="h-auto min-h-10 w-full whitespace-normal py-2"
-              type="button"
-              variant="outline"
-            >
-              <Download className="mr-2 h-4 w-4" />
-              {t("home.importAccount")}
-            </Button>
-          </Link>
-          <Link className="w-full" to={ROUTES.IMPORT_LEDGER}>
-            <Button
-              className="h-auto min-h-10 w-full whitespace-normal py-2"
-              type="button"
-              variant="outline"
-            >
-              <Usb className="mr-2 h-4 w-4" />
-              {t("home.connectLedger")}
-            </Button>
-          </Link>
-        </CardFooter>
-      </Card>
+      {!addAccountsFirst && addAccountsCard}
     </div>
   );
 });

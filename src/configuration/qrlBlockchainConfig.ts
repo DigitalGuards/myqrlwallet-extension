@@ -1,5 +1,5 @@
 import { pinnedMainnet } from "./pinnedNetworks";
-import { V3_CHAIN_ID, V3_RPC_URL } from "./releaseProfile";
+import { V3_CHAIN_ID, V3_RPC_URL, V3_QNS_REGISTRY } from "./releaseProfile";
 
 // The wallet backend's CF-fronted HTTPS JSON-RPC proxy: does server-side
 // node failover and avoids the cleartext-http warning (and consumer
@@ -96,6 +96,7 @@ export const QRL_BLOCKCHAINS: BlockchainDataType[] = [
     isTestnet: true,
     defaultWsRpcUrl: "",
     isCustomChain: false,
+    qrnsRegistryAddress: V3_QNS_REGISTRY,
   },
   ...(QRL_MAINNET_BLOCKCHAIN === null ? [] : [QRL_MAINNET_BLOCKCHAIN]),
 ];

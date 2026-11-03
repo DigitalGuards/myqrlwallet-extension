@@ -1,3 +1,4 @@
+import { V3_CHAIN_ID, V3_QNS_REGISTRY } from "@/configuration/releaseProfile";
 import {
   DEFAULT_BLOCKCHAIN,
   LEGACY_TESTNET_RPC,
@@ -149,7 +150,7 @@ const sanitizeQrnsRegistry = (
   }
   if (rejectInvalid) {
     throw new Error(
-      "QRNS registry must be a canonical uppercase-Q address with 128 hexadecimal characters and a valid checksum",
+      "QNS registry must be a canonical uppercase-Q address with 128 hexadecimal characters and a valid checksum",
     );
   }
   return withoutRegistry;
@@ -526,6 +527,16 @@ const StorageUtil = {
             symbol: "Quanta",
           },
         };
+      }
+      // Stored lists persisted before the v3 QNS registry shipped carry no
+      // registry on the built-in testnet, so .qrl names could not resolve.
+      // A registry already set (by the user or a later build) stays as is.
+      if (
+        !migrated.isCustomChain &&
+        migrated.chainId.toLowerCase() === V3_CHAIN_ID &&
+        migrated.qrnsRegistryAddress === undefined
+      ) {
+        migrated = { ...migrated, qrnsRegistryAddress: V3_QNS_REGISTRY };
       }
       return migrated;
     });
