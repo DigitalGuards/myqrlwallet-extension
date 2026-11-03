@@ -164,18 +164,18 @@ describe.each([
         ],
         extension: { retain: ["first", "second"] },
       });
-      // Web3 normalizes the original nested key arrays in place on origin/dev.
       const accessList = [
         { address: ADDRESS, storageKeys: [OTHER_KEY, key, OTHER_KEY] },
         { address: OTHER_ADDRESS, storageKeys: [key, key] },
         { address: ADDRESS, storageKeys: [] },
       ];
+      // @theqrl/web3 2.0.0 normalizes a copy, so the dApp's own key arrays
+      // stay as sent. 1.0.3 rewrote them in place.
       await expectRpcRoundTrip(
         method,
         () => [transaction()],
         [{ to: ADDRESS, accessList }, "latest"],
         result,
-        [{ ...transaction(), accessList }],
       );
     });
 
@@ -202,7 +202,9 @@ describe.each([
           params: [...normalizedParams, "latest"],
         }),
       );
-      expect(params).toEqual(normalizedParams);
+      // 2.0.0 leaves the dApp's key arrays as sent (1.0.3 normalized them
+      // in place).
+      expect(params).toEqual(makeParams());
 
       send.mockClear();
       const middlewareParams = makeParams();
@@ -219,7 +221,7 @@ describe.each([
           params: [...normalizedParams, "latest"],
         }),
       );
-      expect(middlewareParams).toEqual(normalizedParams);
+      expect(middlewareParams).toEqual(makeParams());
     });
   });
 
@@ -249,7 +251,6 @@ describe.each([
         () => [{ to: ADDRESS, accessList: make() }],
         [{ to: ADDRESS, accessList: expected }, "latest"],
         result,
-        [{ to: ADDRESS, accessList: expected }],
       );
     },
   );
@@ -296,13 +297,29 @@ describe.each(byteInputs)(
       await expectRpcRoundTrip(method, () => [make()], [key], result);
     });
 
-    it("normalizes mixed proof keys and preserves order and duplicates", async () => {
-      await expectRpcRoundTrip(
-        METHODS.QRL_GET_PROOF,
-        () => [ADDRESS, [OTHER_KEY, make(), OTHER_KEY, make()]],
-        [ADDRESS, [OTHER_KEY, hex, OTHER_KEY, hex], "latest"],
-        { storageProof: [] },
-      );
+    it.runIf(hex === key)(
+      "normalizes mixed proof keys and preserves order and duplicates",
+      async () => {
+        await expectRpcRoundTrip(
+          METHODS.QRL_GET_PROOF,
+          () => [ADDRESS, [OTHER_KEY, make(), OTHER_KEY, make()]],
+          [ADDRESS, [OTHER_KEY, hex, OTHER_KEY, hex], "latest"],
+          { storageProof: [] },
+        );
+      },
+    );
+
+    // @theqrl/web3 2.0.0 checks every proof key is 32 bytes (1.0.3 sent a
+    // short key on unpadded).
+    it.runIf(hex !== key)("refuses a short proof key before RPC", async () => {
+      const send = vi.spyOn(HttpProvider.prototype, "request");
+      await expect(
+        executeUnrestrictedMethod({
+          method: METHODS.QRL_GET_PROOF,
+          params: [ADDRESS, [OTHER_KEY, make()]],
+        }),
+      ).rejects.toThrow("Web3 validator found");
+      expect(send).not.toHaveBeenCalled();
     });
   },
 );

@@ -287,6 +287,18 @@ describe.each([
     expect(transaction).toEqual(snapshot);
   });
 
+  it("refuses a fractional quantity before RPC, which the node refused too", async () => {
+    const send = mockRpc(result);
+
+    await expect(
+      executeUnrestrictedMethod({
+        method,
+        params: [{ to: ADDRESS, nonce: 1.5 }],
+      }),
+    ).rejects.toThrow("nonce: 1.5");
+    expect(send).not.toHaveBeenCalled();
+  });
+
   describe.each([
     { field: "chain", metadata: (value: Json) => ({ chain: value }) },
     { field: "hardfork", metadata: (value: Json) => ({ hardfork: value }) },

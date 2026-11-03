@@ -813,9 +813,12 @@ describe("Web3 creation-call compatibility", () => {
         "0x1234",
       );
       expect(send).toHaveBeenCalledWith(
+        // 2.0.0 forwards a null recipient as null, which the node reads as
+        // an omitted one; the executor strips it before this layer
+        // (prepareRpcTransactionInput).
         expect.objectContaining({
           method: "qrl_call",
-          params: [{ data: "0x6080" }, "latest"],
+          params: [transaction, "latest"],
         }),
       );
     },

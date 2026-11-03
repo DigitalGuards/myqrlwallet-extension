@@ -1105,9 +1105,14 @@ describe("QrlSendTransactionForContent", () => {
 
         expect(send).not.toHaveBeenCalled();
         expect(addTransaction).not.toHaveBeenCalled();
+        // @theqrl/web3 2.0.0 words a revert without a receipt as a failed
+        // simulation; 1.0.3 said "Transaction has been reverted by the QRVM".
+        // The class, code, reason and signature are unchanged.
         expect(addToResponseData).toHaveBeenCalledWith({
           error: objectContaining({
-            message: "Transaction has been reverted by the QRVM",
+            code: 402,
+            message:
+              "Transaction execution was rejected or failed during simulation",
             reason: "execution reverted: Insufficient balance",
             signature: "0x08c379a0",
           }),
@@ -1925,7 +1930,8 @@ describe("QrlSendTransactionForContent", () => {
         {
           label: "transfer with negative zero value",
           requestParams: { ...zndTransferRequest, value: "-0" },
-          expectedAmount: "0.",
+          // fromPlanck(0n): "0." on @theqrl/web3 1.0.3, "0" on 2.0.0.
+          expectedAmount: "0",
         },
         {
           label: "transfer with a large exactly representable value",
