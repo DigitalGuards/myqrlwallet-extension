@@ -14,6 +14,7 @@ import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
 import type LockManager from "../lockManager/lockManager";
 import type { openApprovalSurface } from "../utils/approvalSurface";
 import { resetApprovalSlot } from "../utils/approvalSlot";
+import { UNSUPPORTED_TYPED_DATA_V4_MESSAGE } from "../utils/restrictedMethodsMiddlewareUtils";
 import { EXTENSION_MESSAGES } from "../constants/streamConstants";
 import { toChecksumAddress } from "@theqrl/wallet.js";
 import {
@@ -294,7 +295,7 @@ describe("qrl_requestAccounts silent reconnect", () => {
       await restrictedMethodsMiddleware(req, res, vi.fn(), end);
 
       expect(res.error?.code).toBe(4200);
-      expect(res.error?.message).toContain("cannot encode QIP-55 addresses");
+      expect(res.error?.message).toBe(UNSUPPORTED_TYPED_DATA_V4_MESSAGE);
       expect(end).toHaveBeenCalledTimes(1);
       expect(mockedBrowser.action.openPopup.mock.calls).toHaveLength(0);
       expect(mockedBrowser.windows.create.mock.calls).toHaveLength(0);

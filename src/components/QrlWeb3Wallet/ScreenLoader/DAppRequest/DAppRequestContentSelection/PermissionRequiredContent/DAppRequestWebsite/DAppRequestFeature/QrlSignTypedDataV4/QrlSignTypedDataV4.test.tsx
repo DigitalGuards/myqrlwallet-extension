@@ -6,10 +6,6 @@ import { MemoryRouter } from "react-router-dom";
 import QrlSignTypedDataV4 from "./QrlSignTypedDataV4";
 
 vi.mock(
-  "@/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSignTypedDataV4/QrlSignTypedDataV4Content/QrlSignTypedDataV4Content",
-  () => ({ default: () => <div>Mocked Qrl Sign Typed Data V4 Content</div> }),
-);
-vi.mock(
   "@/components/QrlWeb3Wallet/ScreenLoader/DAppRequest/DAppRequestContentSelection/PermissionRequiredContent/DAppRequestWebsite/DAppRequestFeature/QrlSignTypedDataV4/PersonalSign/PersonalSign",
   () => ({ default: () => <div>Mocked Personal Sign</div> }),
 );
@@ -26,7 +22,7 @@ describe("QrlSignTypedDataV4", () => {
       </StoreProvider>,
     );
 
-  it("should render the QrlSignTypedDataV4Content component if the method is qrl_signTypedData_v4", () => {
+  it("renders no signing content for qrl_signTypedData_v4, which the middleware refuses", () => {
     renderComponent(
       mockedStore({
         dAppRequestStore: {
@@ -38,12 +34,6 @@ describe("QrlSignTypedDataV4", () => {
     );
 
     expect(screen.getByText("Signature Request")).toBeInTheDocument();
-    expect(
-      screen.getByText("Review and sign the below message data"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Mocked Qrl Sign Typed Data V4 Content"),
-    ).toBeInTheDocument();
     expect(screen.queryByText("Mocked Personal Sign")).not.toBeInTheDocument();
   });
 
@@ -63,8 +53,5 @@ describe("QrlSignTypedDataV4", () => {
       screen.getByText("Review and sign the below message data"),
     ).toBeInTheDocument();
     expect(screen.getByText("Mocked Personal Sign")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Mocked Qrl Sign Typed Data V4 Content"),
-    ).not.toBeInTheDocument();
   });
 });

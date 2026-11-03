@@ -38,6 +38,7 @@ import {
   pickDefaultRpcUrl,
   normalizeChainId,
   revalidateAuthorizedDAppRequest,
+  UNSUPPORTED_TYPED_DATA_V4_MESSAGE,
 } from "./restrictedMethodsMiddlewareUtils";
 
 const ACCOUNT = `Q${"a".repeat(128)}`;
@@ -472,8 +473,8 @@ describe("dApp chain authorization for PQ signing methods", () => {
 
     expect(result.canProceed).toBe(false);
     expect(result.proceedError?.code).toBe(4200);
-    expect(result.proceedError?.message).toContain(
-      "cannot encode QIP-55 addresses",
+    expect(result.proceedError?.message).toBe(
+      UNSUPPORTED_TYPED_DATA_V4_MESSAGE,
     );
   });
 
