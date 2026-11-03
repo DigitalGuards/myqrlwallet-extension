@@ -297,29 +297,99 @@ describe.each(byteInputs)(
       await expectRpcRoundTrip(method, () => [make()], [key], result);
     });
 
-    it.runIf(hex === key)(
-      "normalizes mixed proof keys and preserves order and duplicates",
-      async () => {
-        await expectRpcRoundTrip(
-          METHODS.QRL_GET_PROOF,
-          () => [ADDRESS, [OTHER_KEY, make(), OTHER_KEY, make()]],
-          [ADDRESS, [OTHER_KEY, hex, OTHER_KEY, hex], "latest"],
-          { storageProof: [] },
-        );
-      },
-    );
-
-    // @theqrl/web3 2.0.0 checks every proof key is 32 bytes (1.0.3 sent a
-    // short key on unpadded).
-    it.runIf(hex !== key)("refuses a short proof key before RPC", async () => {
-      const send = vi.spyOn(HttpProvider.prototype, "request");
-      await expect(
-        executeUnrestrictedMethod({
-          method: METHODS.QRL_GET_PROOF,
-          params: [ADDRESS, [OTHER_KEY, make()]],
-        }),
-      ).rejects.toThrow("Web3 validator found");
-      expect(send).not.toHaveBeenCalled();
+    // A short key goes out unpadded, as 1.0.3 sent it; go-qrl left-pads it.
+    it("normalizes mixed proof keys and preserves order and duplicates", async () => {
+      await expectRpcRoundTrip(
+        METHODS.QRL_GET_PROOF,
+        () => [ADDRESS, [OTHER_KEY, make(), OTHER_KEY, make()]],
+        [ADDRESS, [OTHER_KEY, hex, OTHER_KEY, hex], "latest"],
+        { storageProof: [] },
+      );
     });
   },
 );
+
+describe("qrl_getProof wire format", () => {
+  it.each([
+    { block: 5, sent: "0x5" },
+    { block: "0x05", sent: "0x5" },
+    { block: "5", sent: "0x5" },
+    { block: "0x10", sent: "0x10" },
+    { block: "latest", sent: "latest" },
+    { block: "pending", sent: "pending" },
+    { block: "earliest", sent: "earliest" },
+    { block: "safe", sent: "safe" },
+    { block: "finalized", sent: "finalized" },
+  ])("sends the block $block as $sent", async ({ block, sent }) => {
+    await expectRpcRoundTrip(
+      METHODS.QRL_GET_PROOF,
+      () => [ADDRESS, [HEX], block],
+      [ADDRESS, [HEX], sent],
+      { storageProof: [] },
+    );
+  });
+
+  it("sends uppercase and 0X-prefixed keys as lowercase 0x hex", async () => {
+    await expectRpcRoundTrip(
+      METHODS.QRL_GET_PROOF,
+      () => [ADDRESS, [`0x${"AB".repeat(32)}`, `0X${"ab".repeat(32)}`]],
+      [ADDRESS, [`0x${"ab".repeat(32)}`, `0x${"ab".repeat(32)}`], "latest"],
+      { storageProof: [] },
+    );
+  });
+
+  it("forwards a key longer than 32 bytes for the node to judge", async () => {
+    const longKey = `0x${"11".repeat(64)}`;
+    await expectRpcRoundTrip(
+      METHODS.QRL_GET_PROOF,
+      () => [ADDRESS, [longKey]],
+      [ADDRESS, [longKey], "latest"],
+      { storageProof: [] },
+    );
+  });
+
+  it("returns the node's proof as the node sent it", async () => {
+    const proof = {
+      address: ADDRESS,
+      accountProof: [`0xf9${"ab".repeat(80)}`],
+      balance: "0x1bc16d674ec80000",
+      codeHash: `0x${"c5".repeat(32)}`,
+      nonce: "0x5",
+      storageHash: `0x${"56".repeat(32)}`,
+      storageProof: [
+        { key: "0x11", value: "0x0", proof: [`0xf8${"cd".repeat(40)}`] },
+      ],
+    };
+    await expectRpcRoundTrip(
+      METHODS.QRL_GET_PROOF,
+      () => [ADDRESS, ["0x11"], "latest"],
+      [ADDRESS, ["0x11"], "latest"],
+      proof,
+    );
+  });
+
+  // 1.0.3 refused each of these before RPC too, except the lowercase q
+  // address: the address check follows 2.0.0's rules, as the wrapped
+  // getProof did on this branch.
+  it.each([
+    { name: "odd-length key", params: [ADDRESS, ["0x0"]] },
+    { name: "key without 0x", params: [ADDRESS, ["abcd"]] },
+    { name: "non-hex key", params: [ADDRESS, ["0xzz"]] },
+    { name: "negative block", params: [ADDRESS, [HEX], -1] },
+    { name: "fractional block", params: [ADDRESS, [HEX], 1.5] },
+    { name: "unknown block tag", params: [ADDRESS, [HEX], "committed"] },
+    { name: "lowercase q address", params: [`q${ADDRESS.slice(1)}`, [HEX]] },
+    { name: "short address", params: [`Q${"a".repeat(40)}`, [HEX]] },
+  ])("refuses a $name before RPC", async ({ params }) => {
+    const send = vi.spyOn(HttpProvider.prototype, "request");
+    const snapshot = structuredClone(params);
+    await expect(
+      executeUnrestrictedMethod({ method: METHODS.QRL_GET_PROOF, params }),
+    ).rejects.toThrow("Web3 validator found");
+    await expect(
+      handleMiddlewareRequest(METHODS.QRL_GET_PROOF, params),
+    ).resolves.toMatchObject({ id: 1, jsonrpc: "2.0", error: { code: 4200 } });
+    expect(send).not.toHaveBeenCalled();
+    expect(structuredClone(params)).toEqual(snapshot);
+  });
+});

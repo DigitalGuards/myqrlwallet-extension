@@ -27,7 +27,6 @@ const {
       getTransaction: method(),
       call: method(),
       getCode: method(),
-      getProof: method(),
       getStorageAt: method(),
       getTransactionFromBlock: method(),
       getTransactionCount: method(),
@@ -227,13 +226,6 @@ describe("unrestricted RPC parameter boundaries", () => {
       target: "getCode",
       result: "0x1234",
       expected: "0x1234",
-    },
-    {
-      method: METHODS.QRL_GET_PROOF,
-      params: [ADDRESS, [HASH, new Uint8Array([1])], "latest"],
-      target: "getProof",
-      result: { balance: 16n },
-      expected: { balance: "0x10" },
     },
     {
       method: METHODS.QRL_GET_STORAGE_AT,
