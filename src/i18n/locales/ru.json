@@ -233,6 +233,7 @@
   "chain.qrnsRegistryAddressPlaceholder": "Q и 128 шестнадцатеричных символов",
   "chain.qrnsRegistryAddressDescription": "Необязательно. Адрес развёрнутого контракта реестра QNS для этой сети.",
   "chain.errorChainIdExists": "Блокчейн с ID сети {{chainId}} уже существует.",
+  "chain.errorRpcUrlCredentials": "URL RPC не могут содержать имя пользователя или пароль.",
   "chain.defaultUrl": "URL по умолчанию",
   "chain.deleteUrl": "Удалить URL",
   "dapp.permissionTitle": "Требуется ваше разрешение",

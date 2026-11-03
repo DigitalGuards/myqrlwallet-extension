@@ -233,6 +233,7 @@
   "chain.qrnsRegistryAddressPlaceholder": "Q 后接 128 个十六进制字符",
   "chain.qrnsRegistryAddressDescription": "可选。明确指定此链上已部署的 QNS 注册表合约。",
   "chain.errorChainIdExists": "链 ID 为 {{chainId}} 的区块链已存在。",
+  "chain.errorRpcUrlCredentials": "RPC URL 不能包含用户名或密码。",
   "chain.defaultUrl": "默认 URL",
   "chain.deleteUrl": "删除 URL",
   "dapp.permissionTitle": "需要您的授权",

@@ -35,6 +35,7 @@ import {
   checkAccountAndChainHaveBeenAuthorized,
   checkUrlOriginHasBeenConnected,
   checkWalletAddQrlChainParams,
+  hasUrlCredentials,
   pickDefaultRpcUrl,
   normalizeChainId,
   revalidateAuthorizedDAppRequest,
@@ -615,6 +616,55 @@ describe("wallet_addQRLChain rpcUrls validation (L5)", () => {
     expect(result.canProceed).toBe(true);
   });
 
+  // @theqrl/web3 2.0.0 refuses to build a provider for such a URL, and
+  // browsers refuse to fetch one.
+  it.each([
+    "https://user:pass@rpc.example",
+    "https://user@rpc.example",
+    "https://:pass@rpc.example",
+  ])("rejects a dApp list carrying credentials in %s", async (url) => {
+    const result = await checkWalletAddQrlChainParams({
+      ...chain,
+      rpcUrls: ["https://rpc.example", url],
+    });
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("rpcUrls");
+  });
+
+  it.each([
+    "https://user:pass@rpc.example",
+    "http://user:pass@127.0.0.1:8545",
+    "http://user@localhost:8545",
+    "http://:pass@[::1]:8545",
+  ])("rejects credentials in %s from the wallet form too", async (url) => {
+    const result = await checkWalletAddQrlChainParams(
+      {
+        ...chain,
+        rpcUrls: [url],
+        defaultRpcUrl: url,
+        defaultBlockExplorerUrl: "",
+        defaultIconUrl: "",
+        isTestnet: true,
+        defaultWsRpcUrl: "",
+        isCustomChain: true,
+      },
+      true,
+    );
+
+    expect(result.canProceed).toBe(false);
+    expect(result.proceedError?.message).toContain("rpcUrls");
+  });
+
+  it("accepts an empty credential section, which the URL parser drops", async () => {
+    const result = await checkWalletAddQrlChainParams({
+      ...chain,
+      rpcUrls: ["https://@rpc.example"],
+    });
+
+    expect(result.canProceed).toBe(true);
+  });
+
   it.each([
     "http://localhost./",
     "http://[::ffff:127.0.0.1]:8545/",
@@ -659,12 +709,37 @@ describe("pickDefaultRpcUrl (L5)", () => {
     );
   });
 
+  it("skips an entry carrying credentials, even with local hosts allowed", () => {
+    expect(
+      pickDefaultRpcUrl(["https://user:pass@a.example", "https://b.example"]),
+    ).toBe("https://b.example");
+    expect(pickDefaultRpcUrl(["http://user:pass@127.0.0.1:8545"], true)).toBe(
+      "",
+    );
+  });
+
   it.each([undefined, null, "https://a.example", [], [42]])(
     "answers with an empty string for %s",
     (rpcUrls) => {
       expect(pickDefaultRpcUrl(rpcUrls)).toBe("");
     },
   );
+});
+
+describe("hasUrlCredentials", () => {
+  it.each([
+    ["https://user:pass@rpc.example", true],
+    ["https://user@rpc.example", true],
+    ["https://:pass@rpc.example", true],
+    ["http://user:pass@127.0.0.1:8545", true],
+    ["https://@rpc.example", false],
+    ["https://rpc.example/path?user=a&password=b", false],
+    ["https://rpc.example", false],
+    ["not a url", false],
+    ["", false],
+  ])("answers %s with %s", (url, expected) => {
+    expect(hasUrlCredentials(url)).toBe(expected);
+  });
 });
 
 // L6/L-1: while the wallet is locked, qrl_accounts, the provider state and

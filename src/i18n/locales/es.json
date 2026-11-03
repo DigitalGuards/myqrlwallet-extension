@@ -233,6 +233,7 @@
   "chain.qrnsRegistryAddressPlaceholder": "Q + 128 caracteres hexadecimales",
   "chain.qrnsRegistryAddressDescription": "Opcional. Contrato de registro QNS desplegado explícitamente para esta cadena.",
   "chain.errorChainIdExists": "Ya existe una blockchain con el ID de cadena {{chainId}}.",
+  "chain.errorRpcUrlCredentials": "Las URLs RPC no pueden contener un nombre de usuario ni una contraseña.",
   "chain.defaultUrl": "URL predeterminada",
   "chain.deleteUrl": "Eliminar URL",
   "dapp.permissionTitle": "Se requiere tu permiso",

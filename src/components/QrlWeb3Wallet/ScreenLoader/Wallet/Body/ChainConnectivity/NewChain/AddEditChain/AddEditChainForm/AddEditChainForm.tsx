@@ -18,7 +18,10 @@ import { Input } from "@/components/UI/Input";
 import { Label } from "@/components/UI/Label";
 import { BlockchainDataType } from "@/configuration/qrlBlockchainConfig";
 import { ROUTES } from "@/router/router";
-import { checkWalletAddQrlChainParams } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
+import {
+  checkWalletAddQrlChainParams,
+  hasUrlCredentials,
+} from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import { useStore } from "@/stores/store";
 import StorageUtil from "@/utilities/storageUtil";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -184,6 +187,12 @@ const AddEditChainForm = observer(({ chainToEdit }: AddEditChainFormType) => {
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
     setError("");
+    // The parameter check below refuses these too, with an English message
+    // that repeats the URL, credentials included.
+    if (rpcUrls.some((rpcUrl) => hasUrlCredentials(rpcUrl))) {
+      setError(t("chain.errorRpcUrlCredentials"));
+      return;
+    }
     const blockchainData = generateBlockchainData(formData);
     const { canProceed, proceedError } = await checkWalletAddQrlChainParams(
       blockchainData,

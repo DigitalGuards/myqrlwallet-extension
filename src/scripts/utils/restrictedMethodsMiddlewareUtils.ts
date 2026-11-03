@@ -563,6 +563,22 @@ const isPrivateOrLoopbackHost = (hostname: string): boolean => {
   return isPrivateIpv4Address(host);
 };
 
+const urlHasCredentials = (url: URL) =>
+  url.username !== "" || url.password !== "";
+
+/**
+ * True when the URL carries a user name or password. @theqrl/web3 2.0.0
+ * refuses such a URL when it builds the provider, and browsers refuse to
+ * fetch one, so the wallet never accepts it as an RPC endpoint.
+ */
+export const hasUrlCredentials = (urlString: string): boolean => {
+  try {
+    return urlHasCredentials(new URL(urlString));
+  } catch {
+    return false;
+  }
+};
+
 /**
  * @param allowPrivateHosts true only for the wallet's own add-chain form,
  * where the user typed the URL themselves and running a local node is a
@@ -575,7 +591,8 @@ const isAcceptableUrl = (urlString: string, allowPrivateHosts = false) => {
     if (
       url.hostname.length === 0 ||
       url.pathname.length === 0 ||
-      url.hostname !== decodeURIComponent(url.hostname)
+      url.hostname !== decodeURIComponent(url.hostname) ||
+      urlHasCredentials(url)
     ) {
       return false;
     }

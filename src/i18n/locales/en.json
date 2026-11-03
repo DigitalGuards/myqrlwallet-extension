@@ -233,6 +233,7 @@
   "chain.qrnsRegistryAddressPlaceholder": "Q + 128 hexadecimal characters",
   "chain.qrnsRegistryAddressDescription": "Optional. Explicit deployed QNS registry contract for this chain.",
   "chain.errorChainIdExists": "A blockchain with the chain ID {{chainId}} already exist.",
+  "chain.errorRpcUrlCredentials": "RPC URLs cannot contain a user name or password.",
   "chain.defaultUrl": "Default URL",
   "chain.deleteUrl": "Delete URL",
   "dapp.permissionTitle": "Your permission required",
