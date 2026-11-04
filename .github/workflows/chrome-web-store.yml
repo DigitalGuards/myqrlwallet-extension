@@ -36,6 +36,9 @@ jobs:
   upload:
     runs-on: ubuntu-latest
     environment: chrome-web-store
+    # The job runs for about 10 s. The wait for the environment approval
+    # happens before the job starts, so it does not count toward this limit.
+    timeout-minutes: 5
     env:
       ITEM_ID: cafpjgccpmfjefdfeldlhgmgbmpibdgg
       TAG: ${{ inputs.tag || github.event.release.tag_name }}
