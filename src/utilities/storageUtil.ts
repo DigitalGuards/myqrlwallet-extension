@@ -665,8 +665,12 @@ const StorageUtil = {
     await walletLocalStorage.set(storageData);
   },
 
-  async getTokenContractsList(accountAddress: string) {
-    const { chainId } = await this.getActiveBlockChain();
+  async getTokenContractsList(
+    accountAddress: string,
+    requestedChainId?: string,
+  ) {
+    const chainId =
+      requestedChainId ?? (await this.getActiveBlockChain()).chainId;
 
     const storageData = await readLocalStorage(TOKENS_IDENTIFIER);
     const storedTokenContracts = getStoredValue(

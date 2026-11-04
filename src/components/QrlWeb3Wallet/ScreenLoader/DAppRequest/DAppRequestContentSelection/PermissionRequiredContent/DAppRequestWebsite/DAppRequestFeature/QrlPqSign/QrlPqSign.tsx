@@ -15,8 +15,17 @@ import {
   signMessage,
   signTypedData,
   parseTypedDataPayload,
+  type TypedDataPayload,
 } from "@/functions/pqSigning";
-import { readApprovalParams } from "@/utilities/approvalGuards";
+import { assertVaultRequestSignable } from "@/functions/pqSigning/quantaVaultApproval";
+import { recognizeVaultRequest } from "@/functions/pqSigning/quantaVault";
+import { rpcErrors } from "@theqrl/qrl-wallet-provider";
+import DAppVaultReview from "./DAppVaultReview";
+import { useVaultTokens } from "./vaultReviewContext";
+import {
+  isApprovalSender,
+  readApprovalParams,
+} from "@/utilities/approvalGuards";
 import { RESTRICTED_METHODS } from "@/scripts/constants/requestConstants";
 import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 import { useStore } from "@/stores/store";
@@ -28,7 +37,7 @@ import { Buffer } from "buffer";
 import { Check, Copy, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 /**
  * Post-quantum dApp signing screen for `qrl_signMessage` and
@@ -71,14 +80,27 @@ const QrlPqSign = observer(() => {
   const { sanitized: challenge, hadHidden: hasHiddenChars } =
     sanitizeForDisplay(decodedChallenge);
 
-  const typedPayload = (() => {
+  const typedPayload = useMemo(() => {
     if (!isTypedData) return undefined;
     try {
       return parseTypedDataPayload(payload);
     } catch {
       return undefined;
     }
-  })();
+  }, [isTypedData, payload]);
+
+  const vaultRequest = typedPayload
+    ? recognizeVaultRequest(typedPayload)
+    : null;
+  const sender: unknown = dAppRequestData?.requestData?.senderData;
+  const senderData = isApprovalSender(sender) ? sender : undefined;
+  const activeChainId = qrlStore.qrlConnection.blockchain.chainId;
+  const vaultTokens = useVaultTokens(
+    fromAddress,
+    activeChainId,
+    dAppRequestData,
+    vaultRequest !== null,
+  );
 
   // The ML-DSA digest binds the whole QRLDomain (hashStruct("QRLDomain",
   // ...)), so surface the fields that decide WHICH contract/chain the
@@ -110,23 +132,57 @@ const QrlPqSign = observer(() => {
             record({ error: authorization.proceedError });
             return;
           }
-          await pqSign(record);
+          let approvedPayload: TypedDataPayload | undefined;
+          if (isTypedData) {
+            try {
+              approvedPayload = parseTypedDataPayload(payload);
+            } catch {
+              record({
+                error: rpcErrors.invalidParams({
+                  message: t("dapp.vault.invalidTypedData"),
+                }),
+              });
+              return;
+            }
+            try {
+              assertVaultRequestSignable(approvedPayload);
+            } catch (error) {
+              record({ error });
+              return;
+            }
+          }
+          // The checked object is passed directly to the signer after authorization.
+          await pqSign(record, approvedPayload);
         }
       },
     );
   }, [dAppRequestData]);
 
   useEffect(() => {
-    dAppRequestStore.setCanProceed(true);
-  }, []);
+    try {
+      if (isTypedData)
+        assertVaultRequestSignable(parseTypedDataPayload(payload));
+      dAppRequestStore.setCanProceed(true);
+    } catch {
+      dAppRequestStore.setCanProceed(false);
+    }
+  }, [dAppRequestData]);
 
   const copyMessage = () => {
     void copy(challenge);
   };
 
-  const pqSign = async (record: ResponseRecorder) => {
+  const pqSign = async (
+    record: ResponseRecorder,
+    approvedPayload?: TypedDataPayload,
+  ) => {
     try {
-      if (!fromAddress || (!isTypedData && typeof payload !== "string")) {
+      if (
+        !fromAddress ||
+        (!isTypedData && typeof payload !== "string") ||
+        // Typed data is signed only as the object both approval gates checked.
+        (isTypedData && !approvedPayload)
+      ) {
         throw new Error("Invalid signing parameters");
       }
       const mnemonicPhrases = await lockStore.getMnemonicPhrases(fromAddress);
@@ -136,8 +192,8 @@ const QrlPqSign = observer(() => {
       if (!areAddressesEquivalent(fromAddress, addressFromMnemonic)) {
         throw new Error("Mnemonic phrases did not match with the address");
       }
-      const result = isTypedData
-        ? signTypedData(parseTypedDataPayload(payload), seed)
+      const result = approvedPayload
+        ? signTypedData(approvedPayload, seed)
         : signMessage(rawMessage, seed);
       record({ ...result });
     } catch (error) {
@@ -157,7 +213,7 @@ const QrlPqSign = observer(() => {
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-md p-2">
+    <div className="flex min-w-0 flex-col gap-2 rounded-md p-2">
       {isWalletLocked && (
         <div className="rounded border border-red-500/60 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300">
           {t("account.walletLockedError")}
@@ -177,43 +233,95 @@ const QrlPqSign = observer(() => {
           <div className="text-xs text-amber-600 dark:text-amber-300">
             {t("dapp.pqSignature.typedWarning")}
           </div>
-          <div className="flex flex-col gap-1 rounded bg-muted/40 p-2 text-xs">
-            <div className="font-semibold text-secondary">
-              {typeof domain?.name === "string" ? domain.name : ""} ·{" "}
-              {typedPayload?.primaryType}
-            </div>
-            {verifyingContract && (
-              <div className="min-w-0">
-                <span className="text-muted-foreground">
-                  {t("dapp.pqSignature.verifyingContract")}:
-                </span>
-                <FullAddress
-                  address={verifyingContract}
-                  className="ml-1 text-secondary"
-                />
-              </div>
-            )}
-            {hasChainId && (
-              <div>
-                <span className="text-muted-foreground">
-                  {t("dapp.pqSignature.chainId")}:
-                </span>{" "}
-                <span className="font-mono text-secondary">
-                  {domainChainId}
-                </span>
-              </div>
-            )}
-          </div>
-          {!hasChainId && (
-            <div className="rounded border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
-              {t("dapp.pqSignature.noChainId")}
+          {!typedPayload && (
+            <div
+              role="alert"
+              className="rounded border border-red-500/60 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300"
+            >
+              {t("dapp.vault.invalidTypedData")}
             </div>
           )}
-          <div className="max-h-[10rem] overflow-auto rounded bg-muted/40 p-2 font-mono text-xs text-secondary">
-            <pre className="whitespace-pre-wrap break-words">
-              {JSON.stringify(typedPayload?.message ?? {}, null, 2)}
-            </pre>
-          </div>
+          {vaultRequest ? (
+            <>
+              <DAppVaultReview
+                request={vaultRequest}
+                authorizedChainId={dAppRequestData?.authorizedChainId}
+                activeChainId={activeChainId}
+                origin={senderData?.url}
+                parentOrigin={senderData?.mainFrameOrigin}
+                knownTokens={vaultTokens}
+              />
+              <details
+                key={dAppRequestData?.requestId}
+                className="min-w-0 rounded bg-muted/40 p-2 text-xs"
+              >
+                <summary className="cursor-pointer">
+                  {t("dapp.vault.rawMessage")}
+                </summary>
+                <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-secondary">
+                  {JSON.stringify(
+                    typedPayload?.message ?? {},
+                    (_, value: unknown) =>
+                      typeof value === "bigint" ? value.toString() : value,
+                    2,
+                  )}
+                </pre>
+              </details>
+            </>
+          ) : (
+            <>
+              {domain?.name === "QuantaVault" && (
+                <div
+                  role="alert"
+                  className="rounded border border-amber-500/60 bg-amber-500/10 p-2 text-xs font-semibold text-amber-700 dark:text-amber-200"
+                >
+                  {t("dapp.vault.schemaWarning")}
+                </div>
+              )}
+              <div className="flex flex-col gap-1 rounded bg-muted/40 p-2 text-xs">
+                <div className="font-semibold text-secondary">
+                  {typeof domain?.name === "string" ? domain.name : ""} ·{" "}
+                  {typedPayload?.primaryType}
+                </div>
+                {verifyingContract && (
+                  <div className="min-w-0">
+                    <span className="text-muted-foreground">
+                      {t("dapp.pqSignature.verifyingContract")}:
+                    </span>
+                    <FullAddress
+                      address={verifyingContract}
+                      className="ml-1 text-secondary"
+                    />
+                  </div>
+                )}
+                {hasChainId && (
+                  <div>
+                    <span className="text-muted-foreground">
+                      {t("dapp.pqSignature.chainId")}:
+                    </span>{" "}
+                    <span className="font-mono text-secondary">
+                      {domainChainId}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {!hasChainId && (
+                <div className="rounded border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
+                  {t("dapp.pqSignature.noChainId")}
+                </div>
+              )}
+              <div className="max-h-[10rem] overflow-auto rounded bg-muted/40 p-2 font-mono text-xs text-secondary">
+                <pre className="whitespace-pre-wrap break-words">
+                  {JSON.stringify(
+                    typedPayload?.message ?? {},
+                    (_, value: unknown) =>
+                      typeof value === "bigint" ? value.toString() : value,
+                    2,
+                  )}
+                </pre>
+              </div>
+            </>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-1">

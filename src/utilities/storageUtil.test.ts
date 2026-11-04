@@ -727,6 +727,22 @@ describe("StorageUtil", () => {
       expect(result).toEqual([token1]);
     });
 
+    it("reads the requested token chain even when the active chain changes", async () => {
+      await StorageUtil.setTokenContractsList(ACCOUNT, token1);
+      const original = await StorageUtil.getActiveBlockChain();
+      const active = vi
+        .spyOn(StorageUtil, "getActiveBlockChain")
+        .mockResolvedValue({ ...original, chainId: "0x2" });
+      try {
+        expect(await StorageUtil.getTokenContractsList(ACCOUNT)).toEqual([]);
+        expect(
+          await StorageUtil.getTokenContractsList(ACCOUNT, original.chainId),
+        ).toEqual([token1]);
+      } finally {
+        active.mockRestore();
+      }
+    });
+
     it("should return empty array when no tokens stored", async () => {
       const result = await StorageUtil.getTokenContractsList(ACCOUNT);
       expect(result).toEqual([]);
