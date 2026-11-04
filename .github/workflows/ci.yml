@@ -3,10 +3,11 @@ name: CI
 # Lint, test and build the extension.
 #
 # Every pull request into dev or main runs the full gate, and that run is the
-# test of the change: merged commits do not run CI again. A weekly run on dev
-# and manual dispatch surface drift from the registry, the clock or external
-# pins. GitHub runs scheduled workflows from the default branch (main), so the
-# weekly run takes this file from main and checks out dev.
+# test of the change: merged commits do not run CI again, except a lockfile change
+# on dev, which refreshes the caches. A weekly run on dev and manual dispatch
+# surface drift from the registry, the clock or external pins. GitHub runs
+# scheduled workflows from the default branch (main), so the weekly run takes this
+# file from main and checks out dev.
 #
 # Releases are cut by hand: the extension zip is built locally and attached to
 # the GitHub release. chrome-web-store.yml uploads that zip to the Chrome Web
@@ -15,6 +16,12 @@ name: CI
 on:
   pull_request:
     branches: [main, dev]
+  # A pull request reads caches from its base branch and the default branch only,
+  # so a lockfile change on dev runs this once more to refresh them.
+  push:
+    branches: [dev]
+    paths:
+      - package-lock.json
   schedule:
     # Mondays at 03:00 UTC.
     - cron: "0 3 * * 1"
