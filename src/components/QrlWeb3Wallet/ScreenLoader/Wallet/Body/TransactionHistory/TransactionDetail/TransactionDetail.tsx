@@ -436,10 +436,16 @@ const TransactionDetail = observer(() => {
       ? utils.fromPlanck(totalGasFeeInPlanck, "quanta")
       : undefined);
   const gasPriceQrl = utils.fromPlanck(Number(effectiveGasPrice), "quanta");
+  // A token transfer costs the tokens and, on top, a fee in the native coin.
+  // The two have different units, so the fee stays on its own here and the
+  // row below shows them side by side.
+  const isTokenTransfer = transaction.isZrc20Token;
   const totalCost =
     totalGasFeeQrl === undefined
       ? undefined
-      : new BigNumber(String(amount)).plus(totalGasFeeQrl).toFixed();
+      : isTokenTransfer
+        ? totalGasFeeQrl
+        : new BigNumber(String(amount)).plus(totalGasFeeQrl).toFixed();
 
   // The detail screen keeps every digit and only drops the padding zeros.
   const exactAmount = formatTransactionAmount(amount)?.exact ?? String(amount);
@@ -454,7 +460,7 @@ const TransactionDetail = observer(() => {
     qrlStore.isFiatNetwork &&
     isFiatChain({ chainId: transaction.chainId }) &&
     qrlPrice > 0 &&
-    !transaction.isZrc20Token;
+    !isTokenTransfer;
   const fiatAmount = showFiat
     ? formatFiatCompact(amount, qrlPrice, quoteCurrency)
     : "";
@@ -648,7 +654,9 @@ const TransactionDetail = observer(() => {
                     <span className="font-numeric text-sm font-bold">
                       {totalCost === undefined
                         ? "Unavailable"
-                        : getOptimalGasFee(totalCost)}
+                        : isTokenTransfer
+                          ? `${exactAmount} ${tokenSymbol} + ${getOptimalGasFee(totalCost)}`
+                          : getOptimalGasFee(totalCost)}
                     </span>
                     {fiatTotalCost && (
                       <span className="font-numeric text-xs text-muted-foreground">
