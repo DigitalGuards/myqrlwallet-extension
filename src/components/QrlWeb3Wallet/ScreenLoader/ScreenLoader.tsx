@@ -1,9 +1,10 @@
 import withSuspense from "@/functions/withSuspense";
 import ScrollRegion from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
-import { showTransactionHistory } from "@/router/navigation";
+import { ROUTES } from "@/router/router";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { useStore } from "@/stores/store";
 import { observer } from "mobx-react-lite";
+import { useNavigate } from "react-router-dom";
 import { lazy, useEffect, useRef, useState } from "react";
 
 const SCREENS = {
@@ -27,6 +28,7 @@ const Wallet = withSuspense(
 
 const ScreenLoader = observer(() => {
   const { dAppRequestStore, lockStore, qrlStore } = useStore();
+  const navigate = useNavigate();
   const { hasDAppRequest, completedDAppSend } = dAppRequestStore;
   const { isLocked } = lockStore;
 
@@ -65,7 +67,11 @@ const ScreenLoader = observer(() => {
     const { from } = completedDAppSend;
     dAppRequestStore.clearCompletedDAppSend();
     if (areAddressesEquivalent(from, qrlStore.activeAccount.accountAddress)) {
-      showTransactionHistory();
+      void Promise.resolve(navigate(ROUTES.TRANSACTION_HISTORY)).catch(
+        (error: unknown) => {
+          console.error("Failed to show the transaction history:", error);
+        },
+      );
     }
   }, [completedDAppSend]);
 

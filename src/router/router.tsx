@@ -1,6 +1,5 @@
 import withSuspense from "@/functions/withSuspense";
 import { lazy } from "react";
-import { registerShowTransactionHistory } from "@/router/navigation";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 
 const QrlWeb3Wallet = withSuspense(
@@ -15,163 +14,217 @@ const Home = withSuspense(
 const CreateAccount = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/CreateAccount/CreateAccount"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/CreateAccount/CreateAccount"
+      ),
   ),
 );
 const ImportAccount = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportAccount"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportAccount/ImportAccount"
+      ),
   ),
 );
 const ImportToken = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportToken/ImportToken"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportToken/ImportToken"
+      ),
   ),
 );
 const AllZRC20Tokens = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AllZRC20Tokens/AllZRC20Tokens"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AllZRC20Tokens/AllZRC20Tokens"
+      ),
   ),
 );
 const AllNFTCollections = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AllNFTCollections/AllNFTCollections"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AllNFTCollections/AllNFTCollections"
+      ),
   ),
 );
 const AccountList = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AccountList/AccountList"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/AccountList/AccountList"
+      ),
   ),
 );
 const DAppConnectivity = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/DAppConnectivity"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/DAppConnectivity"
+      ),
   ),
 );
 const EditDAppConnectedAccounts = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/ConnectivityWithWallet/DAppConnected/DAppConnectedAccounts/EditDAppConnectedAccounts/EditDAppConnectedAccounts"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/ConnectivityWithWallet/DAppConnected/DAppConnectedAccounts/EditDAppConnectedAccounts/EditDAppConnectedAccounts"
+      ),
   ),
 );
 const EditDAppConnectedBlockchains = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/ConnectivityWithWallet/DAppConnected/DAppConnectedBlockchains/EditDAppConnectedBlockchains/EditDAppConnectedBlockchains"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/DAppConnectivity/ConnectivityWithWallet/DAppConnected/DAppConnectedBlockchains/EditDAppConnectedBlockchains/EditDAppConnectedBlockchains"
+      ),
   ),
 );
 const ChainConnectivity = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/ChainConnectivity"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/ChainConnectivity"
+      ),
   ),
 );
 const AddEditChain = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/NewChain/AddEditChain/AddEditChain"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ChainConnectivity/NewChain/AddEditChain/AddEditChain"
+      ),
   ),
 );
 const TokenTransfer = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TokenTransfer/TokenTransfer"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TokenTransfer/TokenTransfer"
+      ),
   ),
 );
 const ImportLedger = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportLedger/ImportLedger"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportLedger/ImportLedger"
+      ),
   ),
 );
 const TransactionHistory = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TransactionHistory/TransactionHistory"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TransactionHistory/TransactionHistory"
+      ),
   ),
 );
 const TransactionDetail = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TransactionHistory/TransactionDetail/TransactionDetail"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/TransactionHistory/TransactionDetail/TransactionDetail"
+      ),
   ),
 );
 const ContactsPage = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Contacts/ContactsPage"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Contacts/ContactsPage"
+      ),
   ),
 );
 const Settings = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/Settings"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/Settings"
+      ),
   ),
 );
 const SettingsAppearance = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/SettingsAppearance"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/SettingsAppearance"
+      ),
   ),
 );
 const SettingsSecurity = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/SettingsSecurity"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/SettingsSecurity"
+      ),
   ),
 );
 const SettingsPreferences = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/SettingsPreferences"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/SettingsPreferences"
+      ),
   ),
 );
 const SettingsData = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/SettingsData"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/SettingsData"
+      ),
   ),
 );
 const SettingsAbout = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/SettingsAbout"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Settings/SettingsAbout"
+      ),
   ),
 );
 const ImportNFTCollection = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportNFTCollection/ImportNFTCollection"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/ImportNFTCollection/ImportNFTCollection"
+      ),
   ),
 );
 const NFTGallery = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/NFTGallery/NFTGallery"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/NFTGallery/NFTGallery"
+      ),
   ),
 );
 const NFTDetail = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/NFTDetail/NFTDetail"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/NFTDetail/NFTDetail"
+      ),
   ),
 );
 const NFTTransfer = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/NFTTransfer/NFTTransfer"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/NFTTransfer/NFTTransfer"
+      ),
   ),
 );
 const Receive = withSuspense(
   lazy(
     () =>
-      import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Receive/Receive"),
+      import(
+        "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Receive/Receive"
+      ),
   ),
 );
 
@@ -331,15 +384,6 @@ const router = createMemoryRouter([
     element: <QrlWeb3Wallet />,
   },
 ]);
-
-registerShowTransactionHistory(() => {
-  router.navigate(ROUTES.TRANSACTION_HISTORY).catch((error: unknown) => {
-    console.warn(
-      "QrlWeb3Wallet: Failed to show the transaction history",
-      error,
-    );
-  });
-});
 
 export const AppRouter = () => {
   return <RouterProvider router={router} />;

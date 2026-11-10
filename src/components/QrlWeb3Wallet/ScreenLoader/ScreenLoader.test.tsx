@@ -4,10 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import ScreenLoader from "./ScreenLoader";
-import { showTransactionHistory } from "@/router/navigation";
+import { ROUTES } from "@/router/router";
 
-vi.mock("@/router/navigation", () => ({
-  showTransactionHistory: vi.fn(),
+const navigateMock = vi.fn();
+vi.mock("react-router-dom", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router-dom")>()),
+  useNavigate: () => navigateMock,
 }));
 
 vi.mock("@/components/QrlWeb3Wallet/ScreenLoader/Lock/Lock", () => ({
@@ -172,20 +174,21 @@ describe("ScreenLoader", () => {
     };
 
     it("shows the history once and clears the signal", async () => {
-      vi.mocked(showTransactionHistory).mockClear();
+      navigateMock.mockClear();
       const values = storeWith(ACTIVE);
       const clear = vi.fn();
       values.dAppRequestStore.clearCompletedDAppSend = clear;
       renderComponent(values);
 
       await waitFor(() => {
-        expect(showTransactionHistory).toHaveBeenCalledTimes(1);
+        expect(navigateMock).toHaveBeenCalledTimes(1);
       });
       expect(clear).toHaveBeenCalled();
+      expect(navigateMock).toHaveBeenCalledWith(ROUTES.TRANSACTION_HISTORY);
     });
 
     it("does nothing when the sender is not the active account", async () => {
-      vi.mocked(showTransactionHistory).mockClear();
+      navigateMock.mockClear();
       const values = storeWith(`Q${"cd".repeat(64)}`);
       const clear = vi.fn();
       values.dAppRequestStore.clearCompletedDAppSend = clear;
@@ -194,7 +197,7 @@ describe("ScreenLoader", () => {
       await waitFor(() => {
         expect(clear).toHaveBeenCalled();
       });
-      expect(showTransactionHistory).not.toHaveBeenCalled();
+      expect(navigateMock).not.toHaveBeenCalled();
     });
   });
 });

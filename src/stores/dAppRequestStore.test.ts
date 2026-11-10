@@ -653,7 +653,7 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
       return store;
     };
 
-    it("is set for an approved send with a delivered hash", async () => {
+    it("is set for an approved send with a recorded hash", async () => {
       const store = buildSendStore();
       store.setOnPermissionCallBack((_approved, record) => {
         record({ transactionHash: "0xabc" });
@@ -706,7 +706,7 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
       expect(store.completedDAppSend).toBeUndefined();
     });
 
-    it("stays unset when delivering the answer throws", async () => {
+    it("is still set when delivering the answer throws (the transaction was sent)", async () => {
       const store = buildSendStore();
       store.setOnPermissionCallBack((_approved, record) => {
         record({ transactionHash: "0xabc" });
@@ -722,7 +722,10 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
 
       await store.onPermission(true);
 
-      expect(store.completedDAppSend).toBeUndefined();
+      expect(store.completedDAppSend).toEqual({
+        transactionHash: "0xabc",
+        from: FROM,
+      });
     });
   });
 });

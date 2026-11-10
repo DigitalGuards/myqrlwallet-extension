@@ -59,8 +59,8 @@ class DAppRequestStore {
     record: ResponseRecorder,
   ) => Promise<void> = () => Promise.resolve();
   /**
-   * Set when an approved qrl_sendTransaction has been answered with a
-   * transaction hash and the answer reached the service worker. The wallet
+   * Set when an approved qrl_sendTransaction has recorded a transaction
+   * hash, just before the answer goes to the service worker. The wallet
    * screen reads it to show the history, as a normal send does, and clears
    * it. `from` is the request's sender, empty when the request named none.
    */
@@ -307,6 +307,16 @@ class DAppRequestStore {
       if (hasApproved && !this.hasRecordedResponse(bucketKey)) {
         record({ error: approvalProducedNothingProviderError() });
       }
+      // A recorded hash means the transaction is already broadcast and its
+      // pending history entry written, whether or not the answer below
+      // reaches the worker. Flagging it first lets the wallet screen be on
+      // the history by the time the request slot clears.
+      this.noteCompletedSend(
+        hasApproved,
+        method,
+        sendFrom,
+        this.inFlightResponseData.get(bucketKey)?.transactionHash,
+      );
       const response: DAppResponseType = {
         method,
         action: EXTENSION_MESSAGES.DAPP_RESPONSE,
@@ -318,12 +328,6 @@ class DAppRequestStore {
       // this answer, which keeps the clear ahead of the next request being
       // written. Nothing clears it from here on the success path.
       await browser.runtime.sendMessage(response);
-      this.noteCompletedSend(
-        hasApproved,
-        method,
-        sendFrom,
-        this.inFlightResponseData.get(bucketKey)?.transactionHash,
-      );
     } catch (error) {
       console.warn(
         "QrlWeb3Wallet: Error while resolving the permission request\n",
@@ -364,7 +368,7 @@ class DAppRequestStore {
   }
 
   /**
-   * Runs after the answer was delivered. It only publishes a flag for the
+   * Runs once the approval has recorded its result. It only publishes a flag for the
    * wallet screen and can never affect the approval, so any failure here is
    * swallowed.
    */
