@@ -213,11 +213,13 @@ describe("TransactionDetail", () => {
   });
 
   it("adds the fee to the amount of a sent native transfer", () => {
-    renderComponent(sampleTransaction);
+    renderComponent({ ...sampleTransaction, amount: 0.0001 });
 
-    // 21,000 gas at 1 gwei is 0.000021, on top of the 2.5 sent.
+    // 21,000 gas at 1 gwei is 0.000021, on top of the 0.0001 sent. The
+    // amount is small so that the fee shows in the formatted total.
+    expect(getOptimalGasFee("0.000121")).not.toBe(getOptimalGasFee("0.0001"));
     expect(
-      screen.getByText(getOptimalGasFee("2.500021"), {
+      screen.getByText(getOptimalGasFee("0.000121"), {
         selector: ".font-bold",
       }),
     ).toBeInTheDocument();

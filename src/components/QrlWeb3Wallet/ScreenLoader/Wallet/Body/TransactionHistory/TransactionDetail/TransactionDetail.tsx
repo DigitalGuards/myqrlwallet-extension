@@ -460,7 +460,7 @@ const TransactionDetail = observer(() => {
     qrlStore.isFiatNetwork &&
     isFiatChain({ chainId: transaction.chainId }) &&
     qrlPrice > 0 &&
-    !transaction.isZrc20Token;
+    !isTokenTransfer;
   const fiatAmount = showFiat
     ? formatFiatCompact(amount, qrlPrice, quoteCurrency)
     : "";
