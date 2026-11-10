@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import QrlStore from "./qrlStore";
 import { deferred } from "@/test-utils/deferred";
 import StorageUtil from "@/utilities/storageUtil";
+import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -62,5 +63,62 @@ describe("active account hydration", () => {
     release(address);
     await hydration;
     expect(store.activeAccount.accountAddress).toBe(address);
+  });
+});
+
+describe("an RPC URL the provider refuses", () => {
+  it("drops the previous provider and still clears the startup loader", async () => {
+    const account = `Q${"a".repeat(128)}`;
+    const customChain = {
+      ...DEFAULT_BLOCKCHAIN,
+      chainId: "0x5",
+      isCustomChain: true,
+    };
+    vi.spyOn(StorageUtil, "getActiveBlockChain")
+      .mockResolvedValueOnce({
+        ...customChain,
+        defaultRpcUrl: "https://rpc.example",
+      })
+      .mockResolvedValueOnce({
+        ...customChain,
+        defaultRpcUrl: "https://user:secret@rpc.example",
+      });
+    vi.spyOn(StorageUtil, "getAllAccounts")
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([account]);
+    vi.spyOn(StorageUtil, "getActiveAccount").mockResolvedValue(account);
+    vi.spyOn(StorageUtil, "clearActiveAccount").mockResolvedValue();
+    vi.spyOn(QrlStore.prototype, "startBalancePolling").mockImplementation(
+      () => undefined,
+    );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const initializeSpy = vi.spyOn(QrlStore.prototype, "initializeBlockchain");
+    initializeSpy.mockResolvedValue();
+    const store = new QrlStore();
+    initializeSpy.mockRestore();
+
+    await QrlStore.prototype.initializeBlockchain.call(store);
+    expect(store.qrlInstance).toBeDefined();
+
+    // @theqrl/web3 2.0.0 refuses to build a provider for this URL.
+    await expect(
+      QrlStore.prototype.initializeBlockchain.call(store),
+    ).resolves.toBeUndefined();
+    expect(store.qrlConnection.blockchain.defaultRpcUrl).toBe(
+      "https://user:secret@rpc.example",
+    );
+    expect(store.qrlInstance).toBeUndefined();
+    expect(store.initProgress.active).toBe(false);
+    expect(store.qrlConnection.isConnected).toBe(false);
+    expect(store.qrlConnection.isLoading).toBe(false);
+    expect(store.qrlAccounts.accounts.map((a) => a.accountAddress)).toEqual([
+      account,
+    ]);
+    expect(store.activeAccount.accountAddress).toBe(account);
+    expect(logged).toHaveBeenCalledWith(
+      "[initializeBlockchain] Cannot use the RPC URL:",
+      expect.anything(),
+    );
+    expect(String(logged.mock.calls[0]?.[1])).not.toContain("secret");
   });
 });

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { echoRpcResult } from "@/test-utils/rpcReply";
 import { UNRESTRICTED_METHODS as METHODS } from "../constants/requestConstants";
 import { V3_CHAIN_ID, V3_GENESIS_HASH } from "@/configuration/releaseProfile";
 import { executeUnrestrictedMethod } from "./unrestrictedMethodExecutor";
@@ -26,7 +27,6 @@ const {
       getTransaction: method(),
       call: method(),
       getCode: method(),
-      getProof: method(),
       getStorageAt: method(),
       getTransactionFromBlock: method(),
       getTransactionCount: method(),
@@ -216,6 +216,9 @@ describe("unrestricted RPC parameter boundaries", () => {
       target: "call",
       result: "0x1234",
       expected: "0x1234",
+      // A null recipient is left out, as @theqrl/web3 1.0.3 did on the wire
+      // (prepareRpcTransactionInput); creation reads the same either way.
+      forwarded: [{ data: "0x6080" }, "latest"],
     },
     {
       method: METHODS.QRL_GET_CODE,
@@ -223,13 +226,6 @@ describe("unrestricted RPC parameter boundaries", () => {
       target: "getCode",
       result: "0x1234",
       expected: "0x1234",
-    },
-    {
-      method: METHODS.QRL_GET_PROOF,
-      params: [ADDRESS, [HASH, new Uint8Array([1])], "latest"],
-      target: "getProof",
-      result: { balance: 16n },
-      expected: { balance: "0x10" },
     },
     {
       method: METHODS.QRL_GET_STORAGE_AT,
@@ -451,7 +447,15 @@ describe("unrestricted RPC parameter boundaries", () => {
       rpc.estimateGas.mockResolvedValue(21000n);
       rpc.call.mockResolvedValue("0x1234");
       await executeUnrestrictedMethod(request(method, [transaction]));
-      expect(rpc[target].mock.calls[0]?.[0]).toBe(transaction);
+      // Web3 gets a prepared copy (prepareRpcTransactionInput): every field
+      // and extension field is kept, and gasLimit is folded into gas, as
+      // @theqrl/web3 1.0.3 sent it. The dApp's object is left untouched.
+      const { gasLimit, ...rest } = transaction;
+      expect(rpc[target].mock.calls[0]?.[0]).not.toBe(transaction);
+      expect(rpc[target].mock.calls[0]?.[0]).toEqual({
+        ...rest,
+        gas: gasLimit,
+      });
       expect(serialize()).toBe(snapshot);
     },
   );
@@ -501,11 +505,11 @@ describe("unrestricted RPC parameter boundaries", () => {
   it.each([
     METHODS.QRL_GET_TRANSACTION_BY_BLOCK_HASH_AND_INDEX,
     METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX,
-  ])("preserves the immediate empty result for %s", async (method) => {
+  ])("returns the transaction for %s", async (method) => {
     rpc.getTransactionFromBlock.mockResolvedValue({ hash: HASH, value: 16n });
     await expect(
       executeUnrestrictedMethod(request(method, ["latest", "0x0"])),
-    ).resolves.toEqual({});
+    ).resolves.toEqual({ hash: HASH, value: "0x10" });
     expect(rpc.getTransactionFromBlock).toHaveBeenCalledExactlyOnceWith(
       "latest",
       "0x0",
@@ -513,23 +517,36 @@ describe("unrestricted RPC parameter boundaries", () => {
   });
 
   it.each([
-    METHODS.QRL_GET_TRANSACTION_BY_BLOCK_HASH_AND_INDEX,
-    METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX,
+    [METHODS.QRL_GET_TRANSACTION_BY_BLOCK_HASH_AND_INDEX, null],
+    [METHODS.QRL_GET_TRANSACTION_BY_BLOCK_HASH_AND_INDEX, undefined],
+    [METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX, null],
+    [METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX, undefined],
   ])(
-    "reports a rejected %s lookup after the empty response",
-    async (method) => {
-      const error = new Error("RPC refused the transaction lookup.");
-      const report = vi.spyOn(console, "error").mockImplementation(() => {});
-      rpc.getTransactionFromBlock.mockRejectedValue(error);
+    "answers null from %s for an index the block does not have (%s)",
+    async (method, missing) => {
+      rpc.getTransactionFromBlock.mockResolvedValue(missing);
       await expect(
-        executeUnrestrictedMethod(request(method, ["latest", 0])),
-      ).resolves.toEqual({});
-      expect(report).toHaveBeenCalledExactlyOnceWith(
-        "QrlWeb3Wallet: Failed to look up transaction:",
-        error,
-      );
+        executeUnrestrictedMethod(request(method, ["latest", 7])),
+      ).resolves.toBeNull();
     },
   );
+
+  it.each([
+    METHODS.QRL_GET_TRANSACTION_BY_BLOCK_HASH_AND_INDEX,
+    METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX,
+  ])("passes a rejected %s lookup on to the caller", async (method) => {
+    const error = new Error("RPC refused the transaction lookup.");
+    rpc.getTransactionFromBlock.mockRejectedValue(error);
+    await expect(
+      executeUnrestrictedMethod(request(method, ["latest", 0])),
+    ).rejects.toBe(error);
+  });
+
+  it("answers net_version with the decimal string the node gives", async () => {
+    await expect(
+      executeUnrestrictedMethod(request(METHODS.NET_VERSION)),
+    ).resolves.toBe("3151909");
+  });
 
   it.each([42, {}, { transactionHash: false }])(
     "rejects malformed broadcast receipts (%s)",
@@ -794,16 +811,19 @@ describe("Web3 creation-call compatibility", () => {
       const provider = new Web3.providers.HttpProvider("https://rpc.example");
       const send = vi
         .spyOn(provider, "request")
-        .mockResolvedValue({ jsonrpc: "2.0", id: 1, result: "0x1234" });
+        .mockImplementation(echoRpcResult("0x1234"));
       const web3 = new Web3({ provider });
       const callContext: RpcTransactionContext = web3.qrl;
       await expect(callContext.call(transaction, "latest")).resolves.toBe(
         "0x1234",
       );
       expect(send).toHaveBeenCalledWith(
+        // 2.0.0 forwards a null recipient as null, which the node reads as
+        // an omitted one; the executor strips it before this layer
+        // (prepareRpcTransactionInput).
         expect.objectContaining({
           method: "qrl_call",
-          params: [{ data: "0x6080" }, "latest"],
+          params: [transaction, "latest"],
         }),
       );
     },

@@ -113,6 +113,15 @@ export function parseEncryptedWalletFile(text: string): EncryptedWalletFile {
 }
 
 /**
+ * The web wallet's own importer reads a file's hex seed with or without its
+ * 0x prefix, and @theqrl/web3 1.0.3 parsed both. 2.0.0 parses only a seed
+ * that starts with a lowercase "0x" (InvalidSeedError), so the prefix is
+ * added here, or an upper-case "0X" lowercased.
+ */
+const withHexSeedPrefix = (hexSeed: string): string =>
+  /^0x/i.test(hexSeed) ? `0x${hexSeed.slice(2)}` : `0x${hexSeed}`;
+
+/**
  * Authenticated-decrypt a MyQRLWallet encrypted wallet file. Throws
  * WalletFileDecryptError on a wrong password or tampered ciphertext (the GCM
  * tag check fails), and WalletFileFormatError when the decrypted payload does
@@ -149,7 +158,10 @@ export async function decryptWalletFile(
     throw new WalletFileFormatError("Wallet file contained no seed");
   }
 
-  const hexSeed = typeof payload.hexSeed === "string" ? payload.hexSeed : "";
+  const hexSeed =
+    typeof payload.hexSeed === "string" && payload.hexSeed
+      ? withHexSeedPrefix(payload.hexSeed)
+      : "";
   const mnemonic = typeof payload.mnemonic === "string" ? payload.mnemonic : "";
   if (!hexSeed && !mnemonic) {
     throw new WalletFileFormatError("Wallet file contained no seed");

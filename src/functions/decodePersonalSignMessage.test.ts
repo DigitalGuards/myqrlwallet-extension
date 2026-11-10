@@ -23,6 +23,11 @@ describe("decodePersonalSignMessage", () => {
     ["uppercase unprefixed hex", "48656C6C6F"],
     ["odd-length text that looks hex", "abc"],
     ["empty", ""],
+    // hashMessage on @theqrl/web3 1.0.3 dropped NUL characters at the edges
+    // of a text message, so this decoded text hashed as "hi" while the
+    // request itself hashed all four bytes. 2.0.0 hashes every byte, as
+    // go-qrl's accounts.TextHash does.
+    ["hex with NUL edges", "0x00686900"],
   ])("displays what gets signed for %s", (_label, rawMessage) => {
     const { text } = decodePersonalSignMessage(rawMessage);
     expect(hashMessage(text)).toBe(hashMessage(rawMessage));

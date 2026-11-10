@@ -460,4 +460,87 @@ describe("AddEditChainForm", () => {
       DEFAULT_BLOCKCHAIN.chainName,
     );
   });
+
+  it("refuses a new RPC URL carrying a user name or password", async () => {
+    storageMocks.setAllBlockChains.mockClear();
+    const addChain = vi.fn<QrlStore["addChain"]>();
+    renderComponent(mockedStore({ qrlStore: { addChain } }));
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "chainName" }),
+      "Typed chain name",
+    );
+    await userEvent.type(
+      screen.getByRole("spinbutton", { name: "chainId" }),
+      "243",
+    );
+    await userEvent.click(
+      screen.getAllByRole("button", { name: "Add URL" })[0],
+    );
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "url" }),
+      "https://user:secret@rpc.example",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => {
+      expect(
+        screen.getByText("https://user:secret@rpc.example"),
+      ).toBeInTheDocument();
+    });
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "currencyName" }),
+      "Typed currency name",
+    );
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "currencySymbol" }),
+      "TPD",
+    );
+    await userEvent.type(
+      screen.getByRole("spinbutton", { name: "currencyDecimals" }),
+      "18",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add/edit chain" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "RPC URLs cannot contain a user name or password.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Expected an array/)).not.toBeInTheDocument();
+    expect(addChain).not.toHaveBeenCalled();
+    expect(storageMocks.setAllBlockChains).not.toHaveBeenCalled();
+  });
+
+  it("refuses to save a stored chain whose RPC URL carries credentials", async () => {
+    storageMocks.setAllBlockChains.mockClear();
+    const credentialedUrl = "https://user:secret@rpc.example";
+    const editChain = vi.fn<QrlStore["editChain"]>();
+    const initializeBlockchain = vi.fn<() => Promise<void>>();
+    renderComponent(
+      mockedStore({ qrlStore: { editChain, initializeBlockchain } }),
+      {
+        chainToEdit: {
+          ...DEFAULT_BLOCKCHAIN,
+          rpcUrls: [credentialedUrl],
+          defaultRpcUrl: credentialedUrl,
+        },
+      },
+    );
+    const submit = screen.getByRole("button", { name: "Add/edit chain" });
+    await waitFor(() => {
+      expect(submit).toBeEnabled();
+    });
+    await userEvent.click(submit);
+
+    expect(
+      await screen.findByText(
+        "RPC URLs cannot contain a user name or password.",
+      ),
+    ).toBeInTheDocument();
+    expect(editChain).not.toHaveBeenCalled();
+    expect(initializeBlockchain).not.toHaveBeenCalled();
+    expect(storageMocks.setAllBlockChains).not.toHaveBeenCalled();
+  });
 });
