@@ -1,6 +1,7 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
 import { approvalProducedNothingProviderError } from "@/functions/describeExtensionError";
 import type { StoredBlockchain as BlockchainDataType } from "@/utilities/storageGuards";
+import { RESTRICTED_METHODS } from "@/scripts/constants/requestConstants";
 import { EXTENSION_MESSAGES } from "@/scripts/constants/streamConstants";
 import {
   DAppRequestType,
@@ -57,6 +58,13 @@ class DAppRequestStore {
     hasApproved: boolean,
     record: ResponseRecorder,
   ) => Promise<void> = () => Promise.resolve();
+  /**
+   * Set when an approved qrl_sendTransaction has been answered with a
+   * transaction hash and the answer reached the service worker. The wallet
+   * screen reads it to show the history, as a normal send does, and clears
+   * it. `from` is the request's sender, empty when the request named none.
+   */
+  completedDAppSend?: { transactionHash: string; from: string };
   approvalProcessingStatus = {
     isProcessing: false,
     hasApproved: false,
@@ -253,6 +261,7 @@ class DAppRequestStore {
     const requestId = this.dAppRequestData?.requestId;
     const method = this.dAppRequestData?.method ?? "";
     const bucketKey = requestId ?? "";
+    const sendFrom = this.sendTransactionSender(method);
     // Bound to this run for as long as it lasts, whatever the screen goes
     // on to show.
     const record: ResponseRecorder = (data) => {
@@ -309,6 +318,12 @@ class DAppRequestStore {
       // this answer, which keeps the clear ahead of the next request being
       // written. Nothing clears it from here on the success path.
       await browser.runtime.sendMessage(response);
+      this.noteCompletedSend(
+        hasApproved,
+        method,
+        sendFrom,
+        this.inFlightResponseData.get(bucketKey)?.transactionHash,
+      );
     } catch (error) {
       console.warn(
         "QrlWeb3Wallet: Error while resolving the permission request\n",
@@ -332,6 +347,49 @@ class DAppRequestStore {
         console.warn("QrlWeb3Wallet: Failed to update approval status", error);
       });
     }
+  }
+
+  /** The `from` of the transaction on screen, read at click time. */
+  private sendTransactionSender(method: string): string {
+    try {
+      if (method !== RESTRICTED_METHODS.QRL_SEND_TRANSACTION) return "";
+      const params: unknown = this.dAppRequestData?.params;
+      const first: unknown = Array.isArray(params) ? params[0] : undefined;
+      return isRecord(first) && typeof first.from === "string"
+        ? first.from
+        : "";
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Runs after the answer was delivered. It only publishes a flag for the
+   * wallet screen and can never affect the approval, so any failure here is
+   * swallowed.
+   */
+  private noteCompletedSend(
+    hasApproved: boolean,
+    method: string,
+    from: string,
+    transactionHash: unknown,
+  ): void {
+    try {
+      if (
+        hasApproved &&
+        method === RESTRICTED_METHODS.QRL_SEND_TRANSACTION &&
+        typeof transactionHash === "string" &&
+        transactionHash !== ""
+      ) {
+        this.completedDAppSend = { transactionHash, from };
+      }
+    } catch {
+      // Navigation is a courtesy; the approval has already been answered.
+    }
+  }
+
+  clearCompletedDAppSend() {
+    this.completedDAppSend = undefined;
   }
 
   /**

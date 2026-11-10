@@ -1,5 +1,7 @@
 import withSuspense from "@/functions/withSuspense";
 import ScrollRegion from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
+import { showTransactionHistory } from "@/router/navigation";
+import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { useStore } from "@/stores/store";
 import { observer } from "mobx-react-lite";
 import { lazy, useEffect, useRef, useState } from "react";
@@ -25,7 +27,7 @@ const Wallet = withSuspense(
 
 const ScreenLoader = observer(() => {
   const { dAppRequestStore, lockStore, qrlStore } = useStore();
-  const { hasDAppRequest } = dAppRequestStore;
+  const { hasDAppRequest, completedDAppSend } = dAppRequestStore;
   const { isLocked } = lockStore;
 
   const [screen, setScreen] = useState(SCREENS.LOCK);
@@ -54,6 +56,18 @@ const ScreenLoader = observer(() => {
     }
     wasLockedRef.current = isLocked;
   }, [isLocked]);
+
+  // A normal send ends on the history, where the new transaction shows as
+  // pending. An approved dApp send does the same, for the account whose
+  // history that screen lists.
+  useEffect(() => {
+    if (!completedDAppSend) return;
+    const { from } = completedDAppSend;
+    dAppRequestStore.clearCompletedDAppSend();
+    if (areAddressesEquivalent(from, qrlStore.activeAccount.accountAddress)) {
+      showTransactionHistory();
+    }
+  }, [completedDAppSend]);
 
   useEffect(() => {
     if (isLocked) {

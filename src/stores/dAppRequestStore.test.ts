@@ -640,6 +640,91 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
     });
     await expect(update).resolves.toBeUndefined();
   });
+
+  describe("completed dApp send", () => {
+    const FROM = `Q${"ab".repeat(64)}`;
+    const buildSendStore = (method = "qrl_sendTransaction") => {
+      const store = buildStore("request-a", method);
+      store.dAppRequestData = {
+        requestId: "request-a",
+        method,
+        params: [{ from: FROM, to: `Q${"cd".repeat(64)}` }],
+      };
+      return store;
+    };
+
+    it("is set for an approved send with a delivered hash", async () => {
+      const store = buildSendStore();
+      store.setOnPermissionCallBack((_approved, record) => {
+        record({ transactionHash: "0xabc" });
+        return Promise.resolve();
+      });
+
+      await store.onPermission(true);
+
+      expect(store.completedDAppSend).toEqual({
+        transactionHash: "0xabc",
+        from: FROM,
+      });
+      store.clearCompletedDAppSend();
+      expect(store.completedDAppSend).toBeUndefined();
+    });
+
+    it("stays unset when the user rejects", async () => {
+      const store = buildSendStore();
+      store.setOnPermissionCallBack((_approved, record) => {
+        record({ transactionHash: "0xabc" });
+        return Promise.resolve();
+      });
+
+      await store.onPermission(false);
+
+      expect(store.completedDAppSend).toBeUndefined();
+    });
+
+    it("stays unset when the recorded answer is an error", async () => {
+      const store = buildSendStore();
+      store.setOnPermissionCallBack((_approved, record) => {
+        record({ error: new Error("broadcast failed") });
+        return Promise.resolve();
+      });
+
+      await store.onPermission(true);
+
+      expect(store.completedDAppSend).toBeUndefined();
+    });
+
+    it("stays unset for other methods", async () => {
+      const store = buildSendStore("qrl_signMessage");
+      store.setOnPermissionCallBack((_approved, record) => {
+        record({ transactionHash: "0xabc" });
+        return Promise.resolve();
+      });
+
+      await store.onPermission(true);
+
+      expect(store.completedDAppSend).toBeUndefined();
+    });
+
+    it("stays unset when delivering the answer throws", async () => {
+      const store = buildSendStore();
+      store.setOnPermissionCallBack((_approved, record) => {
+        record({ transactionHash: "0xabc" });
+        return Promise.resolve();
+      });
+      mockedBrowser.runtime.sendMessage.mockImplementation(
+        (message: unknown) =>
+          isRecord(message) &&
+          message.action === EXTENSION_MESSAGES.DAPP_RESPONSE
+            ? Promise.reject(new Error("worker gone"))
+            : Promise.resolve({ accepted: true }),
+      );
+
+      await store.onPermission(true);
+
+      expect(store.completedDAppSend).toBeUndefined();
+    });
+  });
 });
 
 describe("DAppRequestStore boundaries", () => {

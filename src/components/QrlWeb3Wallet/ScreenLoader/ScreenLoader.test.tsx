@@ -4,6 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import ScreenLoader from "./ScreenLoader";
+import { showTransactionHistory } from "@/router/navigation";
+
+vi.mock("@/router/navigation", () => ({
+  showTransactionHistory: vi.fn(),
+}));
 
 vi.mock("@/components/QrlWeb3Wallet/ScreenLoader/Lock/Lock", () => ({
   default: () => <div>Mocked Lock</div>,
@@ -146,5 +151,50 @@ describe("ScreenLoader", () => {
     });
     expect(initializeBlockchain).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("Mocked Wallet")).toBeInTheDocument();
+  });
+
+  describe("after an approved dApp send", () => {
+    const ACTIVE = `Q${"ab".repeat(64)}`;
+    const send = (from: string) => ({
+      transactionHash: "0xabc",
+      from,
+    });
+    const storeWith = (from: string) => {
+      const values = mockedStore({
+        lockStore: { isLocked: false },
+        dAppRequestStore: {
+          completedDAppSend: send(from),
+          clearCompletedDAppSend: vi.fn(),
+        },
+      });
+      values.qrlStore.activeAccount.accountAddress = ACTIVE;
+      return values;
+    };
+
+    it("shows the history once and clears the signal", async () => {
+      vi.mocked(showTransactionHistory).mockClear();
+      const values = storeWith(ACTIVE);
+      const clear = vi.fn();
+      values.dAppRequestStore.clearCompletedDAppSend = clear;
+      renderComponent(values);
+
+      await waitFor(() => {
+        expect(showTransactionHistory).toHaveBeenCalledTimes(1);
+      });
+      expect(clear).toHaveBeenCalled();
+    });
+
+    it("does nothing when the sender is not the active account", async () => {
+      vi.mocked(showTransactionHistory).mockClear();
+      const values = storeWith(`Q${"cd".repeat(64)}`);
+      const clear = vi.fn();
+      values.dAppRequestStore.clearCompletedDAppSend = clear;
+      renderComponent(values);
+
+      await waitFor(() => {
+        expect(clear).toHaveBeenCalled();
+      });
+      expect(showTransactionHistory).not.toHaveBeenCalled();
+    });
   });
 });
