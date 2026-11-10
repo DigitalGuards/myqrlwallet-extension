@@ -44,8 +44,7 @@ const throughMiddleware = (method: string, params: unknown[]) => {
   return runtimeEngine.handle({ id: 1, jsonrpc: "2.0", method, params });
 };
 
-// These expectations are also exercised with the origin/dev executor loaded
-// in place of the worktree executor. Only the HTTP response is controlled.
+// Only the HTTP response is controlled.
 describe.each([
   { method: METHODS.QRL_CALL, result: "0x1234" },
   { method: METHODS.QRL_ESTIMATE_GAS, result: "0x5208" },
@@ -136,22 +135,46 @@ describe.each([
   });
 });
 
+const TX_HASH = `0x${"22".repeat(32)}`;
+
+// A transaction reply @theqrl/web3 2.0.0 accepts for the requested block and
+// index: it names the requested block hash or number and the requested index.
+const replyFor = (rpcBlock: string, hexIndex: string) => ({
+  hash: TX_HASH,
+  blockHash: rpcBlock.length === HASH.length ? rpcBlock : HASH,
+  blockNumber:
+    /^0x[0-9a-f]+$/.test(rpcBlock) && rpcBlock.length !== HASH.length
+      ? rpcBlock
+      : "0x5",
+  transactionIndex: hexIndex,
+  value: "0x1",
+});
+
 describe.each([
   METHODS.QRL_GET_TRANSACTION_BY_BLOCK_HASH_AND_INDEX,
   METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX,
-])("%s indexed lookup response compatibility", (method) => {
+])("%s indexed lookup responses", (method) => {
+  const reply = replyFor("latest", "0x0");
   describe.each([
     {
       name: "executor",
       run: (params: unknown[]) => executeUnrestrictedMethod({ method, params }),
-      expected: {},
+      wrap: (result: unknown) => result,
+      expectFailure: (outcome: Promise<unknown>, message: string) =>
+        expect(outcome).rejects.toThrow(message),
     },
     {
       name: "middleware",
       run: (params: unknown[]) => throughMiddleware(method, params),
-      expected: { id: 1, jsonrpc: "2.0", result: {} },
+      wrap: (result: unknown) => ({ id: 1, jsonrpc: "2.0", result }),
+      expectFailure: (outcome: Promise<unknown>, message: string) =>
+        expect(outcome).resolves.toMatchObject({
+          id: 1,
+          jsonrpc: "2.0",
+          error: { code: 4200, message: expect.stringContaining(message) },
+        }),
     },
-  ])("$name", ({ run, expected }) => {
+  ])("$name", ({ run, wrap, expectFailure }) => {
     it.each([
       { block: HASH, rpcBlock: HASH, byHash: true },
       { block: new Uint8Array(32).fill(17), rpcBlock: HASH, byHash: true },
@@ -161,16 +184,18 @@ describe.each([
       { block: "latest", rpcBlock: "latest", byHash: false },
       { block: undefined, rpcBlock: "latest", byHash: false },
     ])(
-      "returns the legacy empty result for block $block and every index representation",
+      "returns the transaction for block $block and every index representation",
       async ({ block, rpcBlock, byHash }) => {
-        const send = vi
-          .spyOn(HttpProvider.prototype, "request")
-          .mockImplementation(echoRpcResult({ hash: HASH, value: "0x1" }));
+        const send = vi.spyOn(HttpProvider.prototype, "request");
         for (const index of [0, 0n, "0x0"]) {
-          send.mockClear();
+          send
+            .mockClear()
+            .mockImplementation(echoRpcResult(replyFor(rpcBlock, "0x0")));
           const params = [block, index];
           const snapshot = structuredClone(params);
-          await expect(run(params)).resolves.toEqual(expected);
+          await expect(run(params)).resolves.toEqual(
+            wrap(replyFor(rpcBlock, "0x0")),
+          );
           expect(send).toHaveBeenCalledExactlyOnceWith(
             expect.objectContaining({
               method: byHash
@@ -184,40 +209,72 @@ describe.each([
       },
     );
 
-    it.each<{ label: string; rpcResult: Json }>([
-      { label: "transaction", rpcResult: { hash: HASH, value: "0x1" } },
-      { label: "missing transaction", rpcResult: null },
-    ])(
-      "completes before a stalled RPC eventually returns $label",
-      async ({ rpcResult }) => {
-        let completeRpc: (() => void) | undefined;
-        const release = new Promise<void>((resolve) => {
-          completeRpc = resolve;
-        });
-        const send = vi
-          .spyOn(HttpProvider.prototype, "request")
-          .mockImplementation((payload) =>
-            release.then(() => echoRpcResult(rpcResult)(payload)),
-          );
-        let settled = false;
-        const pending = run(["latest", "0x0"]).then((response) => {
-          settled = true;
-          return response;
-        });
+    it("returns null for an index the block does not have", async () => {
+      vi.spyOn(HttpProvider.prototype, "request").mockImplementation(
+        echoRpcResult(null),
+      );
+      await expect(run(["latest", 9])).resolves.toEqual(wrap(null));
+    });
 
-        try {
-          await vi.waitFor(() => {
-            expect(send).toHaveBeenCalledOnce();
-            expect(settled).toBe(true);
-          });
-          await expect(pending).resolves.toEqual(expected);
-        } finally {
-          completeRpc?.();
-          await pending;
-        }
-        await expect(pending).resolves.toEqual(expected);
-        expect(send).toHaveBeenCalledOnce();
+    it("waits for a stalled RPC before it returns the transaction", async () => {
+      let completeRpc: (() => void) | undefined;
+      const release = new Promise<void>((resolve) => {
+        completeRpc = resolve;
+      });
+      const send = vi
+        .spyOn(HttpProvider.prototype, "request")
+        .mockImplementation((payload) =>
+          release.then(() => echoRpcResult(reply)(payload)),
+        );
+      let settled = false;
+      const pending = run(["latest", "0x0"]).then((response) => {
+        settled = true;
+        return response;
+      });
+
+      try {
+        await vi.waitFor(() => {
+          expect(send).toHaveBeenCalledOnce();
+        });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(settled).toBe(false);
+      } finally {
+        completeRpc?.();
+      }
+      await expect(pending).resolves.toEqual(wrap(reply));
+      expect(send).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      {
+        label: "another block hash",
+        block: HASH,
+        patch: { blockHash: `0x${"33".repeat(32)}` },
       },
-    );
+      {
+        label: "another block number",
+        block: 5,
+        patch: { blockNumber: "0x9" },
+      },
+      {
+        label: "another transaction index",
+        block: HASH,
+        patch: { transactionIndex: "0x1" },
+      },
+    ])("refuses a reply for $label", async ({ block, patch }) => {
+      vi.spyOn(HttpProvider.prototype, "request").mockImplementation(
+        echoRpcResult({
+          ...replyFor(block === 5 ? "0x5" : HASH, "0x0"),
+          ...patch,
+        }),
+      );
+      await expectFailure(run([block, 0]), "Invalid JSON-RPC response");
+    });
+
+    it("delivers an RPC failure to the caller", async () => {
+      const error = new Error("RPC refused the transaction lookup.");
+      vi.spyOn(HttpProvider.prototype, "request").mockRejectedValue(error);
+      await expectFailure(run(["latest", 0]), error.message);
+    });
   });
 });
