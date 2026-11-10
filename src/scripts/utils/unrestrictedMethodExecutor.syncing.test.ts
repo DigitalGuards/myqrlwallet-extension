@@ -30,50 +30,36 @@ const NODE_REPLY = {
 };
 
 describe("qrl_syncing through installed Web3", () => {
-  it("returns the node's hex quantities for a syncing node", async () => {
-    const send = vi
-      .spyOn(HttpProvider.prototype, "request")
-      .mockImplementation(echoRpcResult(NODE_REPLY));
+  it.each([
+    ["a syncing node", NODE_REPLY],
+    [
+      "a reply with a field web3 does not know",
+      { ...NODE_REPLY, txIndexRemainingBlocks: "0x5" },
+    ],
+    [
+      "a reply without startingBlock",
+      { currentBlock: "0x1a4", highestBlock: "0x2710" },
+    ],
+  ])(
+    "passes the node's reply through unchanged for %s",
+    async (_name, reply) => {
+      const send = vi
+        .spyOn(HttpProvider.prototype, "request")
+        .mockImplementation(echoRpcResult(reply));
 
-    const result = await executeUnrestrictedMethod({
-      method: METHODS.QRL_SYNCING,
-      params: [],
-    });
+      const result = await executeUnrestrictedMethod({
+        method: METHODS.QRL_SYNCING,
+        params: [],
+      });
 
-    expect(send).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ method: "qrl_syncing" }),
-    );
-    expect(result).toEqual(NODE_REPLY);
-    expect(() => JSON.stringify(result)).not.toThrow();
-    expect(() => structuredClone(result)).not.toThrow();
-    expect(JSON.parse(JSON.stringify(result))).toEqual(NODE_REPLY);
-  });
-
-  it("round-trips the quantities to the node's numbers", async () => {
-    vi.spyOn(HttpProvider.prototype, "request").mockImplementation(
-      echoRpcResult(NODE_REPLY),
-    );
-
-    const result = await executeUnrestrictedMethod({
-      method: METHODS.QRL_SYNCING,
-      params: [],
-    });
-
-    const wire: unknown = JSON.parse(JSON.stringify(result));
-    const numbers: Record<string, number> = {};
-    if (typeof wire !== "object" || wire === null) throw new Error("no object");
-    for (const [key, value] of Object.entries(wire)) {
-      expect(value).toMatch(/^0x[0-9a-f]+$/);
-      numbers[key] = Number(BigInt(String(value)));
-    }
-    expect(numbers).toEqual({
-      startingBlock: 0,
-      currentBlock: 420,
-      highestBlock: 10000,
-      syncedAccounts: 1000,
-      healedTrienodes: 7,
-    });
-  });
+      expect(send).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ method: "qrl_syncing" }),
+      );
+      expect(result).toEqual(reply);
+      expect(() => structuredClone(result)).not.toThrow();
+      expect(JSON.parse(JSON.stringify(result))).toEqual(reply);
+    },
+  );
 
   it("returns false for a node that is not syncing", async () => {
     vi.spyOn(HttpProvider.prototype, "request").mockImplementation(
