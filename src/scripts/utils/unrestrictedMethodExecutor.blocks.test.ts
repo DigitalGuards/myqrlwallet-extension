@@ -20,6 +20,16 @@ vi.mock("@/utilities/storageUtil", () => ({
 vi.mock("../lockManager/lockManager", () => ({ default: {} }));
 
 const HASH = `0x${"11".repeat(32)}`;
+const TX_HASH = `0x${"22".repeat(32)}`;
+
+// A transaction reply @theqrl/web3 2.0.0 accepts for block HASH at index 0.
+const TRANSACTION_REPLY = {
+  hash: TX_HASH,
+  blockHash: HASH,
+  blockNumber: "0x5",
+  transactionIndex: "0x0",
+  value: "0x1",
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -55,19 +65,17 @@ describe.each([
     method: METHODS.QRL_GET_TRANSACTION_BY_BLOCK_HASH_AND_INDEX,
     rpcMethod: METHODS.QRL_GET_TRANSACTION_BY_BLOCK_HASH_AND_INDEX,
     extraParams: ["0x0"],
-    result: { hash: HASH, value: "0x1" },
-    expected: {},
+    result: TRANSACTION_REPLY,
   },
   {
     method: METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX,
     rpcMethod: METHODS.QRL_GET_TRANSACTION_BY_BLOCK_HASH_AND_INDEX,
     extraParams: ["0x0"],
-    result: { hash: HASH, value: "0x1" },
-    expected: {},
+    result: TRANSACTION_REPLY,
   },
 ])(
   "$method through installed Web3",
-  ({ method, rpcMethod, extraParams, result, expected = result }) => {
+  ({ method, rpcMethod, extraParams, result }) => {
     it.each([HASH, new Uint8Array(32).fill(17)])(
       "preserves block hash input %s and the method result",
       async (hash) => {
@@ -81,7 +89,7 @@ describe.each([
 
         await expect(
           executeUnrestrictedMethod({ method, params }),
-        ).resolves.toEqual(expected);
+        ).resolves.toEqual(result);
         expect(send).toHaveBeenCalledExactlyOnceWith(
           expect.objectContaining({
             method: rpcMethod,
@@ -113,75 +121,97 @@ describe.each([
   METHODS.QRL_GET_TRANSACTION_BY_BLOCK_HASH_AND_INDEX,
   METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX,
 ])("%s indexed transaction completion", (method) => {
-  it.each(["success", "failure"])(
-    "completes the middleware request before RPC %s",
-    async (outcome) => {
-      let completeRpc: (() => void) | undefined;
-      const rpcPending = new Promise<void>((resolve) => {
-        completeRpc = resolve;
-      });
-      const result = { hash: HASH, value: "0x1" };
-      const error = new Error("RPC refused the transaction lookup.");
-      const report = vi.spyOn(console, "error").mockImplementation(() => {});
-      const send = vi
-        .spyOn(HttpProvider.prototype, "request")
-        .mockImplementation((payload) =>
-          rpcPending.then(() => {
-            if (outcome === "failure") {
-              throw error;
-            }
-            return echoRpcResult(result)(payload);
+  const rpcMethod = METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX;
+  const runThroughEngine = () => {
+    const engine = new JsonRpcEngine();
+    engine.push(unrestrictedMethodsMiddleware);
+    return engine.handle({
+      id: 1,
+      jsonrpc: "2.0",
+      method,
+      params: ["latest", "0x0"],
+    });
+  };
+
+  it("completes the middleware request after the RPC returns the transaction", async () => {
+    let completeRpc: (() => void) | undefined;
+    const rpcPending = new Promise<void>((resolve) => {
+      completeRpc = resolve;
+    });
+    const send = vi
+      .spyOn(HttpProvider.prototype, "request")
+      .mockImplementation((payload) =>
+        rpcPending.then(() => echoRpcResult(TRANSACTION_REPLY)(payload)),
+      );
+    let settled = false;
+    const pending = runThroughEngine().finally(() => {
+      settled = true;
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(send).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            method: rpcMethod,
+            params: ["latest", "0x0"],
           }),
         );
-      const engine = new JsonRpcEngine();
-      engine.push(unrestrictedMethodsMiddleware);
-      let settled = false;
-      const pending = engine
-        .handle({ id: 1, jsonrpc: "2.0", method, params: ["latest", "0x0"] })
-        .finally(() => {
-          settled = true;
-        });
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(settled).toBe(false);
+    } finally {
+      completeRpc?.();
+    }
 
-      try {
-        await vi.waitFor(() => {
-          expect(send).toHaveBeenCalledExactlyOnceWith(
-            expect.objectContaining({
-              method: METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX,
-              params: ["latest", "0x0"],
-            }),
-          );
-          expect(settled).toBe(true);
-        });
-        await expect(pending).resolves.toEqual({
-          id: 1,
-          jsonrpc: "2.0",
-          result: {},
-        });
-        expect(report).not.toHaveBeenCalled();
-      } finally {
-        completeRpc?.();
-      }
+    await expect(pending).resolves.toEqual({
+      id: 1,
+      jsonrpc: "2.0",
+      result: TRANSACTION_REPLY,
+    });
+  });
 
-      if (outcome === "success") {
-        await expect(pending).resolves.toEqual({
-          id: 1,
-          jsonrpc: "2.0",
-          result: {},
-        });
-        expect(report).not.toHaveBeenCalled();
-      } else {
-        await vi.waitFor(() => {
-          expect(report).toHaveBeenCalledExactlyOnceWith(
-            "QrlWeb3Wallet: Failed to look up transaction:",
-            error,
-          );
-        });
-        await expect(pending).resolves.toEqual({
-          id: 1,
-          jsonrpc: "2.0",
-          result: {},
-        });
-      }
+  it("answers null through the middleware for an index the block does not have", async () => {
+    vi.spyOn(HttpProvider.prototype, "request").mockImplementation(
+      echoRpcResult(null),
+    );
+
+    await expect(runThroughEngine()).resolves.toEqual({
+      id: 1,
+      jsonrpc: "2.0",
+      result: null,
+    });
+  });
+
+  it("answers the middleware request with an error object when the RPC fails", async () => {
+    const error = new Error("RPC refused the transaction lookup.");
+    vi.spyOn(HttpProvider.prototype, "request").mockRejectedValue(error);
+
+    await expect(runThroughEngine()).resolves.toMatchObject({
+      id: 1,
+      jsonrpc: "2.0",
+      error: { code: 4200, message: error.message },
+    });
+  });
+
+  it.each([
+    {
+      label: "another block hash",
+      reply: { blockHash: `0x${"33".repeat(32)}` },
+      block: HASH,
     },
-  );
+    { label: "another block number", reply: { blockNumber: "0x9" }, block: 5 },
+    {
+      label: "another transaction index",
+      reply: { transactionIndex: "0x1" },
+      block: HASH,
+    },
+  ])("refuses a reply for $label", async ({ reply, block }) => {
+    vi.spyOn(HttpProvider.prototype, "request").mockImplementation(
+      echoRpcResult({ ...TRANSACTION_REPLY, ...reply }),
+    );
+
+    await expect(
+      executeUnrestrictedMethod({ method, params: [block, "0x0"] }),
+    ).rejects.toThrow("Invalid JSON-RPC response");
+  });
 });
