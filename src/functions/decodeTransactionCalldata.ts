@@ -91,9 +91,53 @@ export type DecodedCalldataFields = {
   tokenAmounts?: bigint[];
 };
 
+export const SWAP_ESCROW_ACTIONS = {
+  LOCK_NATIVE: "lockNative",
+  LOCK_TOKEN: "lockToken",
+  LOCK_NATIVE_OPEN: "lockNativeOpen",
+  LOCK_TOKEN_OPEN: "lockTokenOpen",
+  ASSIGN: "assign",
+  RELEASE: "release",
+  CLAIM: "claim",
+  REFUND: "refund",
+  WITHDRAW: "withdraw",
+  WITHDRAW_ALL: "withdrawAll",
+  PUSH_CREDIT: "pushCredit",
+} as const;
+
+export type SwapEscrowAction =
+  (typeof SWAP_ESCROW_ACTIONS)[keyof typeof SWAP_ESCROW_ACTIONS];
+
+export type SwapEscrowFields = {
+  /** 32-byte swap identifier as 0x plus 64 hex digits. */
+  hashlock?: string;
+  /** Preimage revealed by `claim`, 0x plus 64 hex digits. */
+  preimage?: string;
+  /** Receiver of a locked swap, or the new receiver set by `assign`. */
+  recipient?: string;
+  /** Token contract. Absent for native-coin calls. */
+  token?: string;
+  /** True when the token argument is the all-zero word (the native coin). */
+  isNativeToken?: boolean;
+  /** Base units of the token. */
+  amount?: bigint;
+  /** Unix time in seconds after which the locker can refund. */
+  timeoutS?: bigint;
+  /** Payee whose parked credit `pushCredit` delivers. */
+  account?: string;
+  /** Destination of `withdraw` / `withdrawAll`. */
+  to?: string;
+};
+
 export type DecodedCalldata =
   | { status: "empty" }
   | { status: "unknown"; selector?: string }
+  | ({
+      status: "swapEscrow";
+      selector: string;
+      signature: string;
+      action: SwapEscrowAction;
+    } & SwapEscrowFields)
   | ({
       status: "decoded";
       selector: string;
@@ -271,6 +315,132 @@ const SPECS: CalldataSpec[] = [
   },
 ];
 
+type SwapEscrowSpec = {
+  signature: string;
+  action: SwapEscrowAction;
+  types: string[];
+  build: (values: unknown[]) => SwapEscrowFields;
+};
+
+/** A bytes32 argument: 0x plus 64 hex digits, as the decoder returns it. */
+const asBytes32 = (value: unknown): string => {
+  if (typeof value !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(value)) {
+    throw new Error("Decoded argument is not a bytes32");
+  }
+  return value.toLowerCase();
+};
+
+/** The all-zero address word stands for the native coin in credit calls. */
+const isZeroAddressWord = (value: unknown): boolean =>
+  typeof value === "string" && /^(?:0x|Q)?0+$/.test(value);
+
+const tokenFields = (value: unknown): SwapEscrowFields =>
+  isZeroAddressWord(value)
+    ? { isNativeToken: true }
+    : { token: asAddress(value) };
+
+/**
+ * Hashed-timelock swap escrow (QuantaSwap HTLCv3). The ABI is the QRVM-512
+ * one: every argument takes a 64-byte word, addresses fill the word, a
+ * uint256 sits in the low half and a bytes32 sits in the high half with
+ * zero padding after it. The strict re-encode check in the decoder rejects
+ * any other layout.
+ */
+const SWAP_ESCROW_SPECS: SwapEscrowSpec[] = [
+  {
+    signature: "lockNative(bytes32,address,uint256)",
+    action: SWAP_ESCROW_ACTIONS.LOCK_NATIVE,
+    types: ["bytes32", "address", "uint256"],
+    build: (v) => ({
+      hashlock: asBytes32(v[0]),
+      recipient: asAddress(v[1]),
+      timeoutS: asBigInt(v[2]),
+    }),
+  },
+  {
+    signature: "lockToken(bytes32,address,address,uint256,uint256)",
+    action: SWAP_ESCROW_ACTIONS.LOCK_TOKEN,
+    types: ["bytes32", "address", "address", "uint256", "uint256"],
+    build: (v) => ({
+      hashlock: asBytes32(v[0]),
+      recipient: asAddress(v[1]),
+      ...tokenFields(v[2]),
+      amount: asBigInt(v[3]),
+      timeoutS: asBigInt(v[4]),
+    }),
+  },
+  {
+    signature: "lockNativeOpen(bytes32,uint256)",
+    action: SWAP_ESCROW_ACTIONS.LOCK_NATIVE_OPEN,
+    types: ["bytes32", "uint256"],
+    build: (v) => ({ hashlock: asBytes32(v[0]), timeoutS: asBigInt(v[1]) }),
+  },
+  {
+    signature: "lockTokenOpen(bytes32,address,uint256,uint256)",
+    action: SWAP_ESCROW_ACTIONS.LOCK_TOKEN_OPEN,
+    types: ["bytes32", "address", "uint256", "uint256"],
+    build: (v) => ({
+      hashlock: asBytes32(v[0]),
+      ...tokenFields(v[1]),
+      amount: asBigInt(v[2]),
+      timeoutS: asBigInt(v[3]),
+    }),
+  },
+  {
+    signature: "assign(bytes32,address)",
+    action: SWAP_ESCROW_ACTIONS.ASSIGN,
+    types: ["bytes32", "address"],
+    build: (v) => ({ hashlock: asBytes32(v[0]), recipient: asAddress(v[1]) }),
+  },
+  {
+    signature: "release(bytes32)",
+    action: SWAP_ESCROW_ACTIONS.RELEASE,
+    types: ["bytes32"],
+    build: (v) => ({ hashlock: asBytes32(v[0]) }),
+  },
+  {
+    signature: "claim(bytes32,bytes32)",
+    action: SWAP_ESCROW_ACTIONS.CLAIM,
+    types: ["bytes32", "bytes32"],
+    build: (v) => ({ hashlock: asBytes32(v[0]), preimage: asBytes32(v[1]) }),
+  },
+  {
+    signature: "refund(bytes32)",
+    action: SWAP_ESCROW_ACTIONS.REFUND,
+    types: ["bytes32"],
+    build: (v) => ({ hashlock: asBytes32(v[0]) }),
+  },
+  {
+    signature: "withdraw(address,address,uint256)",
+    action: SWAP_ESCROW_ACTIONS.WITHDRAW,
+    types: ["address", "address", "uint256"],
+    build: (v) => ({
+      ...tokenFields(v[0]),
+      to: asAddress(v[1]),
+      amount: asBigInt(v[2]),
+    }),
+  },
+  {
+    signature: "withdrawAll(address,address)",
+    action: SWAP_ESCROW_ACTIONS.WITHDRAW_ALL,
+    types: ["address", "address"],
+    build: (v) => ({ ...tokenFields(v[0]), to: asAddress(v[1]) }),
+  },
+  {
+    signature: "pushCredit(address,address)",
+    action: SWAP_ESCROW_ACTIONS.PUSH_CREDIT,
+    types: ["address", "address"],
+    build: (v) => ({ ...tokenFields(v[0]), account: asAddress(v[1]) }),
+  },
+];
+
+const SWAP_ESCROW_SPECS_BY_SELECTOR = new Map<string, SwapEscrowSpec>(
+  SWAP_ESCROW_SPECS.map((spec) => [
+    encodeFunctionSignature(spec.signature).toLowerCase(),
+    spec,
+  ]),
+);
+
 const buildSpecIndex = (): Map<string, CalldataSpec> => {
   const index = new Map<string, CalldataSpec>();
   SPECS.forEach((spec) => {
@@ -284,6 +454,7 @@ const SPECS_BY_SELECTOR = buildSpecIndex();
 /** The selectors this wallet can put into words, for tests and diagnostics. */
 export const knownCalldataSelectors = (): string[] => [
   ...SPECS_BY_SELECTOR.keys(),
+  ...SWAP_ESCROW_SPECS_BY_SELECTOR.keys(),
 ];
 
 const SELECTOR_HEX_LENGTH = 10; // "0x" + 4 bytes
@@ -292,6 +463,36 @@ const readSelector = (data: string): string | undefined => {
   if (!/^0x[0-9a-fA-F]*$/.test(data)) return undefined;
   if (data.length < SELECTOR_HEX_LENGTH) return undefined;
   return data.slice(0, SELECTOR_HEX_LENGTH).toLowerCase();
+};
+
+const decodeSwapEscrow = (
+  data: string,
+  selector: string,
+  spec: SwapEscrowSpec,
+): DecodedCalldata => {
+  try {
+    const argumentBytes = `0x${data.slice(SELECTOR_HEX_LENGTH)}`;
+    const decoded = decodeParameters([...spec.types], argumentBytes);
+    const values = spec.types.map((_type, index) => decoded[index]);
+    // Same strict rule as the token calls: the exact original bytes must
+    // come back, so trailing bytes, missing bytes and non-canonical padding
+    // all fall back to the raw-data view.
+    if (
+      encodeParameters([...spec.types], values).toLowerCase() !==
+      argumentBytes.toLowerCase()
+    ) {
+      return { status: "unknown", selector };
+    }
+    return {
+      status: "swapEscrow",
+      selector,
+      signature: spec.signature,
+      action: spec.action,
+      ...spec.build(values),
+    };
+  } catch {
+    return { status: "unknown", selector };
+  }
 };
 
 /**
@@ -310,6 +511,9 @@ export const decodeTransactionCalldata = (data: unknown): DecodedCalldata => {
 
   const selector = readSelector(trimmed);
   if (!selector) return { status: "unknown" };
+
+  const escrowSpec = SWAP_ESCROW_SPECS_BY_SELECTOR.get(selector);
+  if (escrowSpec) return decodeSwapEscrow(trimmed, selector, escrowSpec);
 
   const spec = SPECS_BY_SELECTOR.get(selector);
   if (!spec) return { status: "unknown", selector };

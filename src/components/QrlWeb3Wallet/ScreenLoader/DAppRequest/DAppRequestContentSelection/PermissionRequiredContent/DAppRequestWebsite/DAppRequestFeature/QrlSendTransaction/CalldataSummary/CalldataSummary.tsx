@@ -7,10 +7,12 @@ import { Button } from "@/components/UI/Button";
 import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
 import {
   CALLDATA_ACTIONS,
+  SWAP_ESCROW_ACTIONS,
   decodeTransactionCalldata,
   formatTokenBaseUnits,
   type CalldataAction,
   type DecodedCalldata,
+  type SwapEscrowAction,
 } from "@/functions/decodeTransactionCalldata";
 import {
   encodeFunctionSignature,
@@ -83,6 +85,30 @@ const ACTION_LABEL_KEYS: Partial<Record<CalldataAction, string>> = {
   safeBatchTransferFrom: "dapp.calldata.actionSafeBatchTransferFrom",
 };
 
+const ESCROW_ACTION_LABEL_KEYS: Record<SwapEscrowAction, string> = {
+  lockNative: "dapp.calldata.escrowActionLockNative",
+  lockToken: "dapp.calldata.escrowActionLockToken",
+  lockNativeOpen: "dapp.calldata.escrowActionLockNativeOpen",
+  lockTokenOpen: "dapp.calldata.escrowActionLockTokenOpen",
+  assign: "dapp.calldata.escrowActionAssign",
+  release: "dapp.calldata.escrowActionRelease",
+  claim: "dapp.calldata.escrowActionClaim",
+  refund: "dapp.calldata.escrowActionRefund",
+  withdraw: "dapp.calldata.escrowActionWithdraw",
+  withdrawAll: "dapp.calldata.escrowActionWithdraw",
+  pushCredit: "dapp.calldata.escrowActionPushCredit",
+};
+
+/** A refund time further out than this gets a warning row. */
+const FAR_TIMEOUT_SECONDS = 30n * 24n * 60n * 60n;
+/** The largest Unix time in seconds a JavaScript Date can hold. */
+const MAX_DATE_SECONDS = 8_640_000_000_000n;
+/** The native coin has 18 decimals, shown as Quanta. */
+const NATIVE_DECIMALS = 18;
+
+const shortenHex = (value: string): string =>
+  value.length > 22 ? `${value.slice(0, 12)}...${value.slice(-8)}` : value;
+
 const DetailRow = ({
   label,
   children,
@@ -109,6 +135,9 @@ const CalldataSummary = observer(
       boolean | undefined
     >();
     const [totalSupply, setTotalSupply] = useState<bigint | undefined>();
+    const [escrowToken, setEscrowToken] = useState<
+      TokenContractType | undefined
+    >();
 
     const decoded: DecodedCalldata = useMemo(
       () => decodeTransactionCalldata(data),
@@ -160,6 +189,41 @@ const CalldataSummary = observer(
         isCurrent = false;
       };
     }, [contractAddress, fromAddress, qrlStore.activeAccount.accountAddress]);
+
+    // A swap escrow call names its token as an argument, so the symbol and
+    // decimals come from the user's own imported list entry for that
+    // address and never from the contract being called.
+    const escrowTokenAddress =
+      decoded.status === "swapEscrow" ? decoded.token : undefined;
+    useEffect(() => {
+      let isCurrent = true;
+      setEscrowToken(undefined);
+      const owner = fromAddress || qrlStore.activeAccount.accountAddress || "";
+      const resolveEscrowToken = async () => {
+        if (!owner || !escrowTokenAddress) return;
+        try {
+          const tokens = await StorageUtil.getTokenContractsList(owner);
+          if (!isCurrent) return;
+          setEscrowToken(
+            tokens
+              .map(tokenView)
+              .find((entry) =>
+                areAddressesEquivalent(entry.address, escrowTokenAddress),
+              ),
+          );
+        } catch {
+          if (isCurrent) setEscrowToken(undefined);
+        }
+      };
+      void resolveEscrowToken();
+      return () => {
+        isCurrent = false;
+      };
+    }, [
+      escrowTokenAddress,
+      fromAddress,
+      qrlStore.activeAccount.accountAddress,
+    ]);
 
     // Asks the contract itself what it is and how much of it exists, for
     // the two questions the wallet's own lists cannot always answer: is
@@ -294,6 +358,176 @@ const CalldataSummary = observer(
             </DetailRow>
           )}
           <div className="text-xs">{t("dapp.calldata.undecodable")}</div>
+          {rawDisclosure}
+        </div>
+      );
+    }
+
+    if (decoded.status === "swapEscrow") {
+      const action = decoded.action;
+      const isLock =
+        action === SWAP_ESCROW_ACTIONS.LOCK_NATIVE ||
+        action === SWAP_ESCROW_ACTIONS.LOCK_TOKEN ||
+        action === SWAP_ESCROW_ACTIONS.LOCK_NATIVE_OPEN ||
+        action === SWAP_ESCROW_ACTIONS.LOCK_TOKEN_OPEN;
+      const isOpen =
+        action === SWAP_ESCROW_ACTIONS.LOCK_NATIVE_OPEN ||
+        action === SWAP_ESCROW_ACTIONS.LOCK_TOKEN_OPEN;
+      const isCredit =
+        action === SWAP_ESCROW_ACTIONS.WITHDRAW ||
+        action === SWAP_ESCROW_ACTIONS.WITHDRAW_ALL ||
+        action === SWAP_ESCROW_ACTIONS.PUSH_CREDIT;
+
+      const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
+      const timeoutS = decoded.timeoutS;
+      const timeoutWarningKey =
+        timeoutS === undefined
+          ? undefined
+          : timeoutS <= nowSeconds
+            ? "dapp.calldata.escrowTimeoutPast"
+            : timeoutS > nowSeconds + FAR_TIMEOUT_SECONDS
+              ? "dapp.calldata.escrowTimeoutFar"
+              : undefined;
+      const timeoutText =
+        timeoutS === undefined
+          ? ""
+          : timeoutS <= MAX_DATE_SECONDS
+            ? new Date(Number(timeoutS) * 1000).toLocaleString()
+            : timeoutS.toString();
+
+      const renderEscrowAmount = () => {
+        if (decoded.amount === undefined) return null;
+        if (decoded.isNativeToken) {
+          return (
+            <DetailRow label={t("dapp.calldata.amount")}>
+              {`${formatTokenBaseUnits(decoded.amount, NATIVE_DECIMALS)} Quanta`}
+            </DetailRow>
+          );
+        }
+        if (
+          escrowToken &&
+          escrowToken.decimals !== null &&
+          Number.isInteger(escrowToken.decimals) &&
+          escrowToken.decimals >= 0 &&
+          escrowToken.decimals <= 255
+        ) {
+          return (
+            <DetailRow label={t("dapp.calldata.amount")}>
+              {`${formatTokenBaseUnits(decoded.amount, escrowToken.decimals)} ${escrowToken.symbol}`}
+            </DetailRow>
+          );
+        }
+        return (
+          <DetailRow label={t("dapp.calldata.amount")}>
+            <span>{`${decoded.amount.toString()} ${t("dapp.calldata.baseUnits")}`}</span>
+            <div className="text-xs font-normal">
+              {t("dapp.calldata.unknownToken")}
+            </div>
+          </DetailRow>
+        );
+      };
+
+      const noteKey =
+        action === SWAP_ESCROW_ACTIONS.CLAIM
+          ? "dapp.calldata.escrowNoteClaim"
+          : action === SWAP_ESCROW_ACTIONS.REFUND ||
+              action === SWAP_ESCROW_ACTIONS.RELEASE
+            ? "dapp.calldata.escrowNoteReturn"
+            : action === SWAP_ESCROW_ACTIONS.ASSIGN
+              ? "dapp.calldata.escrowNoteAssign"
+              : isCredit
+                ? "dapp.calldata.escrowNoteCredit"
+                : undefined;
+
+      return (
+        <div className="flex flex-col gap-2 rounded-md border border-foreground/15 p-2">
+          <DetailRow label={t("dapp.calldata.action")}>
+            {t(ESCROW_ACTION_LABEL_KEYS[action])}
+          </DetailRow>
+          {decoded.hashlock !== undefined && (
+            <DetailRow label={t("dapp.calldata.escrowSwapId")}>
+              <span
+                className="font-numeric"
+                title={decoded.hashlock}
+                data-full-value={decoded.hashlock}
+              >
+                {shortenHex(decoded.hashlock)}
+              </span>
+            </DetailRow>
+          )}
+          {isOpen && (
+            <DetailRow label={t("dapp.calldata.escrowLockedFor")}>
+              <span>{t("dapp.calldata.escrowNoRecipient")}</span>
+            </DetailRow>
+          )}
+          {decoded.recipient !== undefined &&
+            renderAddress(
+              t(
+                isLock
+                  ? "dapp.calldata.escrowLockedFor"
+                  : "dapp.calldata.escrowNewRecipient",
+              ),
+              decoded.recipient,
+            )}
+          {isLock && timeoutS !== undefined && (
+            <DetailRow label={t("dapp.calldata.escrowRefundableAfter")}>
+              <span>{timeoutText}</span>
+            </DetailRow>
+          )}
+          {timeoutWarningKey && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded border border-red-500/60 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{t(timeoutWarningKey)}</span>
+            </div>
+          )}
+          {(isCredit ||
+            action === SWAP_ESCROW_ACTIONS.LOCK_TOKEN ||
+            action === SWAP_ESCROW_ACTIONS.LOCK_TOKEN_OPEN) && (
+            <DetailRow label={t("dapp.calldata.token")}>
+              {decoded.isNativeToken ? (
+                "Quanta"
+              ) : (
+                <>
+                  {escrowToken ? (
+                    <div className="mb-1">{escrowToken.symbol}</div>
+                  ) : null}
+                  {decoded.token !== undefined && (
+                    <FullAddress
+                      address={decoded.token}
+                      className="w-full font-bold text-identity-accent"
+                    />
+                  )}
+                </>
+              )}
+            </DetailRow>
+          )}
+          {renderEscrowAmount()}
+          {decoded.to !== undefined &&
+            renderAddress(t("dapp.calldata.escrowPayoutTo"), decoded.to)}
+          {decoded.account !== undefined &&
+            renderAddress(
+              t("dapp.calldata.escrowPayoutOwner"),
+              decoded.account,
+            )}
+          {decoded.preimage !== undefined && (
+            <DetailRow label={t("dapp.calldata.escrowSecret")}>
+              <span
+                className="font-numeric"
+                title={decoded.preimage}
+                data-full-value={decoded.preimage}
+              >
+                {shortenHex(decoded.preimage)}
+              </span>
+            </DetailRow>
+          )}
+          {noteKey && <div className="text-xs">{t(noteKey)}</div>}
+          <DetailRow label={t("dapp.calldata.selector")}>
+            <span className="font-numeric">{decoded.selector}</span>
+          </DetailRow>
+          <div className="text-xs">{t("dapp.calldata.escrowHonesty")}</div>
           {rawDisclosure}
         </div>
       );
