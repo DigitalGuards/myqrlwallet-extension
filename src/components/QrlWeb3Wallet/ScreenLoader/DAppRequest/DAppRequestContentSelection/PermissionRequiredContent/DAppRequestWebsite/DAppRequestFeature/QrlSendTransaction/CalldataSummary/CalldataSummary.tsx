@@ -196,6 +196,14 @@ const CalldataSummary = observer(
     // address and never from the contract being called.
     const escrowTokenAddress =
       decoded.status === "swapEscrow" ? decoded.token : undefined;
+    // The entry is cleared by the effect below, which runs after the first
+    // render of a replaced request, so an entry for another address is
+    // ignored here.
+    const matchedEscrowToken =
+      escrowToken !== undefined &&
+      areAddressesEquivalent(escrowToken.address, escrowTokenAddress)
+        ? escrowToken
+        : undefined;
     useEffect(() => {
       let isCurrent = true;
       setEscrowToken(undefined);
@@ -404,15 +412,15 @@ const CalldataSummary = observer(
           );
         }
         if (
-          escrowToken &&
-          escrowToken.decimals !== null &&
-          Number.isInteger(escrowToken.decimals) &&
-          escrowToken.decimals >= 0 &&
-          escrowToken.decimals <= 255
+          matchedEscrowToken &&
+          matchedEscrowToken.decimals !== null &&
+          Number.isInteger(matchedEscrowToken.decimals) &&
+          matchedEscrowToken.decimals >= 0 &&
+          matchedEscrowToken.decimals <= 255
         ) {
           return (
             <DetailRow label={t("dapp.calldata.amount")}>
-              {`${formatTokenBaseUnits(decoded.amount, escrowToken.decimals)} ${escrowToken.symbol}`}
+              {`${formatTokenBaseUnits(decoded.amount, matchedEscrowToken.decimals)} ${matchedEscrowToken.symbol}`}
             </DetailRow>
           );
         }
@@ -426,17 +434,23 @@ const CalldataSummary = observer(
         );
       };
 
-      const noteKey =
+      const noteKeys: string[] =
         action === SWAP_ESCROW_ACTIONS.CLAIM
-          ? "dapp.calldata.escrowNoteClaim"
+          ? [
+              "dapp.calldata.escrowNoteClaim",
+              "dapp.calldata.escrowNoteClaimPayout",
+            ]
           : action === SWAP_ESCROW_ACTIONS.REFUND ||
               action === SWAP_ESCROW_ACTIONS.RELEASE
-            ? "dapp.calldata.escrowNoteReturn"
+            ? ["dapp.calldata.escrowNoteReturn"]
             : action === SWAP_ESCROW_ACTIONS.ASSIGN
-              ? "dapp.calldata.escrowNoteAssign"
-              : isCredit
-                ? "dapp.calldata.escrowNoteCredit"
-                : undefined;
+              ? ["dapp.calldata.escrowNoteAssign"]
+              : action === SWAP_ESCROW_ACTIONS.LOCK_NATIVE ||
+                  action === SWAP_ESCROW_ACTIONS.LOCK_TOKEN
+                ? ["dapp.calldata.escrowNoteLockRecipient"]
+                : isCredit
+                  ? ["dapp.calldata.escrowNoteCredit"]
+                  : [];
 
       return (
         <div className="flex flex-col gap-2 rounded-md border border-foreground/15 p-2">
@@ -495,8 +509,8 @@ const CalldataSummary = observer(
                 "Quanta"
               ) : (
                 <>
-                  {escrowToken ? (
-                    <div className="mb-1">{escrowToken.symbol}</div>
+                  {matchedEscrowToken ? (
+                    <div className="mb-1">{matchedEscrowToken.symbol}</div>
                   ) : null}
                   {decoded.token !== undefined && (
                     <FullAddress
@@ -509,6 +523,11 @@ const CalldataSummary = observer(
             </DetailRow>
           )}
           {renderEscrowAmount()}
+          {action === SWAP_ESCROW_ACTIONS.WITHDRAW_ALL && (
+            <DetailRow label={t("dapp.calldata.amount")}>
+              {t("dapp.calldata.escrowWholeBalance")}
+            </DetailRow>
+          )}
           {decoded.to !== undefined &&
             !areAddressesEquivalent(decoded.to, fromAddress) && (
               <div
@@ -537,7 +556,11 @@ const CalldataSummary = observer(
               </span>
             </DetailRow>
           )}
-          {noteKey && <div className="text-xs">{t(noteKey)}</div>}
+          {noteKeys.map((key) => (
+            <div key={key} className="text-xs">
+              {t(key)}
+            </div>
+          ))}
           <DetailRow label={t("dapp.calldata.selector")}>
             <span className="font-numeric">{decoded.selector}</span>
           </DetailRow>

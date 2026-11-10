@@ -1,6 +1,7 @@
 // Calldata produced by QuantaSwap's own QRVM encoder (encodeQrvmHtlc) for the
-// HTLCv3 escrow. Copied as plain data, not imported. bytes32 sits in the high
-// half of a 64-byte word with zero padding after it, uint256 in the low half.
+// HTLCv3 escrow, copied here as plain data from that encoder's output.
+// bytes32 sits in the high half of a 64-byte word with zero padding after
+// it, uint256 in the low half.
 export const SWAP_VECTORS = {
   H: "0x11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff",
   P: "0xa1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",

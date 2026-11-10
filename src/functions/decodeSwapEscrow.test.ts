@@ -216,4 +216,103 @@ describe("decodeTransactionCalldata swap escrow", () => {
       ),
     ).toMatchObject({ action: "pushCredit", isNativeToken: true });
   });
+
+  describe("mutations of every escrow signature", () => {
+    const TO = 1790000000n;
+    const hex = (n: bigint) => n.toString(16).padStart(128, "0");
+    const b32 = (h: string) => h.slice(2).padEnd(128, "0");
+    const addr = (a: string) => a.slice(1).toLowerCase();
+    type Kind = "b32" | "addr" | "uint";
+    const CASES: { sig: string; kinds: Kind[]; words: string[] }[] = [
+      {
+        sig: "lockNative(bytes32,address,uint256)",
+        kinds: ["b32", "addr", "uint"],
+        words: [b32(V.H), addr(V.B), hex(TO)],
+      },
+      {
+        sig: "lockToken(bytes32,address,address,uint256,uint256)",
+        kinds: ["b32", "addr", "addr", "uint", "uint"],
+        words: [b32(V.H), addr(V.B), addr(V.T), hex(7n), hex(TO)],
+      },
+      {
+        sig: "lockNativeOpen(bytes32,uint256)",
+        kinds: ["b32", "uint"],
+        words: [b32(V.H), hex(TO)],
+      },
+      {
+        sig: "lockTokenOpen(bytes32,address,uint256,uint256)",
+        kinds: ["b32", "addr", "uint", "uint"],
+        words: [b32(V.H), addr(V.T), hex(9n), hex(TO)],
+      },
+      {
+        sig: "assign(bytes32,address)",
+        kinds: ["b32", "addr"],
+        words: [b32(V.H), addr(V.B)],
+      },
+      { sig: "release(bytes32)", kinds: ["b32"], words: [b32(V.H)] },
+      {
+        sig: "claim(bytes32,bytes32)",
+        kinds: ["b32", "b32"],
+        words: [b32(V.H), b32(V.P)],
+      },
+      { sig: "refund(bytes32)", kinds: ["b32"], words: [b32(V.H)] },
+      {
+        sig: "withdraw(address,address,uint256)",
+        kinds: ["addr", "addr", "uint"],
+        words: [addr(V.T), addr(V.B), hex(5n)],
+      },
+      {
+        sig: "withdrawAll(address,address)",
+        kinds: ["addr", "addr"],
+        words: [addr(V.T), addr(V.B)],
+      },
+      {
+        sig: "pushCredit(address,address)",
+        kinds: ["addr", "addr"],
+        words: [addr(V.T), addr(V.A)],
+      },
+    ];
+    const build = (sig: string, words: string[]) =>
+      encodeFunctionSignature(sig).toLowerCase() + words.join("");
+
+    it.each(CASES)("$sig decodes canonically", ({ sig, words }) => {
+      expect(decodeTransactionCalldata(build(sig, words)).status).toBe(
+        "swapEscrow",
+      );
+    });
+
+    it.each(CASES)("$sig rejects every length mutation", ({ sig, words }) => {
+      const ok = build(sig, words);
+      const mutated = [
+        `${ok}0`,
+        `${ok}00`,
+        `${ok}${"00".repeat(64)}`,
+        ok.slice(0, -1),
+        ok.slice(0, -2),
+        ok.slice(0, -128),
+        ok.slice(0, 10),
+      ];
+      for (const data of mutated) {
+        expect(decodeTransactionCalldata(data).status).not.toBe("swapEscrow");
+      }
+    });
+
+    it.each(CASES)("$sig rejects dirty padding", ({ sig, kinds, words }) => {
+      kinds.forEach((kind, index) => {
+        if (kind === "addr") return;
+        // A bytes32 keeps its zero padding in the low half of the word and
+        // a uint256 keeps its zeros in the high half.
+        const offsets = kind === "b32" ? [32, 47, 63] : [0, 15, 31];
+        for (const byte of offsets) {
+          const word = words[index];
+          const dirty = `${word.slice(0, byte * 2)}01${word.slice(byte * 2 + 2)}`;
+          const next = words.slice();
+          next[index] = dirty;
+          expect(decodeTransactionCalldata(build(sig, next)).status).not.toBe(
+            "swapEscrow",
+          );
+        }
+      });
+    });
+  });
 });

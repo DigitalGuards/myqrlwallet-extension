@@ -250,4 +250,80 @@ describe("CalldataSummary swap escrow", () => {
       "This time has already passed. The swap escrow rejects a lock like this.",
     );
   });
+
+  it("adds the consequence notes for lock, claim and assign", async () => {
+    const lock = renderSummary(V.lockNative);
+    expect(
+      await screen.findByText(
+        "The recipient can claim these funds with the swap secret until the refund time.",
+      ),
+    ).toBeInTheDocument();
+    lock.unmount();
+
+    const claim = renderSummary(V.claim);
+    expect(
+      await screen.findByText(
+        "The payout goes to the recipient fixed in the swap, whoever sends this claim.",
+      ),
+    ).toBeInTheDocument();
+    claim.unmount();
+
+    renderSummary(V.assign);
+    expect(
+      await screen.findByText(
+        /After this the escrow can no longer be taken back early/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the whole parked balance for withdrawAll only", async () => {
+    const all = renderSummary(V.withdrawAll);
+    expect(
+      await screen.findByText("The whole parked balance"),
+    ).toBeInTheDocument();
+    all.unmount();
+
+    renderSummary(V.pushCredit);
+    await screen.findByText("Deliver a parked payout");
+    expect(
+      screen.queryByText("The whole parked balance"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("never shows the previous request's token for a replaced request", async () => {
+    vi.spyOn(StorageUtil, "getTokenContractsList").mockResolvedValue([
+      { address: V.T, symbol: "MQW", decimals: 18, image: "" },
+    ]);
+    const first = call(
+      "lockTokenOpen(bytes32,address,uint256,uint256)",
+      ["bytes32", "address", "uint256", "uint256"],
+      [V.H, V.T, "2500000000000000000", TIMEOUT_S],
+    );
+    const second = call(
+      "lockTokenOpen(bytes32,address,uint256,uint256)",
+      ["bytes32", "address", "uint256", "uint256"],
+      [V.H, V.A, "2500000000000000000", TIMEOUT_S],
+    );
+    const store = mockedStore();
+    const view = (data: string) => (
+      <StoreProvider value={store}>
+        <MemoryRouter>
+          <CalldataSummary
+            data={data}
+            contractAddress={CONTRACT}
+            fromAddress={OWNER}
+          />
+        </MemoryRouter>
+      </StoreProvider>
+    );
+    const { rerender } = render(view(first));
+    expect(await screen.findByText("2.5 MQW")).toBeInTheDocument();
+
+    rerender(view(second));
+    // The very first render after the swap must already be the unknown token.
+    expect(screen.queryByText("2.5 MQW")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("2500000000000000000 base units"),
+    ).toBeInTheDocument();
+  });
 });
