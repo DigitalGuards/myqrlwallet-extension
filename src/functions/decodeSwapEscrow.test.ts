@@ -181,4 +181,39 @@ describe("decodeTransactionCalldata swap escrow", () => {
     const high = V.lockNativeOpen.slice(0, -128) + "01" + "00".repeat(63);
     expect(decodeTransactionCalldata(high).status).toBe("unknown");
   });
+
+  it("rejects a zero token in lockToken and lockTokenOpen", () => {
+    const zero = `Q${"0".repeat(128)}`;
+    expect(
+      decodeTransactionCalldata(
+        call(
+          "lockToken(bytes32,address,address,uint256,uint256)",
+          ["bytes32", "address", "address", "uint256", "uint256"],
+          [V.H, V.B, zero, 7n, 1790000000n],
+        ),
+      ).status,
+    ).toBe("unknown");
+    expect(
+      decodeTransactionCalldata(
+        call(
+          "lockTokenOpen(bytes32,address,uint256,uint256)",
+          ["bytes32", "address", "uint256", "uint256"],
+          [V.H, zero, 9n, 1790000000n],
+        ),
+      ).status,
+    ).toBe("unknown");
+  });
+
+  it("keeps the native reading of a zero token in pushCredit", () => {
+    const zero = `Q${"0".repeat(128)}`;
+    expect(
+      decodeTransactionCalldata(
+        call(
+          "pushCredit(address,address)",
+          ["address", "address"],
+          [zero, V.A],
+        ),
+      ),
+    ).toMatchObject({ action: "pushCredit", isNativeToken: true });
+  });
 });

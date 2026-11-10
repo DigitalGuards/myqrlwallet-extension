@@ -334,6 +334,14 @@ const asBytes32 = (value: unknown): string => {
 const isZeroAddressWord = (value: unknown): boolean =>
   typeof value === "string" && /^(?:0x|Q)?0+$/.test(value);
 
+/** A lock rejects the zero token (the contract reverts), so it never reads as the native coin. */
+const lockTokenFields = (value: unknown): SwapEscrowFields => {
+  if (isZeroAddressWord(value)) {
+    throw new Error("A token lock cannot use the zero token");
+  }
+  return { token: asAddress(value) };
+};
+
 const tokenFields = (value: unknown): SwapEscrowFields =>
   isZeroAddressWord(value)
     ? { isNativeToken: true }
@@ -364,7 +372,7 @@ const SWAP_ESCROW_SPECS: SwapEscrowSpec[] = [
     build: (v) => ({
       hashlock: asBytes32(v[0]),
       recipient: asAddress(v[1]),
-      ...tokenFields(v[2]),
+      ...lockTokenFields(v[2]),
       amount: asBigInt(v[3]),
       timeoutS: asBigInt(v[4]),
     }),
@@ -381,7 +389,7 @@ const SWAP_ESCROW_SPECS: SwapEscrowSpec[] = [
     types: ["bytes32", "address", "uint256", "uint256"],
     build: (v) => ({
       hashlock: asBytes32(v[0]),
-      ...tokenFields(v[1]),
+      ...lockTokenFields(v[1]),
       amount: asBigInt(v[2]),
       timeoutS: asBigInt(v[3]),
     }),

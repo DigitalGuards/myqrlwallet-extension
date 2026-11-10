@@ -4,6 +4,7 @@ import {
   storedText,
 } from "@/utilities/storageViews";
 import { Button } from "@/components/UI/Button";
+import { knownSwapEscrow } from "@/configuration/knownSwapEscrows";
 import FullAddress from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/FullAddress";
 import {
   CALLDATA_ACTIONS,
@@ -346,24 +347,15 @@ const CalldataSummary = observer(
       </div>
     );
 
-    if (decoded.status === "unknown") {
-      return (
-        <div className="flex flex-col gap-2 rounded-md border border-foreground/15 p-2">
-          <DetailRow label={t("dapp.calldata.action")}>
-            {t("dapp.calldata.actionUnknown")}
-          </DetailRow>
-          {decoded.selector && (
-            <DetailRow label={t("dapp.calldata.selector")}>
-              <span className="font-numeric">{decoded.selector}</span>
-            </DetailRow>
-          )}
-          <div className="text-xs">{t("dapp.calldata.undecodable")}</div>
-          {rawDisclosure}
-        </div>
-      );
-    }
+    const escrowContract =
+      decoded.status === "swapEscrow"
+        ? knownSwapEscrow(
+            qrlStore.qrlConnection.blockchain.chainId,
+            contractAddress,
+          )
+        : undefined;
 
-    if (decoded.status === "swapEscrow") {
+    if (decoded.status === "swapEscrow" && escrowContract) {
       const action = decoded.action;
       const isLock =
         action === SWAP_ESCROW_ACTIONS.LOCK_NATIVE ||
@@ -392,7 +384,14 @@ const CalldataSummary = observer(
         timeoutS === undefined
           ? ""
           : timeoutS <= MAX_DATE_SECONDS
-            ? new Date(Number(timeoutS) * 1000).toLocaleString()
+            ? new Date(Number(timeoutS) * 1000).toLocaleString(undefined, {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })
             : timeoutS.toString();
 
       const renderEscrowAmount = () => {
@@ -441,6 +440,11 @@ const CalldataSummary = observer(
 
       return (
         <div className="flex flex-col gap-2 rounded-md border border-foreground/15 p-2">
+          <DetailRow label={t("dapp.calldata.escrowContract")}>
+            {t("dapp.calldata.escrowContractName", {
+              name: escrowContract.name,
+            })}
+          </DetailRow>
           <DetailRow label={t("dapp.calldata.action")}>
             {t(ESCROW_ACTION_LABEL_KEYS[action])}
           </DetailRow>
@@ -506,6 +510,16 @@ const CalldataSummary = observer(
           )}
           {renderEscrowAmount()}
           {decoded.to !== undefined &&
+            !areAddressesEquivalent(decoded.to, fromAddress) && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded border border-red-500/60 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300"
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{t("dapp.calldata.escrowPayoutElsewhere")}</span>
+              </div>
+            )}
+          {decoded.to !== undefined &&
             renderAddress(t("dapp.calldata.escrowPayoutTo"), decoded.to)}
           {decoded.account !== undefined &&
             renderAddress(
@@ -527,7 +541,23 @@ const CalldataSummary = observer(
           <DetailRow label={t("dapp.calldata.selector")}>
             <span className="font-numeric">{decoded.selector}</span>
           </DetailRow>
-          <div className="text-xs">{t("dapp.calldata.escrowHonesty")}</div>
+          {rawDisclosure}
+        </div>
+      );
+    }
+
+    if (decoded.status !== "decoded") {
+      return (
+        <div className="flex flex-col gap-2 rounded-md border border-foreground/15 p-2">
+          <DetailRow label={t("dapp.calldata.action")}>
+            {t("dapp.calldata.actionUnknown")}
+          </DetailRow>
+          {decoded.selector && (
+            <DetailRow label={t("dapp.calldata.selector")}>
+              <span className="font-numeric">{decoded.selector}</span>
+            </DetailRow>
+          )}
+          <div className="text-xs">{t("dapp.calldata.undecodable")}</div>
           {rawDisclosure}
         </div>
       );

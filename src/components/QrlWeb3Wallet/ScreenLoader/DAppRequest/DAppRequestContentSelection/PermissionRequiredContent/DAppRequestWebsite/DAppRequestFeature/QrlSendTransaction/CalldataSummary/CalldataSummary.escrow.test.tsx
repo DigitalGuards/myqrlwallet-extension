@@ -12,29 +12,45 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CalldataSummary from "./CalldataSummary";
 
-const CONTRACT = `Q${"12".repeat(64)}`;
+const CONTRACT =
+  "QBFe68340591f82a68C2258FA2cE7C02Be21E5fc7Bb71615B56a509db4985e863D9243B74da6335C065e257A01d40354653E551907338DBDc7A6b342ea2274437";
+const OTHER_CONTRACT = `Q${"12".repeat(64)}`;
 const OWNER = `Q${"34".repeat(64)}`;
 
 // The vectors carry the refund time 1790000000 (a Unix second count).
 const TIMEOUT_S = 1790000000;
-const HONESTY =
-  "The wallet read this from the transaction data by matching the function signature. It has not verified the contract at this address, and another contract can use the same function names.";
+const DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+};
 
 const call = (signature: string, types: string[], values: unknown[]) =>
   `${encodeFunctionSignature(signature)}${encodeParameters(types, values).slice(2)}`;
 
-const renderSummary = (data: string) =>
-  render(
-    <StoreProvider value={mockedStore()}>
+const renderSummary = (
+  data: string,
+  {
+    to = CONTRACT,
+    from = OWNER,
+    chainId,
+  }: { to?: string; from?: string; chainId?: string } = {},
+) => {
+  const store = mockedStore();
+  if (chainId !== undefined) {
+    store.qrlStore.qrlConnection.blockchain.chainId = chainId;
+  }
+  return render(
+    <StoreProvider value={store}>
       <MemoryRouter>
-        <CalldataSummary
-          data={data}
-          contractAddress={CONTRACT}
-          fromAddress={OWNER}
-        />
+        <CalldataSummary data={data} contractAddress={to} fromAddress={from} />
       </MemoryRouter>
     </StoreProvider>,
   );
+};
 
 const setNow = (seconds: number) => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -63,13 +79,16 @@ describe("CalldataSummary swap escrow", () => {
     expect(screen.getByText("Locked for")).toBeInTheDocument();
     expect(screen.getByText("Refundable after")).toBeInTheDocument();
     expect(
-      screen.getByText(new Date(TIMEOUT_S * 1000).toLocaleString()),
+      screen.getByText(
+        new Date(TIMEOUT_S * 1000).toLocaleString(undefined, DATE_OPTIONS),
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText("Swap ID (hashlock)")).toBeInTheDocument();
     expect(screen.getByTitle(V.H)).toHaveTextContent("0x1122334455...ccddeeff");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByText("Contract interaction")).not.toBeInTheDocument();
-    expect(screen.getByText(HONESTY)).toBeInTheDocument();
+    expect(screen.getByText("Contract")).toBeInTheDocument();
+    expect(screen.getByText("QuantaSwap swap escrow")).toBeInTheDocument();
   });
 
   it("keeps the raw data disclosure", async () => {
@@ -128,7 +147,6 @@ describe("CalldataSummary swap escrow", () => {
       screen.getByText("No recipient is fixed yet. It can be set later."),
     ).toBeInTheDocument();
     expect(await screen.findByText("2.5 MQW")).toBeInTheDocument();
-    expect(screen.getByText(HONESTY)).toBeInTheDocument();
   });
 
   it("shows base units for an unknown token in lockToken", async () => {
@@ -152,7 +170,6 @@ describe("CalldataSummary swap escrow", () => {
       screen.getByText(/reveals the swap secret on chain/),
     ).toBeInTheDocument();
     expect(screen.getByTitle(V.P)).toBeInTheDocument();
-    expect(screen.getByText(HONESTY)).toBeInTheDocument();
   });
 
   it("says refund returns funds to the locker", async () => {
@@ -181,9 +198,56 @@ describe("CalldataSummary swap escrow", () => {
   it("falls back to the unknown view for malformed escrow calldata", async () => {
     renderSummary(`${V.lockNative}00`);
     expect(await screen.findByText("Contract interaction")).toBeInTheDocument();
-    expect(screen.queryByText(HONESTY)).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText("Function selector")).toBeInTheDocument();
     });
+  });
+
+  it("shows the unknown view for the same calldata sent to another address", async () => {
+    renderSummary(V.lockNative, { to: OTHER_CONTRACT });
+    expect(await screen.findByText("Contract interaction")).toBeInTheDocument();
+    expect(screen.getByText("Function selector")).toBeInTheDocument();
+    expect(screen.getByText(/could not decode/)).toBeInTheDocument();
+    expect(
+      screen.queryByText("Lock funds in a swap escrow"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Refundable after")).not.toBeInTheDocument();
+    expect(screen.queryByText("Swap ID (hashlock)")).not.toBeInTheDocument();
+  });
+
+  it("shows the unknown view when the active chain differs", async () => {
+    renderSummary(V.claim, { chainId: "0x1" });
+    expect(await screen.findByText("Contract interaction")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Claim funds from a swap escrow"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/swap secret/)).not.toBeInTheDocument();
+  });
+
+  it("alerts when a withdrawal pays an address other than the sender", async () => {
+    renderSummary(V.withdraw);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This sends your payout to an address that is not the account you are sending from.",
+    );
+  });
+
+  it("raises no payout alert when the destination is the sender", async () => {
+    renderSummary(V.withdrawAll, { from: V.B });
+    await screen.findByText("Collect a parked payout");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("raises no payout alert for pushCredit", async () => {
+    renderSummary(V.pushCredit);
+    await screen.findByText("Deliver a parked payout");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("uses the new past-time copy", async () => {
+    setNow(TIMEOUT_S + 10);
+    renderSummary(V.lockNative);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This time has already passed. The swap escrow rejects a lock like this.",
+    );
   });
 });
