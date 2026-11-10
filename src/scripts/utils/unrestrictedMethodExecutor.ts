@@ -240,8 +240,10 @@ export const executeUnrestrictedMethod = async (
       "qrl_unsubscribe is not supported by this wallet. Use the qrl_newFilter family for event polling.",
     );
   } else if (method === UNRESTRICTED_METHODS.NET_VERSION) {
-    // A decimal string, as the node answers it and as the provider's own
-    // networkVersion reads.
+    // The node's network id as a decimal string, the form the node itself
+    // answers in. The provider's own networkVersion is decimal as well; it
+    // comes from the stored chain id, which equals the network id on the
+    // networks this wallet ships with.
     const networkId = await qrl.net.getId();
     return networkId.toString();
   } else if (method === UNRESTRICTED_METHODS.QRL_ACCOUNTS) {
