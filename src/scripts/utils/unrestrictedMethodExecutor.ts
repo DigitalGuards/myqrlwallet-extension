@@ -215,8 +215,12 @@ export const executeUnrestrictedMethod = async (
       accounts: isLocked ? [] : readAccounts(connectedAccountsData),
     } satisfies Parameters<BaseProvider["_initializeState"]>[0];
   } else if (method === UNRESTRICTED_METHODS.QRL_SYNCING) {
+    // @theqrl/web3 2.0.0 formats the syncing quantities as BigInt, which the
+    // reply to the page cannot carry. getSerializableObject turns them back
+    // into the 0x quantities the node sent (and web3 1.0.3 passed through).
+    // A node that is not syncing answers false, which passes unchanged.
     const isSyncing = await qrl.isSyncing();
-    return isSyncing;
+    return isSyncing === false ? false : getSerializableObject(isSyncing);
   } else if (method === UNRESTRICTED_METHODS.QRL_UNINSTALL_FILTER) {
     const [filterIdentifier] = readRpcParams(req.params);
     const isSuccess = await qrlRpcMethods.uninstallFilter(
