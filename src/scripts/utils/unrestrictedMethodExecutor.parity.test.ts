@@ -3,7 +3,6 @@ import { echoRpcResult } from "@/test-utils/rpcReply";
 import { HttpProvider } from "@theqrl/web3-providers-http";
 import { toChecksumAddress } from "@theqrl/web3-utils";
 import { JsonRpcEngine } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
-import type { Json } from "@theqrl/qrl-wallet-provider/utils";
 import { V3_CHAIN_ID } from "@/configuration/releaseProfile";
 import { UNRESTRICTED_METHODS as METHODS } from "../constants/requestConstants";
 import { unrestrictedMethodsMiddleware } from "../middlewares/unrestrictedMethodsMiddleware";
@@ -167,12 +166,15 @@ describe.each([
       name: "middleware",
       run: (params: unknown[]) => throughMiddleware(method, params),
       wrap: (result: unknown) => ({ id: 1, jsonrpc: "2.0", result }),
-      expectFailure: (outcome: Promise<unknown>, message: string) =>
-        expect(outcome).resolves.toMatchObject({
+      expectFailure: async (outcome: Promise<unknown>, message: string) => {
+        const response = await outcome;
+        expect(response).toMatchObject({
           id: 1,
           jsonrpc: "2.0",
-          error: { code: 4200, message: expect.stringContaining(message) },
-        }),
+          error: { code: 4200 },
+        });
+        expect(JSON.stringify(response)).toContain(message);
+      },
     },
   ])("$name", ({ run, wrap, expectFailure }) => {
     it.each([

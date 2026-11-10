@@ -75,7 +75,7 @@ describe.each([
   },
 ])(
   "$method through installed Web3",
-  ({ method, rpcMethod, extraParams, result, expected = result }) => {
+  ({ method, rpcMethod, extraParams, result }) => {
     it.each([HASH, new Uint8Array(32).fill(17)])(
       "preserves block hash input %s and the method result",
       async (hash) => {
@@ -89,7 +89,7 @@ describe.each([
 
         await expect(
           executeUnrestrictedMethod({ method, params }),
-        ).resolves.toEqual(expected);
+        ).resolves.toEqual(result);
         expect(send).toHaveBeenCalledExactlyOnceWith(
           expect.objectContaining({
             method: rpcMethod,
