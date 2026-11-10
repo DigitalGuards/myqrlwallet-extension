@@ -240,8 +240,10 @@ export const executeUnrestrictedMethod = async (
       "qrl_unsubscribe is not supported by this wallet. Use the qrl_newFilter family for event polling.",
     );
   } else if (method === UNRESTRICTED_METHODS.NET_VERSION) {
+    // A decimal string, as the node answers it and as the provider's own
+    // networkVersion reads.
     const networkId = await qrl.net.getId();
-    return "0x".concat(networkId.toString(16));
+    return networkId.toString();
   } else if (method === UNRESTRICTED_METHODS.QRL_ACCOUNTS) {
     // MetaMask parity (F8): a locked wallet answers qrl_accounts with an
     // empty array. A dApp that still displays previously-connected
@@ -435,17 +437,14 @@ export const executeUnrestrictedMethod = async (
       UNRESTRICTED_METHODS.QRL_GET_TRANSACTION_BY_BLOCK_NUMBER_AND_INDEX
   ) {
     const [blockHashOrNumber, transactionIndex] = readRpcParams(req.params);
-    // These methods historically serialized the pending promise as {}.
-    // Preserve that immediate response and report later RPC failures locally.
-    blockContext
-      .getTransactionFromBlock(
-        readRpcParameter(blockHashOrNumber, isOptionalRpcBlock),
-        readRpcParameter(transactionIndex, isRpcNumber),
-      )
-      .catch((error: unknown) => {
-        console.error("QrlWeb3Wallet: Failed to look up transaction:", error);
-      });
-    return {};
+    const transaction = await blockContext.getTransactionFromBlock(
+      readRpcParameter(blockHashOrNumber, isOptionalRpcBlock),
+      readRpcParameter(transactionIndex, isRpcNumber),
+    );
+    // The node answers null for an index the block does not have.
+    return transaction === undefined || transaction === null
+      ? null
+      : getSerializableObject(transaction);
   } else if (method === UNRESTRICTED_METHODS.QRL_CHAIN_ID) {
     const chainId = await qrl.getChainId({
       number: FMT_NUMBER.HEX,
