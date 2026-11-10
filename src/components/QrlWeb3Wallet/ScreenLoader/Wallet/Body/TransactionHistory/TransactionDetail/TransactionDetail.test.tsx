@@ -1,5 +1,6 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
+import { getOptimalGasFee } from "@/functions/getOptimalGasFee";
 import { StoreProvider, type StoreType } from "@/stores/store";
 import { historyEntryView } from "@/utilities/storageViews";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
@@ -209,6 +210,36 @@ describe("TransactionDetail", () => {
       selector: ".text-lg",
     });
     expect(amountElement).toBeInTheDocument();
+  });
+
+  it("adds the fee to the amount of a sent native transfer", () => {
+    renderComponent(sampleTransaction);
+
+    // 21,000 gas at 1 gwei is 0.000021, on top of the 2.5 sent.
+    expect(
+      screen.getByText(getOptimalGasFee("2.500021"), {
+        selector: ".font-bold",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the total cost of a sent token transfer as the tokens plus the fee", () => {
+    renderComponent({
+      ...sampleTransaction,
+      amount: 25,
+      tokenSymbol: "RUN",
+      tokenName: "Run Token",
+      isZrc20Token: true,
+      tokenContractAddress: "Q23f0b9f44d7A5E0E2fd2D5eA9C1c6E8d9a2B7e7C",
+    });
+
+    // Tokens and the native fee have different units and are never summed.
+    expect(
+      screen.getByText(`25 RUN + ${getOptimalGasFee("0.000021")}`),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(getOptimalGasFee("25.000021")),
+    ).not.toBeInTheDocument();
   });
 
   it("should display Confirmed status for successful transaction", () => {
