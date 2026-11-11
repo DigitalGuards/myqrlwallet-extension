@@ -17,6 +17,7 @@ const openPopup = vi.spyOn(browser.action, "openPopup");
 const createWindow = vi.spyOn(browser.windows, "create");
 const updateWindow = vi.spyOn(browser.windows, "update");
 const getLastFocused = vi.spyOn(browser.windows, "getLastFocused");
+const getTab = vi.spyOn(browser.tabs, "get");
 const getLocalStorage = vi.spyOn(browser.storage.local, "get");
 const windowProperties = {
   focused: true,
@@ -24,13 +25,20 @@ const windowProperties = {
   alwaysOnTop: false,
 };
 
-// A browser with the side panel API but no panel currently open.
+// A browser with the side panel API but no panel currently open. Any popup
+// the wallet asks for appears at once.
 const installSidePanelApi = () => {
   vi.stubGlobal("chrome", {
     sidePanel: { open: sidePanelOpen },
     runtime: {
       ContextType: { SIDE_PANEL: "SIDE_PANEL", POPUP: "POPUP" },
-      getContexts: vi.fn().mockResolvedValue([]),
+      getContexts: vi.fn((filter: { contextTypes: string[] }) =>
+        Promise.resolve(
+          filter.contextTypes.includes("POPUP")
+            ? [{ contextType: "POPUP" }]
+            : [],
+        ),
+      ),
     },
   });
 };
@@ -89,6 +97,15 @@ describe("openApprovalSurface", () => {
       id: 77,
     });
     updateWindow.mockResolvedValue(windowProperties);
+    getTab.mockResolvedValue({
+      id: 5,
+      index: 0,
+      windowId: 1,
+      active: true,
+      highlighted: true,
+      pinned: false,
+      incognito: false,
+    });
     getLastFocused.mockResolvedValue({
       ...windowProperties,
       left: 100,
@@ -229,6 +246,114 @@ describe("openApprovalSurface", () => {
 
     await openApprovalSurface();
 
+    expect(createWindow).not.toHaveBeenCalled();
+  });
+
+  // Stubs getContexts with per-type answers.
+  const stubContexts = (answers: {
+    sidePanel?: object[];
+    popup?: () => object[];
+  }) => {
+    vi.stubGlobal("chrome", {
+      sidePanel: { open: sidePanelOpen },
+      runtime: {
+        ContextType: { SIDE_PANEL: "SIDE_PANEL", POPUP: "POPUP" },
+        getContexts: vi.fn((filter: { contextTypes: string[] }) =>
+          Promise.resolve(
+            filter.contextTypes.includes("SIDE_PANEL")
+              ? (answers.sidePanel ?? [])
+              : (answers.popup?.() ?? []),
+          ),
+        ),
+      },
+    });
+  };
+
+  const run = async (options?: { tabId?: number }) => {
+    vi.useFakeTimers();
+    const pending = openApprovalSurface(options);
+    await vi.advanceTimersByTimeAsync(2000);
+    await pending;
+    vi.useRealTimers();
+  };
+
+  it("stops at the popup once its context appears", async () => {
+    stubContexts({ popup: () => [{ contextType: "POPUP" }] });
+
+    await run();
+
+    expect(openPopup).toHaveBeenCalledTimes(1);
+    expect(createWindow).not.toHaveBeenCalled();
+  });
+
+  it("waits for a late popup context before deciding", async () => {
+    let polls = 0;
+    stubContexts({ popup: () => (++polls > 3 ? [{}] : []) });
+
+    await run();
+
+    expect(createWindow).not.toHaveBeenCalled();
+  });
+
+  it("opens one window when openPopup resolves but no popup appears", async () => {
+    stubContexts({});
+
+    await run();
+    await run();
+
+    expect(openPopup).toHaveBeenCalledTimes(1);
+    expect(createWindow).toHaveBeenCalledTimes(1);
+    expect(updateWindow).toHaveBeenCalledWith(77, {
+      focused: true,
+      drawAttention: true,
+    });
+  });
+
+  it("trusts openPopup when getContexts is unavailable", async () => {
+    vi.stubGlobal("chrome", { runtime: {} });
+
+    await openApprovalSurface();
+
+    expect(createWindow).not.toHaveBeenCalled();
+  });
+
+  it("does nothing for a side panel in the requesting tab's window", async () => {
+    setSettings({});
+    stubContexts({ sidePanel: [{ windowId: 1 }] });
+
+    await run({ tabId: 5 });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(openPopup).not.toHaveBeenCalled();
+    expect(createWindow).not.toHaveBeenCalled();
+  });
+
+  it("ignores a side panel that belongs to another window", async () => {
+    stubContexts({
+      sidePanel: [{ windowId: 2 }],
+      popup: () => [{ contextType: "POPUP" }],
+    });
+
+    await run({ tabId: 5 });
+
+    expect(openPopup).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a window when only another window has a panel and no popup shows", async () => {
+    stubContexts({ sidePanel: [{ windowId: 2 }] });
+
+    await run({ tabId: 5 });
+
+    expect(createWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts any side panel when the tab cannot be resolved", async () => {
+    getTab.mockRejectedValue(new Error("No tab with id: 5"));
+    stubContexts({ sidePanel: [{ windowId: 2 }] });
+
+    await run({ tabId: 5 });
+
+    expect(openPopup).not.toHaveBeenCalled();
     expect(createWindow).not.toHaveBeenCalled();
   });
 });

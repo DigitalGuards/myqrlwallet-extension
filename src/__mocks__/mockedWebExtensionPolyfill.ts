@@ -35,6 +35,7 @@ const mockedBrowser = {
         { url: "https://example.com", title: "Example", favIconUrl: "" },
       ]),
     create: vi.fn().mockResolvedValue({}),
+    get: vi.fn().mockResolvedValue({ id: 1, windowId: 1 }),
     sendMessage: vi.fn().mockResolvedValue(undefined),
     onActivated: {
       addListener: vi.fn(),
