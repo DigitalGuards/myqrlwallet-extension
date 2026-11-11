@@ -323,7 +323,7 @@ describe("openApprovalSurface", () => {
       stubOpenContexts(["SIDE_PANEL"]);
     });
 
-    it("brings the requesting tab's window forward from behind a popup-type window", async () => {
+    it("asks for attention behind another wallet's window and never takes focus", async () => {
       getLastFocused.mockResolvedValue({
         ...windowProperties,
         id: 12,
@@ -333,26 +333,12 @@ describe("openApprovalSurface", () => {
       await openApprovalSurface({ tabId: 5 });
 
       expect(updateWindow).toHaveBeenCalledTimes(1);
-      expect(updateWindow).toHaveBeenCalledWith(9, { focused: true });
+      expect(updateWindow).toHaveBeenCalledWith(9, { drawAttention: true });
       expect(openPopup).not.toHaveBeenCalled();
       expect(createWindow).not.toHaveBeenCalled();
     });
 
-    it("only asks for attention behind another normal browser window", async () => {
-      // The panel may be open in that window; the user chose to work there.
-      getLastFocused.mockResolvedValue({
-        ...windowProperties,
-        id: 12,
-        type: "normal",
-      });
-
-      await openApprovalSurface({ tabId: 5 });
-
-      expect(updateWindow).toHaveBeenCalledTimes(1);
-      expect(updateWindow).toHaveBeenCalledWith(9, { drawAttention: true });
-    });
-
-    it("only asks for attention when no browser window has focus", async () => {
+    it("asks for attention when no browser window has focus", async () => {
       getLastFocused.mockResolvedValue({
         ...windowProperties,
         id: 9,
@@ -367,21 +353,6 @@ describe("openApprovalSurface", () => {
 
     it("leaves the windows alone when the tab's window already has focus", async () => {
       getLastFocused.mockResolvedValue({ ...windowProperties, id: 9 });
-
-      await openApprovalSurface({ tabId: 5 });
-
-      expect(updateWindow).not.toHaveBeenCalled();
-    });
-
-    it("leaves the windows alone while the action popup is open", async () => {
-      // Activating a window closes an action popup anchored on it, and a
-      // closed popup rejects the request it shows.
-      stubOpenContexts(["SIDE_PANEL", "POPUP"]);
-      getLastFocused.mockResolvedValue({
-        ...windowProperties,
-        id: 12,
-        type: "popup",
-      });
 
       await openApprovalSurface({ tabId: 5 });
 

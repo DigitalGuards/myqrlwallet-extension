@@ -59,27 +59,20 @@ const getTabWindowId = async (
 };
 
 // An open side panel shows the request, but its browser window can sit
-// behind another wallet's confirmation window, which lands right on top of
-// the panel. Only then is the requesting tab's window brought forward: a
-// focused popup-type window cannot host the panel itself. In every other
-// case (another browser window, another application) the window only asks
-// for attention, because the panel may be open somewhere else and the user
-// chose where to work. Never while the action popup is open: activating its
-// window closes the popup, and a closed popup rejects the request it shows.
-const revealRequestingWindow = async (
+// behind another window: another wallet's confirmation window lands right on
+// top of the panel. The requesting tab's window then asks for attention (a
+// flashing taskbar entry). It is never focused from here: a page can send a
+// request at any moment without a gesture, and focusing its window would
+// hand it the keys the user is typing into the window in front.
+const flagRequestingWindow = async (
   tabId: number | undefined,
 ): Promise<void> => {
   try {
     const windowId = await getTabWindowId(tabId);
-    if (windowId === undefined || (await isActionPopupOpen())) return;
+    if (windowId === undefined) return;
     const current = await browser.windows.getLastFocused();
     if (current.focused && current.id === windowId) return;
-    await browser.windows.update(
-      windowId,
-      current.focused && current.type === "popup"
-        ? { focused: true }
-        : { drawAttention: true },
-    );
+    await browser.windows.update(windowId, { drawAttention: true });
   } catch {
     // Best effort: the panel still shows the request.
   }
@@ -136,7 +129,7 @@ export const openApprovalSurface = async ({
   if (await isSidePanelOpen()) {
     // The panel's storage subscription surfaces the request; opening a
     // popup or window would compete with it.
-    await revealRequestingWindow(tabId);
+    await flagRequestingWindow(tabId);
     return;
   }
 
