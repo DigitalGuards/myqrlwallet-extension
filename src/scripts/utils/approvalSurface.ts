@@ -59,12 +59,13 @@ const getTabWindowId = async (
 };
 
 // An open side panel shows the request, but its browser window can sit
-// behind another window of this browser (another wallet's confirmation
-// window lands right on top of the panel). Bring the requesting tab's window
-// forward then. With no browser window focused the user is in another
-// application, so the window only asks for attention. Never while the action
-// popup is open: activating its window closes the popup, and a closed popup
-// rejects the request it shows.
+// behind another wallet's confirmation window, which lands right on top of
+// the panel. Only then is the requesting tab's window brought forward: a
+// focused popup-type window cannot host the panel itself. In every other
+// case (another browser window, another application) the window only asks
+// for attention, because the panel may be open somewhere else and the user
+// chose where to work. Never while the action popup is open: activating its
+// window closes the popup, and a closed popup rejects the request it shows.
 const revealRequestingWindow = async (
   tabId: number | undefined,
 ): Promise<void> => {
@@ -75,27 +76,13 @@ const revealRequestingWindow = async (
     if (current.focused && current.id === windowId) return;
     await browser.windows.update(
       windowId,
-      current.focused ? { focused: true } : { drawAttention: true },
+      current.focused && current.type === "popup"
+        ? { focused: true }
+        : { drawAttention: true },
     );
   } catch {
     // Best effort: the panel still shows the request.
   }
-};
-
-// The window the approval window is positioned against: the requesting tab's
-// window when it is known, else the last focused one.
-const getAnchorWindow = async (
-  tabId: number | undefined,
-): Promise<browser.Windows.Window | undefined> => {
-  const windowId = await getTabWindowId(tabId);
-  if (windowId !== undefined) {
-    try {
-      return await browser.windows.get(windowId);
-    } catch {
-      // Fall through to the last focused window.
-    }
-  }
-  return browser.windows.getLastFocused().catch(() => undefined);
 };
 
 // Bare index.html classifies as the popup surface (settingsStore reads the
@@ -132,8 +119,8 @@ const ensureWindowTracking = () => {
  *  2. The side panel, when it is the preferred surface and the requesting
  *     tab can forward its user gesture.
  *  3. The toolbar-anchored action popup.
- *  4. A standalone notification window near the top-right of the requesting
- *     tab's browser window, when Chrome refuses openPopup() (it does while a
+ *  4. A standalone notification window near the top-right of the focused
+ *     browser window, when Chrome refuses openPopup() (it does while a
  *     window without a toolbar has focus, and fails silently on some
  *     setups). Re-invocations focus the one existing window, so windows
  *     never stack.
@@ -186,7 +173,9 @@ export const openApprovalSurface = async ({
   }
 
   try {
-    const anchor = await getAnchorWindow(tabId);
+    const anchor = await browser.windows
+      .getLastFocused()
+      .catch(() => undefined);
     const left =
       anchor?.left !== undefined && anchor.width !== undefined
         ? Math.max(anchor.left + anchor.width - WINDOW_WIDTH - 16, 0)
@@ -208,7 +197,7 @@ export const openApprovalSurface = async ({
       win = await browser.windows.create(options);
     }
     approvalWindowId = win.id;
-  } catch {
-    console.warn("QrlWeb3Wallet: Could not open the wallet");
+  } catch (error) {
+    console.warn("QrlWeb3Wallet: Could not open the wallet", error);
   }
 };

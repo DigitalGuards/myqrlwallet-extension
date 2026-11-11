@@ -84,7 +84,6 @@ const mockedBrowser = {
   windows: {
     create: vi.fn().mockResolvedValue({ id: 77 }),
     update: vi.fn().mockResolvedValue({}),
-    get: vi.fn().mockResolvedValue({ id: 1, type: "normal" }),
     getLastFocused: vi
       .fn()
       .mockResolvedValue({ left: 0, top: 0, width: 1280, height: 800 }),
