@@ -1,9 +1,7 @@
 import withSuspense from "@/functions/withSuspense";
 import ScrollRegion from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
-import { ROUTES } from "@/router/router";
 import { useStore } from "@/stores/store";
 import { observer } from "mobx-react-lite";
-import { useLocation, useNavigate } from "react-router-dom";
 import { lazy, useEffect, useRef, useState } from "react";
 
 const SCREENS = {
@@ -24,41 +22,6 @@ const DAppRequest = withSuspense(
 const Wallet = withSuspense(
   lazy(() => import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Wallet")),
 );
-
-/**
- * A normal send ends on the history, where the new transaction shows as
- * pending. An approved dApp send does the same on a surface that stays
- * open. It is its own component so that only it follows the route and the
- * screens below ScreenLoader are left alone on navigation.
- */
-const CompletedDAppSendHistory = observer(() => {
-  const { dAppRequestStore, qrlStore, settingsStore } = useStore();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { completedDAppSend } = dAppRequestStore;
-
-  useEffect(() => {
-    if (!completedDAppSend) return;
-    const { from } = completedDAppSend;
-    dAppRequestStore.clearCompletedDAppSend();
-    // The popup closes itself after an approval. A route change there would
-    // only alter the screen the wallet opens on next time.
-    if (settingsStore.isPopupWindow) return;
-    // The pending entry is stored under the sender as the request spelled
-    // it, and the history lists the active account under its own spelling,
-    // so only an exact match shows the new transaction there.
-    if (from !== qrlStore.activeAccount.accountAddress) return;
-    void Promise.resolve(
-      navigate(ROUTES.TRANSACTION_HISTORY, {
-        replace: location.pathname === ROUTES.TRANSACTION_HISTORY,
-      }),
-    ).catch((error: unknown) => {
-      console.error("Failed to show the transaction history:", error);
-    });
-  }, [completedDAppSend]);
-
-  return null;
-});
 
 const ScreenLoader = observer(() => {
   const { dAppRequestStore, lockStore, qrlStore } = useStore();
@@ -102,25 +65,22 @@ const ScreenLoader = observer(() => {
     }
   }, [isLocked, hasDAppRequest]);
 
-  const content =
-    screen === SCREENS.LOCK ? (
+  if (screen === SCREENS.LOCK)
+    return (
       <ScrollRegion>
         <Lock />
       </ScrollRegion>
-    ) : screen === SCREENS.DAPP_REQUEST ? (
+    );
+
+  if (screen === SCREENS.DAPP_REQUEST)
+    return (
       <ScrollRegion>
         <DAppRequest />
       </ScrollRegion>
-    ) : screen === SCREENS.WALLET ? (
-      <Wallet />
-    ) : undefined;
+    );
 
-  return (
-    <>
-      <CompletedDAppSendHistory />
-      {content}
-    </>
-  );
+  if (screen === SCREENS.WALLET) return <Wallet />;
+  return undefined;
 });
 
 export default ScreenLoader;

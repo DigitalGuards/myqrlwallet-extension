@@ -124,8 +124,6 @@ const mockedStoreValues: StoreType = {
     editChain: () => Promise.resolve({ updatedChainList: [] }),
   },
   dAppRequestStore: {
-    completedDAppSend: undefined,
-    clearCompletedDAppSend: () => {},
     dAppRequestData: {
       method: "qrl_requestAccounts",
       requestData: {

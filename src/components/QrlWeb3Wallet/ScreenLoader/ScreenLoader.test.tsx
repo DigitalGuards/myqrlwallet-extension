@@ -4,13 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import ScreenLoader from "./ScreenLoader";
-import { ROUTES } from "@/router/router";
-
-const navigateMock = vi.fn();
-vi.mock("react-router-dom", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("react-router-dom")>()),
-  useNavigate: () => navigateMock,
-}));
 
 vi.mock("@/components/QrlWeb3Wallet/ScreenLoader/Lock/Lock", () => ({
   default: () => <div>Mocked Lock</div>,
@@ -29,13 +22,10 @@ describe("ScreenLoader", () => {
     vi.restoreAllMocks();
   });
 
-  const renderComponent = (
-    mockedStoreValues = mockedStore(),
-    initialEntries: string[] = ["/"],
-  ) =>
+  const renderComponent = (mockedStoreValues = mockedStore()) =>
     render(
       <StoreProvider value={mockedStoreValues}>
-        <MemoryRouter initialEntries={initialEntries}>
+        <MemoryRouter>
           <ScreenLoader />
         </MemoryRouter>
       </StoreProvider>,
@@ -156,95 +146,5 @@ describe("ScreenLoader", () => {
     });
     expect(initializeBlockchain).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("Mocked Wallet")).toBeInTheDocument();
-  });
-
-  describe("after an approved dApp send", () => {
-    const ACTIVE = `Q${"ab".repeat(64)}`;
-    const send = (from: string) => ({
-      transactionHash: "0xabc",
-      from,
-    });
-    const storeWith = (from: string) => {
-      const values = mockedStore({
-        lockStore: { isLocked: false },
-        dAppRequestStore: {
-          completedDAppSend: send(from),
-          clearCompletedDAppSend: vi.fn(),
-        },
-      });
-      values.qrlStore.activeAccount.accountAddress = ACTIVE;
-      // A surface that stays open: the side panel or the expanded tab.
-      values.settingsStore.isPopupWindow = false;
-      return values;
-    };
-
-    it("shows the history once and clears the signal", async () => {
-      navigateMock.mockClear();
-      const values = storeWith(ACTIVE);
-      const clear = vi.fn();
-      values.dAppRequestStore.clearCompletedDAppSend = clear;
-      renderComponent(values);
-
-      await waitFor(() => {
-        expect(navigateMock).toHaveBeenCalledTimes(1);
-      });
-      expect(clear).toHaveBeenCalled();
-      expect(navigateMock).toHaveBeenCalledWith(ROUTES.TRANSACTION_HISTORY, {
-        replace: false,
-      });
-    });
-
-    it("replaces the entry when the history is already showing", async () => {
-      navigateMock.mockClear();
-      renderComponent(storeWith(ACTIVE), [ROUTES.TRANSACTION_HISTORY]);
-
-      await waitFor(() => {
-        expect(navigateMock).toHaveBeenCalledTimes(1);
-      });
-      expect(navigateMock).toHaveBeenCalledWith(ROUTES.TRANSACTION_HISTORY, {
-        replace: true,
-      });
-    });
-
-    it("leaves the route alone in the popup, which closes itself", async () => {
-      navigateMock.mockClear();
-      const values = storeWith(ACTIVE);
-      values.settingsStore.isPopupWindow = true;
-      const clear = vi.fn();
-      values.dAppRequestStore.clearCompletedDAppSend = clear;
-      renderComponent(values);
-
-      await waitFor(() => {
-        expect(clear).toHaveBeenCalled();
-      });
-      expect(navigateMock).not.toHaveBeenCalled();
-    });
-
-    it("does nothing when the sender is spelled differently from the active account", async () => {
-      navigateMock.mockClear();
-      const values = storeWith(ACTIVE.toLowerCase().replace(/^q/, "Q"));
-      values.qrlStore.activeAccount.accountAddress = `Q${"AB".repeat(64)}`;
-      const clear = vi.fn();
-      values.dAppRequestStore.clearCompletedDAppSend = clear;
-      renderComponent(values);
-
-      await waitFor(() => {
-        expect(clear).toHaveBeenCalled();
-      });
-      expect(navigateMock).not.toHaveBeenCalled();
-    });
-
-    it("does nothing when the sender is not the active account", async () => {
-      navigateMock.mockClear();
-      const values = storeWith(`Q${"cd".repeat(64)}`);
-      const clear = vi.fn();
-      values.dAppRequestStore.clearCompletedDAppSend = clear;
-      renderComponent(values);
-
-      await waitFor(() => {
-        expect(clear).toHaveBeenCalled();
-      });
-      expect(navigateMock).not.toHaveBeenCalled();
-    });
   });
 });
