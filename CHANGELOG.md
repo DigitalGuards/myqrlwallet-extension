@@ -10,6 +10,7 @@
 
 ### Changed
 
+- Open the wallet's own approval window when the side panel shows a dApp request but its browser window is not in front, and close that window when the request is answered in the panel.
 - Use shorscan.com for explorer links, history, token and NFT discovery and the price fallback; a stored built-in testnet entry follows.
 
 ## [0.3.0](https://github.com/theQRL/qrl-web3-wallet/compare/v0.2.0...v0.3.0) (2026-05-07)

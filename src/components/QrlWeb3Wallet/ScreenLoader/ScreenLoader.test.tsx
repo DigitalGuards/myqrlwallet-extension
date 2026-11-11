@@ -1,7 +1,8 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { observable } from "mobx";
 import { MemoryRouter } from "react-router-dom";
 import ScreenLoader from "./ScreenLoader";
 
@@ -146,5 +147,58 @@ describe("ScreenLoader", () => {
     });
     expect(initializeBlockchain).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("Mocked Wallet")).toBeInTheDocument();
+  });
+
+  describe("closing a popup window whose request was answered elsewhere", () => {
+    const renderWithLiveRequest = (isPopupWindow: boolean) => {
+      const values = mockedStore({
+        lockStore: { isLocked: false },
+        settingsStore: { isPopupWindow },
+        dAppRequestStore: { hasDAppRequest: true },
+      });
+      values.dAppRequestStore = observable(values.dAppRequestStore);
+      renderComponent(values);
+      return values.dAppRequestStore;
+    };
+
+    it("closes the window when the request clears", async () => {
+      const close = vi.spyOn(window, "close").mockImplementation(() => {});
+      const store = renderWithLiveRequest(true);
+      await screen.findByText("Mocked DApp Request");
+      expect(close).not.toHaveBeenCalled();
+
+      act(() => {
+        Object.assign(store, { hasDAppRequest: false });
+      });
+
+      await waitFor(() => {
+        expect(close).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it("keeps a side panel or tab open when the request clears", async () => {
+      const close = vi.spyOn(window, "close").mockImplementation(() => {});
+      const store = renderWithLiveRequest(false);
+      await screen.findByText("Mocked DApp Request");
+
+      act(() => {
+        Object.assign(store, { hasDAppRequest: false });
+      });
+
+      await screen.findByText("Mocked Wallet");
+      expect(close).not.toHaveBeenCalled();
+    });
+
+    it("does not close a window that never showed a request", async () => {
+      const close = vi.spyOn(window, "close").mockImplementation(() => {});
+      renderComponent(
+        mockedStore({
+          lockStore: { isLocked: false },
+          dAppRequestStore: { hasDAppRequest: false },
+        }),
+      );
+      await screen.findByText("Mocked Wallet");
+      expect(close).not.toHaveBeenCalled();
+    });
   });
 });

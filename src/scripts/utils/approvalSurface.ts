@@ -60,21 +60,22 @@ const getTabWindowId = async (
 
 // An open side panel shows the request, but its browser window can sit
 // behind another window: another wallet's confirmation window lands right on
-// top of the panel. The requesting tab's window then asks for attention (a
-// flashing taskbar entry). It is never focused from here: a page can send a
-// request at any moment without a gesture, and focusing its window would
-// hand it the keys the user is typing into the window in front.
-const flagRequestingWindow = async (
+// top of the panel. Only a window that is not the focused one needs the
+// wallet's own approval window in front. The requesting tab's window is never
+// focused from here: a page can send a request at any moment without a
+// gesture, and focusing its window would hand it the keys the user is typing
+// into the window in front. When the lookups fail the panel keeps the request
+// alone.
+const isRequestingWindowBehind = async (
   tabId: number | undefined,
-): Promise<void> => {
+): Promise<boolean> => {
   try {
     const windowId = await getTabWindowId(tabId);
-    if (windowId === undefined) return;
+    if (windowId === undefined) return false;
     const current = await browser.windows.getLastFocused();
-    if (current.focused && current.id === windowId) return;
-    await browser.windows.update(windowId, { drawAttention: true });
+    return !(current.focused && current.id === windowId);
   } catch {
-    // Best effort: the panel still shows the request.
+    return false;
   }
 };
 
@@ -103,68 +104,23 @@ const ensureWindowTracking = () => {
   browser.windows.onRemoved.addListener(handleApprovalWindowRemoved);
 };
 
-/**
- * Bring an approval surface to the user for a pending dApp request.
- *
- * Order of preference:
- *  1. A side panel that is already open shows the request through its
- *     storage subscription, so nothing else may open next to it.
- *  2. The side panel, when it is the preferred surface and the requesting
- *     tab can forward its user gesture.
- *  3. The toolbar-anchored action popup.
- *  4. A standalone notification window near the top-right of the focused
- *     browser window, when Chrome refuses openPopup() (it does while a
- *     window without a toolbar has focus, and fails silently on some
- *     setups). Re-invocations focus the one existing window, so windows
- *     never stack.
- *
- * The badge is set by the storage listener in the service worker either way.
- * Never throws.
- */
-export const openApprovalSurface = async ({
-  tabId,
-}: { tabId?: number } = {}): Promise<void> => {
-  ensureWindowTracking();
-  const settings = await StorageUtil.getSettings();
-  if (await isSidePanelOpen()) {
-    // The panel's storage subscription surfaces the request; opening a
-    // popup or window would compete with it.
-    await flagRequestingWindow(tabId);
-    return;
-  }
-
-  if (resolveSidePanelPreferred(settings) && tabId !== undefined) {
-    if (await requestSidePanelOpen(tabId)) {
-      return;
-    }
-    // The gesture roundtrip failed or timed out (no content script, a
-    // background tab, a stale gesture). Fall through to the popup path so
-    // the request still reaches the user.
-  }
-
-  if (approvalWindowId !== undefined) {
-    try {
-      await browser.windows.update(approvalWindowId, {
-        focused: true,
-        drawAttention: true,
-      });
-      return;
-    } catch {
-      approvalWindowId = undefined;
-    }
-  }
-
+// Focusing the wallet's own approval window is allowed: it is the surface the
+// user answers in. Resolves true when the tracked window took the focus.
+const focusTrackedWindow = async (): Promise<boolean> => {
+  if (approvalWindowId === undefined) return false;
   try {
-    await browser.action.openPopup();
-    return;
+    await browser.windows.update(approvalWindowId, {
+      focused: true,
+      drawAttention: true,
+    });
+    return true;
   } catch {
-    // Chrome refused the anchored popup; fall through to the window path.
+    approvalWindowId = undefined;
+    return false;
   }
+};
 
-  if (await isActionPopupOpen()) {
-    return;
-  }
-
+const openApprovalWindow = async (): Promise<void> => {
   try {
     const anchor = await browser.windows
       .getLastFocused()
@@ -193,4 +149,67 @@ export const openApprovalSurface = async ({
   } catch (error) {
     console.warn("QrlWeb3Wallet: Could not open the wallet", error);
   }
+};
+
+/**
+ * Bring an approval surface to the user for a pending dApp request.
+ *
+ * Order of preference:
+ *  1. A side panel that is already open shows the request through its
+ *     storage subscription, so nothing else may open next to it. When its
+ *     browser window is not the one in front, the standalone window opens
+ *     as well.
+ *  2. The side panel, when it is the preferred surface and the requesting
+ *     tab can forward its user gesture.
+ *  3. The toolbar-anchored action popup.
+ *  4. A standalone notification window near the top-right of the focused
+ *     browser window, when Chrome refuses openPopup() (it does while a
+ *     window without a toolbar has focus, and fails silently on some
+ *     setups). Re-invocations focus the one existing window, so windows
+ *     never stack.
+ *
+ * The badge is set by the storage listener in the service worker either way.
+ * Never throws.
+ */
+export const openApprovalSurface = async ({
+  tabId,
+}: { tabId?: number } = {}): Promise<void> => {
+  ensureWindowTracking();
+  const settings = await StorageUtil.getSettings();
+  if (await isSidePanelOpen()) {
+    // The panel's storage subscription surfaces the request. Behind another
+    // window it is out of sight, so the wallet's own window comes forward
+    // as well; either surface resolves the request and the other clears.
+    if (
+      (await isRequestingWindowBehind(tabId)) &&
+      !(await focusTrackedWindow())
+    ) {
+      await openApprovalWindow();
+    }
+    return;
+  }
+
+  if (resolveSidePanelPreferred(settings) && tabId !== undefined) {
+    if (await requestSidePanelOpen(tabId)) {
+      return;
+    }
+    // The gesture roundtrip failed or timed out (no content script, a
+    // background tab, a stale gesture). Fall through to the popup path so
+    // the request still reaches the user.
+  }
+
+  if (await focusTrackedWindow()) return;
+
+  try {
+    await browser.action.openPopup();
+    return;
+  } catch {
+    // Chrome refused the anchored popup; fall through to the window path.
+  }
+
+  if (await isActionPopupOpen()) {
+    return;
+  }
+
+  await openApprovalWindow();
 };

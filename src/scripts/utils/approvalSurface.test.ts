@@ -163,8 +163,9 @@ describe("openApprovalSurface", () => {
     expect(updateWindow).not.toHaveBeenCalled();
   });
 
-  it("does nothing when a side panel is already open", async () => {
+  it("opens nothing when a side panel is open in the focused window", async () => {
     setSettings({});
+    getLastFocused.mockResolvedValue({ ...windowProperties, id: 9 });
     vi.stubGlobal("chrome", {
       sidePanel: { open: sidePanelOpen },
       runtime: {
@@ -323,22 +324,37 @@ describe("openApprovalSurface", () => {
       stubOpenContexts(["SIDE_PANEL"]);
     });
 
-    it("asks for attention behind another wallet's window and never takes focus", async () => {
+    const focusedUpdates = () =>
+      updateWindow.mock.calls.filter(([, info]) => info.focused === true);
+
+    it("opens the wallet's own window behind another wallet's window", async () => {
       getLastFocused.mockResolvedValue({
         ...windowProperties,
         id: 12,
         type: "popup",
+        left: 690,
+        top: 20,
+        width: 360,
+        height: 620,
       });
 
       await openApprovalSurface({ tabId: 5 });
 
-      expect(updateWindow).toHaveBeenCalledTimes(1);
-      expect(updateWindow).toHaveBeenCalledWith(9, { drawAttention: true });
+      expect(createWindow).toHaveBeenCalledTimes(1);
+      expect(createWindow).toHaveBeenCalledWith({
+        url: "chrome-extension://mock-id/index.html",
+        type: "popup",
+        focused: true,
+        width: 396,
+        height: 640,
+        left: 690 + 360 - 396 - 16,
+        top: 96,
+      });
       expect(openPopup).not.toHaveBeenCalled();
-      expect(createWindow).not.toHaveBeenCalled();
+      expect(sendMessage).not.toHaveBeenCalled();
     });
 
-    it("asks for attention when no browser window has focus", async () => {
+    it("opens the wallet's own window when no browser window has focus", async () => {
       getLastFocused.mockResolvedValue({
         ...windowProperties,
         id: 9,
@@ -347,8 +363,77 @@ describe("openApprovalSurface", () => {
 
       await openApprovalSurface({ tabId: 5 });
 
+      expect(createWindow).toHaveBeenCalledTimes(1);
+      expect(openPopup).not.toHaveBeenCalled();
+    });
+
+    it("never focuses the requesting tab's window", async () => {
+      for (const last of [
+        { ...windowProperties, id: 12 },
+        { ...windowProperties, id: 9, focused: false },
+        { ...windowProperties, id: 9 },
+      ]) {
+        getLastFocused.mockResolvedValue(last);
+        await openApprovalSurface({ tabId: 5 });
+        handleApprovalWindowRemoved(77);
+      }
+      // A second request while the window exists re-focuses it only.
+      getLastFocused.mockResolvedValue({ ...windowProperties, id: 12 });
+      await openApprovalSurface({ tabId: 5 });
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(updateWindow).not.toHaveBeenCalledWith(
+        9,
+        expect.objectContaining({ focused: true }),
+      );
+      expect(focusedUpdates().every(([id]) => id === 77)).toBe(true);
+    });
+
+    it("re-focuses the tracked window and creates no second one", async () => {
+      getLastFocused.mockResolvedValue({ ...windowProperties, id: 12 });
+
+      await openApprovalSurface({ tabId: 5 });
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(createWindow).toHaveBeenCalledTimes(1);
       expect(updateWindow).toHaveBeenCalledTimes(1);
-      expect(updateWindow).toHaveBeenCalledWith(9, { drawAttention: true });
+      expect(updateWindow).toHaveBeenCalledWith(77, {
+        focused: true,
+        drawAttention: true,
+      });
+    });
+
+    it("creates a new window when the tracked one is gone", async () => {
+      getLastFocused.mockResolvedValue({ ...windowProperties, id: 12 });
+      await openApprovalSurface({ tabId: 5 });
+      updateWindow.mockRejectedValueOnce(new Error("No window"));
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(createWindow).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries the window without a position when Chrome rejects it", async () => {
+      getLastFocused.mockResolvedValue({
+        ...windowProperties,
+        id: 12,
+        left: 100,
+        top: 50,
+        width: 1280,
+        height: 800,
+      });
+      createWindow.mockRejectedValueOnce(new Error("bounds"));
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(createWindow).toHaveBeenCalledTimes(2);
+      expect(createWindow).toHaveBeenLastCalledWith({
+        url: "chrome-extension://mock-id/index.html",
+        type: "popup",
+        focused: true,
+        width: 396,
+        height: 640,
+      });
     });
 
     it("leaves the windows alone when the tab's window already has focus", async () => {
@@ -357,6 +442,8 @@ describe("openApprovalSurface", () => {
       await openApprovalSurface({ tabId: 5 });
 
       expect(updateWindow).not.toHaveBeenCalled();
+      expect(createWindow).not.toHaveBeenCalled();
+      expect(openPopup).not.toHaveBeenCalled();
     });
 
     it("leaves the windows alone without a requesting tab", async () => {
@@ -366,6 +453,7 @@ describe("openApprovalSurface", () => {
 
       expect(getTab).not.toHaveBeenCalled();
       expect(updateWindow).not.toHaveBeenCalled();
+      expect(createWindow).not.toHaveBeenCalled();
     });
 
     it("never throws when the window lookups reject", async () => {

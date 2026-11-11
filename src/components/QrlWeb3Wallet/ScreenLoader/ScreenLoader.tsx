@@ -24,12 +24,24 @@ const Wallet = withSuspense(
 );
 
 const ScreenLoader = observer(() => {
-  const { dAppRequestStore, lockStore, qrlStore } = useStore();
+  const { dAppRequestStore, lockStore, qrlStore, settingsStore } = useStore();
+  const { isPopupWindow } = settingsStore;
   const { hasDAppRequest } = dAppRequestStore;
   const { isLocked } = lockStore;
 
   const [screen, setScreen] = useState(SCREENS.LOCK);
   const wasLockedRef = useRef(true);
+  const hadDAppRequestRef = useRef(false);
+
+  // A request answered in another surface (the side panel next to this
+  // window) clears from storage and leaves this popup window on the wallet
+  // screen. The window was opened for the request, so it closes with it.
+  useEffect(() => {
+    if (hadDAppRequestRef.current && !hasDAppRequest && isPopupWindow) {
+      window.close();
+    }
+    hadDAppRequestRef.current = hasDAppRequest;
+  }, [hasDAppRequest, isPopupWindow]);
 
   useEffect(() => {
     (async () => {
