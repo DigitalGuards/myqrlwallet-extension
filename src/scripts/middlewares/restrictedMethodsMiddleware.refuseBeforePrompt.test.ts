@@ -1,6 +1,7 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
 import { isAddQrlChainParameters } from "@/utilities/approvalGuards";
 import { malformed } from "@/test-utils/malformed";
+import { isRecord } from "@/utilities/storageGuards";
 import canonical from "@/functions/pqSigning/__fixtures__/canonical.json";
 import { TYPED_DATA_LIMITS } from "@/functions/pqSigning";
 import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
@@ -325,4 +326,86 @@ describe("add-chain guard through checkWalletAddQrlChainParams", () => {
     const accepted = await checkWalletAddQrlChainParams(validChain());
     expect(accepted.canProceed).toBe(true);
   });
+});
+
+describe("authorization is answered before the payload is looked at", () => {
+  const OTHER_ACCOUNT = toChecksumAddress(`Q${"b".repeat(128)}`);
+  const goodMessage = "0x48656c6c6f";
+  const badMessage = { foo: 1 };
+  const goodTyped = (): Record<string, unknown> => validTypedData();
+  const badTyped = (): Record<string, unknown> => ({
+    ...validTypedData(),
+    extra: 1,
+  });
+
+  const fromOrigin = (req: JsonRpcRequest, origin: string): JsonRpcRequest => ({
+    ...req,
+    senderData: { url: `${origin}/app`, tabId: 7 },
+  });
+
+  type Scenario = {
+    label: string;
+    prepare?: () => void;
+    build: (method: string, payload: unknown) => JsonRpcRequest;
+    methods: string[];
+  };
+  const both = ["qrl_signTypedData", "qrl_signMessage"];
+  const scenarios: Scenario[] = [
+    {
+      label: "a locked wallet",
+      prepare: () => {
+        mockIsLocked.mockResolvedValue({
+          isLocked: true,
+          hasPasswordSet: true,
+        });
+      },
+      build: (method, payload) => buildRequest(method, [ACCOUNT, payload]),
+      methods: both,
+    },
+    {
+      label: "an unconnected origin",
+      build: (method, payload) =>
+        fromOrigin(
+          buildRequest(method, [ACCOUNT, payload]),
+          "https://unconnected.example",
+        ),
+      methods: both,
+    },
+    {
+      label: "an unauthorized account",
+      build: (method, payload) =>
+        buildRequest(method, [OTHER_ACCOUNT, payload]),
+      methods: both,
+    },
+    {
+      label: "a chain mismatch",
+      build: (method, payload) =>
+        buildRequest(method, [
+          ACCOUNT,
+          isRecord(payload)
+            ? { ...payload, domain: { name: "x", chainId: "0x999" } }
+            : payload,
+        ]),
+      methods: ["qrl_signTypedData"],
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    for (const method of scenario.methods) {
+      it(`${method} from ${scenario.label}: a bad payload gets the refusal a good one gets`, async () => {
+        scenario.prepare?.();
+        const typedMethod = method === "qrl_signTypedData";
+        const good = await run(
+          scenario.build(method, typedMethod ? goodTyped() : goodMessage),
+        );
+        const bad = await run(
+          scenario.build(method, typedMethod ? badTyped() : badMessage),
+        );
+        expect(good.res.error).toBeDefined();
+        expect(good.res.error?.code).not.toBe(INVALID_PARAMS);
+        expect(bad.res.error).toEqual(good.res.error);
+        expect(mockOpenApprovalSurface).not.toHaveBeenCalled();
+      });
+    }
+  }
 });
