@@ -1,14 +1,10 @@
 import browser from "webextension-polyfill";
-import { isRecord } from "@/utilities/storageGuards";
 import StorageUtil from "@/utilities/storageUtil";
 import { resolveSidePanelPreferred } from "./sidePanelPreference";
 import { requestSidePanelOpen } from "./sidePanelSurface";
 
 const extensionGlobals: {
-  chrome?: {
-    runtime?: Partial<(typeof globalThis)["chrome"]["runtime"]>;
-    windows?: Partial<(typeof globalThis)["chrome"]["windows"]>;
-  };
+  chrome?: { runtime?: Partial<(typeof globalThis)["chrome"]["runtime"]> };
 } = globalThis;
 
 // Chrome lets the user dock ANY extension in the side panel manually,
@@ -62,47 +58,44 @@ const getTabWindowId = async (
   }
 };
 
-// The window the approval window is positioned against. Always a normal
-// browser window: a focused popup-type window (another wallet's
-// confirmation) is no valid anchor.
-const getNormalWindow = async (
-  windowId: number | undefined,
+// An open side panel shows the request, but its browser window can sit
+// behind another window of this browser (another wallet's confirmation
+// window lands right on top of the panel). Bring the requesting tab's window
+// forward then. With no browser window focused the user is in another
+// application, so the window only asks for attention. Never while the action
+// popup is open: activating its window closes the popup, and a closed popup
+// rejects the request it shows.
+const revealRequestingWindow = async (
+  tabId: number | undefined,
+): Promise<void> => {
+  try {
+    const windowId = await getTabWindowId(tabId);
+    if (windowId === undefined || (await isActionPopupOpen())) return;
+    const current = await browser.windows.getLastFocused();
+    if (current.focused && current.id === windowId) return;
+    await browser.windows.update(
+      windowId,
+      current.focused ? { focused: true } : { drawAttention: true },
+    );
+  } catch {
+    // Best effort: the panel still shows the request.
+  }
+};
+
+// The window the approval window is positioned against: the requesting tab's
+// window when it is known, else the last focused one.
+const getAnchorWindow = async (
+  tabId: number | undefined,
 ): Promise<browser.Windows.Window | undefined> => {
+  const windowId = await getTabWindowId(tabId);
   if (windowId !== undefined) {
     try {
-      const win = await browser.windows.get(windowId);
-      if (win.type === undefined || win.type === "normal") return win;
+      return await browser.windows.get(windowId);
     } catch {
-      // Fall through to the last focused normal window.
+      // Fall through to the last focused window.
     }
   }
-  try {
-    const chromeWindows = extensionGlobals.chrome?.windows;
-    if (chromeWindows?.getLastFocused) {
-      const win: unknown = await chromeWindows.getLastFocused({
-        windowTypes: ["normal"],
-      });
-      if (isRecord(win)) {
-        return {
-          focused: false,
-          incognito: false,
-          alwaysOnTop: false,
-          left: typeof win.left === "number" ? win.left : undefined,
-          top: typeof win.top === "number" ? win.top : undefined,
-          width: typeof win.width === "number" ? win.width : undefined,
-          height: typeof win.height === "number" ? win.height : undefined,
-        };
-      }
-    }
-  } catch {
-    // Fall through to the polyfill.
-  }
-  try {
-    const win = await browser.windows.getLastFocused();
-    return win.type === undefined || win.type === "normal" ? win : undefined;
-  } catch {
-    return undefined;
-  }
+  return browser.windows.getLastFocused().catch(() => undefined);
 };
 
 // Bare index.html classifies as the popup surface (settingsStore reads the
@@ -139,10 +132,11 @@ const ensureWindowTracking = () => {
  *  2. The side panel, when it is the preferred surface and the requesting
  *     tab can forward its user gesture.
  *  3. The toolbar-anchored action popup.
- *  4. A standalone notification window near the top-right of the focused
- *     browser window, when Chrome refuses openPopup() (it fails silently on
- *     some setups). Re-invocations focus the one existing window, so
- *     windows never stack.
+ *  4. A standalone notification window near the top-right of the requesting
+ *     tab's browser window, when Chrome refuses openPopup() (it does while a
+ *     window without a toolbar has focus, and fails silently on some
+ *     setups). Re-invocations focus the one existing window, so windows
+ *     never stack.
  *
  * The badge is set by the storage listener in the service worker either way.
  * Never throws.
@@ -155,6 +149,7 @@ export const openApprovalSurface = async ({
   if (await isSidePanelOpen()) {
     // The panel's storage subscription surfaces the request; opening a
     // popup or window would compete with it.
+    await revealRequestingWindow(tabId);
     return;
   }
 
@@ -183,32 +178,15 @@ export const openApprovalSurface = async ({
     await browser.action.openPopup();
     return;
   } catch {
-    // Chrome refused the anchored popup (it targets the focused window, which
-    // can be another wallet's popup-type window without a toolbar); fall
-    // through to the targeted popup and window paths.
+    // Chrome refused the anchored popup; fall through to the window path.
   }
 
   if (await isActionPopupOpen()) {
     return;
   }
 
-  const requestingWindowId = await getTabWindowId(tabId);
-  if (requestingWindowId !== undefined) {
-    try {
-      await browser.windows.update(requestingWindowId, { focused: true });
-    } catch {
-      // Focusing is best effort; the targeted openPopup below decides.
-    }
-    try {
-      await browser.action.openPopup({ windowId: requestingWindowId });
-      return;
-    } catch {
-      // Fall through to the standalone window.
-    }
-  }
-
   try {
-    const anchor = await getNormalWindow(requestingWindowId);
+    const anchor = await getAnchorWindow(tabId);
     const left =
       anchor?.left !== undefined && anchor.width !== undefined
         ? Math.max(anchor.left + anchor.width - WINDOW_WIDTH - 16, 0)
@@ -225,8 +203,8 @@ export const openApprovalSurface = async ({
     try {
       win = await browser.windows.create({ ...options, left, top });
     } catch {
-      // Chrome rejects bounds that are not mostly on a visible screen; let
-      // it place the window.
+      // Chrome rejects a position that is not mostly on a visible screen;
+      // let it place the window.
       win = await browser.windows.create(options);
     }
     approvalWindowId = win.id;
