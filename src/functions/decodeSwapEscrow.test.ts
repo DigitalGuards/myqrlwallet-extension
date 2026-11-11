@@ -139,6 +139,11 @@ describe("decodeTransactionCalldata swap escrow", () => {
     if (open.status === "swapEscrow") same(open.token, V.T);
   });
 
+  it("has no duplicate selectors across token and escrow specs", () => {
+    const selectors = knownCalldataSelectors();
+    expect(new Set(selectors).size).toBe(selectors.length);
+  });
+
   it("lists the escrow selectors", () => {
     expect(knownCalldataSelectors()).toEqual(
       expect.arrayContaining(["0xad4c2381", "0x84cc9dfb", "0x7249fbb6"]),

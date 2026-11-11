@@ -1,3 +1,4 @@
+import { V3_CHAIN_ID } from "./releaseProfile";
 import { areAddressesEquivalent } from "@/utilities/addressUtil";
 
 /**
@@ -18,7 +19,7 @@ export type KnownSwapEscrow = { address: string; name: string };
 const KNOWN_SWAP_ESCROWS: ReadonlyMap<string, readonly KnownSwapEscrow[]> =
   new Map([
     [
-      "0x301825",
+      V3_CHAIN_ID,
       [
         {
           address:

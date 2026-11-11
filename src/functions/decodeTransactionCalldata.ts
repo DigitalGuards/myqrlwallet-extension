@@ -132,6 +132,9 @@ export type SwapEscrowFields = {
 export type DecodedCalldata =
   | { status: "empty" }
   | { status: "unknown"; selector?: string }
+  // A signature match only. These function names are generic, so any
+  // contract can imitate them. A caller must check
+  // `knownSwapEscrow(chainId, to)` before describing the call to a user.
   | ({
       status: "swapEscrow";
       selector: string;
@@ -348,7 +351,10 @@ const tokenFields = (value: unknown): SwapEscrowFields =>
     : { token: asAddress(value) };
 
 /**
- * Hashed-timelock swap escrow (QuantaSwap HTLCv3). The ABI is the QRVM-512
+ * Hashed-timelock swap escrow (QuantaSwap HTLCv3). A match here is a
+ * signature match only: the function names are generic, and a caller must
+ * check `knownSwapEscrow(chainId, to)` before describing the call to a
+ * user. The ABI is the QRVM-512
  * one: every argument takes a 64-byte word, addresses fill the word, a
  * uint256 sits in the low half and a bytes32 sits in the high half with
  * zero padding after it. The strict re-encode check in the decoder rejects
