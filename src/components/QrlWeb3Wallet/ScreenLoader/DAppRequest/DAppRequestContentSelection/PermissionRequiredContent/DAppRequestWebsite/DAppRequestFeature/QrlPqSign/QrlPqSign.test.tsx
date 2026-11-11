@@ -309,6 +309,132 @@ describe("QrlPqSign", () => {
       </StoreProvider>,
     );
     expect(screen.queryByText("[object Object]")).not.toBeInTheDocument();
-    expect(screen.getByText(/Message/)).toBeInTheDocument();
+    // The payload fails the signer's validation, so no part of it is shown.
+    expect(screen.queryByText(/Message/)).not.toBeInTheDocument();
   });
+
+  it.each([
+    {
+      label: "a JSON string",
+      payload: JSON.stringify(canonical.schemeSigningVectors[0]?.payload),
+    },
+    {
+      label: "an extra top-level field",
+      payload: { ...canonical.schemeSigningVectors[0]?.payload, extra: 1 },
+    },
+    {
+      label: "a payload that parses but fails validation",
+      payload: {
+        ...canonical.schemeSigningVectors[0]?.payload,
+        primaryType: "Missing",
+      },
+    },
+  ])(
+    "disables Approve and never decrypts the seed for typed data sent as $label",
+    async ({ payload }) => {
+      let capturedPermissionCallback:
+        | ((hasApproved: boolean, record: ResponseRecorder) => Promise<void>)
+        | null = null;
+      const recorded: Record<string, unknown>[] = [];
+      const setCanProceed = vi.fn();
+      const getMnemonicPhrases = vi.fn().mockResolvedValue("unused");
+
+      render(
+        <StoreProvider
+          value={signingStore(signerAddress, {
+            lockStore: { getMnemonicPhrases },
+            dAppRequestStore: {
+              dAppRequestData: {
+                method: RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA,
+                params: [signerAddress, payload],
+              },
+              setCanProceed,
+              setOnPermissionCallBack: (
+                callback: (
+                  hasApproved: boolean,
+                  record: ResponseRecorder,
+                ) => Promise<void>,
+              ) => {
+                capturedPermissionCallback = callback;
+              },
+            },
+          })}
+        >
+          <MemoryRouter>
+            <TooltipProvider>
+              <QrlPqSign />
+            </TooltipProvider>
+          </MemoryRouter>
+        </StoreProvider>,
+      );
+
+      expect(setCanProceed).toHaveBeenLastCalledWith(false);
+      await act(async () => {
+        if (!capturedPermissionCallback)
+          throw new Error("Missing permission callback");
+        await capturedPermissionCallback(true, (data) => {
+          recorded.push(data);
+        });
+      });
+      expect(getMnemonicPhrases).not.toHaveBeenCalled();
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0]?.error).toBeDefined();
+    },
+  );
+
+  it.each([
+    { label: "an object", message: { foo: 1 } },
+    { label: "a number", message: 42 },
+    { label: "plain text", message: "hello" },
+  ])(
+    "disables Approve and never decrypts the seed for a message sent as $label",
+    async ({ message }) => {
+      let capturedPermissionCallback:
+        | ((hasApproved: boolean, record: ResponseRecorder) => Promise<void>)
+        | null = null;
+      const recorded: Record<string, unknown>[] = [];
+      const setCanProceed = vi.fn();
+      const getMnemonicPhrases = vi.fn().mockResolvedValue("unused");
+
+      render(
+        <StoreProvider
+          value={signingStore(signerAddress, {
+            lockStore: { getMnemonicPhrases },
+            dAppRequestStore: {
+              dAppRequestData: {
+                method: RESTRICTED_METHODS.QRL_SIGN_MESSAGE,
+                params: [signerAddress, message],
+              },
+              setCanProceed,
+              setOnPermissionCallBack: (
+                callback: (
+                  hasApproved: boolean,
+                  record: ResponseRecorder,
+                ) => Promise<void>,
+              ) => {
+                capturedPermissionCallback = callback;
+              },
+            },
+          })}
+        >
+          <MemoryRouter>
+            <TooltipProvider>
+              <QrlPqSign />
+            </TooltipProvider>
+          </MemoryRouter>
+        </StoreProvider>,
+      );
+
+      expect(setCanProceed).toHaveBeenLastCalledWith(false);
+      await act(async () => {
+        if (!capturedPermissionCallback)
+          throw new Error("Missing permission callback");
+        await capturedPermissionCallback(true, (data) => {
+          recorded.push(data);
+        });
+      });
+      expect(getMnemonicPhrases).not.toHaveBeenCalled();
+      expect(recorded[0]?.error).toBeDefined();
+    },
+  );
 });

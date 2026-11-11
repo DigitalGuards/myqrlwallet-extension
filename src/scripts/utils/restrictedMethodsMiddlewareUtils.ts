@@ -9,6 +9,7 @@ import StorageUtil from "@/utilities/storageUtil";
 import {
   isApprovalSender,
   isStringArray,
+  isAddQrlChainParameters,
   isUnknownArray,
   readApprovalParams,
   readApprovalTransaction,
@@ -18,6 +19,8 @@ import {
   requireSigningNetwork,
 } from "@/configuration/pinnedNetworks";
 import { MAX_SAFE_CHAIN_ID } from "@/constants/blockchain";
+import { computeTypedDataDigest } from "@/functions/pqSigning/typedData";
+import { hexToBytes } from "@/functions/pqSigning/bytes";
 import {
   areAddressesEquivalent,
   isCanonicalQrlAddress,
@@ -218,6 +221,47 @@ const getTypedDataChainId = (req: AuthorizationRequest) => {
     isValid: true,
     chainId: isRecord(typedData.domain) ? typedData.domain.chainId : undefined,
   };
+};
+
+/**
+ * The signer runs computeTypedDataDigest (full validation: QRLDomain type,
+ * reachability, field types, limits) before it needs the seed. The same
+ * seed-free step runs here, so a payload the signer would reject never opens
+ * a prompt. The digest itself is discarded.
+ */
+export const checkTypedDataPayload = (params: unknown) => {
+  try {
+    computeTypedDataDigest(readApprovalParams(params)?.[1]);
+    return { canProceed: true, proceedError: undefined };
+  } catch {
+    return {
+      canProceed: false,
+      proceedError: rpcErrors.invalidParams({
+        message: "The wallet cannot parse the typed-data request.",
+      }),
+    };
+  }
+};
+
+/**
+ * signMessage takes the message as a 0x-prefixed, even-length hex string and
+ * nothing else; any other value fails after the prompt, so it is refused
+ * here.
+ */
+export const checkSignMessageParams = (params: unknown) => {
+  const message = readApprovalParams(params)?.[1];
+  try {
+    if (typeof message !== "string") throw new Error("not a string");
+    hexToBytes(message);
+    return { canProceed: true, proceedError: undefined };
+  } catch {
+    return {
+      canProceed: false,
+      proceedError: rpcErrors.invalidParams({
+        message: "Expected a 0x-prefixed, even-length hex string message.",
+      }),
+    };
+  }
 };
 
 /** True when the request carries constructor or call data worth running. */
@@ -787,6 +831,20 @@ export const checkWalletAddQrlChainParams = async (
       proceedError: rpcErrors.invalidParams({
         message:
           "Expected 'qrnsRegistryAddress' to be empty or an uppercase-Q QIP-55 address with 128 hexadecimal characters and a valid checksum.",
+      }),
+    };
+  }
+
+  // The approval prompt reads the request through this same guard. A field
+  // it cannot read (a list that is not an array of strings, a currency name
+  // that is not a string) would open a blank prompt that cannot add
+  // anything, so the request is refused here instead.
+  if (!isAddQrlChainParameters(chainData)) {
+    return {
+      canProceed: false,
+      proceedError: rpcErrors.invalidParams({
+        message:
+          "Expected 'blockExplorerUrls' and 'iconUrls' to be arrays of strings and 'nativeCurrency.name' to be a string.",
       }),
     };
   }
