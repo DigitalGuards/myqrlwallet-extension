@@ -12,10 +12,13 @@ export const V3_QNS_REGISTRY =
 /** The block explorer for the v3 testnet. */
 export const V3_EXPLORER = "https://shorscan.com";
 /**
- * The explorer builds before 1.4.3 stored on the built-in testnet. Stored
- * lists are rewritten from this exact value on read.
+ * The explorer values earlier builds stored on the built-in testnet. Stored
+ * lists are rewritten from these exact values on read.
  */
-export const LEGACY_V3_EXPLORER = "https://zondscan.com";
+export const LEGACY_V3_EXPLORERS: readonly string[] = [
+  "https://zondscan.com",
+  "https://v3.zondscan.com",
+];
 
 export const MAINNET_RPC_URL = "https://qrlwallet.com/api/qrl-rpc/mainnet";
 

@@ -1,5 +1,5 @@
 import {
-  LEGACY_V3_EXPLORER,
+  LEGACY_V3_EXPLORERS,
   V3_CHAIN_ID,
   V3_EXPLORER,
   V3_QNS_REGISTRY,
@@ -137,6 +137,9 @@ const ALL_CONTACTS_IDENTIFIER = "ALL_CONTACTS";
 
 const ACCOUNT_LABELS_IDENTIFIER = "ACCOUNT_LABELS";
 const HIDDEN_ACCOUNTS_IDENTIFIER = "HIDDEN_ACCOUNTS";
+
+const isLegacyV3Explorer = (value: unknown): boolean =>
+  typeof value === "string" && LEGACY_V3_EXPLORERS.includes(value);
 
 const sanitizeQrnsRegistry = (
   chain: StoredBlockchain,
@@ -543,22 +546,26 @@ const StorageUtil = {
       ) {
         migrated = { ...migrated, qrnsRegistryAddress: V3_QNS_REGISTRY };
       }
-      // Stored lists persisted before 1.4.3 name zondscan.com as the explorer
-      // of the built-in testnet. Only that exact default is rewritten: a
-      // user-edited explorer list or URL is a different value and stays.
+      // Stored lists persisted by earlier builds name zondscan.com as the
+      // explorer of the built-in testnet. Only those exact values are
+      // rewritten: a user-edited explorer URL is a different value and stays.
       if (
         !migrated.isCustomChain &&
         migrated.chainId.toLowerCase() === V3_CHAIN_ID
       ) {
         const urls = migrated.blockExplorerUrls;
-        if (
-          Array.isArray(urls) &&
-          urls.length === 1 &&
-          urls[0] === LEGACY_V3_EXPLORER
-        ) {
-          migrated = { ...migrated, blockExplorerUrls: [V3_EXPLORER] };
+        if (Array.isArray(urls) && urls.some(isLegacyV3Explorer)) {
+          const mapped = urls.map((url: unknown): unknown =>
+            isLegacyV3Explorer(url) ? V3_EXPLORER : url,
+          );
+          migrated = {
+            ...migrated,
+            blockExplorerUrls: mapped.filter(
+              (url, index) => mapped.indexOf(url) === index,
+            ),
+          };
         }
-        if (migrated.defaultBlockExplorerUrl === LEGACY_V3_EXPLORER) {
+        if (isLegacyV3Explorer(migrated.defaultBlockExplorerUrl)) {
           migrated = { ...migrated, defaultBlockExplorerUrl: V3_EXPLORER };
         }
       }

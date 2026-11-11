@@ -68,7 +68,7 @@ const PROTECTED_BRAND_DOMAINS = [
   "quantapool.com",
   "quantapool.io",
   "quantaswap.io",
-  // The block explorer (formerly zondscan.com, which stays ours).
+  // The block explorer. zondscan.com is its earlier domain and stays protected.
   "shorscan.com",
   "theqrl.org",
   "zondscan.com",
