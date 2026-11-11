@@ -68,7 +68,7 @@ const PROTECTED_BRAND_DOMAINS = [
   "quantapool.com",
   "quantapool.io",
   "quantaswap.io",
-  // The planned mainnet block explorer, registered ahead of the cutover.
+  // The block explorer (formerly zondscan.com, which stays ours).
   "shorscan.com",
   "theqrl.org",
   "zondscan.com",

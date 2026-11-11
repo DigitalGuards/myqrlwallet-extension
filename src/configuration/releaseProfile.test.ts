@@ -182,7 +182,7 @@ describe("testnet profile", () => {
       chainId: V3_CHAIN_ID,
       genesisHash: V3_GENESIS_HASH,
       rpcUrl: V3_RPC_URL,
-      explorer: "https://zondscan.com",
+      explorer: "https://shorscan.com",
     });
   });
 });

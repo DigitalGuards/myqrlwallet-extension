@@ -482,7 +482,7 @@ const TransactionDetail = observer(() => {
     second: "2-digit",
   });
 
-  // Chains indexed by zondscan link there (the web explorer and its API
+  // Chains indexed by ShorScan link there (the web explorer and its API
   // share an origin). Any other chain links to its own block explorer when
   // the entry belongs to the active chain and that explorer is an https
   // URL; otherwise there is no link.

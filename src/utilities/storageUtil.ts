@@ -1,4 +1,9 @@
-import { V3_CHAIN_ID, V3_QNS_REGISTRY } from "@/configuration/releaseProfile";
+import {
+  LEGACY_V3_EXPLORER,
+  V3_CHAIN_ID,
+  V3_EXPLORER,
+  V3_QNS_REGISTRY,
+} from "@/configuration/releaseProfile";
 import {
   DEFAULT_BLOCKCHAIN,
   LEGACY_TESTNET_RPC,
@@ -537,6 +542,25 @@ const StorageUtil = {
         migrated.qrnsRegistryAddress === undefined
       ) {
         migrated = { ...migrated, qrnsRegistryAddress: V3_QNS_REGISTRY };
+      }
+      // Stored lists persisted before 1.4.3 name zondscan.com as the explorer
+      // of the built-in testnet. Only that exact default is rewritten: a
+      // user-edited explorer list or URL is a different value and stays.
+      if (
+        !migrated.isCustomChain &&
+        migrated.chainId.toLowerCase() === V3_CHAIN_ID
+      ) {
+        const urls = migrated.blockExplorerUrls;
+        if (
+          Array.isArray(urls) &&
+          urls.length === 1 &&
+          urls[0] === LEGACY_V3_EXPLORER
+        ) {
+          migrated = { ...migrated, blockExplorerUrls: [V3_EXPLORER] };
+        }
+        if (migrated.defaultBlockExplorerUrl === LEGACY_V3_EXPLORER) {
+          migrated = { ...migrated, defaultBlockExplorerUrl: V3_EXPLORER };
+        }
       }
       return migrated;
     });

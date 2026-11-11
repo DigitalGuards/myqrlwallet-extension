@@ -517,6 +517,44 @@ describe("StorageUtil", () => {
       expect(result[0].qrnsRegistryAddress).toBe(ownRegistry);
     });
 
+    it("moves the stored built-in testnet explorer from zondscan.com to shorscan.com", async () => {
+      const staleBuiltin = {
+        ...chain1,
+        chainId: V3_CHAIN_ID,
+        isCustomChain: false,
+        blockExplorerUrls: ["https://zondscan.com"],
+        defaultBlockExplorerUrl: "https://zondscan.com",
+      };
+      const customOnSameHost = {
+        ...chain2,
+        chainId: "0x3",
+        isCustomChain: true,
+        blockExplorerUrls: ["https://zondscan.com"],
+        defaultBlockExplorerUrl: "https://zondscan.com",
+      };
+      await StorageUtil.setAllBlockChains([staleBuiltin, customOnSameHost]);
+      let result = await StorageUtil.getAllBlockChains();
+      expect(result[0].blockExplorerUrls).toEqual(["https://shorscan.com"]);
+      expect(result[0].defaultBlockExplorerUrl).toBe("https://shorscan.com");
+      // Custom chains keep the explorer the user or dApp provided.
+      expect(result[1].blockExplorerUrls).toEqual(["https://zondscan.com"]);
+      expect(result[1].defaultBlockExplorerUrl).toBe("https://zondscan.com");
+
+      // A user-edited explorer on the built-in chain stays as it is.
+      await StorageUtil.setAllBlockChains([
+        {
+          ...staleBuiltin,
+          blockExplorerUrls: ["https://explorer.example"],
+          defaultBlockExplorerUrl: "https://explorer.example",
+        },
+      ]);
+      result = await StorageUtil.getAllBlockChains();
+      expect(result[0].blockExplorerUrls).toEqual(["https://explorer.example"]);
+      expect(result[0].defaultBlockExplorerUrl).toBe(
+        "https://explorer.example",
+      );
+    });
+
     it("ships the v3 QNS registry as a canonical QIP-55 address", () => {
       expect(toChecksumAddress(V3_QNS_REGISTRY)).toBe(V3_QNS_REGISTRY);
     });

@@ -26,7 +26,7 @@ const COINGECKO_API_URL =
  * It quotes USD only, which still beats a Home card with no fiat line at
  * all. The web wallet reads its price from the same endpoint.
  */
-const EXPLORER_PRICE_URL = "https://zondscan.com/api/overview";
+const EXPLORER_PRICE_URL = "https://shorscan.com/api/overview";
 
 const REFRESH_INTERVAL_MS = 60_000;
 const CACHE_MAX_AGE_MS = 10 * 60_000;

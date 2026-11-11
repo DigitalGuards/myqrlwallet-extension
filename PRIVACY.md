@@ -39,15 +39,15 @@ you.
   (`https://raw.githubusercontent.com/MetaMask/eth-phishing-detect`). This is a
   plain request for a public file; no wallet data is sent, but the request
   reveals your IP address to GitHub. A bundled copy is used as a fallback.
-- **Balances, history, tokens and NFTs:** the extension asks the ZondScan block
-  explorer (zondscan.com, operated by DigitalGuards) for transaction history and
+- **Balances, history, tokens and NFTs:** the extension asks the ShorScan block
+  explorer (shorscan.com, operated by DigitalGuards) for transaction history and
   for the tokens and NFTs held by the addresses you view. The explorer observes
   your IP address and those public addresses.
 - **Prices:** while the wallet is unlocked and balance and price display is
   switched on, the extension asks CoinGecko (`api.coingecko.com`) for the current
   QRL market price about once a minute. No wallet data is sent; the request
   reveals your IP address to CoinGecko. When CoinGecko refuses or fails the
-  request, the extension asks the ZondScan block explorer (zondscan.com,
+  request, the extension asks the ShorScan block explorer (shorscan.com,
   operated by DigitalGuards) for the same price instead, again without sending
   any wallet data. You can switch this off in the settings.
 - **NFT content:** NFT metadata and images stored on IPFS are loaded through the

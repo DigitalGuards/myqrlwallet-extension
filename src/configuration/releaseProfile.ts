@@ -9,6 +9,14 @@ export const V3_STORAGE_PREFIX = `v3:${V3_CHAIN_ID}:${V3_GENESIS_HASH}:`;
 export const V3_QNS_REGISTRY =
   "Qcfc5f3242cE7d413F308D4181fd45D441d535298d78fd2d26833c2650408f636B46590dc10D23221480eFac958705Ba6C266eEB16B5aeafA64202715Adc84424";
 
+/** The block explorer for the v3 testnet. */
+export const V3_EXPLORER = "https://shorscan.com";
+/**
+ * The explorer builds before 1.4.3 stored on the built-in testnet. Stored
+ * lists are rewritten from this exact value on read.
+ */
+export const LEGACY_V3_EXPLORER = "https://zondscan.com";
+
 export const MAINNET_RPC_URL = "https://qrlwallet.com/api/qrl-rpc/mainnet";
 
 /**
@@ -36,7 +44,7 @@ export const V3_TESTNET: PinnedNetwork = {
   chainId: V3_CHAIN_ID,
   genesisHash: V3_GENESIS_HASH,
   rpcUrl: V3_RPC_URL,
-  explorer: "https://zondscan.com",
+  explorer: V3_EXPLORER,
 };
 
 /**
