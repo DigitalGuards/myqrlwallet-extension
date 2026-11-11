@@ -46,6 +46,38 @@ const isActionPopupOpen = async (): Promise<boolean> => {
   }
 };
 
+const getTabWindowId = async (
+  tabId: number | undefined,
+): Promise<number | undefined> => {
+  if (tabId === undefined) return undefined;
+  try {
+    const tab = await browser.tabs.get(tabId);
+    return tab.windowId;
+  } catch {
+    return undefined;
+  }
+};
+
+// An open side panel shows the request, but its browser window can sit
+// behind another window: another wallet's confirmation window lands right on
+// top of the panel. The requesting tab's window then asks for attention (a
+// flashing taskbar entry). It is never focused from here: a page can send a
+// request at any moment without a gesture, and focusing its window would
+// hand it the keys the user is typing into the window in front.
+const flagRequestingWindow = async (
+  tabId: number | undefined,
+): Promise<void> => {
+  try {
+    const windowId = await getTabWindowId(tabId);
+    if (windowId === undefined) return;
+    const current = await browser.windows.getLastFocused();
+    if (current.focused && current.id === windowId) return;
+    await browser.windows.update(windowId, { drawAttention: true });
+  } catch {
+    // Best effort: the panel still shows the request.
+  }
+};
+
 // Bare index.html classifies as the popup surface (settingsStore reads the
 // URL params), which gives the notification window the 600px height pin and
 // DAppRequest's self-close-on-resolve behavior for free.
@@ -81,9 +113,10 @@ const ensureWindowTracking = () => {
  *     tab can forward its user gesture.
  *  3. The toolbar-anchored action popup.
  *  4. A standalone notification window near the top-right of the focused
- *     browser window, when Chrome refuses openPopup() (it fails silently on
- *     some setups). Re-invocations focus the one existing window, so
- *     windows never stack.
+ *     browser window, when Chrome refuses openPopup() (it does while a
+ *     window without a toolbar has focus, and fails silently on some
+ *     setups). Re-invocations focus the one existing window, so windows
+ *     never stack.
  *
  * The badge is set by the storage listener in the service worker either way.
  * Never throws.
@@ -96,6 +129,7 @@ export const openApprovalSurface = async ({
   if (await isSidePanelOpen()) {
     // The panel's storage subscription surfaces the request; opening a
     // popup or window would compete with it.
+    await flagRequestingWindow(tabId);
     return;
   }
 
@@ -140,17 +174,23 @@ export const openApprovalSurface = async ({
         ? Math.max(anchor.left + anchor.width - WINDOW_WIDTH - 16, 0)
         : undefined;
     const top = anchor?.top !== undefined ? anchor.top + 76 : undefined;
-    const win = await browser.windows.create({
+    const options = {
       url: browser.runtime.getURL("index.html"),
       type: "popup",
       focused: true,
       width: WINDOW_WIDTH,
       height: WINDOW_HEIGHT,
-      left,
-      top,
-    });
+    } as const;
+    let win: browser.Windows.Window;
+    try {
+      win = await browser.windows.create({ ...options, left, top });
+    } catch {
+      // Chrome rejects a position that is not mostly on a visible screen;
+      // let it place the window.
+      win = await browser.windows.create(options);
+    }
     approvalWindowId = win.id;
-  } catch {
-    console.warn("QrlWeb3Wallet: Could not open the wallet");
+  } catch (error) {
+    console.warn("QrlWeb3Wallet: Could not open the wallet", error);
   }
 };

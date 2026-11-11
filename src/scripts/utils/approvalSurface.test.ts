@@ -17,6 +17,7 @@ const openPopup = vi.spyOn(browser.action, "openPopup");
 const createWindow = vi.spyOn(browser.windows, "create");
 const updateWindow = vi.spyOn(browser.windows, "update");
 const getLastFocused = vi.spyOn(browser.windows, "getLastFocused");
+const getTab = vi.spyOn(browser.tabs, "get");
 const getLocalStorage = vi.spyOn(browser.storage.local, "get");
 const windowProperties = {
   focused: true,
@@ -76,6 +77,7 @@ describe("openApprovalSurface", () => {
     // Module state (the tracked window id) persists across tests; start
     // each test with the notification window closed.
     handleApprovalWindowRemoved(77);
+    handleApprovalWindowRemoved(78);
     resetSidePanelOpenerForTests();
     sidePanelOpen.mockClear();
     sidePanelOpen.mockResolvedValue(undefined);
@@ -95,6 +97,16 @@ describe("openApprovalSurface", () => {
       top: 50,
       width: 1280,
       height: 800,
+    });
+    // The requesting tab (id 5) lives in window 9.
+    getTab.mockResolvedValue({
+      id: 5,
+      windowId: 9,
+      index: 0,
+      active: true,
+      highlighted: true,
+      pinned: false,
+      incognito: false,
     });
   });
 
@@ -230,5 +242,139 @@ describe("openApprovalSurface", () => {
     await openApprovalSurface();
 
     expect(createWindow).not.toHaveBeenCalled();
+  });
+
+  describe("notification window placement", () => {
+    beforeEach(() => {
+      openPopup.mockRejectedValue(new Error("Browser window has no toolbar."));
+    });
+
+    it("opens the window without a position when Chrome rejects the bounds", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      createWindow.mockImplementation((options) =>
+        options?.left === undefined && options?.top === undefined
+          ? Promise.resolve({ ...windowProperties, id: 78 })
+          : Promise.reject(
+              new Error(
+                "Invalid value for bounds. Bounds must be at least 50% within visible screen space.",
+              ),
+            ),
+      );
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(createWindow).toHaveBeenCalledTimes(2);
+      expect(createWindow).toHaveBeenLastCalledWith({
+        url: "chrome-extension://mock-id/index.html",
+        type: "popup",
+        focused: true,
+        width: 396,
+        height: 640,
+      });
+      expect(warn).not.toHaveBeenCalled();
+
+      // The retried window is the tracked one: the next request focuses it.
+      await openApprovalSurface({ tabId: 5 });
+      expect(createWindow).toHaveBeenCalledTimes(2);
+      expect(updateWindow).toHaveBeenCalledWith(78, {
+        focused: true,
+        drawAttention: true,
+      });
+      warn.mockRestore();
+    });
+
+    it("never throws and warns once when no window can be opened", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const cause = new Error("x");
+      getLastFocused.mockRejectedValue(new Error("x"));
+      createWindow.mockRejectedValue(cause);
+
+      await expect(openApprovalSurface({ tabId: 5 })).resolves.toBeUndefined();
+
+      expect(createWindow).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        "QrlWeb3Wallet: Could not open the wallet",
+        cause,
+      );
+      warn.mockRestore();
+    });
+  });
+
+  describe("with a side panel already open", () => {
+    const stubOpenContexts = (open: readonly string[]) => {
+      vi.stubGlobal("chrome", {
+        sidePanel: { open: sidePanelOpen },
+        runtime: {
+          ContextType: { SIDE_PANEL: "SIDE_PANEL", POPUP: "POPUP" },
+          getContexts: vi.fn((filter: { contextTypes: string[] }) =>
+            Promise.resolve(
+              filter.contextTypes
+                .filter((type) => open.includes(type))
+                .map((contextType) => ({ contextType })),
+            ),
+          ),
+        },
+      });
+    };
+
+    beforeEach(() => {
+      setSettings({});
+      stubOpenContexts(["SIDE_PANEL"]);
+    });
+
+    it("asks for attention behind another wallet's window and never takes focus", async () => {
+      getLastFocused.mockResolvedValue({
+        ...windowProperties,
+        id: 12,
+        type: "popup",
+      });
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(updateWindow).toHaveBeenCalledTimes(1);
+      expect(updateWindow).toHaveBeenCalledWith(9, { drawAttention: true });
+      expect(openPopup).not.toHaveBeenCalled();
+      expect(createWindow).not.toHaveBeenCalled();
+    });
+
+    it("asks for attention when no browser window has focus", async () => {
+      getLastFocused.mockResolvedValue({
+        ...windowProperties,
+        id: 9,
+        focused: false,
+      });
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(updateWindow).toHaveBeenCalledTimes(1);
+      expect(updateWindow).toHaveBeenCalledWith(9, { drawAttention: true });
+    });
+
+    it("leaves the windows alone when the tab's window already has focus", async () => {
+      getLastFocused.mockResolvedValue({ ...windowProperties, id: 9 });
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(updateWindow).not.toHaveBeenCalled();
+    });
+
+    it("leaves the windows alone without a requesting tab", async () => {
+      getLastFocused.mockResolvedValue({ ...windowProperties, id: 12 });
+
+      await openApprovalSurface();
+
+      expect(getTab).not.toHaveBeenCalled();
+      expect(updateWindow).not.toHaveBeenCalled();
+    });
+
+    it("never throws when the window lookups reject", async () => {
+      getLastFocused.mockRejectedValue(new Error("x"));
+      updateWindow.mockRejectedValue(new Error("x"));
+
+      await expect(openApprovalSurface({ tabId: 5 })).resolves.toBeUndefined();
+
+      expect(createWindow).not.toHaveBeenCalled();
+    });
   });
 });
