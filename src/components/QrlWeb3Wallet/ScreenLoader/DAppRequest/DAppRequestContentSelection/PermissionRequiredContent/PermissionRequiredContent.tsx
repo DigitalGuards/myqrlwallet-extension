@@ -39,7 +39,7 @@ const PermissionRequiredContent = observer(() => {
           <DAppRequestWebsite />
           <div className="font-bold">{t("dapp.permissionQuestion")}</div>
         </CardContent>
-        <CardFooter className="grid grid-cols-2 gap-4">
+        <CardFooter className="grid grid-cols-2 items-start gap-4">
           <Button
             className="w-full"
             variant="outline"
