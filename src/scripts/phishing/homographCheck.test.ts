@@ -71,6 +71,7 @@ describe("foldConfusables", () => {
   it.each([
     ["qrlwаllet.com", "qrlwallet.com"], // cyrillic a
     ["zоndscan.com", "zondscan.com"], // cyrillic o
+    ["shоrscan.com", "shorscan.com"], // cyrillic o
     ["theсrl.org", "thecrl.org"], // cyrillic es folds to c
     ["qrlwaIIet.com", "qrlwallet.com"], // capital i folds onto l
     ["qr1wa11et.c0m", "qrlwallet.com"], // digits one and zero

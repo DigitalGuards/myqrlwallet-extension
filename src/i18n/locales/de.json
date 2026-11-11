@@ -553,7 +553,7 @@
   "settings.security.60minutes": "60 Minuten",
   "settings.security.never": "Nie",
   "settings.security.showBalanceLabel": "Guthaben und Token-Preis anzeigen",
-  "settings.security.showBalanceDescription": "Fiat-Werte werden nur im QRL-Mainnet angezeigt. Dort verwenden wir die CoinGecko-API zur Anzeige von Token-Preisen und weichen auf den ZondScan-Explorer aus, wenn CoinGecko die Anfrage ablehnt. Wenn deaktiviert, werden keine Preisanfragen gestellt und keine Fiat-Werte angezeigt.",
+  "settings.security.showBalanceDescription": "Fiat-Werte werden nur im QRL-Mainnet angezeigt. Dort verwenden wir die CoinGecko-API zur Anzeige von Token-Preisen und weichen auf den ShorScan-Explorer aus, wenn CoinGecko die Anfrage ablehnt. Wenn deaktiviert, werden keine Preisanfragen gestellt und keine Fiat-Werte angezeigt.",
   "settings.security.coingeckoLink": "CoinGecko-API",
   "settings.security.changePassword": "Passwort ändern",
   "settings.security.currentPassword": "Aktuelles Passwort",

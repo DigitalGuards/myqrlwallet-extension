@@ -230,7 +230,7 @@ test("the testnet Home card shows no fiat estimate and requests no price", async
       body: COINGECKO_QUOTES,
     });
   });
-  await context.route("https://zondscan.com/api/overview", async (route) => {
+  await context.route("https://shorscan.com/api/overview", async (route) => {
     explorerCalls += 1;
     await route.fulfill({
       status: 200,

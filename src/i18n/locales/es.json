@@ -553,7 +553,7 @@
   "settings.security.60minutes": "60 minutos",
   "settings.security.never": "Nunca",
   "settings.security.showBalanceLabel": "Mostrar saldo y precio del token",
-  "settings.security.showBalanceDescription": "Los valores en moneda fiduciaria solo se muestran en la red principal (mainnet) de QRL. Allí usamos la API de CoinGecko para mostrar precios de tokens, y recurrimos al explorador ZondScan cuando CoinGecko rechaza la solicitud. Cuando está desactivado, no se solicitan precios y no se muestran valores en moneda fiduciaria.",
+  "settings.security.showBalanceDescription": "Los valores en moneda fiduciaria solo se muestran en la red principal (mainnet) de QRL. Allí usamos la API de CoinGecko para mostrar precios de tokens, y recurrimos al explorador ShorScan cuando CoinGecko rechaza la solicitud. Cuando está desactivado, no se solicitan precios y no se muestran valores en moneda fiduciaria.",
   "settings.security.coingeckoLink": "API de CoinGecko",
   "settings.security.changePassword": "Cambiar contraseña",
   "settings.security.currentPassword": "Contraseña actual",

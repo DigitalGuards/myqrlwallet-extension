@@ -326,11 +326,11 @@ describe("TransactionDetail", () => {
 
     await userEvent.click(screen.getByText("View on Block Explorer"));
     expect(createTab).toHaveBeenCalledWith({
-      url: "https://zondscan.com/tx/0xabc123def456",
+      url: "https://shorscan.com/tx/0xabc123def456",
     });
   });
 
-  describe("explorer link for a chain zondscan does not index", () => {
+  describe("explorer link for a chain shorscan does not index", () => {
     const CUSTOM_CHAIN_ID = "0x1";
     const storeOnCustomChain = (defaultBlockExplorerUrl: string) =>
       mockedStore({

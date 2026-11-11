@@ -553,7 +553,7 @@
   "settings.security.60minutes": "60 minutes",
   "settings.security.never": "Never",
   "settings.security.showBalanceLabel": "Show balance and token price",
-  "settings.security.showBalanceDescription": "Fiat values show on QRL mainnet only. There we use the CoinGecko API to display token prices, and fall back to the ZondScan explorer when CoinGecko refuses the request. When disabled, no price requests are made and no fiat values are shown.",
+  "settings.security.showBalanceDescription": "Fiat values show on QRL mainnet only. There we use the CoinGecko API to display token prices, and fall back to the ShorScan explorer when CoinGecko refuses the request. When disabled, no price requests are made and no fiat values are shown.",
   "settings.security.coingeckoLink": "CoinGecko API",
   "settings.security.changePassword": "Change Password",
   "settings.security.currentPassword": "Current password",

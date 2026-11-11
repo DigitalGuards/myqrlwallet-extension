@@ -431,6 +431,12 @@ describe("PriceStore", () => {
     expect(store.getPrice("USD")).toBe(0.67);
     expect(store.getChange24h("USD")).toBe(-0.47);
     expect(store.hasError).toBe(false);
+    expect(
+      mockFetch.mock.calls.some(([input]) => {
+        const url = input instanceof Request ? input.url : String(input);
+        return url === "https://shorscan.com/api/overview";
+      }),
+    ).toBe(true);
     expect(mockSetPriceCache).toHaveBeenCalledWith(
       expect.objectContaining({ prices: { usd: 0.67 } }),
     );

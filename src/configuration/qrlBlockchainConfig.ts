@@ -1,5 +1,10 @@
 import { pinnedMainnet } from "./pinnedNetworks";
-import { V3_CHAIN_ID, V3_RPC_URL, V3_QNS_REGISTRY } from "./releaseProfile";
+import {
+  V3_CHAIN_ID,
+  V3_EXPLORER,
+  V3_RPC_URL,
+  V3_QNS_REGISTRY,
+} from "./releaseProfile";
 
 // The wallet backend's CF-fronted HTTPS JSON-RPC proxy: does server-side
 // node failover and avoids the cleartext-http warning (and consumer
@@ -16,7 +21,7 @@ const QRL_TESTNET_DATA = {
   chainId: V3_CHAIN_ID,
   chainName: "QRL v3 Private",
   rpcUrls: [QRL_TESTNET_RPC_PROXY],
-  blockExplorerUrls: ["https://zondscan.com"],
+  blockExplorerUrls: [V3_EXPLORER],
   nativeCurrency: {
     name: "Quanta",
     symbol: "Quanta",

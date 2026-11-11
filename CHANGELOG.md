@@ -4,6 +4,10 @@
 
 - Include the wallet descriptor in post-quantum signing responses so SDK verifiers can bind the public key to the claimed Q-address.
 
+### Changed
+
+- Use shorscan.com for explorer links, history, token and NFT discovery and the price fallback; a stored built-in testnet entry follows.
+
 ## [0.3.0](https://github.com/theQRL/qrl-web3-wallet/compare/v0.2.0...v0.3.0) (2026-05-07)
 
 ### Features
