@@ -9,6 +9,7 @@ import StorageUtil from "@/utilities/storageUtil";
 import {
   isApprovalSender,
   isStringArray,
+  isAddQrlChainParameters,
   isUnknownArray,
   readApprovalParams,
   readApprovalTransaction,
@@ -18,6 +19,7 @@ import {
   requireSigningNetwork,
 } from "@/configuration/pinnedNetworks";
 import { MAX_SAFE_CHAIN_ID } from "@/constants/blockchain";
+import { parsePayload as parseTypedDataPayload } from "@/functions/pqSigning/typedData";
 import {
   areAddressesEquivalent,
   isCanonicalQrlAddress,
@@ -218,6 +220,26 @@ const getTypedDataChainId = (req: AuthorizationRequest) => {
     isValid: true,
     chainId: isRecord(typedData.domain) ? typedData.domain.chainId : undefined,
   };
+};
+
+/**
+ * The signing prompt and the signer both read a `qrl_signTypedData` payload
+ * through parsePayload, which accepts one object with exactly the four
+ * typed-data fields and no JSON string. A payload it rejects would open a
+ * prompt with nothing to approve, so the service worker refuses it first.
+ */
+export const checkTypedDataPayload = (params: unknown) => {
+  try {
+    parseTypedDataPayload(readApprovalParams(params)?.[1]);
+    return { canProceed: true, proceedError: undefined };
+  } catch {
+    return {
+      canProceed: false,
+      proceedError: rpcErrors.invalidParams({
+        message: "The wallet cannot parse the typed-data request.",
+      }),
+    };
+  }
 };
 
 /** True when the request carries constructor or call data worth running. */
@@ -787,6 +809,20 @@ export const checkWalletAddQrlChainParams = async (
       proceedError: rpcErrors.invalidParams({
         message:
           "Expected 'qrnsRegistryAddress' to be empty or an uppercase-Q QIP-55 address with 128 hexadecimal characters and a valid checksum.",
+      }),
+    };
+  }
+
+  // The approval prompt reads the request through this same guard. A field
+  // it cannot read (a list that is not an array of strings, a currency name
+  // that is not a string) would open a blank prompt that cannot add
+  // anything, so the request is refused here instead.
+  if (!isAddQrlChainParameters(chainData)) {
+    return {
+      canProceed: false,
+      proceedError: rpcErrors.invalidParams({
+        message:
+          "Expected 'blockExplorerUrls' and 'iconUrls' to be arrays of strings and 'nativeCurrency.name' to be a string.",
       }),
     };
   }

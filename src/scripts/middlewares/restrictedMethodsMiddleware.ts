@@ -36,6 +36,7 @@ import {
   checkAccountHasBeenAuthorized,
   checkAccountAndChainHaveBeenAuthorized,
   checkUrlOriginHasBeenConnected,
+  checkTypedDataPayload,
   checkWalletAddQrlChainParams,
   checkWalletRequestPermissionParams,
   checkWalletSwitchQrlChainParams,
@@ -356,9 +357,16 @@ const checkRequestCanProceed = async (req: JsonRpcRequest) => {
           message: UNSUPPORTED_TYPED_DATA_V4_MESSAGE,
         }),
       };
+    case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA: {
+      // Authorization leads, so a locked or unauthorized request keeps its
+      // shared refusal; the payload check follows.
+      const authorization = await checkAccountAndChainHaveBeenAuthorized(req);
+      if (!authorization.canProceed) return authorization;
+      const payloadCheck = checkTypedDataPayload(req.params);
+      return payloadCheck.canProceed ? authorization : payloadCheck;
+    }
     case RESTRICTED_METHODS.QRL_SEND_TRANSACTION:
     case RESTRICTED_METHODS.QRL_SIGN_MESSAGE:
-    case RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA:
     case RESTRICTED_METHODS.PERSONAL_SIGN:
       return await checkAccountAndChainHaveBeenAuthorized(req);
     default:

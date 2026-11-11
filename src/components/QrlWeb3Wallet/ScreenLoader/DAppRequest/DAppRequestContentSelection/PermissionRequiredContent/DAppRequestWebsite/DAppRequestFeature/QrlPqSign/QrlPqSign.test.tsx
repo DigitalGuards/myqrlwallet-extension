@@ -311,4 +311,66 @@ describe("QrlPqSign", () => {
     expect(screen.queryByText("[object Object]")).not.toBeInTheDocument();
     expect(screen.getByText(/Message/)).toBeInTheDocument();
   });
+
+  it.each([
+    {
+      label: "a JSON string",
+      payload: JSON.stringify(canonical.schemeSigningVectors[0]?.payload),
+    },
+    {
+      label: "an extra top-level field",
+      payload: { ...canonical.schemeSigningVectors[0]?.payload, extra: 1 },
+    },
+  ])(
+    "disables Approve and never decrypts the seed for typed data sent as $label",
+    async ({ payload }) => {
+      let capturedPermissionCallback:
+        | ((hasApproved: boolean, record: ResponseRecorder) => Promise<void>)
+        | null = null;
+      const recorded: Record<string, unknown>[] = [];
+      const setCanProceed = vi.fn();
+      const getMnemonicPhrases = vi.fn().mockResolvedValue("unused");
+
+      render(
+        <StoreProvider
+          value={signingStore(signerAddress, {
+            lockStore: { getMnemonicPhrases },
+            dAppRequestStore: {
+              dAppRequestData: {
+                method: RESTRICTED_METHODS.QRL_SIGN_TYPED_DATA,
+                params: [signerAddress, payload],
+              },
+              setCanProceed,
+              setOnPermissionCallBack: (
+                callback: (
+                  hasApproved: boolean,
+                  record: ResponseRecorder,
+                ) => Promise<void>,
+              ) => {
+                capturedPermissionCallback = callback;
+              },
+            },
+          })}
+        >
+          <MemoryRouter>
+            <TooltipProvider>
+              <QrlPqSign />
+            </TooltipProvider>
+          </MemoryRouter>
+        </StoreProvider>,
+      );
+
+      expect(setCanProceed).toHaveBeenLastCalledWith(false);
+      await act(async () => {
+        if (!capturedPermissionCallback)
+          throw new Error("Missing permission callback");
+        await capturedPermissionCallback(true, (data) => {
+          recorded.push(data);
+        });
+      });
+      expect(getMnemonicPhrases).not.toHaveBeenCalled();
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0]?.error).toBeDefined();
+    },
+  );
 });

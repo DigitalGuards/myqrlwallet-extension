@@ -116,9 +116,12 @@ const QrlPqSign = observer(() => {
     );
   }, [dAppRequestData]);
 
+  // A typed-data payload the prompt cannot parse shows nothing to approve,
+  // so Approve stays disabled, as it does for other unreadable requests.
+  const canApprove = !isTypedData || typedPayload !== undefined;
   useEffect(() => {
-    dAppRequestStore.setCanProceed(true);
-  }, []);
+    dAppRequestStore.setCanProceed(canApprove);
+  }, [canApprove]);
 
   const copyMessage = () => {
     void copy(challenge);
@@ -129,6 +132,11 @@ const QrlPqSign = observer(() => {
       if (!fromAddress || (!isTypedData && typeof payload !== "string")) {
         throw new Error("Invalid signing parameters");
       }
+      // Parsed before the seed is decrypted: a payload that cannot be parsed
+      // never reaches decryption.
+      const typedData = isTypedData
+        ? parseTypedDataPayload(payload)
+        : undefined;
       const mnemonicPhrases = await lockStore.getMnemonicPhrases(fromAddress);
       const seed = getHexSeedFromMnemonic(mnemonicPhrases);
       const addressFromMnemonic =
@@ -136,8 +144,8 @@ const QrlPqSign = observer(() => {
       if (!areAddressesEquivalent(fromAddress, addressFromMnemonic)) {
         throw new Error("Mnemonic phrases did not match with the address");
       }
-      const result = isTypedData
-        ? signTypedData(parseTypedDataPayload(payload), seed)
+      const result = typedData
+        ? signTypedData(typedData, seed)
         : signMessage(rawMessage, seed);
       record({ ...result });
     } catch (error) {
