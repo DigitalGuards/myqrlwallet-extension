@@ -17,7 +17,6 @@ const openPopup = vi.spyOn(browser.action, "openPopup");
 const createWindow = vi.spyOn(browser.windows, "create");
 const updateWindow = vi.spyOn(browser.windows, "update");
 const getLastFocused = vi.spyOn(browser.windows, "getLastFocused");
-const getTab = vi.spyOn(browser.tabs, "get");
 const getLocalStorage = vi.spyOn(browser.storage.local, "get");
 const windowProperties = {
   focused: true,
@@ -97,15 +96,6 @@ describe("openApprovalSurface", () => {
       id: 77,
     });
     updateWindow.mockResolvedValue(windowProperties);
-    getTab.mockResolvedValue({
-      id: 5,
-      index: 0,
-      windowId: 1,
-      active: true,
-      highlighted: true,
-      pinned: false,
-      incognito: false,
-    });
     getLastFocused.mockResolvedValue({
       ...windowProperties,
       left: 100,
@@ -317,42 +307,13 @@ describe("openApprovalSurface", () => {
     expect(createWindow).not.toHaveBeenCalled();
   });
 
-  it("does nothing for a side panel in the requesting tab's window", async () => {
+  it("opens nothing for a real-shaped side panel context", async () => {
     setSettings({});
-    stubContexts({ sidePanel: [{ windowId: 1 }] });
+    stubContexts({ sidePanel: [{ windowId: -1, tabId: -1 }] });
 
     await run({ tabId: 5 });
 
     expect(sendMessage).not.toHaveBeenCalled();
-    expect(openPopup).not.toHaveBeenCalled();
-    expect(createWindow).not.toHaveBeenCalled();
-  });
-
-  it("ignores a side panel that belongs to another window", async () => {
-    stubContexts({
-      sidePanel: [{ windowId: 2 }],
-      popup: () => [{ contextType: "POPUP" }],
-    });
-
-    await run({ tabId: 5 });
-
-    expect(openPopup).toHaveBeenCalledTimes(1);
-  });
-
-  it("opens a window when only another window has a panel and no popup shows", async () => {
-    stubContexts({ sidePanel: [{ windowId: 2 }] });
-
-    await run({ tabId: 5 });
-
-    expect(createWindow).toHaveBeenCalledTimes(1);
-  });
-
-  it("counts any side panel when the tab cannot be resolved", async () => {
-    getTab.mockRejectedValue(new Error("No tab with id: 5"));
-    stubContexts({ sidePanel: [{ windowId: 2 }] });
-
-    await run({ tabId: 5 });
-
     expect(openPopup).not.toHaveBeenCalled();
     expect(createWindow).not.toHaveBeenCalled();
   });
