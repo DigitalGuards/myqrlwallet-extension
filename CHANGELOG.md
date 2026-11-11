@@ -2,6 +2,7 @@
 
 ### Security
 
+- Approving a dApp request needs a deliberate action: input right after the prompt appears is ignored, and the keyboard needs press-and-hold.
 - Include the wallet descriptor in post-quantum signing responses so SDK verifiers can bind the public key to the claimed Q-address.
 
 ### Fixed

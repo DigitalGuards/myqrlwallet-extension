@@ -13,6 +13,7 @@ import { Check, Loader, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import DAppRequestWebsite from "./DAppRequestWebsite/DAppRequestWebsite";
+import DeliberateApproveButton from "../../DeliberateApproveButton/DeliberateApproveButton";
 
 const PermissionRequiredContent = observer(() => {
   const { t } = useTranslation();
@@ -29,14 +30,14 @@ const PermissionRequiredContent = observer(() => {
           <ChainBadge isDisabled={true} />
         </div>
         <div className="p-6">
-          <div className="mb-1 text-xs font-bold">{t('dapp.permissionTitle')}</div>
-          <div>
-            {t('dapp.permissionDescription')}
+          <div className="mb-1 text-xs font-bold">
+            {t("dapp.permissionTitle")}
           </div>
+          <div>{t("dapp.permissionDescription")}</div>
         </div>
         <CardContent className="space-y-6">
           <DAppRequestWebsite />
-          <div className="font-bold">{t('dapp.permissionQuestion')}</div>
+          <div className="font-bold">{t("dapp.permissionQuestion")}</div>
         </CardContent>
         <CardFooter className="grid grid-cols-2 gap-4">
           <Button
@@ -54,14 +55,11 @@ const PermissionRequiredContent = observer(() => {
             ) : (
               <X className="mr-2 h-4 w-4" />
             )}
-            {t('dapp.no')}
+            {t("dapp.no")}
           </Button>
-          <Button
-            className="w-full"
-            type="button"
+          <DeliberateApproveButton
             disabled={!canProceed || isProcessing}
-            aria-label="Yes"
-            onClick={() => {
+            onApprove={() => {
               void dAppRequestStore.onPermission(true);
             }}
           >
@@ -70,8 +68,8 @@ const PermissionRequiredContent = observer(() => {
             ) : (
               <Check className="mr-2 h-4 w-4" />
             )}
-            {t('dapp.yes')}
-          </Button>
+            {t("dapp.yes")}
+          </DeliberateApproveButton>
         </CardFooter>
       </Card>
       <AlertDialog open={isProcessing}>
@@ -80,11 +78,11 @@ const PermissionRequiredContent = observer(() => {
             <AlertDialogTitle>
               <div className="flex items-center gap-2">
                 <Loader className="animate-spin text-foreground" size="18" />
-                {t('dapp.transactionRunning')}
+                {t("dapp.transactionRunning")}
               </div>
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {t('dapp.pleaseWait')}
+              {t("dapp.pleaseWait")}
             </AlertDialogDescription>
           </AlertDialogHeader>
         </AlertDialogContent>

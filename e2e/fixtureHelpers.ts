@@ -573,3 +573,12 @@ export const installEthereumFixture = ({
   announce();
   return provider;
 };
+
+// The affirmative button of a dApp prompt ignores input for 600 ms after the
+// prompt, the button or the window becomes ready. Wait that out, then click.
+export const clickApprove = async (page: Page): Promise<void> => {
+  const yes = page.getByRole("button", { name: "Yes" });
+  await yes.waitFor({ state: "visible" });
+  await page.waitForTimeout(800);
+  await yes.click();
+};

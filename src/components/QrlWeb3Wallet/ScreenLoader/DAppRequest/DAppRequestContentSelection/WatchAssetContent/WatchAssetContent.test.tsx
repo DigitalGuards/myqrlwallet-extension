@@ -1,3 +1,4 @@
+import { waitOutApprovalProtection } from "@/__mocks__/approvalProtection";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider, type StoreType } from "@/stores/store";
 import type { ResponseRecorder } from "@/stores/dAppRequestStore";
@@ -100,6 +101,7 @@ describe("WatchAssetContent", () => {
       .mockReturnValue(write);
     const { store, record } = approvingStore([{ options }]);
     renderComponent(store);
+    await waitOutApprovalProtection();
     await userEvent.click(screen.getByRole("button", { name: "Yes" }));
     expect(setToken).toHaveBeenCalledWith(
       store.qrlStore.activeAccount.accountAddress,
@@ -125,6 +127,7 @@ describe("WatchAssetContent", () => {
         .mockResolvedValue(undefined);
       const { store, record } = approvingStore({ 0: { options: asset } });
       renderComponent(store);
+      await waitOutApprovalProtection();
       await userEvent.click(screen.getByRole("button", { name: "Yes" }));
       expect(setToken).toHaveBeenCalledWith(
         store.qrlStore.activeAccount.accountAddress,
@@ -148,6 +151,7 @@ describe("WatchAssetContent", () => {
       },
     ]);
     renderComponent(store);
+    await waitOutApprovalProtection();
     await userEvent.click(screen.getByRole("button", { name: "Yes" }));
     expect(setToken).toHaveBeenCalledWith(
       store.qrlStore.activeAccount.accountAddress,
@@ -173,6 +177,7 @@ describe("WatchAssetContent", () => {
       .mockResolvedValue(undefined);
     const { store, record } = approvingStore(params);
     renderComponent(store);
+    await waitOutApprovalProtection();
     await userEvent.click(screen.getByRole("button", { name: "Yes" }));
     expect(record.mock.lastCall?.[0].error).toMatchObject({ code: -32602 });
     expect(setToken).not.toHaveBeenCalled();
@@ -201,6 +206,7 @@ describe("WatchAssetContent", () => {
         },
       }),
     );
+    await waitOutApprovalProtection();
     await userEvent.click(screen.getByRole("button", { name }));
     expect(warn).toHaveBeenCalledWith(
       "QrlWeb3Wallet: Error while resolving the permission request\n",
@@ -214,11 +220,26 @@ describe("WatchAssetContent", () => {
     vi.spyOn(StorageUtil, "setTokenContractsList").mockRejectedValue(error);
     const { store, record } = approvingStore([{ options }]);
     renderComponent(store);
+    await waitOutApprovalProtection();
     await userEvent.click(screen.getByRole("button", { name: "Yes" }));
     expect(warn).toHaveBeenCalledWith(
       "QrlWeb3Wallet: Error while resolving the permission request\n",
       error,
     );
     expect(record).not.toHaveBeenCalled();
+  });
+
+  it("ignores a Yes click right after the prompt appears", async () => {
+    const mockedOnPermission = vi.fn(async () => {});
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          onPermission: mockedOnPermission,
+        },
+      }),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Yes" }));
+    expect(mockedOnPermission).not.toHaveBeenCalled();
   });
 });

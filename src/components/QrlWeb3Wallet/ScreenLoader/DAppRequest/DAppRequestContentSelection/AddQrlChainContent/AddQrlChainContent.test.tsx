@@ -1,3 +1,4 @@
+import { waitOutApprovalProtection } from "@/__mocks__/approvalProtection";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -83,6 +84,7 @@ describe("AddQrlChainContent", () => {
     const yesButton = screen.getByRole("button", { name: "Yes" });
     expect(yesButton).toBeInTheDocument();
     expect(yesButton).toBeEnabled();
+    await waitOutApprovalProtection();
     await userEvent.click(yesButton);
     expect(mockedOnPermission).toHaveBeenCalledTimes(1);
     expect(mockedOnPermission).toHaveBeenCalledWith(true);
@@ -142,6 +144,7 @@ describe("AddQrlChainContent", () => {
       }),
     );
 
+    await waitOutApprovalProtection();
     await userEvent.click(screen.getByRole("button", { name: "Yes" }));
     expect(captured).toBeTypeOf("function");
     await captured?.(true, record);
@@ -192,6 +195,7 @@ describe("AddQrlChainContent", () => {
     });
     const addChain = vi.spyOn(store.qrlStore, "addChain");
     renderComponent(store);
+    await waitOutApprovalProtection();
     await userEvent.click(screen.getByRole("button", { name: "Yes" }));
     await waitFor(() => {
       expect(record).toHaveBeenCalledTimes(1);
@@ -302,10 +306,25 @@ describe("AddQrlChainContent", () => {
         },
       }),
     );
+    await waitOutApprovalProtection();
     await userEvent.click(screen.getByRole("button", { name: "Yes" }));
     expect(warn).toHaveBeenCalledWith(
       "QrlWeb3Wallet: Error while resolving the permission request\n",
       error,
     );
+  });
+
+  it("ignores a Yes click right after the prompt appears", async () => {
+    const mockedOnPermission = vi.fn(async () => {});
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          onPermission: mockedOnPermission,
+        },
+      }),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Yes" }));
+    expect(mockedOnPermission).not.toHaveBeenCalled();
   });
 });

@@ -12,6 +12,7 @@ import {
   type ProtocolAuth,
   type SignedFillIntent,
   writeStorage,
+  clickApprove,
 } from "./fixtureHelpers";
 import {
   chromium,
@@ -523,9 +524,10 @@ const waitForDAppRequest = async (
 };
 
 const approveCurrentRequest = async (extensionPage: Page): Promise<void> => {
-  const yes = extensionPage.getByRole("button", { name: "Yes" });
-  await expect(yes).toBeEnabled();
-  await yes.click();
+  await expect(
+    extensionPage.getByRole("button", { name: "Yes" }),
+  ).toBeEnabled();
+  await clickApprove(extensionPage);
 };
 
 const onboardExtension = async (

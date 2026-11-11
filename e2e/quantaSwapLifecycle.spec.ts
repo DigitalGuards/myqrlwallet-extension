@@ -16,6 +16,7 @@ import {
   storedConnection,
   writeStorage,
   type DAppRequest,
+  clickApprove,
 } from "./fixtureHelpers";
 import { expect, test, chromium, type Page } from "@playwright/test";
 import { shake256 } from "@noble/hashes/sha3.js";
@@ -214,9 +215,10 @@ const trackedRequestResult = (page: Page, key: string) =>
   });
 
 const approveCurrentRequest = async (extensionPage: Page) => {
-  const yes = extensionPage.getByRole("button", { name: "Yes" });
-  await expect(yes).toBeEnabled();
-  await yes.click();
+  await expect(
+    extensionPage.getByRole("button", { name: "Yes" }),
+  ).toBeEnabled();
+  await clickApprove(extensionPage);
 };
 
 test("QuantaSwap connect, lowercase PQ message sign, disconnect, and reconnect", async () => {

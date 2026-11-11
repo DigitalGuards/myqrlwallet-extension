@@ -241,6 +241,8 @@
   "dapp.permissionQuestion": "Do you trust and want to allow this?",
   "dapp.yes": "Yes",
   "dapp.no": "No",
+  "dapp.holdToApprove": "Hold Enter to approve",
+  "dapp.holdToApproveIgnored": "Not approved. Hold Enter to approve.",
   "dapp.transactionRunning": "Transaction running",
   "dapp.pleaseWait": "Please wait. This may take a while.",
   "dapp.addChain.title": "Add new chain",

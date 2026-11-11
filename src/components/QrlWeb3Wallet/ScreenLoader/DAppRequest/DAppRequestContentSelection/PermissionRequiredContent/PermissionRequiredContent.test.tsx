@@ -1,3 +1,4 @@
+import { waitOutApprovalProtection } from "@/__mocks__/approvalProtection";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -78,6 +79,7 @@ describe("PermissionRequiredContent", () => {
     const yesButton = screen.getByRole("button", { name: "Yes" });
     expect(yesButton).toBeInTheDocument();
     expect(yesButton).toBeEnabled();
+    await waitOutApprovalProtection();
     await userEvent.click(yesButton);
     expect(mockedOnPermission).toHaveBeenCalledTimes(1);
     expect(mockedOnPermission).toHaveBeenCalledWith(true);
@@ -96,5 +98,20 @@ describe("PermissionRequiredContent", () => {
     expect(
       screen.getByText("Please wait. This may take a while."),
     ).toBeInTheDocument();
+  });
+
+  it("ignores a Yes click right after the prompt appears", async () => {
+    const mockedOnPermission = vi.fn(async () => {});
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          canProceed: true,
+          onPermission: mockedOnPermission,
+        },
+      }),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Yes" }));
+    expect(mockedOnPermission).not.toHaveBeenCalled();
   });
 });

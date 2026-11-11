@@ -241,6 +241,8 @@
   "dapp.permissionQuestion": "您是否信任并允许此请求？",
   "dapp.yes": "是",
   "dapp.no": "否",
+  "dapp.holdToApprove": "按住 Enter 以批准",
+  "dapp.holdToApproveIgnored": "未批准。请按住 Enter 以批准。",
   "dapp.transactionRunning": "交易进行中",
   "dapp.pleaseWait": "请稍候。这可能需要一些时间。",
   "dapp.addChain.title": "添加新链",

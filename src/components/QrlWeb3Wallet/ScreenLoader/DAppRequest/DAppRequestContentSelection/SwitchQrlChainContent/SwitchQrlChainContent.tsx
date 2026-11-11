@@ -12,6 +12,7 @@ import {
   readApprovalParams,
 } from "@/utilities/approvalGuards";
 import { rpcErrors } from "@theqrl/qrl-wallet-provider";
+import DeliberateApproveButton from "../../DeliberateApproveButton/DeliberateApproveButton";
 
 const SwitchQrlChainContent = observer(() => {
   const { t } = useTranslation();
@@ -74,12 +75,9 @@ const SwitchQrlChainContent = observer(() => {
           <X className="mr-2 h-4 w-4" />
           {t("dapp.no")}
         </Button>
-        <Button
-          className="w-full"
-          type="button"
+        <DeliberateApproveButton
           disabled={isProcessing}
-          aria-label="Yes"
-          onClick={() => {
+          onApprove={() => {
             switchChain().catch((error: unknown) => {
               console.warn(
                 "QrlWeb3Wallet: Error while resolving the permission request\n",
@@ -90,7 +88,7 @@ const SwitchQrlChainContent = observer(() => {
         >
           <Check className="mr-2 h-4 w-4" />
           {t("dapp.yes")}
-        </Button>
+        </DeliberateApproveButton>
       </CardFooter>
     </Card>
   );

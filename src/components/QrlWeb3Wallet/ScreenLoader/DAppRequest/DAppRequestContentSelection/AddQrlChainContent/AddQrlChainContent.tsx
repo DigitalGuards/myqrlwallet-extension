@@ -16,6 +16,7 @@ import {
   includeChainForUrlOrigin,
   pickDefaultRpcUrl,
 } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
+import DeliberateApproveButton from "../../DeliberateApproveButton/DeliberateApproveButton";
 
 const AddQrlChainContent = observer(() => {
   const { t } = useTranslation();
@@ -101,12 +102,9 @@ const AddQrlChainContent = observer(() => {
           <X className="mr-2 h-4 w-4" />
           {t("dapp.no")}
         </Button>
-        <Button
-          className="w-full"
-          type="button"
+        <DeliberateApproveButton
           disabled={isProcessing}
-          aria-label="Yes"
-          onClick={() => {
+          onApprove={() => {
             addBlockchain().catch((error: unknown) => {
               console.warn(
                 "QrlWeb3Wallet: Error while resolving the permission request\n",
@@ -117,7 +115,7 @@ const AddQrlChainContent = observer(() => {
         >
           <Check className="mr-2 h-4 w-4" />
           {t("dapp.yes")}
-        </Button>
+        </DeliberateApproveButton>
       </CardFooter>
     </Card>
   );

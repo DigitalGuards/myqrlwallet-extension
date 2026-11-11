@@ -11,6 +11,7 @@ import StorageUtil from "@/utilities/storageUtil";
 import WatchAssetVerification from "./WatchAssetVerification/WatchAssetVerification";
 import { readWatchAssetOptions } from "@/utilities/approvalGuards";
 import { rpcErrors } from "@theqrl/qrl-wallet-provider";
+import DeliberateApproveButton from "../../DeliberateApproveButton/DeliberateApproveButton";
 
 const WatchAssetContent = observer(() => {
   const { t } = useTranslation();
@@ -77,12 +78,9 @@ const WatchAssetContent = observer(() => {
           <X className="mr-2 h-4 w-4" />
           {t("dapp.no")}
         </Button>
-        <Button
-          className="w-full"
-          type="button"
+        <DeliberateApproveButton
           disabled={isProcessing}
-          aria-label="Yes"
-          onClick={() => {
+          onApprove={() => {
             addBlockchain().catch((error: unknown) => {
               console.warn(
                 "QrlWeb3Wallet: Error while resolving the permission request\n",
@@ -93,7 +91,7 @@ const WatchAssetContent = observer(() => {
         >
           <Check className="mr-2 h-4 w-4" />
           {t("dapp.yes")}
-        </Button>
+        </DeliberateApproveButton>
       </CardFooter>
     </Card>
   );

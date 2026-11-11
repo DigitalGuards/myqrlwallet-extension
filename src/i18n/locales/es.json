@@ -241,6 +241,8 @@
   "dapp.permissionQuestion": "¿Confías y quieres permitir esto?",
   "dapp.yes": "Sí",
   "dapp.no": "No",
+  "dapp.holdToApprove": "Mantén Enter para aprobar",
+  "dapp.holdToApproveIgnored": "No aprobado. Mantén Enter para aprobar.",
   "dapp.transactionRunning": "Transacción en curso",
   "dapp.pleaseWait": "Por favor espera. Esto puede tardar un momento.",
   "dapp.addChain.title": "Agregar nueva cadena",

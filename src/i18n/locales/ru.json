@@ -241,6 +241,8 @@
   "dapp.permissionQuestion": "Вы доверяете этому запросу и хотите его разрешить?",
   "dapp.yes": "Да",
   "dapp.no": "Нет",
+  "dapp.holdToApprove": "Удерживайте Enter, чтобы подтвердить",
+  "dapp.holdToApproveIgnored": "Не подтверждено. Удерживайте Enter, чтобы подтвердить.",
   "dapp.transactionRunning": "Транзакция выполняется",
   "dapp.pleaseWait": "Подождите. Это может занять некоторое время.",
   "dapp.addChain.title": "Добавить новую сеть",

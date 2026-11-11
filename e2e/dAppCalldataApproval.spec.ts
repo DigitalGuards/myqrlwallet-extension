@@ -6,6 +6,7 @@ import {
   readRpcBody,
   reportFixtureError,
   writeStorage,
+  clickApprove,
 } from "./fixtureHelpers";
 import { expect, test, chromium, type Page } from "@playwright/test";
 import { createServer } from "node:http";
@@ -264,9 +265,10 @@ test("puts a decoded token approval in words on the approval screen", async () =
     await dAppPage.waitForFunction(hasFixtureProvider);
 
     await beginRequest(dAppPage, "qrl_requestAccounts", []);
-    const yes = extensionPage.getByRole("button", { name: "Yes" });
-    await expect(yes).toBeEnabled();
-    await yes.click();
+    await expect(
+      extensionPage.getByRole("button", { name: "Yes" }),
+    ).toBeEnabled();
+    await clickApprove(extensionPage);
 
     // Rejecting several requests back to back arms the per-origin approval
     // cooldown (approvalSlot.ts: two refusals of grace, then five seconds),

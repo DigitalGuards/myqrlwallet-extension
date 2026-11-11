@@ -1,3 +1,4 @@
+import { waitOutApprovalProtection } from "@/__mocks__/approvalProtection";
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { TooltipProvider } from "@/components/UI/Tooltip";
 import { StoreProvider } from "@/stores/store";
@@ -105,6 +106,7 @@ describe("SwitchQrlChainContent", () => {
     const yesButton = screen.getByRole("button", { name: "Yes" });
     expect(yesButton).toBeInTheDocument();
     expect(yesButton).toBeEnabled();
+    await waitOutApprovalProtection();
     await userEvent.click(yesButton);
     expect(mockedOnPermission).toHaveBeenCalledTimes(1);
     expect(mockedOnPermission).toHaveBeenCalledWith(true);
@@ -126,6 +128,7 @@ describe("SwitchQrlChainContent", () => {
       vi.mocked(includeChainForUrlOrigin).mockReturnValueOnce(grant);
       const { store, record, selectBlockchain } = approvingStore(params);
       renderComponent(store);
+      await waitOutApprovalProtection();
       await userEvent.click(screen.getByRole("button", { name: "Yes" }));
       expect(includeChainForUrlOrigin).toHaveBeenCalledWith({
         urlOrigin: "http://localhost/",
@@ -160,6 +163,7 @@ describe("SwitchQrlChainContent", () => {
     async ({ params }) => {
       const { store, record, selectBlockchain } = approvingStore(params);
       renderComponent(store);
+      await waitOutApprovalProtection();
       await userEvent.click(screen.getByRole("button", { name: "Yes" }));
       expect(record.mock.lastCall?.[0].error).toMatchObject({ code: -32602 });
       expect(includeChainForUrlOrigin).not.toHaveBeenCalled();
@@ -177,6 +181,7 @@ describe("SwitchQrlChainContent", () => {
         },
       }),
     );
+    await waitOutApprovalProtection();
     await userEvent.click(screen.getByRole("button", { name }));
     expect(warn).toHaveBeenCalledWith(
       "QrlWeb3Wallet: Error while resolving the permission request\n",
@@ -192,6 +197,7 @@ describe("SwitchQrlChainContent", () => {
       { chainId: "0x11" },
     ]);
     renderComponent(store);
+    await waitOutApprovalProtection();
     await userEvent.click(screen.getByRole("button", { name: "Yes" }));
     expect(warn).toHaveBeenCalledWith(
       "QrlWeb3Wallet: Error while resolving the permission request\n",
@@ -199,5 +205,19 @@ describe("SwitchQrlChainContent", () => {
     );
     expect(selectBlockchain).not.toHaveBeenCalled();
     expect(record).not.toHaveBeenCalled();
+  });
+
+  it("ignores a Yes click right after the prompt appears", async () => {
+    const mockedOnPermission = vi.fn(async () => {});
+    renderComponent(
+      mockedStore({
+        dAppRequestStore: {
+          onPermission: mockedOnPermission,
+        },
+      }),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Yes" }));
+    expect(mockedOnPermission).not.toHaveBeenCalled();
   });
 });

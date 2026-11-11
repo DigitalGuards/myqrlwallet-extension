@@ -241,6 +241,8 @@
   "dapp.permissionQuestion": "Vertraust du dieser Anfrage und möchtest sie erlauben?",
   "dapp.yes": "Ja",
   "dapp.no": "Nein",
+  "dapp.holdToApprove": "Zum Bestätigen Enter gedrückt halten",
+  "dapp.holdToApproveIgnored": "Nicht bestätigt. Zum Bestätigen Enter gedrückt halten.",
   "dapp.transactionRunning": "Transaktion läuft",
   "dapp.pleaseWait": "Bitte warte. Dies kann einen Moment dauern.",
   "dapp.addChain.title": "Neue Kette hinzufügen",
