@@ -368,9 +368,9 @@ class DAppRequestStore {
   }
 
   /**
-   * Runs once the approval has recorded its result. It only publishes a flag for the
-   * wallet screen and can never affect the approval, so any failure here is
-   * swallowed.
+   * Runs once the approval has recorded its result. It only publishes a
+   * flag for the wallet screen and can never affect the approval, so any
+   * failure here is swallowed.
    */
   private noteCompletedSend(
     hasApproved: boolean,
@@ -388,7 +388,8 @@ class DAppRequestStore {
         this.completedDAppSend = { transactionHash, from };
       }
     } catch {
-      // Navigation is a courtesy; the approval has already been answered.
+      // Navigation is a courtesy; the approval's own result is already
+      // recorded and is answered right after this.
     }
   }
 
