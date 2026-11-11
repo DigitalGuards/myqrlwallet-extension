@@ -17,6 +17,8 @@ const openPopup = vi.spyOn(browser.action, "openPopup");
 const createWindow = vi.spyOn(browser.windows, "create");
 const updateWindow = vi.spyOn(browser.windows, "update");
 const getLastFocused = vi.spyOn(browser.windows, "getLastFocused");
+const getWindow = vi.spyOn(browser.windows, "get");
+const getTab = vi.spyOn(browser.tabs, "get");
 const getLocalStorage = vi.spyOn(browser.storage.local, "get");
 const windowProperties = {
   focused: true,
@@ -89,8 +91,26 @@ describe("openApprovalSurface", () => {
       id: 77,
     });
     updateWindow.mockResolvedValue(windowProperties);
+    getTab.mockResolvedValue({
+      id: 5,
+      windowId: 9,
+      index: 0,
+      active: true,
+      highlighted: true,
+      pinned: false,
+      incognito: false,
+    });
+    getWindow.mockResolvedValue({
+      ...windowProperties,
+      type: "normal",
+      left: 200,
+      top: 20,
+      width: 1000,
+      height: 700,
+    });
     getLastFocused.mockResolvedValue({
       ...windowProperties,
+      type: "normal",
       left: 100,
       top: 50,
       width: 1280,
@@ -230,5 +250,118 @@ describe("openApprovalSurface", () => {
     await openApprovalSurface();
 
     expect(createWindow).not.toHaveBeenCalled();
+  });
+
+  describe("when the plain openPopup is refused", () => {
+    const refuse = () =>
+      openPopup.mockImplementation((options) =>
+        options === undefined
+          ? Promise.reject(new Error("Browser window has no toolbar."))
+          : Promise.resolve(),
+      );
+
+    it("focuses the requesting tab's window and opens the popup there", async () => {
+      refuse();
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(getTab).toHaveBeenCalledWith(5);
+      expect(updateWindow).toHaveBeenCalledWith(9, { focused: true });
+      expect(openPopup).toHaveBeenLastCalledWith({ windowId: 9 });
+      expect(createWindow).not.toHaveBeenCalled();
+    });
+
+    it("anchors the window on the requesting tab's normal window", async () => {
+      openPopup.mockRejectedValue(new Error("refused"));
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(createWindow).toHaveBeenCalledTimes(1);
+      expect(createWindow).toHaveBeenCalledWith(
+        expect.objectContaining({ left: 200 + 1000 - 396 - 16, top: 20 + 76 }),
+      );
+      expect(getLastFocused).not.toHaveBeenCalled();
+    });
+
+    it("retries without a position when the bounds are rejected", async () => {
+      openPopup.mockRejectedValue(new Error("refused"));
+      createWindow
+        .mockRejectedValueOnce(new Error("Invalid value for bounds."))
+        .mockResolvedValueOnce({ ...windowProperties, id: 78 });
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(createWindow).toHaveBeenCalledTimes(2);
+      const retry = createWindow.mock.calls[1]?.[0];
+      expect(retry).toBeDefined();
+      expect(retry).not.toHaveProperty("left");
+      expect(retry).not.toHaveProperty("top");
+      handleApprovalWindowRemoved(78);
+    });
+
+    it("anchors on the last focused normal window without a tab id", async () => {
+      openPopup.mockRejectedValue(new Error("refused"));
+      const chromeGetLastFocused = vi.fn().mockResolvedValue({
+        left: 10,
+        top: 30,
+        width: 800,
+        height: 600,
+      });
+      vi.stubGlobal("chrome", {
+        windows: { getLastFocused: chromeGetLastFocused },
+      });
+
+      await openApprovalSurface();
+
+      expect(getTab).not.toHaveBeenCalled();
+      expect(chromeGetLastFocused).toHaveBeenCalledWith({
+        windowTypes: ["normal"],
+      });
+      expect(createWindow).toHaveBeenCalledWith(
+        expect.objectContaining({ left: 10 + 800 - 396 - 16, top: 30 + 76 }),
+      );
+    });
+
+    it("ignores a popup-type last focused window as anchor", async () => {
+      openPopup.mockRejectedValue(new Error("refused"));
+      getLastFocused.mockResolvedValue({
+        ...windowProperties,
+        type: "popup",
+        left: 5,
+        top: 5,
+        width: 400,
+        height: 300,
+      });
+
+      await openApprovalSurface();
+
+      const created = createWindow.mock.calls[0]?.[0];
+      expect(created).toBeDefined();
+      expect(created?.left).toBeUndefined();
+    });
+
+    it("falls to the window path when tabs.get rejects", async () => {
+      openPopup.mockRejectedValue(new Error("refused"));
+      getTab.mockRejectedValue(new Error("No tab with id"));
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(openPopup).toHaveBeenCalledTimes(1);
+      expect(createWindow).toHaveBeenCalledTimes(1);
+    });
+
+    it("never throws and warns once when everything rejects", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      openPopup.mockRejectedValue(new Error("refused"));
+      getTab.mockRejectedValue(new Error("x"));
+      getWindow.mockRejectedValue(new Error("x"));
+      getLastFocused.mockRejectedValue(new Error("x"));
+      createWindow.mockRejectedValue(new Error("x"));
+
+      await expect(openApprovalSurface({ tabId: 5 })).resolves.toBeUndefined();
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockRestore();
+    });
   });
 });

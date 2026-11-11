@@ -1,10 +1,14 @@
 import browser from "webextension-polyfill";
+import { isRecord } from "@/utilities/storageGuards";
 import StorageUtil from "@/utilities/storageUtil";
 import { resolveSidePanelPreferred } from "./sidePanelPreference";
 import { requestSidePanelOpen } from "./sidePanelSurface";
 
 const extensionGlobals: {
-  chrome?: { runtime?: Partial<(typeof globalThis)["chrome"]["runtime"]> };
+  chrome?: {
+    runtime?: Partial<(typeof globalThis)["chrome"]["runtime"]>;
+    windows?: Partial<(typeof globalThis)["chrome"]["windows"]>;
+  };
 } = globalThis;
 
 // Chrome lets the user dock ANY extension in the side panel manually,
@@ -43,6 +47,61 @@ const isActionPopupOpen = async (): Promise<boolean> => {
     return Array.isArray(contexts) && contexts.length > 0;
   } catch {
     return false;
+  }
+};
+
+const getTabWindowId = async (
+  tabId: number | undefined,
+): Promise<number | undefined> => {
+  if (tabId === undefined) return undefined;
+  try {
+    const tab = await browser.tabs.get(tabId);
+    return tab.windowId;
+  } catch {
+    return undefined;
+  }
+};
+
+// The window the approval window is positioned against. Always a normal
+// browser window: a focused popup-type window (another wallet's
+// confirmation) is no valid anchor.
+const getNormalWindow = async (
+  windowId: number | undefined,
+): Promise<browser.Windows.Window | undefined> => {
+  if (windowId !== undefined) {
+    try {
+      const win = await browser.windows.get(windowId);
+      if (win.type === undefined || win.type === "normal") return win;
+    } catch {
+      // Fall through to the last focused normal window.
+    }
+  }
+  try {
+    const chromeWindows = extensionGlobals.chrome?.windows;
+    if (chromeWindows?.getLastFocused) {
+      const win: unknown = await chromeWindows.getLastFocused({
+        windowTypes: ["normal"],
+      });
+      if (isRecord(win)) {
+        return {
+          focused: false,
+          incognito: false,
+          alwaysOnTop: false,
+          left: typeof win.left === "number" ? win.left : undefined,
+          top: typeof win.top === "number" ? win.top : undefined,
+          width: typeof win.width === "number" ? win.width : undefined,
+          height: typeof win.height === "number" ? win.height : undefined,
+        };
+      }
+    }
+  } catch {
+    // Fall through to the polyfill.
+  }
+  try {
+    const win = await browser.windows.getLastFocused();
+    return win.type === undefined || win.type === "normal" ? win : undefined;
+  } catch {
+    return undefined;
   }
 };
 
@@ -124,31 +183,52 @@ export const openApprovalSurface = async ({
     await browser.action.openPopup();
     return;
   } catch {
-    // Chrome refused the anchored popup; fall through to the window path.
+    // Chrome refused the anchored popup (it targets the focused window, which
+    // can be another wallet's popup-type window without a toolbar); fall
+    // through to the targeted popup and window paths.
   }
 
   if (await isActionPopupOpen()) {
     return;
   }
 
+  const requestingWindowId = await getTabWindowId(tabId);
+  if (requestingWindowId !== undefined) {
+    try {
+      await browser.windows.update(requestingWindowId, { focused: true });
+    } catch {
+      // Focusing is best effort; the targeted openPopup below decides.
+    }
+    try {
+      await browser.action.openPopup({ windowId: requestingWindowId });
+      return;
+    } catch {
+      // Fall through to the standalone window.
+    }
+  }
+
   try {
-    const anchor = await browser.windows
-      .getLastFocused()
-      .catch(() => undefined);
+    const anchor = await getNormalWindow(requestingWindowId);
     const left =
       anchor?.left !== undefined && anchor.width !== undefined
         ? Math.max(anchor.left + anchor.width - WINDOW_WIDTH - 16, 0)
         : undefined;
     const top = anchor?.top !== undefined ? anchor.top + 76 : undefined;
-    const win = await browser.windows.create({
+    const options = {
       url: browser.runtime.getURL("index.html"),
       type: "popup",
       focused: true,
       width: WINDOW_WIDTH,
       height: WINDOW_HEIGHT,
-      left,
-      top,
-    });
+    } as const;
+    let win: browser.Windows.Window;
+    try {
+      win = await browser.windows.create({ ...options, left, top });
+    } catch {
+      // Chrome rejects bounds that are not mostly on a visible screen; let
+      // it place the window.
+      win = await browser.windows.create(options);
+    }
     approvalWindowId = win.id;
   } catch {
     console.warn("QrlWeb3Wallet: Could not open the wallet");
