@@ -1,13 +1,15 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
 import { isAddQrlChainParameters } from "@/utilities/approvalGuards";
 import { malformed } from "@/test-utils/malformed";
-import { isRecord } from "@/utilities/storageGuards";
+import canonical from "@/functions/pqSigning/__fixtures__/canonical.json";
+import { TYPED_DATA_LIMITS } from "@/functions/pqSigning";
 import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
 import type {
   Json,
   JsonRpcRequest,
   PendingJsonRpcResponse,
 } from "@theqrl/qrl-wallet-provider/utils";
+import { checkWalletAddQrlChainParams } from "../utils/restrictedMethodsMiddlewareUtils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
 import { toChecksumAddress } from "@theqrl/wallet.js";
@@ -91,12 +93,10 @@ const validChain = () => ({
   iconUrls: ["https://icons.example.org/q.png"],
 });
 
-const validTypedData = () => ({
-  types: { Mail: [{ name: "contents", type: "string" }] },
-  primaryType: "Mail",
-  domain: { name: "Example", chainId: DEFAULT_BLOCKCHAIN.chainId },
-  message: { contents: "hello" },
-});
+// A payload the signer really signs (pqSigning fixture, v1 scheme); its
+// domain chain 3151909 is the wallet's active, authorized chain.
+const validTypedData = (): Record<string, unknown> =>
+  structuredClone(canonical.schemeSigningVectors[1]?.payload ?? {});
 
 /** Run a request and report whether it was refused before any prompt. */
 const run = async (req: JsonRpcRequest) => {
@@ -195,6 +195,7 @@ describe("wallet_addQRLChain refuses what the approval UI cannot render", () => 
 
 describe("qrl_signTypedData refuses a payload the signer cannot parse", () => {
   const typed = () => validTypedData();
+  const fixtureTypes = canonical.schemeSigningVectors[1]?.payload.types;
   const without = (key: string) =>
     Object.fromEntries(
       Object.entries(typed()).filter(([name]) => name !== key),
@@ -214,6 +215,38 @@ describe("qrl_signTypedData refuses a payload the signer cannot parse", () => {
     ["primaryType is a number", { ...typed(), primaryType: 1 }],
     ["domain is a string", { ...typed(), domain: "x" }],
     ["message is a string", { ...typed(), message: "x" }],
+    [
+      "no QRLDomain type",
+      {
+        ...typed(),
+        types: { Vote: fixtureTypes.Vote },
+      },
+    ],
+    ["primaryType not in types", { ...typed(), primaryType: "Missing" }],
+    [
+      "an unknown field type",
+      {
+        ...typed(),
+        types: {
+          ...fixtureTypes,
+          Vote: [{ name: "x", type: "notAType" }],
+        },
+      },
+    ],
+    [
+      "a limits violation (identifier over the length cap)",
+      (() => {
+        const long = "A".repeat(TYPED_DATA_LIMITS.maxIdentifierLength + 1);
+        return {
+          ...typed(),
+          primaryType: long,
+          types: {
+            QRLDomain: fixtureTypes.QRLDomain,
+            [long]: fixtureTypes.Vote,
+          },
+        };
+      })(),
+    ],
     [
       "a type field with an extra key",
       {
@@ -245,11 +278,51 @@ describe("qrl_signTypedData refuses a payload the signer cannot parse", () => {
   });
 });
 
-describe("shared add-chain guard", () => {
-  it("is the one the middleware applies", () => {
-    expect(isRecord(validChain())).toBe(true);
-    expect(isAddQrlChainParameters({ ...validChain(), iconUrls: [1] })).toBe(
-      false,
+describe("qrl_signMessage refuses a message the signer cannot take", () => {
+  it.each([
+    ["an object", { foo: 1 }],
+    ["a number", 42],
+    ["null", null],
+    ["an array", ["0x00"]],
+    ["a plain string", "hello"],
+    ["hex without the prefix", "48656c6c6f"],
+    ["odd-length hex", "0x123"],
+    ["non-hex characters", "0xzz"],
+  ])("refuses before any prompt: %s", async (_label, message) => {
+    const { res, end } = await run(
+      buildRequest("qrl_signMessage", [ACCOUNT, message]),
     );
+    expect(res.error?.code).toBe(INVALID_PARAMS);
+    expect(end).toHaveBeenCalledTimes(1);
+    expectNoPrompt();
+  });
+
+  it("refuses a request with no message slot", async () => {
+    const { res } = await run(buildRequest("qrl_signMessage", [ACCOUNT]));
+    expect(res.error?.code).toBe(INVALID_PARAMS);
+    expectNoPrompt();
+  });
+
+  it.each(["0x", "0x48656c6c6f"])(
+    "still reaches the prompt for %s",
+    async (message) => {
+      const { res } = await run(
+        buildRequest("qrl_signMessage", [ACCOUNT, message]),
+      );
+      expect(res.error?.code).not.toBe(INVALID_PARAMS);
+      expect(mockOpenApprovalSurface).toHaveBeenCalledTimes(1);
+    },
+  );
+});
+
+describe("add-chain guard through checkWalletAddQrlChainParams", () => {
+  it("refuses what the UI guard refuses and accepts what it accepts", async () => {
+    const refused = await checkWalletAddQrlChainParams({
+      ...validChain(),
+      iconUrls: [1],
+    });
+    expect(refused.canProceed).toBe(false);
+    const accepted = await checkWalletAddQrlChainParams(validChain());
+    expect(accepted.canProceed).toBe(true);
   });
 });

@@ -36,6 +36,7 @@ import {
   checkAccountHasBeenAuthorized,
   checkAccountAndChainHaveBeenAuthorized,
   checkUrlOriginHasBeenConnected,
+  checkSignMessageParams,
   checkTypedDataPayload,
   checkWalletAddQrlChainParams,
   checkWalletRequestPermissionParams,
@@ -365,8 +366,13 @@ const checkRequestCanProceed = async (req: JsonRpcRequest) => {
       const payloadCheck = checkTypedDataPayload(req.params);
       return payloadCheck.canProceed ? authorization : payloadCheck;
     }
+    case RESTRICTED_METHODS.QRL_SIGN_MESSAGE: {
+      const authorization = await checkAccountAndChainHaveBeenAuthorized(req);
+      if (!authorization.canProceed) return authorization;
+      const messageCheck = checkSignMessageParams(req.params);
+      return messageCheck.canProceed ? authorization : messageCheck;
+    }
     case RESTRICTED_METHODS.QRL_SEND_TRANSACTION:
-    case RESTRICTED_METHODS.QRL_SIGN_MESSAGE:
     case RESTRICTED_METHODS.PERSONAL_SIGN:
       return await checkAccountAndChainHaveBeenAuthorized(req);
     default:

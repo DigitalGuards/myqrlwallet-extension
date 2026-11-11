@@ -19,7 +19,8 @@ import {
   requireSigningNetwork,
 } from "@/configuration/pinnedNetworks";
 import { MAX_SAFE_CHAIN_ID } from "@/constants/blockchain";
-import { parsePayload as parseTypedDataPayload } from "@/functions/pqSigning/typedData";
+import { computeTypedDataDigest } from "@/functions/pqSigning/typedData";
+import { hexToBytes } from "@/functions/pqSigning/bytes";
 import {
   areAddressesEquivalent,
   isCanonicalQrlAddress,
@@ -223,20 +224,41 @@ const getTypedDataChainId = (req: AuthorizationRequest) => {
 };
 
 /**
- * The signing prompt and the signer both read a `qrl_signTypedData` payload
- * through parsePayload, which accepts one object with exactly the four
- * typed-data fields and no JSON string. A payload it rejects would open a
- * prompt with nothing to approve, so the service worker refuses it first.
+ * The signer runs computeTypedDataDigest (full validation: QRLDomain type,
+ * reachability, field types, limits) before it needs the seed. The same
+ * seed-free step runs here, so a payload the signer would reject never opens
+ * a prompt. The digest itself is discarded.
  */
 export const checkTypedDataPayload = (params: unknown) => {
   try {
-    parseTypedDataPayload(readApprovalParams(params)?.[1]);
+    computeTypedDataDigest(readApprovalParams(params)?.[1]);
     return { canProceed: true, proceedError: undefined };
   } catch {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
         message: "The wallet cannot parse the typed-data request.",
+      }),
+    };
+  }
+};
+
+/**
+ * signMessage takes the message as a 0x-prefixed, even-length hex string and
+ * nothing else; any other value fails after the prompt, so it is refused
+ * here.
+ */
+export const checkSignMessageParams = (params: unknown) => {
+  const message = readApprovalParams(params)?.[1];
+  try {
+    if (typeof message !== "string") throw new Error("not a string");
+    hexToBytes(message);
+    return { canProceed: true, proceedError: undefined };
+  } catch {
+    return {
+      canProceed: false,
+      proceedError: rpcErrors.invalidParams({
+        message: "Expected a 0x-prefixed, even-length hex string message.",
       }),
     };
   }
