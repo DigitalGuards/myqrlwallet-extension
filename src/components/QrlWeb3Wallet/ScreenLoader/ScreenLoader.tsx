@@ -25,11 +25,44 @@ const Wallet = withSuspense(
   lazy(() => import("@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Wallet")),
 );
 
-const ScreenLoader = observer(() => {
-  const { dAppRequestStore, lockStore, qrlStore, settingsStore } = useStore();
+/**
+ * A normal send ends on the history, where the new transaction shows as
+ * pending. An approved dApp send does the same on a surface that stays
+ * open. It is its own component so that only it follows the route and the
+ * screens below ScreenLoader are left alone on navigation.
+ */
+const CompletedDAppSendHistory = observer(() => {
+  const { dAppRequestStore, qrlStore, settingsStore } = useStore();
   const navigate = useNavigate();
   const location = useLocation();
-  const { hasDAppRequest, completedDAppSend } = dAppRequestStore;
+  const { completedDAppSend } = dAppRequestStore;
+
+  useEffect(() => {
+    if (!completedDAppSend) return;
+    const { from } = completedDAppSend;
+    dAppRequestStore.clearCompletedDAppSend();
+    // The popup closes itself after an approval. A route change there would
+    // only alter the screen the wallet opens on next time.
+    if (settingsStore.isPopupWindow) return;
+    // The pending entry is stored under the sender as the request spelled
+    // it, and the history lists the active account under its own spelling,
+    // so only an exact match shows the new transaction there.
+    if (from !== qrlStore.activeAccount.accountAddress) return;
+    void Promise.resolve(
+      navigate(ROUTES.TRANSACTION_HISTORY, {
+        replace: location.pathname === ROUTES.TRANSACTION_HISTORY,
+      }),
+    ).catch((error: unknown) => {
+      console.error("Failed to show the transaction history:", error);
+    });
+  }, [completedDAppSend]);
+
+  return null;
+});
+
+const ScreenLoader = observer(() => {
+  const { dAppRequestStore, lockStore, qrlStore } = useStore();
+  const { hasDAppRequest } = dAppRequestStore;
   const { isLocked } = lockStore;
 
   const [screen, setScreen] = useState(SCREENS.LOCK);
@@ -59,29 +92,6 @@ const ScreenLoader = observer(() => {
     wasLockedRef.current = isLocked;
   }, [isLocked]);
 
-  // A normal send ends on the history, where the new transaction shows as
-  // pending. An approved dApp send does the same on a surface that stays
-  // open.
-  useEffect(() => {
-    if (!completedDAppSend) return;
-    const { from } = completedDAppSend;
-    dAppRequestStore.clearCompletedDAppSend();
-    // The popup closes itself after an approval. A route change there would
-    // only alter the screen the wallet opens on next time.
-    if (settingsStore.isPopupWindow) return;
-    // The pending entry is stored under the sender as the request spelled
-    // it, and the history lists the active account under its own spelling,
-    // so only an exact match shows the new transaction there.
-    if (from !== qrlStore.activeAccount.accountAddress) return;
-    void Promise.resolve(
-      navigate(ROUTES.TRANSACTION_HISTORY, {
-        replace: location.pathname === ROUTES.TRANSACTION_HISTORY,
-      }),
-    ).catch((error: unknown) => {
-      console.error("Failed to show the transaction history:", error);
-    });
-  }, [completedDAppSend]);
-
   useEffect(() => {
     if (isLocked) {
       setScreen(SCREENS.LOCK);
@@ -92,22 +102,25 @@ const ScreenLoader = observer(() => {
     }
   }, [isLocked, hasDAppRequest]);
 
-  if (screen === SCREENS.LOCK)
-    return (
+  const content =
+    screen === SCREENS.LOCK ? (
       <ScrollRegion>
         <Lock />
       </ScrollRegion>
-    );
-
-  if (screen === SCREENS.DAPP_REQUEST)
-    return (
+    ) : screen === SCREENS.DAPP_REQUEST ? (
       <ScrollRegion>
         <DAppRequest />
       </ScrollRegion>
-    );
+    ) : screen === SCREENS.WALLET ? (
+      <Wallet />
+    ) : undefined;
 
-  if (screen === SCREENS.WALLET) return <Wallet />;
-  return undefined;
+  return (
+    <>
+      <CompletedDAppSendHistory />
+      {content}
+    </>
+  );
 });
 
 export default ScreenLoader;

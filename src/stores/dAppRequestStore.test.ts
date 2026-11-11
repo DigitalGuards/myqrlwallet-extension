@@ -753,6 +753,49 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
       });
     });
 
+    it("is set when the broadcast timed out and the error carries the pending hash", async () => {
+      class MayStillBeProcessing extends Error {
+        constructor(public readonly transactionHash: string) {
+          super("may still be processing");
+        }
+        get data() {
+          return { transactionHash: this.transactionHash, pending: true };
+        }
+      }
+      const store = buildSendStore();
+      store.setOnPermissionCallBack((_approved, record) => {
+        record({ error: new MayStillBeProcessing("0xdef") });
+        return Promise.resolve();
+      });
+
+      await store.onPermission(true);
+
+      expect(store.completedDAppSend).toEqual({
+        transactionHash: "0xdef",
+        from: FROM,
+      });
+    });
+
+    it("reads the sender from an index-keyed params record, as the send path does", async () => {
+      const store = buildSendStore();
+      store.dAppRequestData = malformed<DAppRequestType>({
+        requestId: "request-a",
+        method: "qrl_sendTransaction",
+        params: { "0": { from: FROM, to: `Q${"cd".repeat(64)}` } },
+      });
+      store.setOnPermissionCallBack((_approved, record) => {
+        record({ transactionHash: "0xabc" });
+        return Promise.resolve();
+      });
+
+      await store.onPermission(true);
+
+      expect(store.completedDAppSend).toEqual({
+        transactionHash: "0xabc",
+        from: FROM,
+      });
+    });
+
     it("is still set when delivering the answer throws (the transaction was sent)", async () => {
       const store = buildSendStore();
       store.setOnPermissionCallBack((_approved, record) => {

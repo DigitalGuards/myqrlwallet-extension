@@ -10,7 +10,10 @@ import {
 import { getSerializableObject } from "@/scripts/utils/scriptUtils";
 import StorageUtil from "@/utilities/storageUtil";
 import { isRecord } from "@/utilities/storageGuards";
-import { isDAppRequest } from "@/utilities/approvalGuards";
+import {
+  isDAppRequest,
+  readApprovalTransaction,
+} from "@/utilities/approvalGuards";
 import { action, makeAutoObservable, observable } from "mobx";
 import browser from "webextension-polyfill";
 
@@ -40,6 +43,25 @@ const originFromTabUrl = (url?: string): string => {
   }
 };
 
+/**
+ * The hash of the transaction an approval sent, read from what it recorded
+ * for the dApp: the hash of a completed broadcast, or the hash a broadcast
+ * that timed out carries in its error data. The pending history entry is
+ * written in both cases.
+ */
+const sentTransactionHash = (
+  recorded: Record<string, unknown> | undefined,
+): unknown => {
+  if (!recorded) return undefined;
+  if (typeof recorded.transactionHash === "string") {
+    return recorded.transactionHash;
+  }
+  const errorData = isRecord(recorded.error) ? recorded.error.data : undefined;
+  return isRecord(errorData) && errorData.pending === true
+    ? errorData.transactionHash
+    : undefined;
+};
+
 class DAppRequestStore {
   private currentTabFetchGeneration = 0;
   private dAppRequestReadGeneration = 0;
@@ -59,10 +81,10 @@ class DAppRequestStore {
     record: ResponseRecorder,
   ) => Promise<void> = () => Promise.resolve();
   /**
-   * Set when an approved qrl_sendTransaction has recorded a transaction
-   * hash, just before the answer goes to the service worker. The wallet
-   * screen reads it to show the history, as a normal send does, and clears
-   * it. `from` is the request's sender, empty when the request named none.
+   * Set when an approved qrl_sendTransaction has sent a transaction, just
+   * before the answer goes to the service worker. The wallet screen reads
+   * it to show the history, as a normal send does, and clears it. `from` is
+   * the request's sender as the request spelled it.
    */
   completedDAppSend?: { transactionHash: string; from: string };
   approvalProcessingStatus = {
@@ -307,15 +329,15 @@ class DAppRequestStore {
       if (hasApproved && !this.hasRecordedResponse(bucketKey)) {
         record({ error: approvalProducedNothingProviderError() });
       }
-      // A recorded hash means the transaction is already broadcast and its
-      // pending history entry written, whether or not the answer below
-      // reaches the worker. Flagging it first lets the wallet screen be on
-      // the history by the time the request slot clears.
+      // A recorded hash means the transaction went out and its pending
+      // history entry is written, whether or not the answer below reaches
+      // the worker. Flagging it first lets the wallet screen be on the
+      // history by the time the request slot clears.
       this.noteCompletedSend(
         hasApproved,
         method,
         sendFrom,
-        this.inFlightResponseData.get(bucketKey)?.transactionHash,
+        this.inFlightResponseData.get(bucketKey),
       );
       const response: DAppResponseType = {
         method,
@@ -357,11 +379,9 @@ class DAppRequestStore {
   private sendTransactionSender(method: string): string {
     try {
       if (method !== RESTRICTED_METHODS.QRL_SEND_TRANSACTION) return "";
-      const params: unknown = this.dAppRequestData?.params;
-      const first: unknown = Array.isArray(params) ? params[0] : undefined;
-      return isRecord(first) && typeof first.from === "string"
-        ? first.from
-        : "";
+      // The same reader the send path uses, so both see the same sender.
+      const transaction = readApprovalTransaction(this.dAppRequestData?.params);
+      return typeof transaction?.from === "string" ? transaction.from : "";
     } catch {
       return "";
     }
@@ -376,9 +396,10 @@ class DAppRequestStore {
     hasApproved: boolean,
     method: string,
     from: string,
-    transactionHash: unknown,
+    recorded: Record<string, unknown> | undefined,
   ): void {
     try {
+      const transactionHash = sentTransactionHash(recorded);
       if (
         hasApproved &&
         method === RESTRICTED_METHODS.QRL_SEND_TRANSACTION &&
