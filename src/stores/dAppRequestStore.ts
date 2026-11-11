@@ -1,6 +1,7 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
 import { approvalProducedNothingProviderError } from "@/functions/describeExtensionError";
 import type { StoredBlockchain as BlockchainDataType } from "@/utilities/storageGuards";
+import { RESTRICTED_METHODS } from "@/scripts/constants/requestConstants";
 import { EXTENSION_MESSAGES } from "@/scripts/constants/streamConstants";
 import {
   DAppRequestType,
@@ -9,7 +10,10 @@ import {
 import { getSerializableObject } from "@/scripts/utils/scriptUtils";
 import StorageUtil from "@/utilities/storageUtil";
 import { isRecord } from "@/utilities/storageGuards";
-import { isDAppRequest } from "@/utilities/approvalGuards";
+import {
+  isDAppRequest,
+  readApprovalTransaction,
+} from "@/utilities/approvalGuards";
 import { action, makeAutoObservable, observable } from "mobx";
 import browser from "webextension-polyfill";
 
@@ -39,6 +43,25 @@ const originFromTabUrl = (url?: string): string => {
   }
 };
 
+/**
+ * The hash of the transaction an approval sent, read from what it recorded
+ * for the dApp: the hash of a completed broadcast, or the hash a broadcast
+ * that timed out carries in its error data. The pending history entry is
+ * written in both cases.
+ */
+const sentTransactionHash = (
+  recorded: Record<string, unknown> | undefined,
+): unknown => {
+  if (!recorded) return undefined;
+  if (typeof recorded.transactionHash === "string") {
+    return recorded.transactionHash;
+  }
+  const errorData = isRecord(recorded.error) ? recorded.error.data : undefined;
+  return isRecord(errorData) && errorData.pending === true
+    ? errorData.transactionHash
+    : undefined;
+};
+
 class DAppRequestStore {
   private currentTabFetchGeneration = 0;
   private dAppRequestReadGeneration = 0;
@@ -57,6 +80,13 @@ class DAppRequestStore {
     hasApproved: boolean,
     record: ResponseRecorder,
   ) => Promise<void> = () => Promise.resolve();
+  /**
+   * Set when an approved qrl_sendTransaction has sent a transaction, just
+   * before the answer goes to the service worker. The wallet screen reads
+   * it to show the history, as a normal send does, and clears it. `from` is
+   * the request's sender as the request spelled it.
+   */
+  completedDAppSend?: { transactionHash: string; from: string };
   approvalProcessingStatus = {
     isProcessing: false,
     hasApproved: false,
@@ -253,6 +283,7 @@ class DAppRequestStore {
     const requestId = this.dAppRequestData?.requestId;
     const method = this.dAppRequestData?.method ?? "";
     const bucketKey = requestId ?? "";
+    const sendFrom = this.sendTransactionSender(method);
     // Bound to this run for as long as it lasts, whatever the screen goes
     // on to show.
     const record: ResponseRecorder = (data) => {
@@ -298,6 +329,16 @@ class DAppRequestStore {
       if (hasApproved && !this.hasRecordedResponse(bucketKey)) {
         record({ error: approvalProducedNothingProviderError() });
       }
+      // A recorded hash means the transaction went out and its pending
+      // history entry is written, whether or not the answer below reaches
+      // the worker. Flagging it first lets the wallet screen be on the
+      // history by the time the request slot clears.
+      this.noteCompletedSend(
+        hasApproved,
+        method,
+        sendFrom,
+        this.inFlightResponseData.get(bucketKey),
+      );
       const response: DAppResponseType = {
         method,
         action: EXTENSION_MESSAGES.DAPP_RESPONSE,
@@ -332,6 +373,49 @@ class DAppRequestStore {
         console.warn("QrlWeb3Wallet: Failed to update approval status", error);
       });
     }
+  }
+
+  /** The `from` of the transaction on screen, read at click time. */
+  private sendTransactionSender(method: string): string {
+    try {
+      if (method !== RESTRICTED_METHODS.QRL_SEND_TRANSACTION) return "";
+      // The same reader the send path uses, so both see the same sender.
+      const transaction = readApprovalTransaction(this.dAppRequestData?.params);
+      return typeof transaction?.from === "string" ? transaction.from : "";
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Runs once the approval has recorded its result. It only publishes a
+   * flag for the wallet screen and can never affect the approval, so any
+   * failure here is swallowed.
+   */
+  private noteCompletedSend(
+    hasApproved: boolean,
+    method: string,
+    from: string,
+    recorded: Record<string, unknown> | undefined,
+  ): void {
+    try {
+      const transactionHash = sentTransactionHash(recorded);
+      if (
+        hasApproved &&
+        method === RESTRICTED_METHODS.QRL_SEND_TRANSACTION &&
+        typeof transactionHash === "string" &&
+        transactionHash !== ""
+      ) {
+        this.completedDAppSend = { transactionHash, from };
+      }
+    } catch {
+      // Navigation is a courtesy; the approval's own result is already
+      // recorded and is answered right after this.
+    }
+  }
+
+  clearCompletedDAppSend() {
+    this.completedDAppSend = undefined;
   }
 
   /**
