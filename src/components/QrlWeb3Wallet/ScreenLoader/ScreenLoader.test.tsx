@@ -29,10 +29,13 @@ describe("ScreenLoader", () => {
     vi.restoreAllMocks();
   });
 
-  const renderComponent = (mockedStoreValues = mockedStore()) =>
+  const renderComponent = (
+    mockedStoreValues = mockedStore(),
+    initialEntries: string[] = ["/"],
+  ) =>
     render(
       <StoreProvider value={mockedStoreValues}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={initialEntries}>
           <ScreenLoader />
         </MemoryRouter>
       </StoreProvider>,
@@ -170,6 +173,8 @@ describe("ScreenLoader", () => {
         },
       });
       values.qrlStore.activeAccount.accountAddress = ACTIVE;
+      // A surface that stays open: the side panel or the expanded tab.
+      values.settingsStore.isPopupWindow = false;
       return values;
     };
 
@@ -184,7 +189,49 @@ describe("ScreenLoader", () => {
         expect(navigateMock).toHaveBeenCalledTimes(1);
       });
       expect(clear).toHaveBeenCalled();
-      expect(navigateMock).toHaveBeenCalledWith(ROUTES.TRANSACTION_HISTORY);
+      expect(navigateMock).toHaveBeenCalledWith(ROUTES.TRANSACTION_HISTORY, {
+        replace: false,
+      });
+    });
+
+    it("replaces the entry when the history is already showing", async () => {
+      navigateMock.mockClear();
+      renderComponent(storeWith(ACTIVE), [ROUTES.TRANSACTION_HISTORY]);
+
+      await waitFor(() => {
+        expect(navigateMock).toHaveBeenCalledTimes(1);
+      });
+      expect(navigateMock).toHaveBeenCalledWith(ROUTES.TRANSACTION_HISTORY, {
+        replace: true,
+      });
+    });
+
+    it("leaves the route alone in the popup, which closes itself", async () => {
+      navigateMock.mockClear();
+      const values = storeWith(ACTIVE);
+      values.settingsStore.isPopupWindow = true;
+      const clear = vi.fn();
+      values.dAppRequestStore.clearCompletedDAppSend = clear;
+      renderComponent(values);
+
+      await waitFor(() => {
+        expect(clear).toHaveBeenCalled();
+      });
+      expect(navigateMock).not.toHaveBeenCalled();
+    });
+
+    it("does nothing when the sender is spelled differently from the active account", async () => {
+      navigateMock.mockClear();
+      const values = storeWith(ACTIVE.toLowerCase().replace(/^q/, "Q"));
+      values.qrlStore.activeAccount.accountAddress = `Q${"AB".repeat(64)}`;
+      const clear = vi.fn();
+      values.dAppRequestStore.clearCompletedDAppSend = clear;
+      renderComponent(values);
+
+      await waitFor(() => {
+        expect(clear).toHaveBeenCalled();
+      });
+      expect(navigateMock).not.toHaveBeenCalled();
     });
 
     it("does nothing when the sender is not the active account", async () => {

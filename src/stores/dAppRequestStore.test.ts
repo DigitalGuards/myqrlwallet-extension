@@ -1,5 +1,6 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { isObservableProp, reaction } from "mobx";
 import browser from "webextension-polyfill";
 import StorageUtil from "@/utilities/storageUtil";
 import DAppRequestStore from "./dAppRequestStore";
@@ -704,6 +705,52 @@ describe("DAppRequestStore answers the request the user clicked on", () => {
       await store.onPermission(true);
 
       expect(store.completedDAppSend).toBeUndefined();
+    });
+
+    it("is an observable of the real store, so the wallet screen reacts to it", async () => {
+      const store = buildSendStore();
+      expect(isObservableProp(store, "completedDAppSend")).toBe(true);
+      const seen: unknown[] = [];
+      const stop = reaction(
+        () => store.completedDAppSend,
+        (value) => seen.push(value),
+      );
+      store.setOnPermissionCallBack((_approved, record) => {
+        record({ transactionHash: "0xabc" });
+        return Promise.resolve();
+      });
+
+      await store.onPermission(true);
+      stop();
+
+      expect(seen).toEqual([{ transactionHash: "0xabc", from: FROM }]);
+    });
+
+    it("is set before the answer is posted to the worker", async () => {
+      const store = buildSendStore();
+      store.setOnPermissionCallBack((_approved, record) => {
+        record({ transactionHash: "0xabc" });
+        return Promise.resolve();
+      });
+      let flagWhenAnswered: unknown = "not answered";
+      mockedBrowser.runtime.sendMessage.mockImplementation(
+        (message: unknown) => {
+          if (
+            isRecord(message) &&
+            message.action === EXTENSION_MESSAGES.DAPP_RESPONSE
+          ) {
+            flagWhenAnswered = store.completedDAppSend;
+          }
+          return Promise.resolve({ accepted: true });
+        },
+      );
+
+      await store.onPermission(true);
+
+      expect(flagWhenAnswered).toEqual({
+        transactionHash: "0xabc",
+        from: FROM,
+      });
     });
 
     it("is still set when delivering the answer throws (the transaction was sent)", async () => {

@@ -1,10 +1,9 @@
 import withSuspense from "@/functions/withSuspense";
 import ScrollRegion from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
 import { ROUTES } from "@/router/router";
-import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { useStore } from "@/stores/store";
 import { observer } from "mobx-react-lite";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { lazy, useEffect, useRef, useState } from "react";
 
 const SCREENS = {
@@ -27,8 +26,9 @@ const Wallet = withSuspense(
 );
 
 const ScreenLoader = observer(() => {
-  const { dAppRequestStore, lockStore, qrlStore } = useStore();
+  const { dAppRequestStore, lockStore, qrlStore, settingsStore } = useStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const { hasDAppRequest, completedDAppSend } = dAppRequestStore;
   const { isLocked } = lockStore;
 
@@ -60,19 +60,26 @@ const ScreenLoader = observer(() => {
   }, [isLocked]);
 
   // A normal send ends on the history, where the new transaction shows as
-  // pending. An approved dApp send does the same, for the account whose
-  // history that screen lists.
+  // pending. An approved dApp send does the same on a surface that stays
+  // open.
   useEffect(() => {
     if (!completedDAppSend) return;
     const { from } = completedDAppSend;
     dAppRequestStore.clearCompletedDAppSend();
-    if (areAddressesEquivalent(from, qrlStore.activeAccount.accountAddress)) {
-      void Promise.resolve(navigate(ROUTES.TRANSACTION_HISTORY)).catch(
-        (error: unknown) => {
-          console.error("Failed to show the transaction history:", error);
-        },
-      );
-    }
+    // The popup closes itself after an approval. A route change there would
+    // only alter the screen the wallet opens on next time.
+    if (settingsStore.isPopupWindow) return;
+    // The pending entry is stored under the sender as the request spelled
+    // it, and the history lists the active account under its own spelling,
+    // so only an exact match shows the new transaction there.
+    if (from !== qrlStore.activeAccount.accountAddress) return;
+    void Promise.resolve(
+      navigate(ROUTES.TRANSACTION_HISTORY, {
+        replace: location.pathname === ROUTES.TRANSACTION_HISTORY,
+      }),
+    ).catch((error: unknown) => {
+      console.error("Failed to show the transaction history:", error);
+    });
   }, [completedDAppSend]);
 
   useEffect(() => {
