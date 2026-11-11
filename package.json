@@ -158,7 +158,6 @@
       "firefox-profile": "4.7.1",
       "tmp": "0.2.7"
     },
-    "node-forge": "1.4.3",
     "fx-runner": {
       "shell-quote": "1.9.0"
     },
