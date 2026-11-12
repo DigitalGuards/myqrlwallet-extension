@@ -187,6 +187,7 @@
   "txDetail.statusDropped": "Dropped",
   "txDetail.statusUnknown": "Unknown",
   "txDetail.amount": "Amount",
+  "txDetail.amountNotTransferred": "Amount (not transferred)",
   "txDetail.from": "From",
   "txDetail.to": "To",
   "txDetail.transactionHash": "Transaction Hash",

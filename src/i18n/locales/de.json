@@ -187,6 +187,7 @@
   "txDetail.statusDropped": "Verworfen",
   "txDetail.statusUnknown": "Unbekannt",
   "txDetail.amount": "Betrag",
+  "txDetail.amountNotTransferred": "Betrag (nicht übertragen)",
   "txDetail.from": "Von",
   "txDetail.to": "An",
   "txDetail.transactionHash": "Transaktions-Hash",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isContractCallEntry,
+  isFailedOnChainWithoutTransfer,
   isRolledBackContractCall,
 } from "./contractCallEntry";
 import { V3_CHAIN_ID } from "@/configuration/releaseProfile";
@@ -17,6 +18,12 @@ const base = {
 describe("isContractCallEntry", () => {
   it("recognises a locally sent entry that carries call data", () => {
     expect(isContractCallEntry({ ...base, data: "0xa9059cbb00" })).toBe(true);
+  });
+
+  it("does not treat a deployment (empty recipient) as a call", () => {
+    expect(isContractCallEntry({ ...base, to: "", data: "0x6080" })).toBe(
+      false,
+    );
   });
 
   it("keeps a plain value transfer as a send", () => {
@@ -107,6 +114,41 @@ describe("isRolledBackContractCall", () => {
         pendingStatus: "failed",
         receiptStatusVerified: true,
       }),
+    ).toBe(false);
+  });
+});
+
+describe("isFailedOnChainWithoutTransfer", () => {
+  const failed = {
+    status: false,
+    pendingStatus: "failed" as const,
+    receiptStatusVerified: true,
+    isZrc20Token: false,
+  };
+
+  it("holds for a native entry with a verified failed receipt", () => {
+    expect(isFailedOnChainWithoutTransfer(failed)).toBe(true);
+  });
+
+  it("leaves out unverified, confirmed, token and internal entries", () => {
+    expect(
+      isFailedOnChainWithoutTransfer({
+        ...failed,
+        receiptStatusVerified: false,
+      }),
+    ).toBe(false);
+    expect(
+      isFailedOnChainWithoutTransfer({
+        ...failed,
+        status: true,
+        pendingStatus: "confirmed",
+      }),
+    ).toBe(false);
+    expect(
+      isFailedOnChainWithoutTransfer({ ...failed, isZrc20Token: true }),
+    ).toBe(false);
+    expect(
+      isFailedOnChainWithoutTransfer({ ...failed, isInternal: true }),
     ).toBe(false);
   });
 });

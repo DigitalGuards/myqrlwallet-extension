@@ -22,6 +22,8 @@ export const isContractCallEntry = (
   >,
 ): boolean => {
   if (entry.isInternal === true) return false;
+  // A deployment has no recipient: its init code is not a call.
+  if (entry.to === "") return false;
   if (entry.isZrc20Token || entry.tokenContractAddress !== "") return false;
   const data = entry.data ?? "";
   if (data !== "" && data !== "0x") return true;
@@ -48,5 +50,26 @@ export const isRolledBackContractCall = (
   >,
 ): boolean =>
   isContractCallEntry(entry) &&
+  entry.receiptStatusVerified === true &&
+  (entry.pendingStatus ?? (entry.status ? "confirmed" : "failed")) === "failed";
+
+/**
+ * A native entry whose receipt shows it failed on chain. The chain moves no
+ * value for it: only the fee was spent. A token row, an internal entry and a
+ * transaction the node refused before mining (no verified receipt) are left
+ * out.
+ */
+export const isFailedOnChainWithoutTransfer = (
+  entry: Pick<
+    TransactionHistoryEntry,
+    | "isInternal"
+    | "isZrc20Token"
+    | "status"
+    | "pendingStatus"
+    | "receiptStatusVerified"
+  >,
+): boolean =>
+  entry.isInternal !== true &&
+  !entry.isZrc20Token &&
   entry.receiptStatusVerified === true &&
   (entry.pendingStatus ?? (entry.status ? "confirmed" : "failed")) === "failed";

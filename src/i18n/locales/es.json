@@ -187,6 +187,7 @@
   "txDetail.statusDropped": "Descartada",
   "txDetail.statusUnknown": "Desconocida",
   "txDetail.amount": "Monto",
+  "txDetail.amountNotTransferred": "Monto (no transferido)",
   "txDetail.from": "De",
   "txDetail.to": "Para",
   "txDetail.transactionHash": "Hash de Transacción",

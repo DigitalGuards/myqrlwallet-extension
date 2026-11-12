@@ -187,6 +187,7 @@
   "txDetail.statusDropped": "已丢弃",
   "txDetail.statusUnknown": "未知",
   "txDetail.amount": "金额",
+  "txDetail.amountNotTransferred": "金额（未转移）",
   "txDetail.from": "发送方",
   "txDetail.to": "接收方",
   "txDetail.transactionHash": "交易哈希",

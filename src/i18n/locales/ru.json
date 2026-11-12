@@ -187,6 +187,7 @@
   "txDetail.statusDropped": "Исключена из очереди",
   "txDetail.statusUnknown": "Неизвестно",
   "txDetail.amount": "Сумма",
+  "txDetail.amountNotTransferred": "Сумма (не переведена)",
   "txDetail.from": "Отправитель",
   "txDetail.to": "Получатель",
   "txDetail.transactionHash": "Хеш транзакции",

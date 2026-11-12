@@ -909,16 +909,45 @@ describe("TransactionDetail", () => {
       ).toBeInTheDocument();
     });
 
-    it("shows the fee alone as total cost for a rolled-back call that carried value", () => {
+    it("shows the fee alone as total cost and labels the amount for a rolled-back call that carried value", () => {
       renderComponent({
         ...rolledBackCall,
         amount: "100.000000000000000000",
       });
 
+      const fee = getOptimalGasFee("0.000045262500211225");
+      const totalCostRow = screen.getByText("Total Cost").parentElement;
+      expect(totalCostRow).toHaveTextContent(fee);
+      expect(totalCostRow).not.toHaveTextContent("100");
+      expect(screen.getByText("Amount (not transferred)")).toBeInTheDocument();
+      expect(screen.queryByText("Amount")).not.toBeInTheDocument();
+    });
+
+    it("labels the amount and charges the fee alone for a failed plain send with a receipt", () => {
+      renderComponent({
+        ...sampleTransaction,
+        amount: "100.000000000000000000",
+        status: false,
+        pendingStatus: "failed",
+        receiptStatusVerified: true,
+        paidFeesQrl: "0.000021",
+      });
+
+      expect(screen.getByText("Failed")).toBeInTheDocument();
+      expect(screen.getByText("Amount (not transferred)")).toBeInTheDocument();
       expect(
-        screen.getAllByText(getOptimalGasFee("0.000045262500211225")),
-      ).toHaveLength(2);
-      expect(screen.queryByText(/^100\.0000/)).not.toBeInTheDocument();
+        screen.getByText("Total Cost").parentElement,
+      ).not.toHaveTextContent("100");
+    });
+
+    it("keeps the plain Amount label for a failed send the node refused", () => {
+      renderComponent({
+        ...sampleTransaction,
+        status: false,
+        pendingStatus: "failed",
+      });
+
+      expect(screen.getByText("Amount")).toBeInTheDocument();
     });
 
     it("reads an explorer row to the swap escrow as a rolled-back call", () => {
