@@ -56,6 +56,7 @@ vi.mock("../utils/approvalSurface", () => ({
   openApprovalSurface: mockOpenApprovalSurface,
 }));
 
+const opts = { type: "basic" as const, iconUrl: "i", title: "t", message: "m" };
 const ORIGIN_A = "https://a.example";
 const ORIGIN_B = "https://b.example";
 const DAPPS_KEY = profileStorageKey("DAPPS");
@@ -362,7 +363,10 @@ describe("restricted method approval slot and timers", () => {
       vi.fn(),
     );
 
-    expect(mockOpenApprovalSurface).toHaveBeenCalledWith({ tabId: 11 });
+    expect(mockOpenApprovalSurface).toHaveBeenCalledWith({
+      tabId: 11,
+      announce: false,
+    });
 
     answerPending(false);
     await first;
@@ -476,6 +480,28 @@ describe("restricted method approval slot and timers", () => {
 
     answerPending(false);
     await retry;
+  });
+
+  it("clears the approval-waiting notification when the slot is released", async () => {
+    vi.spyOn(browser.notifications, "getAll").mockResolvedValue({
+      "approval-waiting-9": opts,
+    });
+    const clear = vi.spyOn(browser.notifications, "clear");
+    const first = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      buildResponse(),
+      vi.fn(),
+      vi.fn(),
+    );
+    await vi.waitFor(() => {
+      expect(pendingRequestId()).toBeTypeOf("string");
+    });
+    answerPending(false);
+    await first;
+
+    await vi.waitFor(() => {
+      expect(clear).toHaveBeenCalledWith("approval-waiting-9");
+    });
   });
 
   it("rejects a request the user never answered (M1)", async () => {

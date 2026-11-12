@@ -10,13 +10,19 @@ import {
   handleSidePanelOpenMessage,
   resetSidePanelOpenerForTests,
 } from "./sidePanelSurface";
+import {
+  handleSidePanelVisibilityMessage,
+  resetSidePanelVisibilityForTests,
+} from "./sidePanelVisibility";
 
 const sidePanelOpen = vi.fn<() => Promise<void>>();
 const sendMessage = vi.spyOn(browser.tabs, "sendMessage");
+const runtimeSendMessage = vi.spyOn(browser.runtime, "sendMessage");
 const openPopup = vi.spyOn(browser.action, "openPopup");
 const createWindow = vi.spyOn(browser.windows, "create");
 const updateWindow = vi.spyOn(browser.windows, "update");
 const getLastFocused = vi.spyOn(browser.windows, "getLastFocused");
+const createNotification = vi.spyOn(browser.notifications, "create");
 const getTab = vi.spyOn(browser.tabs, "get");
 const getLocalStorage = vi.spyOn(browser.storage.local, "get");
 const windowProperties = {
@@ -112,6 +118,7 @@ describe("openApprovalSurface", () => {
 
   afterEach(() => {
     resetSidePanelOpenerForTests();
+    resetSidePanelVisibilityForTests();
     vi.unstubAllGlobals();
   });
 
@@ -374,6 +381,224 @@ describe("openApprovalSurface", () => {
 
       await expect(openApprovalSurface({ tabId: 5 })).resolves.toBeUndefined();
 
+      expect(createWindow).not.toHaveBeenCalled();
+    });
+  });
+  describe("with a side panel that may sit behind another extension's panel", () => {
+    const panelSender = {
+      id: "mock-id",
+      url: "chrome-extension://mock-id/index.html?sidepanel=true",
+    };
+
+    const stubPanelLive = () => {
+      vi.stubGlobal("chrome", {
+        sidePanel: { open: sidePanelOpen },
+        runtime: {
+          ContextType: { SIDE_PANEL: "SIDE_PANEL", POPUP: "POPUP" },
+          getContexts: vi.fn((filter: { contextTypes: string[] }) =>
+            Promise.resolve(
+              filter.contextTypes.includes("SIDE_PANEL")
+                ? [{ contextType: "SIDE_PANEL" }]
+                : [],
+            ),
+          ),
+        },
+      });
+    };
+
+    // Plays the panel page: answers every probe the worker sends.
+    const panelAnswers = (visible: boolean, windowId = 9) => {
+      runtimeSendMessage.mockImplementation((message: unknown) => {
+        if (
+          isRecord(message) &&
+          message.name === "QRL_WALLET_PROBE_SIDE_PANEL"
+        ) {
+          handleSidePanelVisibilityMessage(
+            {
+              name: "QRL_WALLET_SIDE_PANEL_VISIBILITY",
+              nonce: message.nonce,
+              visible,
+              windowId,
+            },
+            panelSender,
+          );
+        }
+        return Promise.resolve(undefined);
+      });
+    };
+
+    beforeEach(() => {
+      setSettings({});
+      stubPanelLive();
+      getLastFocused.mockResolvedValue({ ...windowProperties, id: 12 });
+    });
+
+    afterEach(() => {
+      createNotification.mockClear();
+      runtimeSendMessage.mockReset();
+      runtimeSendMessage.mockResolvedValue(undefined);
+    });
+
+    it("announces a hidden panel and never shows it for a page request", async () => {
+      panelAnswers(false);
+      getLastFocused.mockResolvedValue({ ...windowProperties, id: 9 });
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(sidePanelOpen).not.toHaveBeenCalled();
+      expect(openPopup).not.toHaveBeenCalled();
+      expect(createWindow).not.toHaveBeenCalled();
+      expect(createNotification).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the attention request and the notification when another window has the focus", async () => {
+      panelAnswers(false);
+      getLastFocused.mockResolvedValue({ ...windowProperties, id: 12 });
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(sidePanelOpen).not.toHaveBeenCalled();
+      expect(updateWindow).toHaveBeenCalledWith(9, { drawAttention: true });
+      expect(createNotification).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs no roundtrip when no browser window has the focus", async () => {
+      panelAnswers(false);
+      getLastFocused.mockResolvedValue({
+        ...windowProperties,
+        id: 9,
+        focused: false,
+      });
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(sidePanelOpen).not.toHaveBeenCalled();
+      expect(updateWindow).toHaveBeenCalledWith(9, { drawAttention: true });
+    });
+
+    it("runs no roundtrip when two panels report differently", async () => {
+      vi.stubGlobal("chrome", {
+        sidePanel: { open: sidePanelOpen },
+        runtime: {
+          ContextType: { SIDE_PANEL: "SIDE_PANEL", POPUP: "POPUP" },
+          getContexts: vi.fn((filter: { contextTypes: string[] }) =>
+            Promise.resolve(
+              filter.contextTypes.includes("SIDE_PANEL")
+                ? [{ contextType: "SIDE_PANEL" }, { contextType: "SIDE_PANEL" }]
+                : [],
+            ),
+          ),
+        },
+      });
+      getLastFocused.mockResolvedValue({ ...windowProperties, id: 9 });
+      runtimeSendMessage.mockImplementation((message: unknown) => {
+        if (isRecord(message) && message.nonce !== undefined) {
+          for (const visible of [false, true]) {
+            handleSidePanelVisibilityMessage(
+              {
+                name: "QRL_WALLET_SIDE_PANEL_VISIBILITY",
+                nonce: message.nonce,
+                visible,
+                windowId: 9,
+              },
+              panelSender,
+            );
+          }
+        }
+        return Promise.resolve(undefined);
+      });
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(sidePanelOpen).not.toHaveBeenCalled();
+    });
+
+    it("posts no notification for a repeat request of the pending approval", async () => {
+      panelAnswers(false);
+      getLastFocused.mockResolvedValue({ ...windowProperties, id: 9 });
+      sendMessage.mockRejectedValue(new Error("no content script"));
+
+      await openApprovalSurface({ tabId: 5 });
+      await openApprovalSurface({ tabId: 5, announce: false });
+      await openApprovalSurface({ tabId: 5, announce: false });
+
+      expect(createNotification).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves a visible panel alone", async () => {
+      panelAnswers(true);
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(sidePanelOpen).not.toHaveBeenCalled();
+      expect(updateWindow).toHaveBeenCalledWith(9, { drawAttention: true });
+      expect(createNotification).not.toHaveBeenCalled();
+    });
+
+    it("posts only the notification when a hidden panel's tab has no gesture", async () => {
+      panelAnswers(false);
+      getLastFocused.mockResolvedValue({ ...windowProperties, id: 9 });
+      sendMessage.mockRejectedValue(new Error("no content script"));
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(sidePanelOpen).not.toHaveBeenCalled();
+      expect(openPopup).not.toHaveBeenCalled();
+      expect(createWindow).not.toHaveBeenCalled();
+      expect(updateWindow).not.toHaveBeenCalled();
+      expect(createNotification).toHaveBeenCalledTimes(1);
+      expect(createNotification).toHaveBeenCalledWith(
+        "approval-waiting-9",
+        expect.objectContaining({ type: "basic", title: "Approval waiting" }),
+      );
+    });
+
+    it("treats a panel that stays silent as showing", async () => {
+      vi.useFakeTimers();
+
+      const pending = openApprovalSurface({ tabId: 5 });
+      await vi.advanceTimersByTimeAsync(1000);
+      await pending;
+      vi.useRealTimers();
+
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(sidePanelOpen).not.toHaveBeenCalled();
+      expect(updateWindow).toHaveBeenCalledWith(9, { drawAttention: true });
+      expect(createNotification).not.toHaveBeenCalled();
+    });
+
+    it("leaves a hidden panel in another window alone", async () => {
+      panelAnswers(false, 4);
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(sidePanelOpen).not.toHaveBeenCalled();
+      expect(createNotification).not.toHaveBeenCalled();
+    });
+
+    it("does not probe without a requesting tab", async () => {
+      panelAnswers(false);
+
+      await openApprovalSurface();
+
+      expect(runtimeSendMessage).not.toHaveBeenCalled();
+      expect(sidePanelOpen).not.toHaveBeenCalled();
+    });
+
+    it("never opens a popup or window next to a live panel", async () => {
+      panelAnswers(false);
+      sendMessage.mockRejectedValue(new Error("no content script"));
+      openPopup.mockRejectedValue(new Error("refused"));
+
+      await openApprovalSurface({ tabId: 5 });
+
+      expect(openPopup).not.toHaveBeenCalled();
       expect(createWindow).not.toHaveBeenCalled();
     });
   });

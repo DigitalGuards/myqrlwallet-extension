@@ -2,6 +2,8 @@ import browser from "webextension-polyfill";
 import StorageUtil from "@/utilities/storageUtil";
 import { resolveSidePanelPreferred } from "./sidePanelPreference";
 import { requestSidePanelOpen } from "./sidePanelSurface";
+import { showApprovalWaitingNotification } from "./approvalNotification";
+import { isPanelHiddenInWindow, probeSidePanels } from "./sidePanelVisibility";
 
 const extensionGlobals: {
   chrome?: { runtime?: Partial<(typeof globalThis)["chrome"]["runtime"]> };
@@ -13,20 +15,23 @@ const extensionGlobals: {
 // competing approval surface next to it; the storage subscription already
 // surfaces the request in the open panel. runtime.getContexts needs Chrome
 // 116+, so this is feature-detected and fails open to the popup path.
-export const isSidePanelOpen = async (): Promise<boolean> => {
+const countSidePanels = async (): Promise<number> => {
   try {
     const runtime = extensionGlobals.chrome?.runtime;
     if (!runtime?.getContexts || !runtime.ContextType) {
-      return false;
+      return 0;
     }
     const contexts: unknown = await runtime.getContexts({
       contextTypes: [runtime.ContextType.SIDE_PANEL],
     });
-    return Array.isArray(contexts) && contexts.length > 0;
+    return Array.isArray(contexts) ? contexts.length : 0;
   } catch {
-    return false;
+    return 0;
   }
 };
+
+export const isSidePanelOpen = async (): Promise<boolean> =>
+  (await countSidePanels()) > 0;
 
 // If the action popup is already open, the request is surfaced there by the
 // dAppRequestStore session-storage subscription; creating a notification
@@ -56,6 +61,21 @@ const getTabWindowId = async (
   } catch {
     return undefined;
   }
+};
+
+// The window of the requesting tab when every live panel answered the probe,
+// none of them shows, and one of them sits in that window. A panel that stays
+// silent counts as showing.
+const hiddenPanelWindow = async (
+  tabId: number,
+  livePanels: number,
+): Promise<number | undefined> => {
+  const windowId = await getTabWindowId(tabId);
+  if (windowId === undefined) return undefined;
+  const reports = await probeSidePanels(livePanels);
+  return isPanelHiddenInWindow(reports, livePanels, windowId)
+    ? windowId
+    : undefined;
 };
 
 // An open side panel shows the request, but its browser window can sit
@@ -108,7 +128,10 @@ const ensureWindowTracking = () => {
  *
  * Order of preference:
  *  1. A side panel that is already open shows the request through its
- *     storage subscription, so nothing else may open next to it.
+ *     storage subscription, so nothing else may open next to it. When that
+ *     panel is hidden behind another extension's panel in the requesting
+ *     tab's window, a notification announces it and selecting the
+ *     notification shows the panel.
  *  2. The side panel, when it is the preferred surface and the requesting
  *     tab can forward its user gesture.
  *  3. The toolbar-anchored action popup.
@@ -123,12 +146,26 @@ const ensureWindowTracking = () => {
  */
 export const openApprovalSurface = async ({
   tabId,
-}: { tabId?: number } = {}): Promise<void> => {
+  announce = true,
+}: { tabId?: number; announce?: boolean } = {}): Promise<void> => {
   ensureWindowTracking();
   const settings = await StorageUtil.getSettings();
-  if (await isSidePanelOpen()) {
+  const livePanels = await countSidePanels();
+  if (livePanels > 0) {
     // The panel's storage subscription surfaces the request; opening a
-    // popup or window would compete with it.
+    // popup or window would compete with it. A live panel can still sit
+    // behind another extension's panel in the same window. A page request
+    // never shows a hidden panel: the panel is announced by a notification,
+    // and selecting the notification shows it.
+    const hiddenIn =
+      tabId === undefined
+        ? undefined
+        : await hiddenPanelWindow(tabId, livePanels);
+    if (hiddenIn !== undefined && announce) {
+      // One notification per waiting approval: a repeat request for the
+      // approval that is already pending passes announce: false.
+      await showApprovalWaitingNotification(hiddenIn);
+    }
     await flagRequestingWindow(tabId);
     return;
   }

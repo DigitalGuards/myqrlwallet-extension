@@ -52,6 +52,9 @@ vi.mock("webextension-polyfill", () => ({
       getURL: vi.fn((path: string) => `chrome-extension://mock-id/${path}`),
       id: "mock-id",
     },
+    notifications: {
+      onClicked: { addListener: vi.fn() },
+    },
     scripting: {
       getRegisteredContentScripts: vi.fn().mockResolvedValue([]),
       registerContentScripts: vi.fn().mockResolvedValue(undefined),

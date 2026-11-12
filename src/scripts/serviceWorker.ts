@@ -26,6 +26,7 @@ import {
   PHISHING_ALARM_NAME,
   setupPhishingRefreshAlarm,
 } from "./phishing/phishingDetector";
+import { handleApprovalNotificationClicked } from "./utils/approvalNotification";
 import { showTransactionNotification } from "./utils/transactionNotification";
 import {
   isNamedMessage,
@@ -182,6 +183,14 @@ const prepareListeners = () => {
   // Side-panel gesture roundtrip. Registered early so a request that arrives
   // right after a cold start still finds its listener.
   registerSidePanelOpenListener();
+  // A click on the "approval waiting" notification opens the wallet's panel.
+  try {
+    browser.notifications.onClicked.addListener(
+      handleApprovalNotificationClicked,
+    );
+  } catch {
+    // A browser without the notifications API must not stop the worker.
+  }
   // Existing installs move to the side panel and get the one-time notice.
   browser.runtime.onInstalled.addListener((details) => {
     handleSidePanelInstalled(details.reason).catch(() => {
