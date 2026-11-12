@@ -231,7 +231,10 @@ export async function handleDAppTransactionWatchAlarm(): Promise<void> {
             entry ? historyEntryView(entry) : undefined,
             update.pendingStatus === "confirmed" ? "confirmed" : "failed",
             entry !== undefined &&
-              isRolledBackContractCall({ ...entry, ...update }),
+              isRolledBackContractCall({
+                ...historyEntryView(entry),
+                ...update,
+              }),
           );
         }
         resolvedHashes.add(watch.hash.toLowerCase());

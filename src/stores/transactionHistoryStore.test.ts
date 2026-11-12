@@ -432,14 +432,16 @@ describe("TransactionHistoryStore", () => {
     vi.advanceTimersByTime(10000);
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(mockedBrowser.runtime.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: "failed",
-          rolledBackContractCall: true,
+    expect(mockedBrowser.runtime.sendMessage.mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: "failed",
+            rolledBackContractCall: true,
+          }),
         }),
-      }),
-    );
+      ],
+    ]);
     store.stopPolling();
   });
 
