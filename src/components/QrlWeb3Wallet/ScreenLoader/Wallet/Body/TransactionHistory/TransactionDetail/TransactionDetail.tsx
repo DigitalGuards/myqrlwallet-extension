@@ -5,6 +5,7 @@ import { getExplorerApiBase } from "@/configuration/assetDiscoveryConfig";
 import { isFiatChain } from "@/configuration/pinnedNetworks";
 import { NATIVE_TOKEN_UNITS_OF_GAS } from "@/constants/nativeToken";
 import { formatFiatCompact } from "@/functions/formatFiat";
+import { isRolledBackContractCall } from "@/functions/contractCallEntry";
 import { formatTransactionAmount } from "@/functions/formatTransactionAmount";
 import { getOptimalGasFee } from "@/functions/getOptimalGasFee";
 import { transactionFailureUpdate } from "@/functions/transactionOutcome";
@@ -424,6 +425,7 @@ const TransactionDetail = observer(() => {
   const badgeConfig =
     STATUS_BADGE_CONFIG[displayStatus] ?? DEFAULT_BADGE_CONFIG;
   const isPending = displayStatus === "pending";
+  const isRolledBack = isRolledBackContractCall(transaction);
   const canReplace = isPending && transaction.nonce !== undefined;
 
   // Explorer-sourced entries have no gas breakdown, only the fee the
@@ -519,9 +521,23 @@ const TransactionDetail = observer(() => {
                 className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-medium ${badgeConfig.className}`}
               >
                 {isPending && <Loader className="mr-1 h-3 w-3 animate-spin" />}
-                {t(badgeConfig.labelKey)}
+                {t(
+                  isRolledBack
+                    ? "txDetail.statusRolledBack"
+                    : badgeConfig.labelKey,
+                )}
               </div>
             </div>
+
+            {isRolledBack && (
+              <p className="text-sm text-muted-foreground">
+                {totalGasFeeQrl === undefined
+                  ? t("txDetail.rolledBackNoticeNoFee")
+                  : t("txDetail.rolledBackNotice", {
+                      fee: getOptimalGasFee(totalGasFeeQrl),
+                    })}
+              </p>
+            )}
 
             {/* Speed Up / Cancel buttons for pending TXs */}
             {canReplace && (

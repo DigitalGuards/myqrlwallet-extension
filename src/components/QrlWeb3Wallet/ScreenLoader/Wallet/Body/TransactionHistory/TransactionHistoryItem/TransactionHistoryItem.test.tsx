@@ -351,4 +351,70 @@ describe("TransactionHistoryItem", () => {
 
     expect(screen.queryByText(/≈/)).not.toBeInTheDocument();
   });
+
+  it("should label an outgoing contract call and keep Confirmed", () => {
+    renderComponent(makeSampleEntry({ data: "0x1234abcd", amount: 0 }));
+
+    expect(screen.getByText("Contract call")).toBeInTheDocument();
+    expect(screen.queryByText("Send")).not.toBeInTheDocument();
+    expect(screen.getByText("Confirmed")).toBeInTheDocument();
+  });
+
+  it("should show a rolled-back contract call as Rolled back", () => {
+    renderComponent(
+      makeSampleEntry({
+        data: "0x1234abcd",
+        amount: 0,
+        status: false,
+        pendingStatus: "failed",
+        receiptStatusVerified: true,
+      }),
+    );
+
+    expect(screen.getByText("Contract call")).toBeInTheDocument();
+    expect(screen.getByText("Rolled back")).toBeInTheDocument();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+  });
+
+  it("should keep Send and Failed for a failed plain send", () => {
+    renderComponent(
+      makeSampleEntry({
+        amount: 0,
+        status: false,
+        pendingStatus: "failed",
+        receiptStatusVerified: true,
+      }),
+    );
+
+    expect(screen.getByText("Send")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+
+  it("should keep Failed for a call the node refused before it was mined", () => {
+    renderComponent(
+      makeSampleEntry({
+        data: "0x1234abcd",
+        status: false,
+        pendingStatus: "failed",
+        submissionRejected: true,
+      }),
+    );
+
+    expect(screen.getByText("Contract call")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+
+  it("should leave an incoming contract transfer unchanged", () => {
+    renderComponent(
+      makeSampleEntry({
+        from: OTHER_ACCOUNT,
+        to: ACTIVE_ACCOUNT,
+        isInternal: true,
+        amount: "2.23875",
+      }),
+    );
+
+    expect(screen.getByText("Contract transfer")).toBeInTheDocument();
+    expect(screen.getByText("Confirmed")).toBeInTheDocument();
+  });
 });

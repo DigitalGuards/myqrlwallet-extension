@@ -1,5 +1,9 @@
 import { isFiatChain } from "@/configuration/pinnedNetworks";
 import { formatFiatCompact } from "@/functions/formatFiat";
+import {
+  isContractCallEntry,
+  isRolledBackContractCall,
+} from "@/functions/contractCallEntry";
 import { formatTransactionAmount } from "@/functions/formatTransactionAmount";
 import AddressFingerprint from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/AddressDisplay/AddressFingerprint";
 import { ROUTES } from "@/router/router";
@@ -59,6 +63,7 @@ const TransactionHistoryItem = observer(
     const navigate = useNavigate();
     const displayStatus = getDisplayStatus(pendingStatus, status);
     const isPending = displayStatus === "pending";
+    const isRolledBack = isRolledBackContractCall(transaction);
 
     // Explorer-sourced entries include transfers TO this account; local
     // entries are always sends. Self-sends render as sends.
@@ -118,7 +123,9 @@ const TransactionHistoryItem = observer(
                     ? "txHistory.typeContractTransfer"
                     : isIncoming
                       ? "txHistory.typeReceive"
-                      : "txHistory.typeSend",
+                      : isContractCallEntry(transaction)
+                        ? "txHistory.typeContractCall"
+                        : "txHistory.typeSend",
                 )}
               </span>
               <span
@@ -135,7 +142,10 @@ const TransactionHistoryItem = observer(
                   <Loader className="mr-1 inline h-3 w-3 animate-spin" />
                 )}
                 {t(
-                  STATUS_LABEL_KEYS[displayStatus] ?? "txDetail.statusUnknown",
+                  isRolledBack
+                    ? "txDetail.statusRolledBack"
+                    : (STATUS_LABEL_KEYS[displayStatus] ??
+                        "txDetail.statusUnknown"),
                 )}
               </span>
               {fiatDisplay && (

@@ -870,4 +870,55 @@ describe("TransactionDetail", () => {
 
     expect(screen.getByText("Dropped")).toBeInTheDocument();
   });
+
+  describe("contract calls", () => {
+    const rolledBackCall: TransactionHistoryEntry = {
+      ...sampleTransaction,
+      amount: 0,
+      data: "0x1234abcd",
+      status: false,
+      pendingStatus: "failed",
+      receiptStatusVerified: true,
+      paidFeesQrl: "0.000045262500211225",
+    };
+
+    it("explains a rolled-back contract call with the fee", () => {
+      renderComponent(rolledBackCall);
+
+      expect(screen.getByText("Rolled back")).toBeInTheDocument();
+      expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+      expect(
+        screen.getByText(
+          `The contract rolled this call back. Nothing was transferred. Only the network fee of ${getOptimalGasFee("0.000045262500211225")} was spent.`,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("explains a rolled-back call without a fee amount", () => {
+      renderComponent({
+        ...rolledBackCall,
+        paidFeesQrl: undefined,
+        gasUsed: "",
+        effectiveGasPrice: "",
+      });
+
+      expect(
+        screen.getByText(
+          "The contract rolled this call back. Nothing was transferred. Only the network fee was spent.",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps Failed for a plain send", () => {
+      renderComponent({
+        ...sampleTransaction,
+        status: false,
+        pendingStatus: "failed",
+        receiptStatusVerified: true,
+      });
+
+      expect(screen.getByText("Failed")).toBeInTheDocument();
+      expect(screen.queryByText("Rolled back")).not.toBeInTheDocument();
+    });
+  });
 });
