@@ -870,4 +870,113 @@ describe("TransactionDetail", () => {
 
     expect(screen.getByText("Dropped")).toBeInTheDocument();
   });
+
+  describe("contract calls", () => {
+    const rolledBackCall: TransactionHistoryEntry = {
+      ...sampleTransaction,
+      amount: 0,
+      data: "0x1234abcd",
+      status: false,
+      pendingStatus: "failed",
+      receiptStatusVerified: true,
+      paidFeesQrl: "0.000045262500211225",
+    };
+
+    it("explains a rolled-back contract call with the fee", () => {
+      renderComponent(rolledBackCall);
+
+      expect(screen.getByText("Rolled back")).toBeInTheDocument();
+      expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+      expect(
+        screen.getByText(
+          `The contract rolled this call back. Nothing was transferred. Only the network fee of ${getOptimalGasFee("0.000045262500211225")} was spent.`,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("explains a rolled-back call without a fee amount", () => {
+      renderComponent({
+        ...rolledBackCall,
+        paidFeesQrl: undefined,
+        gasUsed: "",
+        effectiveGasPrice: "",
+      });
+
+      expect(
+        screen.getByText(
+          "The contract rolled this call back. Nothing was transferred. Only the network fee was spent.",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("shows the fee alone as total cost and labels the amount for a rolled-back call that carried value", () => {
+      renderComponent({
+        ...rolledBackCall,
+        amount: "100.000000000000000000",
+      });
+
+      const fee = getOptimalGasFee("0.000045262500211225");
+      const totalCostRow = screen.getByText("Total Cost").parentElement;
+      expect(totalCostRow).toHaveTextContent(fee);
+      expect(totalCostRow).not.toHaveTextContent("100");
+      expect(screen.getByText("Amount (not transferred)")).toBeInTheDocument();
+      expect(screen.queryByText("Amount")).not.toBeInTheDocument();
+    });
+
+    it("labels the amount and charges the fee alone for a failed plain send with a receipt", () => {
+      renderComponent({
+        ...sampleTransaction,
+        amount: "100.000000000000000000",
+        status: false,
+        pendingStatus: "failed",
+        receiptStatusVerified: true,
+        paidFeesQrl: "0.000021",
+      });
+
+      expect(screen.getByText("Failed")).toBeInTheDocument();
+      expect(screen.getByText("Amount (not transferred)")).toBeInTheDocument();
+      expect(
+        screen.getByText("Total Cost").parentElement,
+      ).not.toHaveTextContent("100");
+    });
+
+    it("keeps the plain Amount label for a failed send the node refused", () => {
+      renderComponent({
+        ...sampleTransaction,
+        status: false,
+        pendingStatus: "failed",
+      });
+
+      expect(screen.getByText("Amount")).toBeInTheDocument();
+    });
+
+    it("reads an explorer row to the swap escrow as a rolled-back call", () => {
+      renderComponent({
+        ...rolledBackCall,
+        data: undefined,
+        to: "QBFe68340591f82a68C2258FA2cE7C02Be21E5fc7Bb71615B56a509db4985e863D9243B74da6335C065e257A01d40354653E551907338DBDc7A6b342ea2274437",
+      });
+
+      expect(screen.getByText("Rolled back")).toBeInTheDocument();
+    });
+
+    it("keeps its own label for a dropped contract call", () => {
+      renderComponent({ ...rolledBackCall, pendingStatus: "dropped" });
+
+      expect(screen.getByText("Dropped")).toBeInTheDocument();
+      expect(screen.queryByText("Rolled back")).not.toBeInTheDocument();
+    });
+
+    it("keeps Failed for a plain send", () => {
+      renderComponent({
+        ...sampleTransaction,
+        status: false,
+        pendingStatus: "failed",
+        receiptStatusVerified: true,
+      });
+
+      expect(screen.getByText("Failed")).toBeInTheDocument();
+      expect(screen.queryByText("Rolled back")).not.toBeInTheDocument();
+    });
+  });
 });

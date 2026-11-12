@@ -1,3 +1,4 @@
+import { isRolledBackContractCall } from "@/functions/contractCallEntry";
 import { historyEntryView } from "@/utilities/storageViews";
 import { LOCK_MANAGER_MESSAGES } from "@/scripts/lockManager/lockManager";
 import {
@@ -300,6 +301,8 @@ class TransactionHistoryStore {
             amount: entry.amount,
             tokenSymbol: entry.tokenSymbol,
             txHash: entry.transactionHash,
+            rolledBackContractCall:
+              isRolledBackContractCall(entry) || undefined,
           },
         })
         .catch(() => {});
@@ -381,6 +384,9 @@ class TransactionHistoryStore {
                     amount: tx.amount,
                     tokenSymbol: tx.tokenSymbol,
                     txHash: tx.transactionHash,
+                    rolledBackContractCall:
+                      isRolledBackContractCall({ ...tx, ...update }) ||
+                      undefined,
                   },
                 })
                 .catch(() => {});

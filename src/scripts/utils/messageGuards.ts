@@ -17,4 +17,6 @@ export const isTransactionNotificationData = (
     typeof value.amount === "string" ||
     typeof value.amount === "number") &&
   (value.tokenSymbol === undefined || typeof value.tokenSymbol === "string") &&
-  (value.txHash === undefined || typeof value.txHash === "string");
+  (value.txHash === undefined || typeof value.txHash === "string") &&
+  (value.rolledBackContractCall === undefined ||
+    typeof value.rolledBackContractCall === "boolean");

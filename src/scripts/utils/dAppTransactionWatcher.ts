@@ -1,3 +1,4 @@
+import { isRolledBackContractCall } from "@/functions/contractCallEntry";
 import { historyEntryView } from "@/utilities/storageViews";
 import StorageUtil from "@/utilities/storageUtil";
 import { walletSessionStorage } from "@/utilities/profileStorage";
@@ -135,6 +136,7 @@ async function notifyWatchOutcome(
   watch: DAppTransactionWatch,
   entry: TransactionHistoryEntry | undefined,
   status: "confirmed" | "failed",
+  rolledBackContractCall: boolean,
 ): Promise<void> {
   // While locked, history is still updated (the caller does that before
   // calling here); only the notification is withheld. Checked the same way
@@ -153,6 +155,7 @@ async function notifyWatchOutcome(
     amount: entry?.amount,
     tokenSymbol: entry?.tokenSymbol,
     txHash: watch.hash,
+    rolledBackContractCall: rolledBackContractCall || undefined,
   });
 }
 
@@ -223,10 +226,13 @@ export async function handleDAppTransactionWatchAlarm(): Promise<void> {
           update,
         );
         if (!alreadyTerminal) {
+          const entryView = entry ? historyEntryView(entry) : undefined;
           await notifyWatchOutcome(
             watch,
-            entry ? historyEntryView(entry) : undefined,
+            entryView,
             update.pendingStatus === "confirmed" ? "confirmed" : "failed",
+            entryView !== undefined &&
+              isRolledBackContractCall({ ...entryView, ...update }),
           );
         }
         resolvedHashes.add(watch.hash.toLowerCase());

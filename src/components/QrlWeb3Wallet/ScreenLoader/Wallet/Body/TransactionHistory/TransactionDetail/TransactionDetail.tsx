@@ -5,6 +5,10 @@ import { getExplorerApiBase } from "@/configuration/assetDiscoveryConfig";
 import { isFiatChain } from "@/configuration/pinnedNetworks";
 import { NATIVE_TOKEN_UNITS_OF_GAS } from "@/constants/nativeToken";
 import { formatFiatCompact } from "@/functions/formatFiat";
+import {
+  isFailedOnChainWithoutTransfer,
+  isRolledBackContractCall,
+} from "@/functions/contractCallEntry";
 import { formatTransactionAmount } from "@/functions/formatTransactionAmount";
 import { getOptimalGasFee } from "@/functions/getOptimalGasFee";
 import { transactionFailureUpdate } from "@/functions/transactionOutcome";
@@ -424,6 +428,8 @@ const TransactionDetail = observer(() => {
   const badgeConfig =
     STATUS_BADGE_CONFIG[displayStatus] ?? DEFAULT_BADGE_CONFIG;
   const isPending = displayStatus === "pending";
+  const isRolledBack = isRolledBackContractCall(transaction);
+  const movedNothing = isFailedOnChainWithoutTransfer(transaction);
   const canReplace = isPending && transaction.nonce !== undefined;
 
   // Explorer-sourced entries have no gas breakdown, only the fee the
@@ -439,11 +445,12 @@ const TransactionDetail = observer(() => {
   // A token transfer costs the tokens and, on top, a fee in the native coin.
   // The two have different units, so the fee stays on its own here and the
   // row below shows them side by side.
+  // A call that failed on chain moved nothing: its cost is the fee alone.
   const isTokenTransfer = transaction.isZrc20Token;
   const totalCost =
     totalGasFeeQrl === undefined
       ? undefined
-      : isTokenTransfer
+      : isTokenTransfer || movedNothing
         ? totalGasFeeQrl
         : new BigNumber(String(amount)).plus(totalGasFeeQrl).toFixed();
 
@@ -519,9 +526,23 @@ const TransactionDetail = observer(() => {
                 className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-medium ${badgeConfig.className}`}
               >
                 {isPending && <Loader className="mr-1 h-3 w-3 animate-spin" />}
-                {t(badgeConfig.labelKey)}
+                {t(
+                  isRolledBack
+                    ? "txDetail.statusRolledBack"
+                    : badgeConfig.labelKey,
+                )}
               </div>
             </div>
+
+            {isRolledBack && (
+              <p className="text-sm text-muted-foreground">
+                {totalGasFeeQrl === undefined
+                  ? t("txDetail.rolledBackNoticeNoFee")
+                  : t("txDetail.rolledBackNotice", {
+                      fee: getOptimalGasFee(totalGasFeeQrl),
+                    })}
+              </p>
+            )}
 
             {/* Speed Up / Cancel buttons for pending TXs */}
             {canReplace && (
@@ -572,12 +593,16 @@ const TransactionDetail = observer(() => {
 
             <div className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">
-                {t("txDetail.amount")}
+                {t(
+                  movedNothing
+                    ? "txDetail.amountNotTransferred"
+                    : "txDetail.amount",
+                )}
               </span>
               <span className="break-all font-numeric text-lg font-bold">
                 {exactAmount} {tokenSymbol}
               </span>
-              {fiatAmount && (
+              {fiatAmount && !movedNothing && (
                 <span className="font-numeric text-xs text-muted-foreground">
                   {fiatAmount}
                 </span>

@@ -351,4 +351,103 @@ describe("TransactionHistoryItem", () => {
 
     expect(screen.queryByText(/≈/)).not.toBeInTheDocument();
   });
+
+  it("should label an outgoing contract call and keep Confirmed", () => {
+    renderComponent(makeSampleEntry({ data: "0x1234abcd", amount: 0 }));
+
+    expect(screen.getByText("Contract call")).toBeInTheDocument();
+    expect(screen.queryByText("Send")).not.toBeInTheDocument();
+    expect(screen.getByText("Confirmed")).toBeInTheDocument();
+  });
+
+  it("should show a rolled-back contract call as Rolled back", () => {
+    renderComponent(
+      makeSampleEntry({
+        data: "0x1234abcd",
+        amount: 0,
+        status: false,
+        pendingStatus: "failed",
+        receiptStatusVerified: true,
+      }),
+    );
+
+    expect(screen.getByText("Contract call")).toBeInTheDocument();
+    expect(screen.getByText("Rolled back")).toBeInTheDocument();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+  });
+
+  it("should read an explorer row to the swap escrow as a rolled-back contract call", () => {
+    renderComponent(
+      makeSampleEntry({
+        to: "QBFe68340591f82a68C2258FA2cE7C02Be21E5fc7Bb71615B56a509db4985e863D9243B74da6335C065e257A01d40354653E551907338DBDc7A6b342ea2274437",
+        chainId: "0x301825",
+        amount: 0,
+        status: false,
+        pendingStatus: "failed",
+        receiptStatusVerified: true,
+      }),
+    );
+
+    expect(screen.getByText("Contract call")).toBeInTheDocument();
+    expect(screen.getByText("Rolled back")).toBeInTheDocument();
+  });
+
+  it.each(["replaced", "cancelled", "dropped"] as const)(
+    "should keep the %s label on a contract call",
+    (pendingStatus) => {
+      renderComponent(
+        makeSampleEntry({
+          data: "0x1234abcd",
+          status: false,
+          pendingStatus,
+          receiptStatusVerified: true,
+        }),
+      );
+
+      expect(screen.getByText("Contract call")).toBeInTheDocument();
+      expect(screen.queryByText("Rolled back")).not.toBeInTheDocument();
+    },
+  );
+
+  it("should keep Send and Failed for a failed plain send", () => {
+    renderComponent(
+      makeSampleEntry({
+        amount: 0,
+        status: false,
+        pendingStatus: "failed",
+        receiptStatusVerified: true,
+      }),
+    );
+
+    expect(screen.getByText("Send")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+
+  it("should keep Failed for a call the node refused before it was mined", () => {
+    renderComponent(
+      makeSampleEntry({
+        data: "0x1234abcd",
+        status: false,
+        pendingStatus: "failed",
+        submissionRejected: true,
+      }),
+    );
+
+    expect(screen.getByText("Contract call")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+
+  it("should leave an incoming contract transfer unchanged", () => {
+    renderComponent(
+      makeSampleEntry({
+        from: OTHER_ACCOUNT,
+        to: ACTIVE_ACCOUNT,
+        isInternal: true,
+        amount: "2.23875",
+      }),
+    );
+
+    expect(screen.getByText("Contract transfer")).toBeInTheDocument();
+    expect(screen.getByText("Confirmed")).toBeInTheDocument();
+  });
 });
