@@ -24,6 +24,7 @@ import {
   POPUP_RESPONSE_TIMEOUT_MS,
   restrictedMethodsMiddleware,
 } from "./restrictedMethodsMiddleware";
+import { showApprovalWaitingNotification } from "../utils/approvalNotification";
 import type { DAppResponseType } from "./middlewareTypes";
 
 const { mockIsLocked, mockCheckDomain, mockOpenApprovalSurface } = vi.hoisted(
@@ -56,7 +57,6 @@ vi.mock("../utils/approvalSurface", () => ({
   openApprovalSurface: mockOpenApprovalSurface,
 }));
 
-const opts = { type: "basic" as const, iconUrl: "i", title: "t", message: "m" };
 const ORIGIN_A = "https://a.example";
 const ORIGIN_B = "https://b.example";
 const DAPPS_KEY = profileStorageKey("DAPPS");
@@ -483,9 +483,7 @@ describe("restricted method approval slot and timers", () => {
   });
 
   it("clears the approval-waiting notification when the slot is released", async () => {
-    vi.spyOn(browser.notifications, "getAll").mockResolvedValue({
-      "approval-waiting-9": opts,
-    });
+    await showApprovalWaitingNotification(9);
     const clear = vi.spyOn(browser.notifications, "clear");
     const first = restrictedMethodsMiddleware(
       buildRequest(ORIGIN_A, 11),
@@ -500,7 +498,9 @@ describe("restricted method approval slot and timers", () => {
     await first;
 
     await vi.waitFor(() => {
-      expect(clear).toHaveBeenCalledWith("approval-waiting-9");
+      expect(clear).toHaveBeenCalledWith(
+        expect.stringMatching(/^approval-waiting-9-\d+$/),
+      );
     });
   });
 

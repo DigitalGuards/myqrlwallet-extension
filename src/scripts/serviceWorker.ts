@@ -26,7 +26,10 @@ import {
   PHISHING_ALARM_NAME,
   setupPhishingRefreshAlarm,
 } from "./phishing/phishingDetector";
-import { handleApprovalNotificationClicked } from "./utils/approvalNotification";
+import {
+  clearApprovalWaitingNotifications,
+  handleApprovalNotificationClicked,
+} from "./utils/approvalNotification";
 import { showTransactionNotification } from "./utils/transactionNotification";
 import {
   isNamedMessage,
@@ -191,6 +194,8 @@ const prepareListeners = () => {
   } catch {
     // A browser without the notifications API must not stop the worker.
   }
+  // An approval that died with the previous worker leaves its notification.
+  void clearApprovalWaitingNotifications();
   // Existing installs move to the side panel and get the one-time notice.
   browser.runtime.onInstalled.addListener((details) => {
     handleSidePanelInstalled(details.reason).catch(() => {

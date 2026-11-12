@@ -1,6 +1,7 @@
 import { isRecord } from "@/utilities/storageGuards";
 import browser from "webextension-polyfill";
 import { EXTENSION_MESSAGES } from "../constants/streamConstants";
+import { mintNonce } from "./mintNonce";
 import { isTrustedExtensionSender } from "./trustedSender";
 
 // How long the worker waits for the panel pages to answer. A panel that is
@@ -20,14 +21,6 @@ type PendingProbe = {
 };
 
 const pendingProbes = new Map<string, PendingProbe>();
-
-const mintNonce = (): string => {
-  const bytes = new Uint8Array(16);
-  globalThis.crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
-    "",
-  );
-};
 
 const isSidePanelUrl = (url: string | undefined): boolean => {
   if (url === undefined) return false;

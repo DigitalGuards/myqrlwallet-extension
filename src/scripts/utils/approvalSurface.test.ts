@@ -6,6 +6,7 @@ import {
   handleApprovalWindowRemoved,
   openApprovalSurface,
 } from "./approvalSurface";
+import { resetApprovalNotificationForTests } from "./approvalNotification";
 import {
   handleSidePanelOpenMessage,
   resetSidePanelOpenerForTests,
@@ -435,6 +436,7 @@ describe("openApprovalSurface", () => {
 
     afterEach(() => {
       createNotification.mockClear();
+      resetApprovalNotificationForTests();
       runtimeSendMessage.mockReset();
       runtimeSendMessage.mockResolvedValue(undefined);
     });
@@ -517,6 +519,15 @@ describe("openApprovalSurface", () => {
       expect(sidePanelOpen).not.toHaveBeenCalled();
     });
 
+    it("does not probe the panels for a repeat request", async () => {
+      panelAnswers(false);
+
+      await openApprovalSurface({ tabId: 5, announce: false });
+
+      expect(runtimeSendMessage).not.toHaveBeenCalled();
+      expect(createNotification).not.toHaveBeenCalled();
+    });
+
     it("posts no notification for a repeat request of the pending approval", async () => {
       panelAnswers(false);
       getLastFocused.mockResolvedValue({ ...windowProperties, id: 9 });
@@ -553,7 +564,7 @@ describe("openApprovalSurface", () => {
       expect(updateWindow).not.toHaveBeenCalled();
       expect(createNotification).toHaveBeenCalledTimes(1);
       expect(createNotification).toHaveBeenCalledWith(
-        "approval-waiting-9",
+        "approval-waiting-9-1",
         expect.objectContaining({ type: "basic", title: "Approval waiting" }),
       );
     });

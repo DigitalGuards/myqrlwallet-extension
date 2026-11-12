@@ -158,10 +158,10 @@ export const openApprovalSurface = async ({
     // never shows a hidden panel: the panel is announced by a notification,
     // and selecting the notification shows it.
     const hiddenIn =
-      tabId === undefined
+      tabId === undefined || !announce
         ? undefined
         : await hiddenPanelWindow(tabId, livePanels);
-    if (hiddenIn !== undefined && announce) {
+    if (hiddenIn !== undefined) {
       // One notification per waiting approval: a repeat request for the
       // approval that is already pending passes announce: false.
       await showApprovalWaitingNotification(hiddenIn);

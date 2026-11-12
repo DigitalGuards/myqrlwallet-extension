@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import browser from "webextension-polyfill";
 import { profileStorageKey } from "@/utilities/profileStorage";
 import {
+  clearAnnouncedApprovalNotification,
   clearApprovalWaitingNotifications,
   handleApprovalNotificationClicked,
+  resetApprovalNotificationForTests,
   showApprovalWaitingNotification,
 } from "./approvalNotification";
 
@@ -28,6 +30,7 @@ describe("showApprovalWaitingNotification", () => {
   beforeEach(() => {
     create.mockClear();
     create.mockResolvedValue("id");
+    resetApprovalNotificationForTests();
     setSettings({});
   });
 
@@ -36,9 +39,41 @@ describe("showApprovalWaitingNotification", () => {
 
     expect(create).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledWith(
-      "approval-waiting-9",
+      "approval-waiting-9-1",
       expect.objectContaining({ type: "basic", title: "Approval waiting" }),
     );
+  });
+
+  it("clears exactly the notification this approval posted", async () => {
+    clear.mockClear();
+    clear.mockResolvedValue(true);
+    await showApprovalWaitingNotification(9);
+    clearAnnouncedApprovalNotification();
+    await showApprovalWaitingNotification(9);
+    clearAnnouncedApprovalNotification();
+
+    expect(clear.mock.calls).toEqual([
+      ["approval-waiting-9-1"],
+      ["approval-waiting-9-2"],
+    ]);
+  });
+
+  it("clears nothing for an approval that posted nothing", () => {
+    clear.mockClear();
+
+    clearAnnouncedApprovalNotification();
+
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it("clears an id once", async () => {
+    clear.mockClear();
+    clear.mockResolvedValue(true);
+    await showApprovalWaitingNotification(9);
+    clearAnnouncedApprovalNotification();
+    clearAnnouncedApprovalNotification();
+
+    expect(clear).toHaveBeenCalledTimes(1);
   });
 
   it("stays quiet when the user turned notifications off", async () => {
@@ -68,12 +103,15 @@ describe("clearApprovalWaitingNotifications", () => {
   });
 
   it("clears only the approval notifications", async () => {
-    getAll.mockResolvedValue({ "approval-waiting-9": opts, "tx-0xabc": opts });
+    getAll.mockResolvedValue({
+      "approval-waiting-9-1": opts,
+      "tx-0xabc": opts,
+    });
 
     await clearApprovalWaitingNotifications();
 
     expect(clear).toHaveBeenCalledTimes(1);
-    expect(clear).toHaveBeenCalledWith("approval-waiting-9");
+    expect(clear).toHaveBeenCalledWith("approval-waiting-9-1");
   });
 
   it("never throws", async () => {
@@ -99,6 +137,12 @@ describe("handleApprovalNotificationClicked", () => {
     await vi.waitFor(() => {
       expect(clear).toHaveBeenCalledWith("approval-waiting-9");
     });
+  });
+
+  it("reads the window from an id with a counter", () => {
+    handleApprovalNotificationClicked("approval-waiting-12-3");
+
+    expect(open).toHaveBeenCalledWith({ windowId: 12 });
   });
 
   it("ignores other notifications", () => {

@@ -27,7 +27,7 @@ import {
 } from "../constants/streamConstants";
 import LockManager from "../lockManager/lockManager";
 import { checkDomain } from "../phishing/phishingDetector";
-import { clearApprovalWaitingNotifications } from "../utils/approvalNotification";
+import { clearAnnouncedApprovalNotification } from "../utils/approvalNotification";
 import { claimApprovalSlot, releaseApprovalSlot } from "../utils/approvalSlot";
 import { openApprovalSurface } from "../utils/approvalSurface";
 import { isTrustedExtensionSender } from "../utils/trustedSender";
@@ -957,7 +957,7 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
       // a hostile page can produce on demand, so that origin backs off
       // before it may take the slot again.
       releaseApprovalSlot({ startCooldown: approvalWasRefused });
-      void clearApprovalWaitingNotifications();
+      clearAnnouncedApprovalNotification();
     }
   } else {
     next();
