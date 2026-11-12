@@ -21,6 +21,7 @@ const mockedBrowser = {
   },
   alarms: {
     create: vi.fn().mockResolvedValue(undefined),
+    getAll: vi.fn().mockResolvedValue({}),
     clear: vi.fn().mockResolvedValue(true),
     get: vi.fn().mockResolvedValue(null),
     onAlarm: {
@@ -81,9 +82,16 @@ const mockedBrowser = {
     setBadgeText: vi.fn().mockResolvedValue(undefined),
     setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
   },
+  notifications: {
+    create: vi.fn().mockResolvedValue("id"),
+    getAll: vi.fn().mockResolvedValue({}),
+    clear: vi.fn().mockResolvedValue(true),
+    onClicked: { addListener: vi.fn(), removeListener: vi.fn() },
+  },
   windows: {
     create: vi.fn().mockResolvedValue({ id: 77 }),
     update: vi.fn().mockResolvedValue({}),
+    getCurrent: vi.fn().mockResolvedValue({ id: 9 }),
     getLastFocused: vi
       .fn()
       .mockResolvedValue({ left: 0, top: 0, width: 1280, height: 800 }),

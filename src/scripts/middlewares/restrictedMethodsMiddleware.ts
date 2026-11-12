@@ -27,6 +27,7 @@ import {
 } from "../constants/streamConstants";
 import LockManager from "../lockManager/lockManager";
 import { checkDomain } from "../phishing/phishingDetector";
+import { clearAnnouncedApprovalNotification } from "../utils/approvalNotification";
 import { claimApprovalSlot, releaseApprovalSlot } from "../utils/approvalSlot";
 import { openApprovalSurface } from "../utils/approvalSurface";
 import { isTrustedExtensionSender } from "../utils/trustedSender";
@@ -765,7 +766,10 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
         // Raise the surface for the tab that owns the pending request. The
         // requesting tab's own id would put another site's approval prompt
         // in this tab's side panel.
-        await openApprovalSurface({ tabId: slotClaim.pendingTabId });
+        await openApprovalSurface({
+          tabId: slotClaim.pendingTabId,
+          announce: false,
+        });
       } finally {
         res.error = providerErrors.unsupportedMethod({
           message: "A request is already pending",
@@ -953,6 +957,7 @@ export const restrictedMethodsMiddleware: RestrictedMethodsMiddleware = async (
       // a hostile page can produce on demand, so that origin backs off
       // before it may take the slot again.
       releaseApprovalSlot({ startCooldown: approvalWasRefused });
+      clearAnnouncedApprovalNotification();
     }
   } else {
     next();
