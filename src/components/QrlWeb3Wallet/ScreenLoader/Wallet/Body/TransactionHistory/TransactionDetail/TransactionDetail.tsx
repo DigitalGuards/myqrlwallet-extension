@@ -441,11 +441,12 @@ const TransactionDetail = observer(() => {
   // A token transfer costs the tokens and, on top, a fee in the native coin.
   // The two have different units, so the fee stays on its own here and the
   // row below shows them side by side.
+  // A rolled-back contract call moved nothing: its cost is the fee alone.
   const isTokenTransfer = transaction.isZrc20Token;
   const totalCost =
     totalGasFeeQrl === undefined
       ? undefined
-      : isTokenTransfer
+      : isTokenTransfer || isRolledBack
         ? totalGasFeeQrl
         : new BigNumber(String(amount)).plus(totalGasFeeQrl).toFixed();
 

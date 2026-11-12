@@ -405,6 +405,44 @@ describe("TransactionHistoryStore", () => {
     store.stopPolling();
   });
 
+  it("sends the rolled-back flag when a polled contract call reverts", async () => {
+    const pendingCall = makeSampleEntry({
+      pendingStatus: "pending",
+      transactionHash: "0xcall1",
+      data: "0x1234abcd",
+    });
+    const mockQrlInstance = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        transactionHash: "0xcall1",
+        status: BigInt(0),
+        blockNumber: BigInt(200),
+        gasUsed: BigInt(21000),
+        effectiveGasPrice: BigInt(2000000000),
+      }),
+    };
+    const store = new TransactionHistoryStore();
+    store.transactions = [pendingCall];
+    mockGetTransactionHistory.mockResolvedValue([pendingCall]);
+    mockedBrowser.runtime.sendMessage.mockClear();
+
+    store.startPolling(
+      "Q20B714091cF2a62DADda2847803e3f1B9D2D3779",
+      mockQrlInstance,
+    );
+    vi.advanceTimersByTime(10000);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mockedBrowser.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "failed",
+          rolledBackContractCall: true,
+        }),
+      }),
+    );
+    store.stopPolling();
+  });
+
   it("skips the notification, but still refreshes the entry, when it was already confirmed out-of-band", async () => {
     // Mirrors dAppTransactionWatcher.ts's own guard against the mirror-image
     // race: the service worker's dApp-transaction watcher can confirm a

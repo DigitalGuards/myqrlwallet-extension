@@ -909,6 +909,35 @@ describe("TransactionDetail", () => {
       ).toBeInTheDocument();
     });
 
+    it("shows the fee alone as total cost for a rolled-back call that carried value", () => {
+      renderComponent({
+        ...rolledBackCall,
+        amount: "100.000000000000000000",
+      });
+
+      expect(
+        screen.getAllByText(getOptimalGasFee("0.000045262500211225")),
+      ).toHaveLength(2);
+      expect(screen.queryByText(/^100\.0000/)).not.toBeInTheDocument();
+    });
+
+    it("reads an explorer row to the swap escrow as a rolled-back call", () => {
+      renderComponent({
+        ...rolledBackCall,
+        data: undefined,
+        to: "QBFe68340591f82a68C2258FA2cE7C02Be21E5fc7Bb71615B56a509db4985e863D9243B74da6335C065e257A01d40354653E551907338DBDc7A6b342ea2274437",
+      });
+
+      expect(screen.getByText("Rolled back")).toBeInTheDocument();
+    });
+
+    it("keeps its own label for a dropped contract call", () => {
+      renderComponent({ ...rolledBackCall, pendingStatus: "dropped" });
+
+      expect(screen.getByText("Dropped")).toBeInTheDocument();
+      expect(screen.queryByText("Rolled back")).not.toBeInTheDocument();
+    });
+
     it("keeps Failed for a plain send", () => {
       renderComponent({
         ...sampleTransaction,

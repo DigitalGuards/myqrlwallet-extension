@@ -53,6 +53,42 @@ describe("showTransactionNotification", () => {
     );
   });
 
+  it("says a contract call was rolled back and only the fee was spent", async () => {
+    await showTransactionNotification({
+      status: "failed",
+      amount: 0,
+      tokenSymbol: "Quanta",
+      txHash: "0xabc",
+      rolledBackContractCall: true,
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      "tx-0xabc",
+      expect.objectContaining({
+        title: "Contract call rolled back",
+        message: "Nothing was transferred. Only the network fee was spent.",
+      }),
+    );
+  });
+
+  it("keeps the failure wording when the call was not rolled back", async () => {
+    await showTransactionNotification({
+      status: "failed",
+      amount: "1",
+      tokenSymbol: "Quanta",
+      txHash: "0xabc",
+      rolledBackContractCall: false,
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      "tx-0xabc",
+      expect.objectContaining({
+        title: "Transaction Failed",
+        message: "Your transaction of 1 Quanta failed.",
+      }),
+    );
+  });
+
   it("stays silent when notifications are switched off", async () => {
     getSettings.mockResolvedValue({ notificationsEnabled: false });
 

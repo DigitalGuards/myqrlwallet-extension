@@ -69,6 +69,18 @@ describe("isRolledBackContractCall", () => {
     ).toBe(true);
   });
 
+  it("counts an explorer row to a pinned escrow that has no data", () => {
+    expect(
+      isRolledBackContractCall({
+        ...base,
+        to: ESCROW,
+        status: false,
+        pendingStatus: "failed",
+        receiptStatusVerified: true,
+      }),
+    ).toBe(true);
+  });
+
   it("does not count a call the node refused before it was mined", () => {
     expect(
       isRolledBackContractCall({

@@ -6,6 +6,8 @@ export type TransactionNotificationData = {
   amount?: string | number;
   tokenSymbol?: string;
   txHash?: string;
+  /** The chain rolled back a contract call: only the fee was spent. */
+  rolledBackContractCall?: boolean;
 };
 
 /**
@@ -27,11 +29,17 @@ export async function showTransactionNotification(
   ) {
     return;
   }
-  const { status, amount, tokenSymbol, txHash } = data;
+  const { status, amount, tokenSymbol, txHash, rolledBackContractCall } = data;
   const isConfirmed = status === "confirmed";
-  const title = isConfirmed ? "Transaction Confirmed" : "Transaction Failed";
-  const body =
-    amount !== undefined && tokenSymbol
+  const isRolledBack = !isConfirmed && rolledBackContractCall === true;
+  const title = isRolledBack
+    ? "Contract call rolled back"
+    : isConfirmed
+      ? "Transaction Confirmed"
+      : "Transaction Failed";
+  const body = isRolledBack
+    ? "Nothing was transferred. Only the network fee was spent."
+    : amount !== undefined && tokenSymbol
       ? `Your transaction of ${amount} ${tokenSymbol} ${isConfirmed ? "was confirmed" : "failed"}.`
       : `Your transaction ${isConfirmed ? "was confirmed" : "failed"}.`;
   try {
