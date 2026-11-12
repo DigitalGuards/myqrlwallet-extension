@@ -557,6 +557,8 @@ describe("phishingDetector lookalike precision (L-7)", () => {
     ["qrlwаllet.com", "qrlwallet.com"],
     // Cyrillic o (U+043E) for the latin o of zondscan.com.
     ["zоndscan.com", "zondscan.com"],
+    // Cyrillic o (U+043E) for the latin o of shorscan.com.
+    ["shоrscan.com", "shorscan.com"],
     // Cyrillic o twice, inside quantapool.com.
     ["quantapооl.com", "quantapool.com"],
   ])(

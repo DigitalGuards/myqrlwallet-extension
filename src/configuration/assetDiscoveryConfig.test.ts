@@ -5,7 +5,7 @@ describe("explorer API lookup", () => {
   it.each(["0x301825", "0X301825"])(
     "resolves the known chain %s",
     (chainId) => {
-      expect(getExplorerApiBase(chainId)).toBe("https://zondscan.com");
+      expect(getExplorerApiBase(chainId)).toBe("https://shorscan.com");
     },
   );
 

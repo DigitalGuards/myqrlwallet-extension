@@ -23,7 +23,7 @@ export type OnChainHistoryPage = {
   failed: boolean;
 };
 
-// One row of the zondscan /api/address/aggregate/:addr response,
+// One row of the ShorScan /api/address/aggregate/:addr response,
 // restricted to the fields the extension consumes.
 type ExplorerAggregateTx = {
   From?: string | null;
@@ -53,7 +53,7 @@ const isExplorerAggregateTx = (value: unknown): value is ExplorerAggregateTx =>
 
 // One row of the aggregate's internal-transactions list: value moved by
 // contract code (nested call frames), indexed by the explorer since
-// zondscan #162. Field names are capitalized by the handler.
+// ShorScan #162. Field names are capitalized by the handler.
 type ExplorerAggregateInternalTx = {
   From?: string | null;
   To?: string | null;

@@ -40,7 +40,7 @@ export type DiscoveredNFTCollection = {
 export const MAX_DISCOVERED_TOKENS = 50;
 export const MAX_DISCOVERED_COLLECTIONS = 50;
 
-// One row of the zondscan /api/address/:addr/tokens response, restricted
+// One row of the ShorScan /api/address/:addr/tokens response, restricted
 // to the fields the extension consumes.
 type ExplorerToken = {
   contractAddress: string;
@@ -61,7 +61,7 @@ const isExplorerToken = (value: unknown): value is ExplorerToken =>
       value.decimals >= 0 &&
       value.decimals <= 255));
 
-// One row of the zondscan /api/address/:addr/nfts response. The endpoint
+// One row of the ShorScan /api/address/:addr/nfts response. The endpoint
 // returns per-(contract, tokenID) rows joined with collection-level
 // metadata; collection discovery groups rows by contract, while
 // discoverOwnedNftTokens consumes the per-token rows directly.

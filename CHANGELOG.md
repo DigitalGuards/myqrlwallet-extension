@@ -4,6 +4,14 @@
 
 - Include the wallet descriptor in post-quantum signing responses so SDK verifiers can bind the public key to the claimed Q-address.
 
+### Fixed
+
+- Refuse add-network and typed-data signing requests the approval prompt cannot read with an invalid-params error before any prompt opens, and parse the typed-data payload before the seed is decrypted.
+
+### Changed
+
+- Use shorscan.com for explorer links, history, token and NFT discovery and the price fallback; a stored built-in testnet entry follows.
+
 ## [0.3.0](https://github.com/theQRL/qrl-web3-wallet/compare/v0.2.0...v0.3.0) (2026-05-07)
 
 ### Features

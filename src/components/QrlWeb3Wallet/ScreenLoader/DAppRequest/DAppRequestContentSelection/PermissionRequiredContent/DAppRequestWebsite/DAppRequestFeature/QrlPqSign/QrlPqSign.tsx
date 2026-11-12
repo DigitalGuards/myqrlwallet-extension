@@ -14,6 +14,8 @@ import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import {
   signMessage,
   signTypedData,
+  computeTypedDataDigest,
+  hexToBytes,
   parseTypedDataPayload,
 } from "@/functions/pqSigning";
 import { readApprovalParams } from "@/utilities/approvalGuards";
@@ -28,7 +30,7 @@ import { Buffer } from "buffer";
 import { Check, Copy, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 /**
  * Post-quantum dApp signing screen for `qrl_signMessage` and
@@ -71,14 +73,30 @@ const QrlPqSign = observer(() => {
   const { sanitized: challenge, hadHidden: hasHiddenChars } =
     sanitizeForDisplay(decodedChallenge);
 
-  const typedPayload = (() => {
+  // Parsed and validated once per request with the signer's own seed-free
+  // step (computeTypedDataDigest), and this one object is shown, gates
+  // Approve and is signed.
+  const typedPayload = useMemo(() => {
     if (!isTypedData) return undefined;
     try {
-      return parseTypedDataPayload(payload);
+      const parsed = parseTypedDataPayload(payload);
+      computeTypedDataDigest(parsed);
+      return parsed;
     } catch {
       return undefined;
     }
-  })();
+  }, [dAppRequestData]);
+
+  // signMessage needs a 0x-prefixed, even-length hex string.
+  const isSignableMessage = useMemo(() => {
+    if (isTypedData || typeof payload !== "string") return false;
+    try {
+      hexToBytes(payload);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [dAppRequestData]);
 
   // The ML-DSA digest binds the whole QRLDomain (hashStruct("QRLDomain",
   // ...)), so surface the fields that decide WHICH contract/chain the
@@ -116,9 +134,14 @@ const QrlPqSign = observer(() => {
     );
   }, [dAppRequestData]);
 
+  // A typed-data payload the prompt cannot parse shows nothing to approve,
+  // so Approve stays disabled, as it does for other unreadable requests.
+  const canApprove =
+    fromAddress !== "" &&
+    (isTypedData ? typedPayload !== undefined : isSignableMessage);
   useEffect(() => {
-    dAppRequestStore.setCanProceed(true);
-  }, []);
+    dAppRequestStore.setCanProceed(canApprove);
+  }, [canApprove]);
 
   const copyMessage = () => {
     void copy(challenge);
@@ -126,7 +149,11 @@ const QrlPqSign = observer(() => {
 
   const pqSign = async (record: ResponseRecorder) => {
     try {
-      if (!fromAddress || (!isTypedData && typeof payload !== "string")) {
+      if (!fromAddress) {
+        throw new Error("Invalid signing parameters");
+      }
+      // Nothing the signer would reject reaches seed decryption.
+      if (isTypedData ? !typedPayload : !isSignableMessage) {
         throw new Error("Invalid signing parameters");
       }
       const mnemonicPhrases = await lockStore.getMnemonicPhrases(fromAddress);
@@ -136,8 +163,8 @@ const QrlPqSign = observer(() => {
       if (!areAddressesEquivalent(fromAddress, addressFromMnemonic)) {
         throw new Error("Mnemonic phrases did not match with the address");
       }
-      const result = isTypedData
-        ? signTypedData(parseTypedDataPayload(payload), seed)
+      const result = typedPayload
+        ? signTypedData(typedPayload, seed)
         : signMessage(rawMessage, seed);
       record({ ...result });
     } catch (error) {

@@ -1,0 +1,329 @@
+import { mockedStore } from "@/__mocks__/mockedStore";
+import { StoreProvider } from "@/stores/store";
+import StorageUtil from "@/utilities/storageUtil";
+import { SWAP_VECTORS as V } from "@/functions/swapEscrowVectors";
+import {
+  encodeFunctionSignature,
+  encodeParameters,
+} from "@theqrl/web3-qrl-abi";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import CalldataSummary from "./CalldataSummary";
+
+const CONTRACT =
+  "QBFe68340591f82a68C2258FA2cE7C02Be21E5fc7Bb71615B56a509db4985e863D9243B74da6335C065e257A01d40354653E551907338DBDc7A6b342ea2274437";
+const OTHER_CONTRACT = `Q${"12".repeat(64)}`;
+const OWNER = `Q${"34".repeat(64)}`;
+
+// The vectors carry the refund time 1790000000 (a Unix second count).
+const TIMEOUT_S = 1790000000;
+const DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+};
+
+const call = (signature: string, types: string[], values: unknown[]) =>
+  `${encodeFunctionSignature(signature)}${encodeParameters(types, values).slice(2)}`;
+
+const renderSummary = (
+  data: string,
+  {
+    to = CONTRACT,
+    from = OWNER,
+    chainId,
+  }: { to?: string; from?: string; chainId?: string } = {},
+) => {
+  const store = mockedStore();
+  if (chainId !== undefined) {
+    store.qrlStore.qrlConnection.blockchain.chainId = chainId;
+  }
+  return render(
+    <StoreProvider value={store}>
+      <MemoryRouter>
+        <CalldataSummary data={data} contractAddress={to} fromAddress={from} />
+      </MemoryRouter>
+    </StoreProvider>,
+  );
+};
+
+const setNow = (seconds: number) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(seconds * 1000);
+};
+
+describe("CalldataSummary swap escrow", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(StorageUtil, "getTokenContractsList").mockResolvedValue([]);
+    vi.spyOn(StorageUtil, "getNFTCollectionsList").mockResolvedValue([]);
+    setNow(TIMEOUT_S - 3600);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("explains lockNative with the recipient, refund time and swap ID", async () => {
+    renderSummary(V.lockNative);
+
+    expect(
+      await screen.findByText("Lock funds in a swap escrow"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Locked for")).toBeInTheDocument();
+    expect(screen.getByText("Refundable after")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        new Date(TIMEOUT_S * 1000).toLocaleString(undefined, DATE_OPTIONS),
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Swap ID (hashlock)")).toBeInTheDocument();
+    expect(screen.getByTitle(V.H)).toHaveTextContent("0x1122334455...ccddeeff");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("Contract interaction")).not.toBeInTheDocument();
+    expect(screen.getByText("Contract")).toBeInTheDocument();
+    expect(screen.getByText("QuantaSwap swap escrow")).toBeInTheDocument();
+  });
+
+  it("keeps the raw data disclosure", async () => {
+    renderSummary(V.lockNative);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Show raw data" }),
+    );
+    expect(screen.getByText(V.lockNative)).toBeInTheDocument();
+  });
+
+  it("warns when the refund time has passed", async () => {
+    setNow(TIMEOUT_S + 10);
+    renderSummary(V.lockNative);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "already passed",
+    );
+  });
+
+  it("warns when the refund time is more than 30 days ahead", async () => {
+    setNow(TIMEOUT_S - 31 * 24 * 3600);
+    renderSummary(V.lockNative);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "more than 30 days away",
+    );
+  });
+
+  it("shows an unrepresentable time as raw seconds with a warning", async () => {
+    renderSummary(
+      call(
+        "lockNativeOpen(bytes32,uint256)",
+        ["bytes32", "uint256"],
+        [V.H, 10n ** 20n],
+      ),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("30 days");
+    expect(screen.getByText("100000000000000000000")).toBeInTheDocument();
+  });
+
+  it("says no recipient is fixed for lockTokenOpen and uses the imported token", async () => {
+    vi.spyOn(StorageUtil, "getTokenContractsList").mockResolvedValue([
+      { address: V.T, symbol: "MQW", decimals: 18, image: "" },
+    ]);
+    renderSummary(
+      call(
+        "lockTokenOpen(bytes32,address,uint256,uint256)",
+        ["bytes32", "address", "uint256", "uint256"],
+        [V.H, V.T, "2500000000000000000", TIMEOUT_S],
+      ),
+    );
+    expect(
+      await screen.findByText(
+        "Lock tokens in a swap escrow with no recipient yet",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No recipient is fixed yet. It can be set later."),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("2.5 MQW")).toBeInTheDocument();
+  });
+
+  it("shows base units for an unknown token in lockToken", async () => {
+    renderSummary(
+      call(
+        "lockToken(bytes32,address,address,uint256,uint256)",
+        ["bytes32", "address", "address", "uint256", "uint256"],
+        [V.H, V.B, V.T, 42n, TIMEOUT_S],
+      ),
+    );
+    expect(await screen.findByText("42 base units")).toBeInTheDocument();
+    expect(screen.getByText(/Unknown token/)).toBeInTheDocument();
+  });
+
+  it("says claim reveals the swap secret on chain", async () => {
+    renderSummary(V.claim);
+    expect(
+      await screen.findByText("Claim funds from a swap escrow"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/reveals the swap secret on chain/),
+    ).toBeInTheDocument();
+    expect(screen.getByTitle(V.P)).toBeInTheDocument();
+  });
+
+  it("says refund returns funds to the locker", async () => {
+    renderSummary(V.refund);
+    expect(
+      await screen.findByText(
+        "The funds return to the address that locked them.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the destination of a parked payout withdrawal", async () => {
+    renderSummary(V.withdraw);
+    expect(
+      await screen.findByText("Collect a parked payout"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Payout goes to")).toBeInTheDocument();
+    expect(await screen.findByText(/base units/)).toBeInTheDocument();
+  });
+
+  it("names the native coin for a zero token word", async () => {
+    renderSummary(V.withdrawNative);
+    expect(await screen.findByText("Quanta")).toBeInTheDocument();
+  });
+
+  it("falls back to the unknown view for malformed escrow calldata", async () => {
+    renderSummary(`${V.lockNative}00`);
+    expect(await screen.findByText("Contract interaction")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Function selector")).toBeInTheDocument();
+    });
+  });
+
+  it("shows the unknown view for the same calldata sent to another address", async () => {
+    renderSummary(V.lockNative, { to: OTHER_CONTRACT });
+    expect(await screen.findByText("Contract interaction")).toBeInTheDocument();
+    expect(screen.getByText("Function selector")).toBeInTheDocument();
+    expect(screen.getByText(/could not decode/)).toBeInTheDocument();
+    expect(
+      screen.queryByText("Lock funds in a swap escrow"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Refundable after")).not.toBeInTheDocument();
+    expect(screen.queryByText("Swap ID (hashlock)")).not.toBeInTheDocument();
+  });
+
+  it("shows the unknown view when the active chain differs", async () => {
+    renderSummary(V.claim, { chainId: "0x1" });
+    expect(await screen.findByText("Contract interaction")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Claim funds from a swap escrow"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/swap secret/)).not.toBeInTheDocument();
+  });
+
+  it("alerts when a withdrawal pays an address other than the sender", async () => {
+    renderSummary(V.withdraw);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This sends your payout to an address that is not the account you are sending from.",
+    );
+  });
+
+  it("raises no payout alert when the destination is the sender", async () => {
+    renderSummary(V.withdrawAll, { from: V.B });
+    await screen.findByText("Collect a parked payout");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("raises no payout alert for pushCredit", async () => {
+    renderSummary(V.pushCredit);
+    await screen.findByText("Deliver a parked payout");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("uses the new past-time copy", async () => {
+    setNow(TIMEOUT_S + 10);
+    renderSummary(V.lockNative);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This time has already passed. The swap escrow rejects a lock like this.",
+    );
+  });
+
+  it("adds the consequence notes for lock, claim and assign", async () => {
+    const lock = renderSummary(V.lockNative);
+    expect(
+      await screen.findByText(
+        "The recipient can claim these funds with the swap secret until the refund time.",
+      ),
+    ).toBeInTheDocument();
+    lock.unmount();
+
+    const claim = renderSummary(V.claim);
+    expect(
+      await screen.findByText(
+        "The payout goes to the recipient fixed in the swap, whoever sends this claim.",
+      ),
+    ).toBeInTheDocument();
+    claim.unmount();
+
+    renderSummary(V.assign);
+    expect(
+      await screen.findByText(
+        /After this the escrow can no longer be taken back early/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the whole parked balance for withdrawAll only", async () => {
+    const all = renderSummary(V.withdrawAll);
+    expect(
+      await screen.findByText("The whole parked balance"),
+    ).toBeInTheDocument();
+    all.unmount();
+
+    renderSummary(V.pushCredit);
+    await screen.findByText("Deliver a parked payout");
+    expect(
+      screen.queryByText("The whole parked balance"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("never shows the previous request's token for a replaced request", async () => {
+    vi.spyOn(StorageUtil, "getTokenContractsList").mockResolvedValue([
+      { address: V.T, symbol: "MQW", decimals: 18, image: "" },
+    ]);
+    const first = call(
+      "lockTokenOpen(bytes32,address,uint256,uint256)",
+      ["bytes32", "address", "uint256", "uint256"],
+      [V.H, V.T, "2500000000000000000", TIMEOUT_S],
+    );
+    const second = call(
+      "lockTokenOpen(bytes32,address,uint256,uint256)",
+      ["bytes32", "address", "uint256", "uint256"],
+      [V.H, V.A, "2500000000000000000", TIMEOUT_S],
+    );
+    const store = mockedStore();
+    const view = (data: string) => (
+      <StoreProvider value={store}>
+        <MemoryRouter>
+          <CalldataSummary
+            data={data}
+            contractAddress={CONTRACT}
+            fromAddress={OWNER}
+          />
+        </MemoryRouter>
+      </StoreProvider>
+    );
+    const { rerender } = render(view(first));
+    expect(await screen.findByText("2.5 MQW")).toBeInTheDocument();
+
+    rerender(view(second));
+    // The very first render after the swap must already be the unknown token.
+    expect(screen.queryByText("2.5 MQW")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("2500000000000000000 base units"),
+    ).toBeInTheDocument();
+  });
+});

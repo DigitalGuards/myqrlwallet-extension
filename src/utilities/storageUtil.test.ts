@@ -517,6 +517,113 @@ describe("StorageUtil", () => {
       expect(result[0].qrnsRegistryAddress).toBe(ownRegistry);
     });
 
+    it("moves the stored built-in testnet explorer from zondscan.com to shorscan.com", async () => {
+      const staleBuiltin = {
+        ...chain1,
+        chainId: V3_CHAIN_ID,
+        isCustomChain: false,
+        blockExplorerUrls: ["https://zondscan.com"],
+        defaultBlockExplorerUrl: "https://zondscan.com",
+      };
+      const customOnSameHost = {
+        ...chain2,
+        chainId: "0x3",
+        isCustomChain: true,
+        blockExplorerUrls: ["https://zondscan.com"],
+        defaultBlockExplorerUrl: "https://zondscan.com",
+      };
+      await StorageUtil.setAllBlockChains([staleBuiltin, customOnSameHost]);
+      let result = await StorageUtil.getAllBlockChains();
+      expect(result[0].blockExplorerUrls).toEqual(["https://shorscan.com"]);
+      expect(result[0].defaultBlockExplorerUrl).toBe("https://shorscan.com");
+      // Custom chains keep the explorer the user or dApp provided.
+      expect(result[1].blockExplorerUrls).toEqual(["https://zondscan.com"]);
+      expect(result[1].defaultBlockExplorerUrl).toBe("https://zondscan.com");
+
+      // A user-edited explorer on the built-in chain stays as it is.
+      await StorageUtil.setAllBlockChains([
+        {
+          ...staleBuiltin,
+          blockExplorerUrls: ["https://explorer.example"],
+          defaultBlockExplorerUrl: "https://explorer.example",
+        },
+      ]);
+      result = await StorageUtil.getAllBlockChains();
+      expect(result[0].blockExplorerUrls).toEqual(["https://explorer.example"]);
+      expect(result[0].defaultBlockExplorerUrl).toBe(
+        "https://explorer.example",
+      );
+    });
+
+    describe("legacy explorer rewrite guards", () => {
+      const legacy = {
+        blockExplorerUrls: ["https://zondscan.com"],
+        defaultBlockExplorerUrl: "https://zondscan.com",
+      };
+      const read = async (chain: object) => {
+        await StorageUtil.setAllBlockChains([{ ...chain1, ...chain }]);
+        return (await StorageUtil.getAllBlockChains())[0];
+      };
+
+      it("keeps a custom chain on the testnet chain id", async () => {
+        const result = await read({
+          ...legacy,
+          chainId: V3_CHAIN_ID,
+          isCustomChain: true,
+        });
+        expect(result.blockExplorerUrls).toEqual(["https://zondscan.com"]);
+        expect(result.defaultBlockExplorerUrl).toBe("https://zondscan.com");
+      });
+
+      it("keeps a built-in chain on another chain id", async () => {
+        const result = await read({
+          ...legacy,
+          chainId: "0x5",
+          isCustomChain: false,
+        });
+        expect(result.blockExplorerUrls).toEqual(["https://zondscan.com"]);
+        expect(result.defaultBlockExplorerUrl).toBe("https://zondscan.com");
+      });
+
+      it("rewrites the legacy entry of a two-URL list and the default follows", async () => {
+        const result = await read({
+          chainId: V3_CHAIN_ID,
+          isCustomChain: false,
+          blockExplorerUrls: ["https://zondscan.com", "https://other.example"],
+          defaultBlockExplorerUrl: "https://zondscan.com",
+        });
+        expect(result.blockExplorerUrls).toEqual([
+          "https://shorscan.com",
+          "https://other.example",
+        ]);
+        expect(result.defaultBlockExplorerUrl).toBe("https://shorscan.com");
+      });
+
+      it("rewrites an upper-case chain id", async () => {
+        const result = await read({
+          ...legacy,
+          chainId: V3_CHAIN_ID.replace("0x", "0X"),
+          isCustomChain: false,
+        });
+        expect(result.blockExplorerUrls).toEqual(["https://shorscan.com"]);
+        expect(result.defaultBlockExplorerUrl).toBe("https://shorscan.com");
+      });
+
+      it("rewrites the v3.zondscan.com value and drops the duplicate", async () => {
+        const result = await read({
+          chainId: V3_CHAIN_ID,
+          isCustomChain: false,
+          blockExplorerUrls: [
+            "https://v3.zondscan.com",
+            "https://zondscan.com",
+          ],
+          defaultBlockExplorerUrl: "https://v3.zondscan.com",
+        });
+        expect(result.blockExplorerUrls).toEqual(["https://shorscan.com"]);
+        expect(result.defaultBlockExplorerUrl).toBe("https://shorscan.com");
+      });
+    });
+
     it("ships the v3 QNS registry as a canonical QIP-55 address", () => {
       expect(toChecksumAddress(V3_QNS_REGISTRY)).toBe(V3_QNS_REGISTRY);
     });
