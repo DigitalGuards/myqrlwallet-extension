@@ -271,14 +271,20 @@ class LockManager {
   /**
    * Locking is the one path every other surface's state has to trust, so
    * the LOCKED timestamp is written first, durably, before anything else.
+   * The in-memory keys and the password are cleared even when that write
+   * fails: a lock that cannot be recorded must still lock. The error is
+   * passed on to the caller after the cleanup.
    * Safe to call on an already-locked wallet: clearing already-undefined
    * keys and an already-cleared alarm are both no-ops.
    */
   async lock(): Promise<void> {
-    await StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
-    this.clearDecryptedKeys();
-    this.walletPassword = undefined;
-    await this.clearAutoLockAlarm();
+    try {
+      await StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
+    } finally {
+      this.clearDecryptedKeys();
+      this.walletPassword = undefined;
+      await this.clearAutoLockAlarm();
+    }
   }
 
   /**

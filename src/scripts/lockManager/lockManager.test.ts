@@ -493,6 +493,23 @@ describe("LockManager", () => {
       await expect(LockManager.lock()).resolves.toBeUndefined();
       expect(() => LockManager.getDecryptedKeys()).toThrow();
     });
+
+    it("still clears keys, password and alarm when the LOCKED timestamp write fails", async () => {
+      unlock();
+      await LockManager.setupAutoLockAlarm();
+      const writeError = new Error("QUOTA_BYTES quota exceeded");
+      const spy = vi
+        .spyOn(StorageUtil, "updateLockStateTimeStamp")
+        .mockRejectedValueOnce(writeError);
+
+      await expect(LockManager.lock()).rejects.toBe(writeError);
+
+      expect(() => LockManager.getDecryptedKeys()).toThrow();
+      expect(LockManager.hasWalletPassword()).toBe(false);
+      expect(LockManager.isKeepAliveIntervalRunning()).toBe(false);
+      expect(alarmsStore.get(LockManager.AUTO_LOCK_ALARM)).toBeUndefined();
+      spy.mockRestore();
+    });
   });
 
   describe("resetWallet", () => {
