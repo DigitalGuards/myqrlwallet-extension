@@ -280,11 +280,17 @@ class LockManager {
   async lock(): Promise<void> {
     try {
       await StorageUtil.updateLockStateTimeStamp(LockState.LOCKED);
-    } finally {
+    } catch (error) {
       this.clearDecryptedKeys();
       this.walletPassword = undefined;
-      await this.clearAutoLockAlarm();
+      // The write error is the one the caller needs; an alarm error on
+      // this path must not replace it.
+      await this.clearAutoLockAlarm().catch(() => undefined);
+      throw error;
     }
+    this.clearDecryptedKeys();
+    this.walletPassword = undefined;
+    await this.clearAutoLockAlarm();
   }
 
   /**

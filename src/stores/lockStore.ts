@@ -580,23 +580,34 @@ class LockStore {
 
   async lock() {
     // LockManager.lock() (F6) writes the LOCKED timestamp itself, durably,
-    // before it clears anything, so by the time this message resolves
-    // every other open surface's readLockState() already sees it.
-    await browser.runtime.sendMessage({
-      name: LOCK_MANAGER_MESSAGES.LOCK,
-    });
-    const response: unknown = await browser.runtime.sendMessage({
-      name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
-    });
-    this.isLocked =
-      isRecord(response) && typeof response.isLocked === "boolean"
-        ? response.isLocked
-        : true;
-    // lock() closes the keep-alive port itself immediately here, on
-    // purpose: waiting on the port's own onDisconnect (or Chrome's idle
-    // timer) to eventually drop it would leave it open for a while after
-    // an explicit lock.
-    this.disconnectKeepAlive();
+    // before it clears anything, so when this message resolves every other
+    // open surface's readLockState() already sees it. When that write fails
+    // the worker still clears its keys and the message rejects: the worker
+    // is then locked although no timestamp was written. This surface reads
+    // the state back either way, so it shows the lock it asked for.
+    try {
+      await browser.runtime.sendMessage({
+        name: LOCK_MANAGER_MESSAGES.LOCK,
+      });
+    } finally {
+      let response: unknown;
+      try {
+        response = await browser.runtime.sendMessage({
+          name: LOCK_MANAGER_MESSAGES.IS_LOCKED,
+        });
+      } catch {
+        response = undefined;
+      }
+      this.isLocked =
+        isRecord(response) && typeof response.isLocked === "boolean"
+          ? response.isLocked
+          : true;
+      // lock() closes the keep-alive port itself immediately here, on
+      // purpose: waiting on the port's own onDisconnect (or Chrome's idle
+      // timer) to eventually drop it would leave it open for a while after
+      // an explicit lock.
+      this.disconnectKeepAlive();
+    }
   }
 
   /**
