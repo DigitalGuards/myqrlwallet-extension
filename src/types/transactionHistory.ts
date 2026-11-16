@@ -15,7 +15,7 @@ export type TransactionHistoryEntry = {
   tokenSymbol: string;
   tokenName: string;
   // Stored with every history entry, together with its earlier name
-  // (isQrc20Token); see utilities/storedNames.ts. It decides whether Speed Up
+  // (isZrc20Token); see utilities/storedNames.ts. It decides whether Speed Up
   // rebuilds a token transfer or a native one.
   isQrc20Token: boolean;
   tokenContractAddress: string;
