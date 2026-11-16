@@ -47,7 +47,7 @@ describe("NFTCollectionItem", () => {
             collection: {
               name: "Test Collection",
               symbol: "TST",
-              standard: "ZRC721" as const,
+              standard: "QRC721" as const,
               balance: 3,
             },
             error: "",
@@ -65,7 +65,7 @@ describe("NFTCollectionItem", () => {
               element={
                 <NFTCollectionItem
                   contractAddress={contractAddress}
-                  storedStandard="ZRC721"
+                  storedStandard="QRC721"
                   triggerReRender={triggerReRender}
                 />
               }
@@ -103,7 +103,7 @@ describe("NFTCollectionItem", () => {
                 collection: {
                   name: "Test Collection",
                   symbol: "TST",
-                  standard: "ZRC721" as const,
+                  standard: "QRC721" as const,
                   balance: 1,
                 },
                 error: "",
@@ -130,7 +130,7 @@ describe("NFTCollectionItem", () => {
                 collection: {
                   name: "",
                   symbol: "",
-                  standard: "ZRC721" as const,
+                  standard: "QRC721" as const,
                   balance: 1,
                 },
                 error: "",
@@ -245,7 +245,7 @@ describe("NFTCollectionItem", () => {
           name: "Current collection",
           symbol: "CUR",
           balance: 1,
-          standard: "ZRC721",
+          standard: "QRC721",
         },
         error: "",
       });
@@ -272,7 +272,7 @@ describe("NFTCollectionItem", () => {
           name: "Old collection",
           symbol: "OLD",
           balance: 9,
-          standard: "ZRC721",
+          standard: "QRC721",
         },
         error: "",
       });
@@ -282,7 +282,7 @@ describe("NFTCollectionItem", () => {
     expect(screen.queryByText("Old collection")).not.toBeInTheDocument();
   });
 
-  it("ignores a previous account's delayed ZRC1155 ownership count", async () => {
+  it("ignores a previous account's delayed QRC1155 ownership count", async () => {
     type Owned = Awaited<ReturnType<QrlStore["getOwnedNftTokens"]>>;
     let finish: ((owned: Owned) => void) | undefined;
     const pending = new Promise<Owned>((resolve) => {
@@ -291,7 +291,7 @@ describe("NFTCollectionItem", () => {
     const getNftCollectionDetails = vi
       .fn<QrlStore["getNftCollectionDetails"]>()
       .mockResolvedValue({
-        collection: { name: "Collection", symbol: "COL", standard: "ZRC1155" },
+        collection: { name: "Collection", symbol: "COL", standard: "QRC1155" },
         error: "",
       });
     const getOwnedNftTokens = vi

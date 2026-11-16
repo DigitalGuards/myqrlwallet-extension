@@ -23,7 +23,7 @@ type NFTGalleryItemProps = {
   tokenId: string;
   collectionName: string;
   standard?: NFTStandard;
-  // ERC-1155 per-id holding (decimal string); undefined for ZRC721.
+  // ERC-1155 per-id holding (decimal string); undefined for QRC721.
   balance?: string;
 };
 
@@ -32,7 +32,7 @@ const NFTGalleryItem = observer(
     contractAddress,
     tokenId,
     collectionName,
-    standard = "ZRC721",
+    standard = "QRC721",
     balance,
   }: NFTGalleryItemProps) => {
     const navigate = useNavigate();
@@ -67,7 +67,7 @@ const NFTGalleryItem = observer(
               // The 1155 spec's {id} templating applies to URIs inside
               // the metadata document too, not just uri() itself.
               const rawImage =
-                standard === "ZRC1155" && typeof meta.image === "string"
+                standard === "QRC1155" && typeof meta.image === "string"
                   ? substituteErc1155TokenId(meta.image, tokenId)
                   : meta.image;
               const nftMeta: NFTMetadata = {

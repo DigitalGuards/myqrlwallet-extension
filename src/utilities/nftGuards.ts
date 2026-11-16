@@ -36,8 +36,8 @@ export const isNFTGalleryState = (value: unknown): value is NFTGalleryState =>
   isOptionalText(value.collectionName) &&
   (value.standard === undefined ||
     value.standard === null ||
-    value.standard === "ZRC721" ||
-    value.standard === "ZRC1155");
+    value.standard === "QRC721" ||
+    value.standard === "QRC1155");
 
 export const isNFTTransferState = (value: unknown): value is NFTTransferState =>
   isRecord(value) &&

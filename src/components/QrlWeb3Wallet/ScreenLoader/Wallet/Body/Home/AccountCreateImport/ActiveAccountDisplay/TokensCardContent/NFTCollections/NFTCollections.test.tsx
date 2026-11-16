@@ -91,7 +91,7 @@ describe("NFTCollections", () => {
       address: `0x${i}`,
       name: `Col${i}`,
       symbol: `C${i}`,
-      standard: "ZRC721" as const,
+      standard: "QRC721" as const,
       image: "",
     }));
     mockGetNFTCollectionsList.mockResolvedValue(collections);
@@ -110,7 +110,7 @@ describe("NFTCollections", () => {
       address: `0x${i}`,
       name: `Col${i}`,
       symbol: `C${i}`,
-      standard: "ZRC721" as const,
+      standard: "QRC721" as const,
       image: "",
     }));
     mockGetNFTCollectionsList.mockResolvedValue(collections);
@@ -136,7 +136,7 @@ describe("NFTCollections", () => {
 
   it("should not show the empty state before the storage read resolves", async () => {
     let resolveStorage: (
-      value: Awaited<ReturnType<typeof StorageUtil.getNFTCollectionsList>>
+      value: Awaited<ReturnType<typeof StorageUtil.getNFTCollectionsList>>,
     ) => void = () => {};
     mockGetNFTCollectionsList.mockReturnValue(
       new Promise((resolve) => {
@@ -163,7 +163,7 @@ describe("NFTCollections", () => {
         address: `0x${i}`,
         name: `Col${i}`,
         symbol: `C${i}`,
-        standard: "ZRC721" as const,
+        standard: "QRC721" as const,
         image: "",
       })),
     );
@@ -188,6 +188,8 @@ describe("NFTCollections", () => {
       );
     });
     expect(onCountChange).not.toHaveBeenCalled();
-    expect(screen.queryByText("There are no NFT collections.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("There are no NFT collections."),
+    ).not.toBeInTheDocument();
   });
 });

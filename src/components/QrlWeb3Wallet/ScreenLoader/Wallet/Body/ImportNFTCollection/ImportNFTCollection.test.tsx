@@ -55,7 +55,7 @@ describe("ImportNFTCollection", () => {
         collection: {
           name: "Test Collection",
           symbol: "NFT",
-          standard: "ZRC721",
+          standard: "QRC721",
           balance: 2,
         },
         error: "",

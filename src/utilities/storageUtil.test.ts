@@ -127,7 +127,7 @@ const makeTxEntry = (
   amount: 2.5,
   tokenSymbol: "QRL",
   tokenName: "QRL",
-  isZrc20Token: false,
+  isQrc20Token: false,
   tokenContractAddress: "",
   tokenDecimals: 18,
   transactionHash: "0xtxhash1",
@@ -139,6 +139,15 @@ const makeTxEntry = (
   chainId: "0x1",
   ...overrides,
 });
+
+// A history entry as storage holds it from a version before the QRC-20
+// rename: the flag under its earlier name only. Seeds use this form.
+const makeStoredTxEntry = (
+  overrides: Partial<TransactionHistoryEntry> = {},
+) => {
+  const { isQrc20Token, ...rest } = makeTxEntry(overrides);
+  return { ...rest, isZrc20Token: isQrc20Token };
+};
 
 describe("StorageUtil", () => {
   let StorageUtil: typeof import("@/utilities/storageUtil").default;
@@ -798,7 +807,7 @@ describe("StorageUtil", () => {
 
     it("should store token details", async () => {
       const tokenDetails = {
-        isZrc20Token: true,
+        isQrc20Token: true,
         tokenContractAddress: "0xtoken",
         tokenDecimals: 18,
         tokenImage: "img.png",
@@ -1190,7 +1199,7 @@ describe("StorageUtil", () => {
       });
 
       it("should return stored transactions for account and chain", async () => {
-        const entries = [makeTxEntry()];
+        const entries = [makeStoredTxEntry()];
         localStore[profileStorageKey("TX_HISTORY")] = {
           ALL_TX_HISTORY: {
             [ACCOUNT]: { "0x1": { transactions: entries } },
@@ -1204,7 +1213,7 @@ describe("StorageUtil", () => {
       it("should return empty array for different account", async () => {
         localStore[profileStorageKey("TX_HISTORY")] = {
           ALL_TX_HISTORY: {
-            [ACCOUNT]: { "0x1": { transactions: [makeTxEntry()] } },
+            [ACCOUNT]: { "0x1": { transactions: [makeStoredTxEntry()] } },
           },
         };
 
@@ -1218,11 +1227,13 @@ describe("StorageUtil", () => {
         const entry = makeTxEntry();
         await StorageUtil.setTransactionHistoryEntry(ACCOUNT, entry);
 
-        expect(storedTransactions(ACCOUNT)).toEqual([entry]);
+        expect(storedTransactions(ACCOUNT)).toEqual([
+          { ...entry, isZrc20Token: entry.isQrc20Token },
+        ]);
       });
 
       it("should prepend new entry to existing transactions", async () => {
-        const existing = makeTxEntry({
+        const existing = makeStoredTxEntry({
           id: "0xold",
           transactionHash: "0xold",
         });
@@ -1239,11 +1250,14 @@ describe("StorageUtil", () => {
         });
         await StorageUtil.setTransactionHistoryEntry(ACCOUNT, newEntry);
 
-        expect(storedTransactions(ACCOUNT)).toEqual([newEntry, existing]);
+        expect(storedTransactions(ACCOUNT)).toEqual([
+          { ...newEntry, isZrc20Token: newEntry.isQrc20Token },
+          existing,
+        ]);
       });
 
       it("should deduplicate by transactionHash", async () => {
-        const existing = makeTxEntry({ amount: 2.5 });
+        const existing = makeStoredTxEntry({ amount: 2.5 });
         localStore[profileStorageKey("TX_HISTORY")] = {
           ALL_TX_HISTORY: {
             [ACCOUNT]: { "0x1": { transactions: [existing] } },
@@ -1253,11 +1267,13 @@ describe("StorageUtil", () => {
         const updated = makeTxEntry({ status: false });
         await StorageUtil.setTransactionHistoryEntry(ACCOUNT, updated);
 
-        expect(storedTransactions(ACCOUNT)).toEqual([updated]);
+        expect(storedTransactions(ACCOUNT)).toEqual([
+          { ...updated, isZrc20Token: updated.isQrc20Token },
+        ]);
       });
 
       it("should not affect other accounts in storage", async () => {
-        const otherEntry = makeTxEntry({
+        const otherEntry = makeStoredTxEntry({
           id: "0xother",
           transactionHash: "0xother",
         });
@@ -1277,7 +1293,7 @@ describe("StorageUtil", () => {
       it("should clear transactions for the account", async () => {
         localStore[profileStorageKey("TX_HISTORY")] = {
           ALL_TX_HISTORY: {
-            [ACCOUNT]: { "0x1": { transactions: [makeTxEntry()] } },
+            [ACCOUNT]: { "0x1": { transactions: [makeStoredTxEntry()] } },
           },
         };
 
@@ -1292,13 +1308,13 @@ describe("StorageUtil", () => {
       });
 
       it("should not affect other accounts when clearing", async () => {
-        const otherEntry = makeTxEntry({
+        const otherEntry = makeStoredTxEntry({
           id: "0xother",
           transactionHash: "0xother",
         });
         localStore[profileStorageKey("TX_HISTORY")] = {
           ALL_TX_HISTORY: {
-            [ACCOUNT]: { "0x1": { transactions: [makeTxEntry()] } },
+            [ACCOUNT]: { "0x1": { transactions: [makeStoredTxEntry()] } },
             [ACCOUNT_2]: { "0x1": { transactions: [otherEntry] } },
           },
         };

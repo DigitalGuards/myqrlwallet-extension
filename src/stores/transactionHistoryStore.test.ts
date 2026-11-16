@@ -60,7 +60,7 @@ const makeSampleEntry = (
   amount: 2.5,
   tokenSymbol: "QRL",
   tokenName: "QRL",
-  isZrc20Token: false,
+  isQrc20Token: false,
   tokenContractAddress: "",
   tokenDecimals: 18,
   transactionHash: "0xtxhash1",
@@ -261,11 +261,11 @@ describe("TransactionHistoryStore", () => {
 
   it("should return filtered transactions for native filter", () => {
     const store = new TransactionHistoryStore();
-    const nativeEntry = makeSampleEntry({ isZrc20Token: false });
+    const nativeEntry = makeSampleEntry({ isQrc20Token: false });
     const qrc20Entry = makeSampleEntry({
       id: "0xtxhash2",
       transactionHash: "0xtxhash2",
-      isZrc20Token: true,
+      isQrc20Token: true,
       tokenSymbol: "TST",
     });
 

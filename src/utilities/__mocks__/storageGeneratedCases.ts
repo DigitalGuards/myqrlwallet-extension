@@ -73,7 +73,7 @@ export const storageWriterBases: Record<string, Record<string, unknown>> = {
     receiverAddress: OTHER_ACCOUNT,
     amount: "2",
     tokenDetails: {
-      isZrc20Token: true,
+      isQrc20Token: true,
       tokenContractAddress: TOKEN.address,
       tokenDecimals: 18,
       tokenImage: false,

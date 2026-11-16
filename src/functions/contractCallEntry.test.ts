@@ -11,7 +11,7 @@ const ESCROW =
 const base = {
   to: `Q${"b".repeat(128)}`,
   chainId: V3_CHAIN_ID,
-  isZrc20Token: false,
+  isQrc20Token: false,
   tokenContractAddress: "",
 };
 
@@ -47,7 +47,7 @@ describe("isContractCallEntry", () => {
 
   it("leaves token rows and internal entries alone", () => {
     expect(
-      isContractCallEntry({ ...base, data: "0x1234", isZrc20Token: true }),
+      isContractCallEntry({ ...base, data: "0x1234", isQrc20Token: true }),
     ).toBe(false);
     expect(
       isContractCallEntry({
@@ -123,7 +123,7 @@ describe("isFailedOnChainWithoutTransfer", () => {
     status: false,
     pendingStatus: "failed" as const,
     receiptStatusVerified: true,
-    isZrc20Token: false,
+    isQrc20Token: false,
   };
 
   it("holds for a native entry with a verified failed receipt", () => {
@@ -145,7 +145,7 @@ describe("isFailedOnChainWithoutTransfer", () => {
       }),
     ).toBe(false);
     expect(
-      isFailedOnChainWithoutTransfer({ ...failed, isZrc20Token: true }),
+      isFailedOnChainWithoutTransfer({ ...failed, isQrc20Token: true }),
     ).toBe(false);
     expect(
       isFailedOnChainWithoutTransfer({ ...failed, isInternal: true }),

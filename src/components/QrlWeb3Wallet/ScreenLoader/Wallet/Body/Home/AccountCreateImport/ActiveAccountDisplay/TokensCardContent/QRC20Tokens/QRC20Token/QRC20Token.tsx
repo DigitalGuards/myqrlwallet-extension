@@ -123,7 +123,7 @@ const QRC20Token = observer(
       <TokenListItemLoading />
     ) : (
       <TokenListItem
-        isZrc20Token={true}
+        isQrc20Token={true}
         contractAddress={contractAddress}
         decimals={Number(token.decimals)}
         balance={getOptimalTokenBalance(token.balance.toString(), token.symbol)}

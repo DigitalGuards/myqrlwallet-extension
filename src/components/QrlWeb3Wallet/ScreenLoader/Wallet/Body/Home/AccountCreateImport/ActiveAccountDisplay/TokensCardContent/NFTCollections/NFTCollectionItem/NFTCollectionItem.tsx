@@ -73,7 +73,7 @@ const NFTCollectionItem = observer(
           setCollection({
             name: "",
             symbol: "",
-            standard: storedStandard ?? "ZRC721",
+            standard: storedStandard ?? "QRC721",
           });
           return;
         }
@@ -90,7 +90,7 @@ const NFTCollectionItem = observer(
         if (!getExplorerApiBase(blockchain.chainId)) return;
         const owned = await qrlStore.getOwnedNftTokens(
           contractAddress,
-          "ZRC1155",
+          "QRC1155",
         );
         // A failed read leaves the count unknown, so the row shows the
         // collection name and no count. Treating it as zero would claim
@@ -157,7 +157,7 @@ const NFTCollectionItem = observer(
               </div>
               <div className="text-xs [overflow-wrap:anywhere]">
                 {ownedCount !== undefined && displayName}
-                {collection.standard === "ZRC1155" && (
+                {collection.standard === "QRC1155" && (
                   <span className="ml-1 text-muted-foreground">QRC-1155</span>
                 )}
               </div>

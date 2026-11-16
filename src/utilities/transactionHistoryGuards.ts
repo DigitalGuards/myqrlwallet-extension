@@ -27,7 +27,7 @@ export const isTransactionDetailEntry = (
     ] as const
   ).every((key) => isString(value[key])) &&
   (isString(value.amount) || isFiniteNumber(value.amount)) &&
-  isBoolean(value.isZrc20Token) &&
+  isBoolean(value.isQrc20Token) &&
   (value.tokenDecimals === null || isFiniteNumber(value.tokenDecimals)) &&
   isBoolean(value.status) &&
   isFiniteNumber(value.timestamp) &&

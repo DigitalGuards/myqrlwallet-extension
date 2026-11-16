@@ -155,13 +155,13 @@ class TransactionHistoryStore {
     if (this.filter === "all") return merged;
     if (this.filter === "native")
       return merged.filter(
-        (tx) => !tx.isZrc20Token && !tx.tokenContractAddress,
+        (tx) => !tx.isQrc20Token && !tx.tokenContractAddress,
       );
     if (this.filter === "nft")
       return merged.filter(
-        (tx) => !tx.isZrc20Token && !!tx.tokenContractAddress,
+        (tx) => !tx.isQrc20Token && !!tx.tokenContractAddress,
       );
-    return merged.filter((tx) => tx.isZrc20Token);
+    return merged.filter((tx) => tx.isQrc20Token);
   }
 
   get pendingTransactions(): TransactionHistoryEntry[] {

@@ -633,7 +633,7 @@ const QrlSendTransactionForContent = observer(
           amount,
           tokenSymbol,
           tokenName,
-          isZrc20Token: false,
+          isQrc20Token: false,
           tokenContractAddress: "",
           tokenDecimals: 18,
           transactionHash,

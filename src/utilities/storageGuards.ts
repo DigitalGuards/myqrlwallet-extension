@@ -20,6 +20,7 @@ import {
   isQrlAddress,
   toCanonicalQrlAddress,
 } from "@/utilities/addressUtil";
+import { hasStoredTokenFlag } from "@/utilities/storedNames";
 import type { KeyStore } from "@theqrl/web3";
 
 type Guard<T> = (value: unknown) => value is T;
@@ -377,7 +378,9 @@ const isTokenDetails = (
   value: unknown,
 ): value is NonNullable<TransactionValuesType["tokenDetails"]> =>
   isRecord(value) &&
-  isBoolean(value.isZrc20Token) &&
+  // A stored draft carries the flag under its current name, its earlier name,
+  // or both; getTransactionValues returns it under the current name.
+  hasStoredTokenFlag(value) &&
   isString(value.tokenContractAddress) &&
   isStoredNumber(value.tokenDecimals) &&
   // watchAsset historically persisted arbitrary optional image metadata.
@@ -787,6 +790,7 @@ const priceQuoteShape: StorageShape = {
   chf: isStoredNumber,
   jpy: isStoredNumber,
 };
+type StoredEarlierName = "isZrc20Token";
 const storageShapes = {
   settings: {
     themePreference: (value) =>
@@ -864,6 +868,8 @@ const storageShapes = {
     amount: isAmount,
     tokenSymbol: isString,
     tokenName: isString,
+    isQrc20Token: isBoolean,
+    // Earlier name of the flag; stored beside the current one.
     isZrc20Token: isBoolean,
     tokenContractAddress: isString,
     tokenDecimals: isStoredNumber,
@@ -896,7 +902,10 @@ const storageShapes = {
     data: isString,
     replacementTransactionHash: isString,
     replacedByAction: (value) => value === "speed-up" || value === "cancel",
-  } satisfies Record<keyof TransactionHistoryEntry, StorageField>,
+  } satisfies Record<
+    keyof TransactionHistoryEntry | StoredEarlierName,
+    StorageField
+  >,
   keystore: {
     address: isString,
     id: isString,
@@ -924,6 +933,7 @@ const storageShapes = {
     amount: isAmount,
     tokenDetails: {
       fields: {
+        isQrc20Token: isBoolean,
         isZrc20Token: isBoolean,
         tokenContractAddress: isString,
         tokenDecimals: isStoredNumber,

@@ -47,7 +47,7 @@ it.each([false, null, 0, { future: true }])(
       receiverAddress: OTHER_ACCOUNT,
       amount: "1.5",
       tokenDetails: {
-        isZrc20Token: true,
+        isQrc20Token: true,
         tokenContractAddress: ACCOUNT,
         tokenDecimals: 18,
         tokenImage,

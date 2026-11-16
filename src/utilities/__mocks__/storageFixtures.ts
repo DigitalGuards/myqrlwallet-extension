@@ -31,9 +31,12 @@ export const NFT: NFTCollectionType = {
   address: "nft-a",
   name: "Collection",
   symbol: "NFT",
-  standard: "ZRC721",
+  standard: "QRC721",
   image: "",
 };
+// What a collection looks like in storage: the standard under its earlier
+// value, which every released version reads. Seeds for storage stand for this.
+export const STORED_NFT = { ...NFT, standard: "ZRC721" };
 export const HISTORY: TransactionHistoryEntry = {
   id: "hash-a",
   transactionHash: "hash-a",
@@ -43,7 +46,7 @@ export const HISTORY: TransactionHistoryEntry = {
   tokenSymbol: "TOK",
   tokenName: "Token",
   tokenContractAddress: TOKEN.address,
-  isZrc20Token: true,
+  isQrc20Token: true,
   tokenDecimals: 18,
   blockNumber: "",
   gasUsed: "",
@@ -77,4 +80,26 @@ export const LEDGER = {
   derivationPath: "m/44'/238'/0'/0/0",
   publicKey: "",
   index: 0,
+};
+
+// A history entry as storage holds it from a version before the rename: the
+// flag under its earlier name only. Seeds for storage stand for this.
+export const STORED_HISTORY = {
+  id: "hash-a",
+  transactionHash: "hash-a",
+  from: ACCOUNT,
+  to: OTHER_ACCOUNT,
+  amount: "1.5",
+  tokenSymbol: "TOK",
+  tokenName: "Token",
+  tokenContractAddress: TOKEN.address,
+  isZrc20Token: true,
+  tokenDecimals: 18,
+  blockNumber: "",
+  gasUsed: "",
+  effectiveGasPrice: "",
+  status: false,
+  timestamp: 1700000000000,
+  chainId: CHAIN.chainId,
+  pendingStatus: "pending",
 };

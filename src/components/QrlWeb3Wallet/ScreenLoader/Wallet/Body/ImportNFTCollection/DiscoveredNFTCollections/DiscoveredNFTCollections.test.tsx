@@ -17,7 +17,7 @@ const DISCOVERED: DiscoveredNFTCollection = {
   address: CONTRACT_ADDRESS,
   name: "Test Collection",
   symbol: "NFT",
-  standard: "ZRC721",
+  standard: "QRC721",
   tokenCount: 1,
 };
 
@@ -169,7 +169,7 @@ describe("DiscoveredNFTCollections", () => {
         address: CONTRACT_ADDRESS,
         name: "Test Collection",
         symbol: "NFT",
-        standard: "ZRC721",
+        standard: "QRC721",
         image: "",
       },
     );
@@ -180,7 +180,7 @@ describe("DiscoveredNFTCollections", () => {
         address: second.address,
         name: "Second",
         symbol: "NFT",
-        standard: "ZRC721",
+        standard: "QRC721",
         image: "",
       },
     );

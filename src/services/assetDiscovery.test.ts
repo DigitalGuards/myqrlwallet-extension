@@ -239,21 +239,21 @@ describe("discoverNftCollections", () => {
         address: toChecksumAddress(`Q${"d".repeat(128)}`),
         name: "Doodles",
         symbol: "DOO",
-        standard: "ZRC721",
+        standard: "QRC721",
         tokenCount: 2,
       },
       {
         address: toChecksumAddress(`Q${"e".repeat(128)}`),
         name: "Multi",
         symbol: "MUL",
-        standard: "ZRC1155",
+        standard: "QRC1155",
         tokenCount: 1,
       },
       {
         address: toChecksumAddress(`Q${"f".repeat(128)}`),
         name: "",
         symbol: "",
-        standard: "ZRC721",
+        standard: "QRC721",
         tokenCount: 1,
       },
     ]);
@@ -303,15 +303,15 @@ describe("NFT explorer validation", () => {
         address: contractAddress,
         name: "Multi",
         symbol: "MUL",
-        standard: "ZRC1155",
+        standard: "QRC1155",
         tokenCount: 2,
       },
     ]);
     expect(
       await discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
     ).toEqual([
-      { tokenId: "1", standard: "ZRC1155", balance: "3" },
-      { tokenId: "2", standard: "ZRC1155", balance: "3" },
+      { tokenId: "1", standard: "QRC1155", balance: "3" },
+      { tokenId: "2", standard: "QRC1155", balance: "3" },
     ]);
   });
 
@@ -330,7 +330,7 @@ describe("NFT explorer validation", () => {
           address: contractAddress,
           name: "Multi",
           symbol: "MUL",
-          standard: "ZRC1155",
+          standard: "QRC1155",
           tokenCount: 2,
         },
       ]);
@@ -405,8 +405,8 @@ describe("discoverOwnedNftTokens", () => {
       `0x${"D".repeat(128)}`,
     );
     expect(tokens).toEqual([
-      { tokenId: "1", standard: "ZRC721", balance: undefined },
-      { tokenId: "2", standard: "ZRC721", balance: undefined },
+      { tokenId: "1", standard: "QRC721", balance: undefined },
+      { tokenId: "2", standard: "QRC721", balance: undefined },
     ]);
   });
 
@@ -418,7 +418,7 @@ describe("discoverOwnedNftTokens", () => {
       toChecksumAddress(`Q${"e".repeat(128)}`),
     );
     expect(tokens).toEqual([
-      { tokenId: "42", standard: "ZRC1155", balance: "3" },
+      { tokenId: "42", standard: "QRC1155", balance: "3" },
     ]);
   });
 

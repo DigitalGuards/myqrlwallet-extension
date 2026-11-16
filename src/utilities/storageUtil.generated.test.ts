@@ -228,7 +228,18 @@ const cases: WriterCase[] = [
     name: "draft",
     guard: isTransactionValues,
     write: (input) => StorageUtil.setTransactionValues(malformed(input)),
-    read: () => StorageUtil.getTransactionValues(),
+    // The reader returns the token flag under its current name; the writer
+    // stores it under both, so the read is shown with the earlier name too.
+    read: async () => {
+      const values = await StorageUtil.getTransactionValues();
+      const details = values.tokenDetails;
+      return details
+        ? {
+            ...values,
+            tokenDetails: { ...details, isZrc20Token: details.isQrc20Token },
+          }
+        : values;
+    },
     raw: () => h.store[`${CHAIN.chainId}_TRANSACTION_VALUES`],
     unrelated: () => StorageUtil.setAccountLabel(ACCOUNT, "Other write"),
   },
@@ -771,8 +782,14 @@ it.each(nestedFieldMutations(storageWriterBases.history))(
       HISTORY.transactionHash,
       malformed(input),
     );
+    // The writer mirrors a boolean flag into the earlier name; otherwise the
+    // earlier name keeps the value the first write gave it.
+    const earlier =
+      typeof input.isQrc20Token === "boolean"
+        ? input.isQrc20Token
+        : HISTORY.isQrc20Token;
     expect(await StorageUtil.getTransactionHistory(ACCOUNT)).toEqual(
-      h.roundTrip([input]),
+      h.roundTrip([{ ...input, isZrc20Token: earlier }]),
     );
   },
 );

@@ -448,7 +448,7 @@ describe("store response and polling boundaries", () => {
       amount: "1",
       tokenSymbol: "Quanta",
       tokenName: "Quanta",
-      isZrc20Token: false,
+      isQrc20Token: false,
       tokenContractAddress: "",
       tokenDecimals: 18,
       transactionHash: "0xpending",

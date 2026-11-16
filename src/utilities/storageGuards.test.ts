@@ -36,7 +36,7 @@ import {
 } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 
 const DETAILS = {
-  isZrc20Token: true,
+  isQrc20Token: true,
   tokenContractAddress: TOKEN.address,
   tokenDecimals: 18,
   tokenImage: "",
@@ -293,6 +293,14 @@ describe("storage record guards", () => {
         tokenDetails: { ...DETAILS, tokenDecimals: "18" },
       }),
     ).toBe(false);
+    // A draft from before the rename holds the flag under its earlier name.
+    const { isQrc20Token: flag, ...earlier } = DETAILS;
+    expect(
+      isTransactionValues({
+        tokenDetails: { ...earlier, isZrc20Token: flag },
+      }),
+    ).toBe(true);
+    expect(isTransactionValues({ tokenDetails: earlier })).toBe(false);
   });
 
   it("accepts partial settings and both price-cache versions and rejects wrong field types", () => {

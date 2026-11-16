@@ -27,7 +27,7 @@ const makeSampleEntry = (
   amount: 2.5,
   tokenSymbol: "QRL",
   tokenName: "QRL",
-  isZrc20Token: false,
+  isQrc20Token: false,
   tokenContractAddress: "",
   tokenDecimals: 18,
   transactionHash: "0xtxhash1",
@@ -114,7 +114,7 @@ describe("TransactionHistory", () => {
         transactionHash: "0xtxhash2",
         amount: 5,
         tokenSymbol: "TST",
-        isZrc20Token: true,
+        isQrc20Token: true,
       }),
     ];
 

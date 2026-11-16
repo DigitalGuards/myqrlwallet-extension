@@ -12,7 +12,9 @@ import {
   CHAIN,
   TOKEN,
   NFT,
+  STORED_NFT,
   HISTORY,
+  STORED_HISTORY,
   CONNECTION,
   LEDGER,
 } from "./__mocks__/storageFixtures";
@@ -391,40 +393,49 @@ describe("storage writes preserve raw records", () => {
   });
 
   it("preserves unreadable NFT collections through import, replacement, removal and re-read", async () => {
+    // Storage holds the standard under its earlier value; the wallet's typed
+    // NFT uses the current name and the writer maps it back.
     const junk = {
-      ...NFT,
+      ...STORED_NFT,
       address: null,
       standard: "future",
       future: { keep: true },
     };
-    const raw = [NFT, junk, null];
+    const raw = [STORED_NFT, junk, null];
     setList("NFT_COLLECTIONS", "ALL_NFT_COLLECTIONS", "collections", raw);
-    expect(await StorageUtil.getNFTCollectionsList(ACCOUNT)).toEqual([NFT]);
+    expect(await StorageUtil.getNFTCollectionsList(ACCOUNT)).toEqual([
+      STORED_NFT,
+    ]);
     expect(h.local.set).not.toHaveBeenCalled();
-    const added = { ...NFT, address: "nft-new", standard: "ZRC1155" };
+    const added = { ...NFT, address: "nft-new", standard: "QRC1155" as const };
+    const storedAdded = { ...added, standard: "ZRC1155" };
     await StorageUtil.setNFTCollectionsList(ACCOUNT, added);
     expect(
       bytes(list("NFT_COLLECTIONS", "ALL_NFT_COLLECTIONS", "collections")),
-    ).toBe(bytes([...raw, added]));
+    ).toBe(bytes([...raw, storedAdded]));
     await StorageUtil.setNFTCollectionsList(ACCOUNT, {
       ...NFT,
       name: "Updated",
     });
     expect(
       bytes(list("NFT_COLLECTIONS", "ALL_NFT_COLLECTIONS", "collections")),
-    ).toBe(bytes([junk, null, added, { ...NFT, name: "Updated" }]));
-    await StorageUtil.clearFromNFTCollectionsList(ACCOUNT, added.address);
+    ).toBe(
+      bytes([junk, null, storedAdded, { ...STORED_NFT, name: "Updated" }]),
+    );
+    await StorageUtil.clearFromNFTCollectionsList(ACCOUNT, storedAdded.address);
     expect(
       bytes(list("NFT_COLLECTIONS", "ALL_NFT_COLLECTIONS", "collections")),
-    ).toBe(bytes([junk, null, { ...NFT, name: "Updated" }]));
+    ).toBe(bytes([junk, null, { ...STORED_NFT, name: "Updated" }]));
     expect(await StorageUtil.getNFTCollectionsList(ACCOUNT)).toEqual([
-      { ...NFT, name: "Updated" },
+      { ...STORED_NFT, name: "Updated" },
     ]);
   });
 
   it("preserves raw history during receipt updates and new sends, including null decimals", async () => {
+    // Seeds hold the flag under its earlier name only, as a version before
+    // the rename wrote it.
     const nullable = {
-      ...HISTORY,
+      ...STORED_HISTORY,
       id: "nullable",
       transactionHash: "nullable",
       tokenDecimals: null,
@@ -434,10 +445,10 @@ describe("storage writes preserve raw records", () => {
       pendingStatus: "future",
       extension: [1, 2],
     };
-    const raw = [HISTORY, junk, nullable, null];
+    const raw = [STORED_HISTORY, junk, nullable, null];
     setList("TX_HISTORY", "ALL_TX_HISTORY", "transactions", raw);
     expect(await StorageUtil.getTransactionHistory(ACCOUNT)).toEqual([
-      HISTORY,
+      STORED_HISTORY,
       nullable,
     ]);
     expect(h.local.set).not.toHaveBeenCalled();
@@ -454,31 +465,38 @@ describe("storage writes preserve raw records", () => {
       HISTORY.transactionHash,
       update,
     );
-    const updated = [{ ...HISTORY, ...update }, junk, nullable, null];
+    const updated = [{ ...STORED_HISTORY, ...update }, junk, nullable, null];
     expect(bytes(list("TX_HISTORY", "ALL_TX_HISTORY", "transactions"))).toBe(
       bytes(updated),
     );
     const added = { ...HISTORY, id: "new", transactionHash: "new" };
+    // A new entry is stored with the flag under both names.
+    const storedAdded = { ...added, isZrc20Token: true };
     await StorageUtil.setTransactionHistoryEntry(ACCOUNT, added);
     expect(bytes(list("TX_HISTORY", "ALL_TX_HISTORY", "transactions"))).toBe(
-      bytes([added, ...updated]),
+      bytes([storedAdded, ...updated]),
     );
     expect(await StorageUtil.getTransactionHistory(ACCOUNT)).toEqual([
-      added,
-      { ...HISTORY, ...update },
+      storedAdded,
+      { ...STORED_HISTORY, ...update },
       nullable,
     ]);
     await StorageUtil.updateTransactionHistoryEntry(ACCOUNT, "future", update);
     expect(bytes(list("TX_HISTORY", "ALL_TX_HISTORY", "transactions"))).toBe(
-      bytes([added, ...updated]),
+      bytes([storedAdded, ...updated]),
     );
   });
 
   it("keeps unreadable history and caps only the readable entries", async () => {
     const full = Array.from(
       { length: StorageUtil.TX_HISTORY_MAX_PER_ACCOUNT_CHAIN },
-      (_, i) => ({ ...HISTORY, id: `hash-${i}`, transactionHash: `hash-${i}` }),
+      (_, i) => ({
+        ...STORED_HISTORY,
+        id: `hash-${i}`,
+        transactionHash: `hash-${i}`,
+      }),
     );
+    const storedHistory = { ...HISTORY, isZrc20Token: true };
     const junk = { future: "history" };
     setList("TX_HISTORY", "ALL_TX_HISTORY", "transactions", [
       junk,
@@ -488,12 +506,12 @@ describe("storage writes preserve raw records", () => {
     await StorageUtil.setTransactionHistoryEntry(ACCOUNT, HISTORY);
     // 1,001 readable entries: the oldest readable one goes, both raw records stay.
     expect(bytes(list("TX_HISTORY", "ALL_TX_HISTORY", "transactions"))).toBe(
-      bytes([HISTORY, junk, ...full.slice(0, -1), null]),
+      bytes([storedHistory, junk, ...full.slice(0, -1), null]),
     );
     setList("TX_HISTORY", "ALL_TX_HISTORY", "transactions", full);
     await StorageUtil.setTransactionHistoryEntry(ACCOUNT, HISTORY);
     expect(list("TX_HISTORY", "ALL_TX_HISTORY", "transactions")).toEqual(
-      [HISTORY, ...full].slice(0, 1000),
+      [storedHistory, ...full].slice(0, 1000),
     );
   });
 

@@ -35,7 +35,7 @@ describe("NFTCollectionImportSuccess", () => {
             collection={{
               name: "Collection",
               symbol: "NFT",
-              standard: "ZRC1155",
+              standard: "QRC1155",
             }}
           />
         </MemoryRouter>
@@ -65,7 +65,7 @@ describe("NFTCollectionImportSuccess", () => {
         address: CONTRACT_ADDRESS,
         name: "Collection",
         symbol: "NFT",
-        standard: "ZRC1155",
+        standard: "QRC1155",
         image: "",
       },
     );
