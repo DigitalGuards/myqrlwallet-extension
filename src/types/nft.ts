@@ -1,5 +1,8 @@
 import type { MetadataText } from "@/utilities/nftMetadata";
 
+// The values keep the standards' earlier names (now QRC-721 and QRC-1155):
+// they are stored with every imported collection, and every released
+// version reads exactly these two.
 export type NFTStandard = "ZRC721" | "ZRC1155";
 
 export type NFTCollectionType = {

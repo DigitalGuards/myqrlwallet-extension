@@ -14,6 +14,9 @@ export type TransactionHistoryEntry = {
   amount: string | number;
   tokenSymbol: string;
   tokenName: string;
+  // Keeps the token standard's earlier name (ZRC-20, now QRC-20): the field
+  // is stored with every history entry and transfer draft, and it decides
+  // whether Speed Up rebuilds a token transfer or a native one.
   isZrc20Token: boolean;
   tokenContractAddress: string;
   tokenDecimals: number | null;
@@ -44,4 +47,4 @@ export type TransactionHistoryEntry = {
   replacedByAction?: "speed-up" | "cancel";
 };
 
-export type TokenFilter = "all" | "native" | "zrc20" | "nft";
+export type TokenFilter = "all" | "native" | "qrc20" | "nft";

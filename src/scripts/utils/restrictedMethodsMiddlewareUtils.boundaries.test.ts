@@ -557,7 +557,7 @@ describe("validator results and approval errors", () => {
 
   it("keeps the asynchronous asset and permission validator results", async () => {
     const asset = checkWalletWatchAssetParams({
-      type: "ZRC20",
+      type: "QRC20",
       options: { address: ACCOUNT, symbol: "TEST", decimals: 18 },
     });
     const permission = checkWalletRequestPermissionParams({ qrl_accounts: {} });

@@ -33,7 +33,7 @@ describe("WatchAssetVerification", () => {
         },
       },
       qrlStore: {
-        getZrc20TokenDetails: () =>
+        getQrc20TokenDetails: () =>
           Promise.resolve({
             token: {
               balance: 2,
@@ -88,7 +88,7 @@ describe("WatchAssetVerification", () => {
           },
         },
         qrlStore: {
-          getZrc20TokenDetails: () =>
+          getQrc20TokenDetails: () =>
             Promise.resolve({
               token: {
                 balance: 2,
@@ -130,7 +130,7 @@ describe("WatchAssetVerification", () => {
       renderComponent(
         mockedStore({
           dAppRequestStore: { dAppRequestData: { params: [{ options }] } },
-          qrlStore: { getZrc20TokenDetails: () => Promise.resolve(details) },
+          qrlStore: { getQrc20TokenDetails: () => Promise.resolve(details) },
         }),
       );
       expect(
@@ -148,7 +148,7 @@ describe("WatchAssetVerification", () => {
     renderComponent(
       mockedStore({
         dAppRequestStore: { dAppRequestData: { params: [{ options }] } },
-        qrlStore: { getZrc20TokenDetails: () => Promise.reject(error) },
+        qrlStore: { getQrc20TokenDetails: () => Promise.reject(error) },
       }),
     );
     expect(
@@ -175,18 +175,18 @@ describe("WatchAssetVerification", () => {
   )(
     "handles malformed token parameters without a lookup: %j",
     async ({ params }) => {
-      const getZrc20TokenDetails =
-        vi.fn<StoreType["qrlStore"]["getZrc20TokenDetails"]>();
+      const getQrc20TokenDetails =
+        vi.fn<StoreType["qrlStore"]["getQrc20TokenDetails"]>();
       renderComponent(
         mockedStore({
           dAppRequestStore: { dAppRequestData: { params } },
-          qrlStore: { getZrc20TokenDetails },
+          qrlStore: { getQrc20TokenDetails },
         }),
       );
       expect(
         await screen.findByText(/Failed to fetch details for/i),
       ).toBeInTheDocument();
-      expect(getZrc20TokenDetails).not.toHaveBeenCalled();
+      expect(getQrc20TokenDetails).not.toHaveBeenCalled();
     },
   );
 
@@ -195,7 +195,7 @@ describe("WatchAssetVerification", () => {
       mockedStore({
         dAppRequestStore: { dAppRequestData: { params: { 0: { options } } } },
         qrlStore: {
-          getZrc20TokenDetails: () =>
+          getQrc20TokenDetails: () =>
             Promise.resolve({
               token: {
                 name: "Test",

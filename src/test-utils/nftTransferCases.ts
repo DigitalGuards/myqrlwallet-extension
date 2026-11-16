@@ -41,7 +41,7 @@ export const invalidNftTransferFields = [
       value,
     })),
   ),
-  ...["ZRC20", "zrc721", ""].map((value) => ({
+  ...["QRC20", "zrc721", ""].map((value) => ({
     label: `standard: ${JSON.stringify(value)}`,
     field: "standard",
     value,

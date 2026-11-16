@@ -403,12 +403,12 @@ describe("restricted request boundaries", () => {
     ["wallet_switchQRLChain", [null]],
     ["wallet_switchQRLChain", [{ chainId: 12 }]],
     ["wallet_watchAsset", [{ type: 42 }]],
-    ["wallet_watchAsset", [{ type: "ZRC20", options: null }]],
+    ["wallet_watchAsset", [{ type: "QRC20", options: null }]],
     [
       "wallet_watchAsset",
       [
         {
-          type: "ZRC20",
+          type: "QRC20",
           options: { address: ACCOUNT_A, symbol: "TEST", decimals: "18" },
         },
       ],
@@ -417,7 +417,7 @@ describe("restricted request boundaries", () => {
       "wallet_watchAsset",
       [
         {
-          type: "ZRC20",
+          type: "QRC20",
           options: { address: 123, symbol: "TEST", decimals: 18 },
         },
       ],
@@ -742,7 +742,7 @@ describe("approval message boundaries and cleanup", () => {
     async (result) => {
       const approval = await startApproval("wallet_watchAsset", [
         {
-          type: "ZRC20",
+          type: "QRC20",
           options: { address: ACCOUNT_A, symbol: "TEST", decimals: 18 },
         },
       ]);
@@ -755,7 +755,7 @@ describe("approval message boundaries and cleanup", () => {
   it("requires a boolean success flag from watch-asset approvals", async () => {
     const approval = await startApproval("wallet_watchAsset", [
       {
-        type: "ZRC20",
+        type: "QRC20",
         options: { address: ACCOUNT_A, symbol: "TEST", decimals: 18 },
       },
     ]);

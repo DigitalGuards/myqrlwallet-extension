@@ -121,7 +121,7 @@ export const GasFeeSelector = observer(
     const calculateGas = useCallback(
       async (overrides: GasFeeOverrides): Promise<string> => {
         if (isZrc20Token) {
-          return await qrlStore.getZrc20TokenGas(
+          return await qrlStore.getQrc20TokenGas(
             from,
             to,
             value,

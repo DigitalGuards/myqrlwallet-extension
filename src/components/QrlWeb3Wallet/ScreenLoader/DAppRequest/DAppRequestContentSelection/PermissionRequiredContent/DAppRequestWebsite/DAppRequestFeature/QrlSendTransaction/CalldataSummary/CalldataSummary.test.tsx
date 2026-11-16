@@ -64,7 +64,7 @@ const RELIC_COLLECTION = {
   address: CONTRACT,
   name: "Quanta Relics",
   symbol: "RELIC",
-  standard: "ZRC721" as const,
+  standard: "QRC721" as const,
   image: "",
 };
 
@@ -566,7 +566,7 @@ describe("CalldataSummary", () => {
     expect(screen.getByText("Revoked")).toBeInTheDocument();
   });
 
-  it("lists every token ID and quantity of a ZRC-1155 batch transfer", async () => {
+  it("lists every token ID and quantity of a QRC-1155 batch transfer", async () => {
     renderSummary(
       call(
         "safeBatchTransferFrom(address,address,uint256[],uint256[],bytes)",

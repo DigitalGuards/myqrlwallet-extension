@@ -46,15 +46,15 @@ type CalldataSummaryProps = {
 };
 
 /**
- * The ZRC-721 interface id, and the read-only calls used to ask an unknown
+ * The QRC-721 interface id, and the read-only calls used to ask an unknown
  * contract what it is. Both are hints: a node that will not answer, or a
  * contract that does not implement them, simply leaves the surface saying
  * it does not know. Nothing waits on them and nothing is blocked by them.
  */
-const ZRC721_INTERFACE_ID = "0x80ac58cd";
+const QRC721_INTERFACE_ID = "0x80ac58cd";
 const SUPPORTS_INTERFACE_CALLDATA = `${encodeFunctionSignature(
   "supportsInterface(bytes4)",
-)}${encodeParameters(["bytes4"], [ZRC721_INTERFACE_ID]).slice(2)}`;
+)}${encodeParameters(["bytes4"], [QRC721_INTERFACE_ID]).slice(2)}`;
 const TOTAL_SUPPLY_CALLDATA = encodeFunctionSignature("totalSupply()");
 /** No contract read may hold the summary up for longer than this. */
 const CONTRACT_PROBE_TIMEOUT_MS = 5_000;
@@ -601,13 +601,13 @@ const CalldataSummary = observer(
     // token (ERC-404 style) or a maliciously upgraded one could otherwise
     // claim to be a collection and have a real allowance rendered as a
     // harmless token ID with no warning at all.
-    const isAmbiguousStandard = decoded.standard === "ZRC20_OR_ZRC721";
+    const isAmbiguousStandard = decoded.standard === "QRC20_OR_QRC721";
     const isKnownToken = token !== undefined;
     const isKnownCollection = collection !== undefined;
     const isUnresolvedStandard =
       isAmbiguousStandard && !isKnownToken && !isKnownCollection;
     const treatAmountAsTokenId =
-      decoded.standard === "ZRC721" ||
+      decoded.standard === "QRC721" ||
       (isAmbiguousStandard && !isKnownToken && isKnownCollection);
     const amountLabelKey = isUnresolvedStandard
       ? "dapp.calldata.amountOrTokenId"

@@ -988,14 +988,17 @@ const validateWalletWatchAssetParams = (paramObject: unknown) => {
     };
   }
 
-  if (
-    typeof paramObject.type !== "string" ||
-    paramObject.type.toLowerCase() !== "zrc20"
-  ) {
+  // "QRC20" is the name of the token standard. "ZRC20", its earlier name, is
+  // still accepted, because dApps written for earlier versions send it.
+  const assetType =
+    typeof paramObject.type === "string"
+      ? paramObject.type.toLowerCase()
+      : undefined;
+  if (assetType !== "qrc20" && assetType !== "zrc20") {
     return {
       canProceed: false,
       proceedError: rpcErrors.invalidParams({
-        message: "Asset type should be ZRC20.",
+        message: "Asset type should be QRC20.",
       }),
     };
   }

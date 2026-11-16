@@ -103,7 +103,7 @@ const toNftStandard = (standard: string): NFTStandard | null => {
 };
 
 /**
- * Discovers ZRC-20 tokens held by an address via the explorer API.
+ * Discovers QRC-20 tokens held by an address via the explorer API.
  * The `standard=ERC-20` filter keeps NFT rows out of the response.
  */
 export async function discoverTokens(
@@ -170,7 +170,7 @@ async function fetchExplorerNfts(
 }
 
 /**
- * Discovers NFT collections (ZRC-721 and ZRC-1155) holding at least one
+ * Discovers NFT collections (QRC-721 and QRC-1155) holding at least one
  * token of the address, grouped from the explorer's per-token rows.
  */
 export async function discoverNftCollections(
@@ -235,8 +235,8 @@ export const MAX_DISCOVERED_TOKEN_IDS = 50;
 /**
  * Discovers the token IDs an address owns inside one collection, capped
  * at MAX_DISCOVERED_TOKEN_IDS. This is the detection fallback for
- * contracts the wallet cannot enumerate on chain: ZRC-721 without the
- * Enumerable extension, and all of ZRC-1155 (the standard has no owner
+ * contracts the wallet cannot enumerate on chain: QRC-721 without the
+ * Enumerable extension, and all of QRC-1155 (the standard has no owner
  * enumeration at all). Callers MUST re-verify ownership on chain
  * (ownerOf / balanceOf), because the explorer index can lag a recent
  * transfer.

@@ -6,8 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import TokensCardContent from "./TokensCardContent";
 
 vi.mock(
-  "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/ZRC20Tokens/ZRC20Tokens",
-  () => ({ default: () => <div>Mocked ZRC 20 token</div> }),
+  "@/components/QrlWeb3Wallet/ScreenLoader/Wallet/Body/Home/AccountCreateImport/ActiveAccountDisplay/TokensCardContent/QRC20Tokens/QRC20Tokens",
+  () => ({ default: () => <div>Mocked QRC-20 token</div> }),
 );
 
 describe("TokensCardContent", () => {
@@ -25,7 +25,7 @@ describe("TokensCardContent", () => {
   it("should render the token card content component", () => {
     renderComponent();
 
-    expect(screen.getByText("Mocked ZRC 20 token")).toBeInTheDocument();
+    expect(screen.getByText("Mocked QRC-20 token")).toBeInTheDocument();
   });
 
   it("should not list the native asset as a token", () => {

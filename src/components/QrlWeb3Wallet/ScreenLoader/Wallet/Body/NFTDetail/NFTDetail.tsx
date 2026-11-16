@@ -154,7 +154,7 @@ const NFTDetail = () => {
               <div className="flex min-w-0 flex-col gap-1">
                 <div className="text-sm">{t("nft.standard")}</div>
                 <div className="text-sm font-bold text-secondary [overflow-wrap:anywhere]">
-                  {standard === "ZRC1155" ? "ZRC-1155" : "ZRC-721"}
+                  {standard === "ZRC1155" ? "QRC-1155" : "QRC-721"}
                 </div>
               </div>
               {balance && (

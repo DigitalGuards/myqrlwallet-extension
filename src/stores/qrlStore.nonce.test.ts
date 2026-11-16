@@ -85,10 +85,10 @@ describe("nonce reads at the signing boundary", () => {
     expect(result.nonce).toBe(7);
   });
 
-  it("reads the ZRC-20 transfer nonce at the pending block", async () => {
+  it("reads the QRC-20 transfer nonce at the pending block", async () => {
     const store = createStore();
 
-    const result = await store.signZrc20Token(
+    const result = await store.signQrc20Token(
       "from",
       "to",
       "1",

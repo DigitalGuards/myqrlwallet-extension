@@ -63,8 +63,8 @@ export const GasFeeNotice = observer(
       return await qrlStore.getNativeTokenGas(overrides);
     };
 
-    const calculateZrc20TokenGas = async () => {
-      return await qrlStore.getZrc20TokenGas(
+    const calculateQrc20TokenGas = async () => {
+      return await qrlStore.getQrc20TokenGas(
         from,
         to,
         value,
@@ -78,7 +78,7 @@ export const GasFeeNotice = observer(
       setGasFee({ ...gasFee, isLoading: true, error: "" });
       try {
         const gasFeeAmount = await (isZrc20Token
-          ? calculateZrc20TokenGas()
+          ? calculateQrc20TokenGas()
           : calculateNativeTokenGas());
         setGasFee({
           ...gasFee,

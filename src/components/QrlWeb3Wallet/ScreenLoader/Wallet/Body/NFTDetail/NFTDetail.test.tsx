@@ -891,7 +891,7 @@ describe("NFTDetail", () => {
     });
     expect(screen.getByText("TestCollection #42")).toBeInTheDocument();
     expect(screen.getByText("0")).toBeInTheDocument();
-    expect(screen.getByText("ZRC-721")).toBeInTheDocument();
+    expect(screen.getByText("QRC-721")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Send NFT" }));
     expect(navigate).toHaveBeenCalledWith(ROUTES.NFT_TRANSFER, {
       state: {
