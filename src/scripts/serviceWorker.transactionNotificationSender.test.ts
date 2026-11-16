@@ -72,6 +72,7 @@ vi.mock("webextension-polyfill", () => ({
     },
     notifications: {
       create: vi.fn().mockResolvedValue(undefined),
+      onClicked: { addListener: vi.fn() },
     },
   },
 }));

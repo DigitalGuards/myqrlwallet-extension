@@ -25,6 +25,12 @@ export const EXTENSION_MESSAGES = {
   // scripts/utils/sidePanelSurface.ts.
   REQUEST_OPEN_SIDE_PANEL: "QRL_WALLET_REQUEST_OPEN_SIDE_PANEL",
   OPEN_SIDE_PANEL: "QRL_WALLET_OPEN_SIDE_PANEL",
+  // Side-panel visibility probe. A live panel page can sit behind another
+  // extension's panel; the worker asks every panel page whether it is showing
+  // and each one answers with its visibility state and window. See
+  // scripts/utils/sidePanelVisibility.ts.
+  PROBE_SIDE_PANEL: "QRL_WALLET_PROBE_SIDE_PANEL",
+  SIDE_PANEL_VISIBILITY: "QRL_WALLET_SIDE_PANEL_VISIBILITY",
 } as const;
 
 export const QRL_POST_MESSAGE_STREAM = {

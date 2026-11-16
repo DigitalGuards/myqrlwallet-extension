@@ -1,6 +1,7 @@
 import StorageUtil from "@/utilities/storageUtil";
 import { isRecord } from "@/utilities/storageGuards";
 import browser from "webextension-polyfill";
+import { mintNonce } from "./mintNonce";
 import { EXTENSION_MESSAGES } from "../constants/streamConstants";
 import {
   isSidePanelSupported,
@@ -91,19 +92,6 @@ type PendingOpen = {
 };
 
 const pendingOpens = new Map<string, PendingOpen>();
-
-const mintNonce = (): string => {
-  const webCrypto: Pick<Crypto, "getRandomValues"> &
-    Partial<Pick<Crypto, "randomUUID">> = globalThis.crypto;
-  if (typeof webCrypto.randomUUID === "function") {
-    return webCrypto.randomUUID();
-  }
-  const bytes = new Uint8Array(16);
-  webCrypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
-    "",
-  );
-};
 
 const settlePending = (nonce: string, opened: boolean) => {
   const entry = pendingOpens.get(nonce);

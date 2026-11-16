@@ -395,6 +395,57 @@ describe("dAppTransactionWatcher", () => {
       expect(mockSendMessage).not.toHaveBeenCalled();
     });
 
+    it("flags a reverted contract call as rolled back in the notification", async () => {
+      await register();
+      getTransactionHistory.mockResolvedValue([
+        {
+          transactionHash: HASH,
+          from: ACCOUNT,
+          to: `Q${"b".repeat(128)}`,
+          chainId: CHAIN_ID,
+          amount: "0",
+          tokenSymbol: "Quanta",
+          isZrc20Token: false,
+          tokenContractAddress: "",
+          data: "0x1234abcd",
+          pendingStatus: "pending",
+        },
+      ]);
+      getQrlProperties.mockResolvedValue({
+        qrl: {
+          getTransactionReceipt: vi
+            .fn()
+            .mockResolvedValue({ ...minedReceipt(HASH), status: 0n }),
+        },
+      });
+
+      await handleDAppTransactionWatchAlarm();
+
+      expect(mockShowTransactionNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "failed",
+          rolledBackContractCall: true,
+        }),
+      );
+    });
+
+    it("does not flag a reverted plain send as rolled back", async () => {
+      await register();
+      getQrlProperties.mockResolvedValue({
+        qrl: {
+          getTransactionReceipt: vi
+            .fn()
+            .mockResolvedValue({ ...minedReceipt(HASH), status: 0n }),
+        },
+      });
+
+      await handleDAppTransactionWatchAlarm();
+
+      expect(mockShowTransactionNotification).toHaveBeenCalledWith(
+        expect.not.objectContaining({ rolledBackContractCall: true }),
+      );
+    });
+
     it("leaves an unmined transaction queued for the next tick", async () => {
       await register();
       getQrlProperties.mockResolvedValue({

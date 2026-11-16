@@ -8,6 +8,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import './i18n'
+import { registerSidePanelVisibilityResponder } from './scripts/utils/sidePanelVisibility'
 // Brand fonts, self-hosted (MV3 CSP forbids remote fonts): Sora = display,
 // Instrument Sans = body, Inter = numeric (balances/amounts/fees),
 // JetBrains Mono = data (addresses/hashes/seeds). Explicit /index.css paths
@@ -36,6 +37,10 @@ if (!surfaceParams.has('sidepanel') && !surfaceParams.has('tab')) {
   document.documentElement.style.setProperty('height', '600px', 'important');
   document.body.style.setProperty('height', '600px', 'important');
   document.body.style.setProperty('min-width', '23rem', 'important');
+}
+
+if (surfaceParams.has('sidepanel')) {
+  registerSidePanelVisibilityResponder();
 }
 
 const root = document.getElementById("root");

@@ -32,7 +32,9 @@ const {
   mockGetDAppsRequestData,
   mockSetBadgeText,
   mockSetBadgeBackgroundColor,
+  mockNotificationsGetAll,
 } = vi.hoisted(() => ({
+  mockNotificationsGetAll: vi.fn().mockResolvedValue({}),
   mockOnMessageAddListener: vi.fn<(listener: RuntimeMessageListener) => void>(),
   mockOnConnectAddListener:
     vi.fn<(listener: (port: Runtime.Port) => void) => void>(),
@@ -84,6 +86,8 @@ vi.mock("webextension-polyfill", () => ({
     },
     notifications: {
       create: vi.fn().mockResolvedValue(undefined),
+      getAll: mockNotificationsGetAll,
+      onClicked: { addListener: vi.fn() },
     },
   },
 }));
@@ -161,6 +165,12 @@ describe("serviceWorker listener registration survives a stuck async init", () =
     // and two onConnect listeners (content script, lock manager port).
     expect(mockOnMessageAddListener).toHaveBeenCalledTimes(2);
     expect(mockOnConnectAddListener).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears the approval notifications a previous worker left behind", async () => {
+    await import("./serviceWorker");
+
+    expect(mockNotificationsGetAll).toHaveBeenCalled();
   });
 
   it("forwards a local storage change to both dApp notifiers", async () => {

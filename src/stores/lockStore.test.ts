@@ -1390,6 +1390,21 @@ describe("LockStore – keep-alive port only while unlocked (real-device regress
     expect(lastErrorReads).toBeGreaterThan(0);
   });
 
+  it("shows the lock and closes the port when the worker locked but could not record it", async () => {
+    const { store, getConnectCallCount } =
+      await createLockStoreWithControllablePort();
+    const afterConstruction = getConnectCallCount();
+    const writeError = new Error("QUOTA_BYTES quota exceeded");
+    mockSendMessage.mockRejectedValueOnce(writeError); // LOCK
+    mockSendMessage.mockResolvedValueOnce({ isLocked: true }); // IS_LOCKED
+
+    await expect(store.lock()).rejects.toBe(writeError);
+
+    expect(store.isLocked).toBe(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getConnectCallCount()).toBe(afterConstruction);
+  });
+
   it("disconnects the port on lock()", async () => {
     const { store, fireDisconnect, getConnectCallCount } =
       await createLockStoreWithControllablePort();

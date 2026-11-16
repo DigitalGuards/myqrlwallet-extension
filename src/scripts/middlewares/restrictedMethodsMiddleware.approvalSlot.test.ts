@@ -24,6 +24,7 @@ import {
   POPUP_RESPONSE_TIMEOUT_MS,
   restrictedMethodsMiddleware,
 } from "./restrictedMethodsMiddleware";
+import { showApprovalWaitingNotification } from "../utils/approvalNotification";
 import type { DAppResponseType } from "./middlewareTypes";
 
 const { mockIsLocked, mockCheckDomain, mockOpenApprovalSurface } = vi.hoisted(
@@ -362,7 +363,10 @@ describe("restricted method approval slot and timers", () => {
       vi.fn(),
     );
 
-    expect(mockOpenApprovalSurface).toHaveBeenCalledWith({ tabId: 11 });
+    expect(mockOpenApprovalSurface).toHaveBeenCalledWith({
+      tabId: 11,
+      announce: false,
+    });
 
     answerPending(false);
     await first;
@@ -476,6 +480,28 @@ describe("restricted method approval slot and timers", () => {
 
     answerPending(false);
     await retry;
+  });
+
+  it("clears the approval-waiting notification when the slot is released", async () => {
+    await showApprovalWaitingNotification(9);
+    const clear = vi.spyOn(browser.notifications, "clear");
+    const first = restrictedMethodsMiddleware(
+      buildRequest(ORIGIN_A, 11),
+      buildResponse(),
+      vi.fn(),
+      vi.fn(),
+    );
+    await vi.waitFor(() => {
+      expect(pendingRequestId()).toBeTypeOf("string");
+    });
+    answerPending(false);
+    await first;
+
+    await vi.waitFor(() => {
+      expect(clear).toHaveBeenCalledWith(
+        expect.stringMatching(/^approval-waiting-9-\d+$/),
+      );
+    });
   });
 
   it("rejects a request the user never answered (M1)", async () => {
