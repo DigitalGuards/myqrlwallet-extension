@@ -9,12 +9,19 @@ import type { NFTStandard } from "@/types/nft";
  * decides whether Speed Up rebuilds a token transfer or a native one, so a
  * record must read the same in both directions:
  *
- * - readers take the current name first and the earlier one after it;
  * - writers store the flag under both names, and the NFT standard under its
- *   earlier value, which is the one value every version reads.
+ *   earlier value, which is the one value every version reads;
+ * - readers take the earlier name of the flag when it holds a boolean, and
+ *   the current name otherwise. Every version that writes the current name
+ *   writes the earlier one with the same value, so the two differ only after
+ *   a version from before the rename rewrote the record: it updates the
+ *   earlier name and carries the current one along unchanged. The earlier
+ *   name is then the fresh value.
  *
- * One release after the rename, writers can drop the earlier names. Readers
- * keep them.
+ * One release after the rename, writers can drop the earlier names. They
+ * must then remove the earlier name from every record they rewrite (it stays
+ * a known field of the storage shapes for that purpose), and this reader
+ * must take the current name first. Readers keep both names.
  */
 
 type TokenFlagRecord = Record<string, unknown>;
@@ -22,9 +29,9 @@ type TokenFlagRecord = Record<string, unknown>;
 /** The token flag of a stored record, whichever name it was stored under. */
 export const readStoredTokenFlag = (stored: TokenFlagRecord): boolean => {
   const flag =
-    typeof stored.isQrc20Token === "boolean"
-      ? stored.isQrc20Token
-      : stored.isZrc20Token;
+    typeof stored.isZrc20Token === "boolean"
+      ? stored.isZrc20Token
+      : stored.isQrc20Token;
   return flag === true;
 };
 

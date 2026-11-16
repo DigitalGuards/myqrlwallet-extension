@@ -167,7 +167,7 @@ describe("token flag in history entries", () => {
     ]);
   });
 
-  it("reads the current name first when both names differ", async () => {
+  it("reads the earlier name when both names differ, as after a rewrite by a version from before the rename", async () => {
     seedHistory([
       { ...STORED_HISTORY, isQrc20Token: false, isZrc20Token: true },
       {
@@ -181,7 +181,15 @@ describe("token flag in history entries", () => {
     const views = (await StorageUtil.getTransactionHistory(ACCOUNT)).map(
       historyEntryView,
     );
-    expect(views.map((view) => view.isQrc20Token)).toEqual([false, true]);
+    expect(views.map((view) => view.isQrc20Token)).toEqual([true, false]);
+  });
+
+  it("reads the current name when the earlier one is not a boolean", async () => {
+    seedHistory([{ ...STORED_HISTORY, isQrc20Token: true, isZrc20Token: 1 }]);
+    const [view] = (await StorageUtil.getTransactionHistory(ACCOUNT)).map(
+      historyEntryView,
+    );
+    expect(view.isQrc20Token).toBe(true);
   });
 
   it("falls back to the earlier name when the current one is not a boolean", async () => {
@@ -206,6 +214,19 @@ describe("token flag in the transfer draft", () => {
       ...tokenDetails,
       isQrc20Token: true,
     });
+    expect(values.tokenDetails).not.toHaveProperty("isZrc20Token");
+  });
+
+  it("reads the earlier name of a draft that 1.4.3 rewrote after this version wrote it", async () => {
+    // 1.4.3 updates the name it knows and carries the unfamiliar current
+    // name along unchanged.
+    h.store[draftKey] = {
+      receiverAddress: OTHER_ACCOUNT,
+      amount: "1",
+      tokenDetails: { ...tokenDetails, isQrc20Token: true, isZrc20Token: false },
+    };
+    const values = await StorageUtil.getTransactionValues();
+    expect(values.tokenDetails?.isQrc20Token).toBe(false);
     expect(values.tokenDetails).not.toHaveProperty("isZrc20Token");
   });
 
