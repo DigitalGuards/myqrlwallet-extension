@@ -1200,7 +1200,12 @@ const draftAsRead = (draft: unknown): unknown => {
   const { isZrc20Token, isQrc20Token, ...rest } = draft.tokenDetails;
   return {
     ...draft,
-    tokenDetails: { ...rest, isQrc20Token: isQrc20Token ?? isZrc20Token },
+    // The same order as readStoredTokenFlag: the earlier name when it holds a
+    // boolean, the current one otherwise.
+    tokenDetails: {
+      ...rest,
+      isQrc20Token: typeof isZrc20Token === "boolean" ? isZrc20Token : isQrc20Token,
+    },
   };
 };
 

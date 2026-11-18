@@ -54,6 +54,7 @@ import {
   isStringRecord,
   isTokenContract,
   isTransactionHistoryEntry,
+  isStoredTransactionValues,
   isTransactionValues,
   isWalletSettings,
   readStoredSettings,
@@ -352,7 +353,7 @@ const StorageUtil = {
       transactionValuesIdentifier,
     );
     const stored = storedTransactionValues[transactionValuesIdentifier];
-    if (isTransactionValues(stored)) {
+    if (isStoredTransactionValues(stored)) {
       transactionValues = {
         ...transactionValues,
         ...stored,

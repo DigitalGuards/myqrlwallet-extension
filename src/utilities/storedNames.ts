@@ -3,7 +3,7 @@ import type { NFTStandard } from "@/types/nft";
 /**
  * Stored names from before the token standards were renamed from ZRC to QRC.
  *
- * Versions up to 1.4.3 read the token flag as `isZrc20Token` and the NFT
+ * Versions up to 1.4.4 read the token flag as `isZrc20Token` and the NFT
  * standard as "ZRC721" or "ZRC1155", and a profile can be opened by such a
  * version again (a rolled-back release, a test build swapped back). The flag
  * decides whether Speed Up rebuilds a token transfer or a native one, so a
@@ -35,10 +35,20 @@ export const readStoredTokenFlag = (stored: TokenFlagRecord): boolean => {
   return flag === true;
 };
 
-/** True when a stored record carries a readable token flag under either name. */
+const isFlagOrAbsent = (value: unknown): boolean =>
+  value === undefined || typeof value === "boolean";
+
+/**
+ * True when a stored record carries a readable token flag: a boolean under
+ * at least one name, and nothing but a boolean under either. A record with
+ * anything else under one of the names is one the wallet cannot fully read,
+ * so it stays as it is.
+ */
 export const hasStoredTokenFlag = (stored: TokenFlagRecord): boolean =>
-  typeof stored.isQrc20Token === "boolean" ||
-  typeof stored.isZrc20Token === "boolean";
+  isFlagOrAbsent(stored.isQrc20Token) &&
+  isFlagOrAbsent(stored.isZrc20Token) &&
+  (typeof stored.isQrc20Token === "boolean" ||
+    typeof stored.isZrc20Token === "boolean");
 
 /** A stored record's fields, with the token flag under its current name only. */
 export const withCurrentTokenFlag = <T extends TokenFlagRecord>(

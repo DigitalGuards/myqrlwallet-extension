@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import StorageUtil from "./storageUtil";
-import { isTransactionValues } from "./storageGuards";
+import {
+  isStoredTransactionValues,
+  isTransactionValues,
+} from "./storageGuards";
 import { historyEntryView, nftCollectionView } from "./storageViews";
 import { isTransactionDetailEntry } from "./transactionHistoryGuards";
 import {
@@ -208,7 +211,10 @@ describe("token flag in the transfer draft", () => {
       amount: "1",
       tokenDetails: { ...tokenDetails, isZrc20Token: true },
     };
-    expect(isTransactionValues(h.store[draftKey])).toBe(true);
+    // Readable as a stored draft; a draft this version works with carries
+    // the flag under its current name.
+    expect(isStoredTransactionValues(h.store[draftKey])).toBe(true);
+    expect(isTransactionValues(h.store[draftKey])).toBe(false);
     const values = await StorageUtil.getTransactionValues();
     expect(values.tokenDetails).toEqual({
       ...tokenDetails,
@@ -217,8 +223,8 @@ describe("token flag in the transfer draft", () => {
     expect(values.tokenDetails).not.toHaveProperty("isZrc20Token");
   });
 
-  it("reads the earlier name of a draft that 1.4.3 rewrote after this version wrote it", async () => {
-    // 1.4.3 updates the name it knows and carries the unfamiliar current
+  it("reads the earlier name of a draft that 1.4.4 rewrote after this version wrote it", async () => {
+    // 1.4.4 updates the name it knows and carries the unfamiliar current
     // name along unchanged.
     h.store[draftKey] = {
       receiverAddress: OTHER_ACCOUNT,
@@ -244,12 +250,34 @@ describe("token flag in the transfer draft", () => {
   });
 
   it("rejects a draft whose flag is under neither name", () => {
-    expect(isTransactionValues({ tokenDetails })).toBe(false);
+    expect(isStoredTransactionValues({ tokenDetails })).toBe(false);
     expect(
-      isTransactionValues({
+      isStoredTransactionValues({
         tokenDetails: { ...tokenDetails, isZrc20Token: "true" },
       }),
     ).toBe(false);
+  });
+
+  it("leaves a draft unread when one of the two names holds something else", async () => {
+    const stored = {
+      receiverAddress: OTHER_ACCOUNT,
+      amount: "1",
+      tokenDetails: { ...tokenDetails, isQrc20Token: true, isZrc20Token: "yes" },
+    };
+    h.store[draftKey] = stored;
+    expect(isStoredTransactionValues(stored)).toBe(false);
+    const values = await StorageUtil.getTransactionValues();
+    expect(values.tokenDetails).toBeUndefined();
+    expect(h.store[draftKey]).toEqual(stored);
+  });
+
+  it("does not take a draft with the flag under the earlier name only for one to store", () => {
+    const draft: unknown = {
+      receiverAddress: OTHER_ACCOUNT,
+      amount: "1",
+      tokenDetails: { ...tokenDetails, isZrc20Token: true },
+    };
+    expect(isTransactionValues(draft)).toBe(false);
   });
 });
 

@@ -126,11 +126,8 @@ const isTransferNavigationState = (
   isRecord(value) &&
   (value.shouldStartFresh === undefined ||
     typeof value.shouldStartFresh === "boolean") &&
-  // Route state is built by this version only, so the flag must carry its
-  // current name; the stored-draft guard also accepts the earlier one.
-  (value.tokenDetails === undefined ||
-    (isRecord(value.tokenDetails) &&
-      typeof value.tokenDetails.isQrc20Token === "boolean")) &&
+  // Route state is built by this version only, so the token flag must carry
+  // its current name, which is what this guard requires.
   isTransactionValues({ tokenDetails: value.tokenDetails });
 
 const TokenTransfer = observer(() => {

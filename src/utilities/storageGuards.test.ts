@@ -12,6 +12,7 @@ import {
   isNormalizableContact,
   isNormalizableQrlAddress,
   isPriceCache,
+  isStoredTransactionValues,
   isStoredBlockchain,
   isStoredKeystore,
   isStoredPermission,
@@ -293,13 +294,14 @@ describe("storage record guards", () => {
         tokenDetails: { ...DETAILS, tokenDecimals: "18" },
       }),
     ).toBe(false);
-    // A draft from before the rename holds the flag under its earlier name.
+    // A draft from before the rename holds the flag under its earlier name:
+    // readable from storage, and outside the shape this version works with.
     const { isQrc20Token: flag, ...earlier } = DETAILS;
-    expect(
-      isTransactionValues({
-        tokenDetails: { ...earlier, isZrc20Token: flag },
-      }),
-    ).toBe(true);
+    const earlierDraft = { tokenDetails: { ...earlier, isZrc20Token: flag } };
+    expect(isStoredTransactionValues(earlierDraft)).toBe(true);
+    expect(isTransactionValues(earlierDraft)).toBe(false);
+    expect(isStoredTransactionValues({ tokenDetails: DETAILS })).toBe(true);
+    expect(isStoredTransactionValues({ tokenDetails: earlier })).toBe(false);
     expect(isTransactionValues({ tokenDetails: earlier })).toBe(false);
   });
 
