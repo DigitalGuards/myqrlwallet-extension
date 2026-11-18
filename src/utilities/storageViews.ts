@@ -12,6 +12,7 @@ import {
   type StoredNFTCollection,
   type StoredToken,
 } from "./storageGuards";
+import { readStoredNftStandard, readStoredTokenFlag } from "./storedNames";
 
 export const storedText = (value: unknown): string =>
   isString(value) ? value : "";
@@ -65,10 +66,7 @@ export const nftCollectionView = (
   address: collection.address,
   name: storedText(collection.name),
   symbol: storedText(collection.symbol),
-  standard:
-    collection.standard === "ZRC721" || collection.standard === "ZRC1155"
-      ? collection.standard
-      : undefined,
+  standard: readStoredNftStandard(collection.standard),
   image: storedText(collection.image),
 });
 
@@ -83,7 +81,7 @@ export const historyEntryView = (
     isString(entry.amount) || isFiniteNumber(entry.amount) ? entry.amount : "",
   tokenSymbol: storedText(entry.tokenSymbol),
   tokenName: storedText(entry.tokenName),
-  isZrc20Token: entry.isZrc20Token === true,
+  isQrc20Token: readStoredTokenFlag(entry),
   tokenContractAddress: storedText(entry.tokenContractAddress),
   tokenDecimals: isFiniteNumber(entry.tokenDecimals)
     ? entry.tokenDecimals

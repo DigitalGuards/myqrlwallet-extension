@@ -218,7 +218,7 @@ describe("NFTTransfer", () => {
         "7",
         expect.any(String),
         defaultState.contractAddress,
-        "ZRC721",
+        "QRC721",
         "1",
       );
     });
@@ -437,7 +437,7 @@ describe("NFTTransfer", () => {
     const signNftTransfer = vi.fn();
     const getErc1155TokenBalance = vi.fn().mockReturnValue(balance.promise);
     renderComponent(
-      { ...defaultState, standard: "ZRC1155", balance: "3" },
+      { ...defaultState, standard: "QRC1155", balance: "3" },
       mockedStore({ qrlStore: { signNftTransfer, getErc1155TokenBalance } }),
     );
     await userEvent.type(
@@ -468,7 +468,7 @@ describe("NFTTransfer", () => {
     const error = new Error("balance unavailable");
     const report = vi.spyOn(console, "error").mockImplementation(() => {});
     renderComponent(
-      { ...defaultState, standard: "ZRC1155", balance: "3" },
+      { ...defaultState, standard: "QRC1155", balance: "3" },
       mockedStore({
         qrlStore: {
           getErc1155TokenBalance: vi.fn().mockRejectedValue(error),
@@ -497,7 +497,7 @@ describe("NFTTransfer", () => {
           initialEntries={[
             {
               pathname: "/nft-transfer",
-              state: { ...defaultState, standard: "ZRC1155", balance: "3" },
+              state: { ...defaultState, standard: "QRC1155", balance: "3" },
             },
           ]}
         >
@@ -506,7 +506,7 @@ describe("NFTTransfer", () => {
             state={{
               ...defaultState,
               tokenId: "8",
-              standard: "ZRC1155",
+              standard: "QRC1155",
               balance: "3",
             }}
           >
@@ -681,7 +681,7 @@ describe("NFTTransfer", () => {
       return Promise.resolve({ values: {}, errors: {} });
     };
     vi.spyOn(resolvers, "zodResolver").mockReturnValue(resolver);
-    renderComponent({ ...defaultState, standard: "ZRC1155", balance: "3" });
+    renderComponent({ ...defaultState, standard: "QRC1155", balance: "3" });
     await waitFor(() => {
       expect(report).toHaveBeenCalledWith(
         "Failed to validate NFT amount:",

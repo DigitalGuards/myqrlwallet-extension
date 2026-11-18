@@ -166,7 +166,7 @@ describe("NFT transaction fields stay separate from display defaults", () => {
     vi.restoreAllMocks();
   });
 
-  describe.each<NFTStandard>(["ZRC721", "ZRC1155"])("%s", (standard) => {
+  describe.each<NFTStandard>(["QRC721", "QRC1155"])("%s", (standard) => {
     it.each(invalidNftTransferFields)(
       "blocks detail navigation and direct transfer submission for $label",
       async ({ field, value }) => {
@@ -270,7 +270,7 @@ describe("NFT transaction fields stay separate from display defaults", () => {
           receiver,
           BigInt(tokenId),
         ];
-        if (standard === "ZRC1155") expectedArgs.push(1n, "0x");
+        if (standard === "QRC1155") expectedArgs.push(1n, "0x");
         expect(safeTransferFrom).toHaveBeenCalledExactlyOnceWith(
           ...expectedArgs,
         );
@@ -305,7 +305,7 @@ describe("NFT transaction fields stay separate from display defaults", () => {
             tokenId: state.tokenId,
             collectionName: state.collectionName ?? "",
             imageUrl: state.imageUrl ?? "",
-            standard: state.standard ?? "ZRC721",
+            standard: state.standard ?? "QRC721",
             balance: state.balance,
             nftName: details.metadata.name,
           },

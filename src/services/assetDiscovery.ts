@@ -94,11 +94,11 @@ const toQAddress = (address: string): string | null => {
   }
 };
 
-// The extension stores NFTStandard as "ZRC721"/"ZRC1155"; the explorer
-// returns "ERC-721"/"ERC-1155".
+// The wallet types NFTStandard as "QRC721"/"QRC1155"; the explorer returns
+// "ERC-721"/"ERC-1155".
 const toNftStandard = (standard: string): NFTStandard | null => {
-  if (standard === "ERC-721" || standard === "ERC721") return "ZRC721";
-  if (standard === "ERC-1155" || standard === "ERC1155") return "ZRC1155";
+  if (standard === "ERC-721" || standard === "ERC721") return "QRC721";
+  if (standard === "ERC-1155" || standard === "ERC1155") return "QRC1155";
   return null;
 };
 

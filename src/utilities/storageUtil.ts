@@ -54,6 +54,7 @@ import {
   isStringRecord,
   isTokenContract,
   isTransactionHistoryEntry,
+  isStoredTransactionValues,
   isTransactionValues,
   isWalletSettings,
   readStoredSettings,
@@ -77,6 +78,11 @@ import {
   type StoredLedgerAccount,
   type StoredHistoryEntry,
 } from "@/utilities/storageGuards";
+import {
+  toStoredNftStandard,
+  withCurrentTokenFlag,
+  withEarlierTokenFlag,
+} from "@/utilities/storedNames";
 
 const readLocalStorage = async (
   key: string,
@@ -207,7 +213,7 @@ export type TransactionValuesType = {
   receiverAddress?: string;
   amount?: string | number;
   tokenDetails?: {
-    isZrc20Token: boolean;
+    isQrc20Token: boolean;
     tokenContractAddress: string;
     tokenDecimals: number | null;
     tokenImage: unknown;
@@ -321,7 +327,9 @@ const StorageUtil = {
     const transactionValuesWithDefaultValues = {
       receiverAddress: transactionValues.receiverAddress ?? "",
       amount: transactionValues.amount ?? 0,
-      tokenDetails: transactionValues.tokenDetails,
+      tokenDetails:
+        transactionValues.tokenDetails &&
+        withEarlierTokenFlag(transactionValues.tokenDetails),
     };
     const storageData = await readLocalStorage(transactionValuesIdentifier);
     await walletLocalStorage.set({
@@ -345,10 +353,14 @@ const StorageUtil = {
       transactionValuesIdentifier,
     );
     const stored = storedTransactionValues[transactionValuesIdentifier];
-    if (isTransactionValues(stored)) {
+    if (isStoredTransactionValues(stored)) {
       transactionValues = {
         ...transactionValues,
         ...stored,
+        // A draft from before the QRC-20 rename holds the flag under its
+        // earlier name only.
+        tokenDetails:
+          stored.tokenDetails && withCurrentTokenFlag(stored.tokenDetails),
       };
     }
 
@@ -767,7 +779,7 @@ const StorageUtil = {
           (item) =>
             isNFTCollection(item) && item.address === collection.address,
         ),
-        collection,
+        { ...collection, standard: toStoredNftStandard(collection.standard) },
       ),
     ];
 
@@ -1433,7 +1445,7 @@ const StorageUtil = {
             isTransactionHistoryEntry(tx) &&
             tx.transactionHash === entry.transactionHash,
         ),
-        entry,
+        withEarlierTokenFlag(entry),
       ),
       ...existing.filter(
         (tx) =>
@@ -1503,7 +1515,7 @@ const StorageUtil = {
         tx.transactionHash !== transactionHash
       )
         return tx;
-      const merged = { ...tx, ...updates };
+      const merged = { ...tx, ...withEarlierTokenFlag(updates) };
       if (!isTransactionHistoryEntry(merged))
         throw new Error("Invalid stored transaction identity");
       const hasReceipt =

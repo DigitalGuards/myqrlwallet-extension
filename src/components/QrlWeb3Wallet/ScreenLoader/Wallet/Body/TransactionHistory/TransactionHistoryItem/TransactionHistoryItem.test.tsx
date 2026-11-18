@@ -20,7 +20,7 @@ const makeSampleEntry = (
   amount: 2.5,
   tokenSymbol: "QRL",
   tokenName: "QRL",
-  isZrc20Token: false,
+  isQrc20Token: false,
   tokenContractAddress: "",
   tokenDecimals: 18,
   transactionHash: "0xtxhash1",
@@ -117,7 +117,7 @@ describe("TransactionHistoryItem", () => {
   it("should render a QRC-20 token transaction", () => {
     renderComponent(
       makeSampleEntry({
-        isZrc20Token: true,
+        isQrc20Token: true,
         tokenSymbol: "TST",
         amount: 100,
       }),
@@ -316,7 +316,7 @@ describe("TransactionHistoryItem", () => {
           <TransactionHistoryItem
             transaction={makeSampleEntry({
               amount: 10,
-              isZrc20Token: true,
+              isQrc20Token: true,
               tokenSymbol: "TST",
             })}
           />

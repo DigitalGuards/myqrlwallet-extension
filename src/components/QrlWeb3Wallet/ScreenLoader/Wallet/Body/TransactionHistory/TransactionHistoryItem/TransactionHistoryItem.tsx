@@ -89,7 +89,7 @@ const TransactionHistoryItem = observer(
     const { price: qrlPrice, currency: quoteCurrency } =
       priceStore.quoteFor(currency);
     const fiatDisplay =
-      showFiat && qrlPrice > 0 && !transaction.isZrc20Token
+      showFiat && qrlPrice > 0 && !transaction.isQrc20Token
         ? formatFiatCompact(amount, qrlPrice, quoteCurrency)
         : "";
 

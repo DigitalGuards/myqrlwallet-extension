@@ -47,7 +47,7 @@ it.each([false, null, 0, { future: true }])(
       receiverAddress: OTHER_ACCOUNT,
       amount: "1.5",
       tokenDetails: {
-        isZrc20Token: true,
+        isQrc20Token: true,
         tokenContractAddress: ACCOUNT,
         tokenDecimals: 18,
         tokenImage,
@@ -90,3 +90,40 @@ it.each([false, null, 0, { future: true }])(
     });
   },
 );
+
+it("cold-opens a token draft saved by a version before the rename (flag under its earlier name only)", async () => {
+  const key = `${DEFAULT_BLOCKCHAIN.chainId}_TRANSACTION_VALUES`;
+  h.values[key] = {
+    receiverAddress: OTHER_ACCOUNT,
+    amount: "1.5",
+    tokenDetails: {
+      isZrc20Token: true,
+      tokenContractAddress: ACCOUNT,
+      tokenDecimals: 18,
+      tokenImage: false,
+      tokenBalance: "10",
+      tokenBalanceBaseUnits: "10000000000000000000",
+      tokenName: "Token",
+      tokenSymbol: "TOK",
+    },
+  };
+  await act(() => {
+    render(
+      <StoreProvider
+        value={mockedStore({
+          qrlStore: { activeAccount: { accountAddress: ACCOUNT } },
+        })}
+      >
+        <MemoryRouter>
+          <TokenTransfer />
+        </MemoryRouter>
+      </StoreProvider>,
+    );
+    return Promise.resolve();
+  });
+  await waitFor(() => {
+    expect(
+      screen.getByRole("button", { name: "Send TOK" }),
+    ).toBeInTheDocument();
+  });
+});

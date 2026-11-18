@@ -290,7 +290,7 @@ const TransactionDetail = observer(() => {
           amount: transaction.amount,
           tokenSymbol: transaction.tokenSymbol,
           tokenName: transaction.tokenName,
-          isZrc20Token: transaction.isZrc20Token,
+          isQrc20Token: transaction.isQrc20Token,
           tokenContractAddress: transaction.tokenContractAddress,
           tokenDecimals: transaction.tokenDecimals,
           transactionHash: replacementHash,
@@ -446,7 +446,7 @@ const TransactionDetail = observer(() => {
   // The two have different units, so the fee stays on its own here and the
   // row below shows them side by side.
   // A call that failed on chain moved nothing: its cost is the fee alone.
-  const isTokenTransfer = transaction.isZrc20Token;
+  const isTokenTransfer = transaction.isQrc20Token;
   const totalCost =
     totalGasFeeQrl === undefined
       ? undefined

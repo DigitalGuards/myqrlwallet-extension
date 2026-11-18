@@ -60,7 +60,7 @@ const makeSampleEntry = (
   amount: 2.5,
   tokenSymbol: "QRL",
   tokenName: "QRL",
-  isZrc20Token: false,
+  isQrc20Token: false,
   tokenContractAddress: "",
   tokenDecimals: 18,
   transactionHash: "0xtxhash1",
@@ -72,6 +72,13 @@ const makeSampleEntry = (
   chainId: "0x1",
   ...overrides,
 });
+
+// An entry as storage holds it from a version before the QRC-20 rename: the
+// flag under its earlier name only.
+const toEarlierStored = (entry: TransactionHistoryEntry) => {
+  const { isQrc20Token, ...rest } = entry;
+  return { ...rest, isZrc20Token: isQrc20Token };
+};
 
 describe("TransactionHistoryStore", () => {
   // Dynamic import so mocks are in place
@@ -217,7 +224,9 @@ describe("TransactionHistoryStore", () => {
       makeSampleEntry(),
       makeSampleEntry({ id: "0xtxhash2", transactionHash: "0xtxhash2" }),
     ];
-    mockGetTransactionHistory.mockResolvedValue(entries);
+    // Storage from before the QRC-20 rename holds the flag under its earlier
+    // name; the store shows it under the current one.
+    mockGetTransactionHistory.mockResolvedValue(entries.map(toEarlierStored));
 
     const store = new TransactionHistoryStore();
     await store.loadHistory("Q20B714091cF2a62DADda2847803e3f1B9D2D3779");
@@ -227,6 +236,26 @@ describe("TransactionHistoryStore", () => {
     );
     expect(store.transactions).toEqual(entries);
     expect(store.isLoading).toBe(false);
+  });
+
+  it("loads a pending token transfer stored under the earlier flag name as a token transfer", async () => {
+    // Speed Up and Cancel rebuild the replacement from these entries.
+    const pending = makeSampleEntry({
+      id: "0xpendingtoken",
+      transactionHash: "0xpendingtoken",
+      pendingStatus: "pending",
+      blockNumber: "",
+      isQrc20Token: true,
+      tokenContractAddress: "Q20fB08fF1f1376A14C055E9F56df80563E16722b",
+    });
+    mockGetTransactionHistory.mockResolvedValue([toEarlierStored(pending)]);
+
+    const store = new TransactionHistoryStore();
+    await store.loadHistory("Q20B714091cF2a62DADda2847803e3f1B9D2D3779");
+
+    expect(store.transactions).toEqual([pending]);
+    expect(store.transactions[0].isQrc20Token).toBe(true);
+    expect(store.pendingTransactions).toEqual([pending]);
   });
 
   it("should add transaction and reload", async () => {
@@ -261,11 +290,11 @@ describe("TransactionHistoryStore", () => {
 
   it("should return filtered transactions for native filter", () => {
     const store = new TransactionHistoryStore();
-    const nativeEntry = makeSampleEntry({ isZrc20Token: false });
+    const nativeEntry = makeSampleEntry({ isQrc20Token: false });
     const qrc20Entry = makeSampleEntry({
       id: "0xtxhash2",
       transactionHash: "0xtxhash2",
-      isZrc20Token: true,
+      isQrc20Token: true,
       tokenSymbol: "TST",
     });
 

@@ -105,7 +105,7 @@ const createFormSchema = (t: TFunction, decimals: number) =>
     );
 
 type TransferTokenDetails = {
-  isZrc20Token: boolean;
+  isQrc20Token: boolean;
   tokenContractAddress: string;
   tokenDecimals: number | null;
   tokenImage: unknown;
@@ -126,6 +126,8 @@ const isTransferNavigationState = (
   isRecord(value) &&
   (value.shouldStartFresh === undefined ||
     typeof value.shouldStartFresh === "boolean") &&
+  // Route state is built by this version only, so the token flag must carry
+  // its current name, which is what this guard requires.
   isTransactionValues({ tokenDetails: value.tokenDetails });
 
 const TokenTransfer = observer(() => {
@@ -146,7 +148,7 @@ const TokenTransfer = observer(() => {
   const { activeAccount, qrlInstance } = qrlStore;
   const { accountAddress } = activeAccount;
 
-  const [isZrc20Token, setIsZrc20Token] = useState(false);
+  const [isQrc20Token, setIsQrc20Token] = useState(false);
   const [tokenContractAddress, setTokenContractAddress] = useState("");
   const [tokenDecimals, setTokenDecimals] = useState(0);
   const [tokenImage, setTokenImage] = useState<unknown>(NATIVE_TOKEN.image);
@@ -184,7 +186,7 @@ const TokenTransfer = observer(() => {
     setInitializationError(t("transfer.errorOccurred", { error }));
   };
 
-  const amountDecimals = isZrc20Token ? tokenDecimals : 18;
+  const amountDecimals = isQrc20Token ? tokenDecimals : 18;
   const FormSchema = createFormSchema(t, amountDecimals);
 
   type SignResult = {
@@ -306,7 +308,7 @@ const TokenTransfer = observer(() => {
 
       // Step 1: Sign the transaction (fast, no blockchain wait)
       let signResult: SignResult;
-      if (isZrc20Token) {
+      if (isQrc20Token) {
         signResult = await signQrc20TokenLocal(formData);
       } else {
         signResult = await signNativeTokenLocal(formData);
@@ -346,7 +348,7 @@ const TokenTransfer = observer(() => {
         amount: formData.amount,
         tokenSymbol,
         tokenName,
-        isZrc20Token,
+        isQrc20Token,
         tokenContractAddress,
         tokenDecimals,
         transactionHash,
@@ -493,7 +495,7 @@ const TokenTransfer = observer(() => {
         const tokenDetailsFromStorage = storedTransactionValues.tokenDetails;
         const tokenDetailsFromState = state?.tokenDetails;
         let tokenDetails: TransferTokenDetails = {
-          isZrc20Token,
+          isQrc20Token,
           tokenContractAddress,
           tokenDecimals,
           tokenImage,
@@ -505,7 +507,7 @@ const TokenTransfer = observer(() => {
 
         if (tokenDetailsFromState) {
           await resetForm();
-          setIsZrc20Token(tokenDetailsFromState.isZrc20Token);
+          setIsQrc20Token(tokenDetailsFromState.isQrc20Token);
           setTokenContractAddress(tokenDetailsFromState.tokenContractAddress);
           setTokenDecimals(tokenDetailsFromState.tokenDecimals ?? Number.NaN);
           setTokenImage(tokenDetailsFromState.tokenImage);
@@ -517,7 +519,7 @@ const TokenTransfer = observer(() => {
           setTokenSymbol(tokenDetailsFromState.tokenSymbol);
           tokenDetails = { ...tokenDetailsFromState };
         } else if (tokenDetailsFromStorage) {
-          setIsZrc20Token(tokenDetailsFromStorage.isZrc20Token);
+          setIsQrc20Token(tokenDetailsFromStorage.isQrc20Token);
           setTokenContractAddress(tokenDetailsFromStorage.tokenContractAddress);
           setTokenDecimals(tokenDetailsFromStorage.tokenDecimals ?? Number.NaN);
           setTokenImage(tokenDetailsFromStorage.tokenImage);
@@ -545,7 +547,7 @@ const TokenTransfer = observer(() => {
   // balance is re-read here and overwrites both the display string and the
   // base-unit ceiling every guard and Max work from.
   useEffect(() => {
-    if (!isZrc20Token || !tokenContractAddress || !accountAddress) return;
+    if (!isQrc20Token || !tokenContractAddress || !accountAddress) return;
     const request = { cancelled: false };
     void (async () => {
       const details = await qrlStore.getQrc20TokenDetails(tokenContractAddress);
@@ -563,7 +565,7 @@ const TokenTransfer = observer(() => {
     return () => {
       request.cancelled = true;
     };
-  }, [isZrc20Token, tokenContractAddress, accountAddress, qrlStore]);
+  }, [isQrc20Token, tokenContractAddress, accountAddress, qrlStore]);
 
   useEffect(() => {
     const formWatchSubscription = watch((value) => {
@@ -572,7 +574,7 @@ const TokenTransfer = observer(() => {
       void StorageUtil.setTransactionValues({
         ...value,
         tokenDetails: {
-          isZrc20Token,
+          isQrc20Token,
           tokenContractAddress,
           tokenDecimals,
           tokenImage,
@@ -590,7 +592,7 @@ const TokenTransfer = observer(() => {
     };
   }, [
     watch,
-    isZrc20Token,
+    isQrc20Token,
     tokenContractAddress,
     tokenDecimals,
     tokenImage,
@@ -616,7 +618,7 @@ const TokenTransfer = observer(() => {
     const sendAmount = amountForDisplay(watchedAmount);
     const nativeBalance = parseBalanceValue(nativeAccountBalance);
 
-    if (isZrc20Token) {
+    if (isQrc20Token) {
       // Compared in base units: the display balance is rounded to four
       // decimals, so a real balance of 0.00005 of an 8-decimal token read
       // as 0 and every send of it was refused.
@@ -669,7 +671,7 @@ const TokenTransfer = observer(() => {
     tokenBalance,
     tokenBalanceBaseUnits,
     tokenDecimals,
-    isZrc20Token,
+    isQrc20Token,
     accountAddress,
     nativeAccountBalance,
   ]);
@@ -679,7 +681,7 @@ const TokenTransfer = observer(() => {
   // estimate this needs no recipient/amount, so Max works on a blank form.
   // Recomputed when the tier changes (advanced overrides move the limit).
   useEffect(() => {
-    if (isZrc20Token) {
+    if (isQrc20Token) {
       setNativeGasReserve("0");
       return;
     }
@@ -695,12 +697,12 @@ const TokenTransfer = observer(() => {
     return () => {
       request.cancelled = true;
     };
-  }, [isZrc20Token, gasFeeOverrides, qrlStore]);
+  }, [isQrc20Token, gasFeeOverrides, qrlStore]);
 
   // Balance available for the amount itself. Tokens spend gas from the
   // native balance, so their full token balance is sendable.
   const maxSendable = useMemo(() => {
-    if (isZrc20Token) {
+    if (isQrc20Token) {
       if (
         !Number.isInteger(tokenDecimals) ||
         tokenDecimals < 0 ||
@@ -724,7 +726,7 @@ const TokenTransfer = observer(() => {
     const sendable = balance.minus(reserve);
     return sendable.gt(0) ? sendable : new BigNumber(0);
   }, [
-    isZrc20Token,
+    isQrc20Token,
     tokenBalance,
     tokenBalanceBaseUnits,
     tokenDecimals,
@@ -739,7 +741,7 @@ const TokenTransfer = observer(() => {
       form.setValue("amount", "", { shouldValidate: true });
       return;
     }
-    const decimals = isZrc20Token ? tokenDecimals : 18;
+    const decimals = isQrc20Token ? tokenDecimals : 18;
     const formatted = maxSendable
       .times(percentage)
       .times("0.01")
@@ -762,9 +764,9 @@ const TokenTransfer = observer(() => {
   const applyPercentageRef = useRef(applyPercentage);
   applyPercentageRef.current = applyPercentage;
   useEffect(() => {
-    if (sliderValue !== 100 || isZrc20Token) return;
+    if (sliderValue !== 100 || isQrc20Token) return;
     applyPercentageRef.current(100);
-  }, [nativeGasReserve, isZrc20Token]);
+  }, [nativeGasReserve, isQrc20Token]);
 
   // Typing an amount moves the slider to match.
   useEffect(() => {
@@ -1032,7 +1034,7 @@ const TokenTransfer = observer(() => {
 
                         <FormDescription>
                           {t("transfer.amountDescription")}
-                          {!isZrc20Token &&
+                          {!isQrc20Token &&
                             settingsStore.showBalanceAndPrice &&
                             qrlStore.isFiatNetwork &&
                             amountQuote.price > 0 &&
@@ -1061,7 +1063,7 @@ const TokenTransfer = observer(() => {
                     )}
                   />
                   <GasFeeSelector
-                    isZrc20Token={isZrc20Token}
+                    isQrc20Token={isQrc20Token}
                     tokenContractAddress={tokenContractAddress}
                     tokenDecimals={tokenDecimals}
                     from={accountAddress}

@@ -12,7 +12,7 @@ describe("GasFeeNotice", () => {
   const renderComponent = (
     mockedStoreValues = mockedStore(),
     mockedProps: ComponentProps<typeof GasFeeNotice> = {
-      isZrc20Token: false,
+      isQrc20Token: false,
       tokenContractAddress: "",
       tokenDecimals: 18,
       isSubmitting: false,
@@ -31,7 +31,7 @@ describe("GasFeeNotice", () => {
 
   it("should render the gas fee notice component", async () => {
     renderComponent(undefined, {
-      isZrc20Token: false,
+      isQrc20Token: false,
       tokenContractAddress: "",
       tokenDecimals: 18,
       isSubmitting: false,
@@ -66,7 +66,7 @@ describe("GasFeeNotice", () => {
         },
       }),
       {
-        isZrc20Token: false,
+        isQrc20Token: false,
         tokenContractAddress: "",
         tokenDecimals: 18,
         isSubmitting: false,
@@ -94,7 +94,7 @@ describe("GasFeeNotice", () => {
         },
       }),
       {
-        isZrc20Token: false,
+        isQrc20Token: false,
         tokenContractAddress: "",
         tokenDecimals: 18,
         isSubmitting: false,
@@ -120,7 +120,7 @@ describe("GasFeeNotice", () => {
         },
       }),
       {
-        isZrc20Token: true,
+        isQrc20Token: true,
         tokenContractAddress: "0x28c4113a9d3a2e836f28c23ed8e3c1e7c243f566",
         tokenDecimals: 18,
         isSubmitting: false,
@@ -141,7 +141,7 @@ describe("GasFeeNotice", () => {
 
   it.each([false, true])(
     "reports a rejected estimate for token mode %s",
-    async (isZrc20Token) => {
+    async (isQrc20Token) => {
       const failure = new Error("RPC unavailable");
       const onGasFeeCalculated = vi.fn();
       renderComponent(
@@ -152,7 +152,7 @@ describe("GasFeeNotice", () => {
           },
         }),
         {
-          isZrc20Token,
+          isQrc20Token,
           tokenContractAddress: "token",
           tokenDecimals: 18,
           from: "sender",
@@ -174,7 +174,7 @@ describe("GasFeeNotice", () => {
     const report = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       renderComponent(undefined, {
-        isZrc20Token: false,
+        isQrc20Token: false,
         tokenContractAddress: "",
         tokenDecimals: 18,
         from: "sender",

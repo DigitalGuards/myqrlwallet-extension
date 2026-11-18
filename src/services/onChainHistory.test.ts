@@ -82,7 +82,7 @@ describe("fetchOnChainHistory", () => {
     expect(entry.blockNumber).toBe("143412");
     expect(entry.status).toBe(true);
     expect(entry.receiptStatusVerified).toBe(true);
-    expect(entry.isZrc20Token).toBe(false);
+    expect(entry.isQrc20Token).toBe(false);
     expect(entry.tokenContractAddress).toBe("");
     expect(entry.tokenSymbol).toBe("Quanta");
     expect(entry.gasUsed).toBe("");

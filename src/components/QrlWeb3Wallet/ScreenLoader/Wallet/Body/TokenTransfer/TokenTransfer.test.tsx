@@ -99,7 +99,7 @@ const CONTRACT_D = toChecksumAddress(`Q${"d".repeat(128)}`);
 const QRNS_REGISTRY = toChecksumAddress(`Q${"e".repeat(128)}`);
 const QRNS_RPC_URL = "https://qns-rpc.example";
 const TOKEN_DETAILS = {
-  isZrc20Token: true,
+  isQrc20Token: true,
   tokenContractAddress: CONTRACT_C,
   tokenDecimals: 8,
   tokenImage: "token.png",
@@ -169,7 +169,7 @@ describe("TokenTransfer", () => {
   // Compare both classes with origin/dev while each dependency is pending.
   describe("origin/dev async timing", () => {
     const nativeDetails = {
-      isZrc20Token: false,
+      isQrc20Token: false,
       tokenContractAddress: "",
       tokenDecimals: 0,
       tokenImage: NATIVE_TOKEN.image,
@@ -504,7 +504,7 @@ describe("TokenTransfer", () => {
         });
         fireEvent.change(amount, { target: { value: "2" } });
         const send = screen.getByRole("button", {
-          name: tokenDetails?.isZrc20Token ? "Send TOK" : "Send Quanta",
+          name: tokenDetails?.isQrc20Token ? "Send TOK" : "Send Quanta",
         });
         await waitFor(() => {
           expect(send).toBeEnabled();
@@ -827,7 +827,7 @@ describe("TokenTransfer", () => {
         receiverAddress: ACCOUNT_B,
         amount: "1",
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals,
           tokenImage: "",
@@ -881,7 +881,7 @@ describe("TokenTransfer", () => {
     { shouldStartFresh: "true" },
     { tokenDetails: null },
     ...[
-      { isZrc20Token: "true" },
+      { isQrc20Token: "true" },
       { tokenContractAddress: 3 },
       { tokenDecimals: "8" },
       { tokenBalance: 3 },
@@ -1450,7 +1450,7 @@ describe("TokenTransfer", () => {
     renderComponentWithState(
       {
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 18,
           tokenImage: "token.png",
@@ -1731,7 +1731,7 @@ describe("TokenTransfer", () => {
       renderComponentWithState(
         {
           tokenDetails: {
-            isZrc20Token: true,
+            isQrc20Token: true,
             tokenContractAddress: CONTRACT_C,
             tokenDecimals: decimals,
             tokenImage: "token.png",
@@ -1767,7 +1767,7 @@ describe("TokenTransfer", () => {
     renderComponentWithState(
       {
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 0,
           tokenImage: "token.png",
@@ -1808,7 +1808,7 @@ describe("TokenTransfer", () => {
     // decimals, so the display string is "0.0 MQW" and every comparison
     // made against it read the balance as zero.
     const SMALL_BALANCE_DETAILS = {
-      isZrc20Token: true,
+      isQrc20Token: true,
       tokenContractAddress: CONTRACT_D,
       tokenDecimals: 8,
       tokenImage: "token.png",
@@ -1914,7 +1914,7 @@ describe("TokenTransfer", () => {
     // DECIMAL_PLACES is 18 with ROUND_DOWN, so dividing by 10^24 dropped
     // that trailing unit and Max left dust behind.
     const WIDE_DECIMALS_DETAILS = {
-      isZrc20Token: true,
+      isQrc20Token: true,
       tokenContractAddress: CONTRACT_D,
       tokenDecimals: 24,
       tokenImage: "token.png",
@@ -1967,7 +1967,7 @@ describe("TokenTransfer", () => {
       renderComponentWithState(
         {
           tokenDetails: {
-            isZrc20Token: true,
+            isQrc20Token: true,
             tokenContractAddress: CONTRACT_D,
             tokenDecimals: 8,
             tokenImage: "token.png",
@@ -2095,7 +2095,7 @@ describe("TokenTransfer", () => {
     renderComponentWithState(
       {
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 18,
           tokenImage: "token.png",
@@ -2228,7 +2228,7 @@ describe("TokenTransfer", () => {
     renderComponentWithState(
       {
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 18,
           tokenImage: "token.png",
@@ -2269,7 +2269,7 @@ describe("TokenTransfer", () => {
       receiverAddress: "",
       amount: 0,
       tokenDetails: {
-        isZrc20Token: true,
+        isQrc20Token: true,
         tokenContractAddress: CONTRACT_D,
         tokenDecimals: 8,
         tokenImage: "stored-token.png",
@@ -2428,7 +2428,7 @@ describe("TokenTransfer", () => {
     renderComponentWithState(
       {
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 18,
           tokenImage: "token.png",
@@ -2476,7 +2476,7 @@ describe("TokenTransfer", () => {
     renderComponentWithState(
       {
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 18,
           tokenImage: "token.png",
@@ -2620,7 +2620,7 @@ describe("TokenTransfer", () => {
     it("should use the full token balance for Max on QRC-20 transfers", async () => {
       renderComponentWithState({
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 18,
           tokenImage: "token.png",

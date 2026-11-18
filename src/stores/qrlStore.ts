@@ -1110,7 +1110,7 @@ class QrlStore {
           );
           return {
             ...result,
-            collection: { name, symbol, balance, standard: "ZRC721" as const },
+            collection: { name, symbol, balance, standard: "QRC721" as const },
           };
         }
 
@@ -1144,7 +1144,7 @@ class QrlStore {
           }
           return {
             ...result,
-            collection: { name, symbol, standard: "ZRC1155" as const },
+            collection: { name, symbol, standard: "QRC1155" as const },
           };
         }
 
@@ -1178,7 +1178,7 @@ class QrlStore {
    */
   async getOwnedNftTokens(
     contractAddress: string,
-    standard: NFTStandard = "ZRC721",
+    standard: NFTStandard = "QRC721",
   ): Promise<OwnedNftTokensResult> {
     if (!this.qrlInstance) {
       return { tokens: [], failed: true };
@@ -1186,7 +1186,7 @@ class QrlStore {
     const owner = this.activeAccount.accountAddress;
     if (!owner) return { tokens: [], failed: false };
 
-    if (standard === "ZRC1155") {
+    if (standard === "QRC1155") {
       return this.getOwned1155Tokens(contractAddress, owner);
     }
 
@@ -1325,11 +1325,11 @@ class QrlStore {
   async getNftTokenUri(
     contractAddress: string,
     tokenId: string,
-    standard: NFTStandard = "ZRC721",
+    standard: NFTStandard = "QRC721",
   ) {
     if (this.qrlInstance) {
       try {
-        if (standard === "ZRC1155") {
+        if (standard === "QRC1155") {
           const contract = new this.qrlInstance.Contract(
             QRC_1155_CONTRACT_ABI,
             contractAddress,
@@ -1362,7 +1362,7 @@ class QrlStore {
     tokenId: string,
     mnemonicPhrases: string,
     contractAddress: string,
-    standard: NFTStandard = "ZRC721",
+    standard: NFTStandard = "QRC721",
     // ERC-1155 only: how many copies of `tokenId` to send.
     amount = "1",
     overrides?: GasFeeOverrides,
@@ -1381,7 +1381,7 @@ class QrlStore {
     if (this.qrlInstance) {
       try {
         const transferCall =
-          standard === "ZRC1155"
+          standard === "QRC1155"
             ? new this.qrlInstance.Contract(
                 QRC_1155_CONTRACT_ABI,
                 contractAddress,
@@ -1650,7 +1650,7 @@ class QrlStore {
       } else {
         // Any token/NFT entry carries a contract address; the real
         // transaction goes TO the contract with the transfer calldata, not to
-        // the human recipient. Keying only off isZrc20Token sent NFT
+        // the human recipient. Keying only off isQrc20Token sent NFT
         // replacements to the recipient EOA with the calldata as inert bytes,
         // consuming the nonce and destroying the transfer while it reported
         // success. Route every contract interaction to its contract, with

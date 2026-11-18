@@ -55,7 +55,7 @@ afterEach(() => {
   captureDetailState.mockClear();
 });
 
-describe.each(["ZRC721", "ZRC1155"] as const)(
+describe.each(["QRC721", "QRC1155"] as const)(
   "%s metadata compatibility",
   (standard) => {
     it.each(metadataCases)(
@@ -125,7 +125,7 @@ describe.each(["ZRC721", "ZRC1155"] as const)(
         );
 
         const imagePath =
-          standard === "ZRC1155"
+          standard === "QRC1155"
             ? `images/${"7".padStart(64, "0")}.png`
             : "images/{id}.png";
         const imageUrl = `https://qrlwallet.com/api/ipfs/${imagePath}`;

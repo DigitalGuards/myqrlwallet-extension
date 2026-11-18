@@ -24,7 +24,9 @@ import {
   CHAIN,
   TOKEN,
   NFT,
+  STORED_NFT,
   HISTORY,
+  STORED_HISTORY,
   CONNECTION,
   LEDGER,
 } from "./storageFixtures";
@@ -160,14 +162,14 @@ export const fixture = (
   };
   const otherToken = { ...token, address: "token-b" };
   const nft = {
-    ...NFT,
-    standard: mixedMetadata ? junk : NFT.standard,
+    ...STORED_NFT,
+    standard: mixedMetadata ? junk : STORED_NFT.standard,
     future: junk,
   };
   const otherNFT = { ...nft, address: "nft-b" };
   const history = {
-    ...HISTORY,
-    timestamp: mixedMetadata ? junk : HISTORY.timestamp,
+    ...STORED_HISTORY,
+    timestamp: mixedMetadata ? junk : STORED_HISTORY.timestamp,
     future: junk,
   };
   const otherHistory = { ...history, transactionHash: "hash-b" };
@@ -347,6 +349,7 @@ export const fixture = (
     grant,
     permissions,
     junk,
+    mixedMetadata,
   };
 };
 type Fixture = ReturnType<typeof fixture>;
@@ -741,8 +744,17 @@ export const cases = {
         amount: "2",
       }),
     edit: (e, f) => {
+      // The writer stores the flag under both names. The seed holds the
+      // earlier one, so the current one joins it with the same value. A seed
+      // with no unfamiliar field is replaced by the entry as given, in the
+      // entry's key order; any other seed keeps its own key order.
+      const written =
+        f.mixedMetadata ||
+        Object.prototype.hasOwnProperty.call(h.copy(f.history), "future")
+          ? { ...f.history, amount: "2", isQrc20Token: true }
+          : { ...HISTORY, amount: "2", isZrc20Token: true };
       set(e.local, historyPath, [
-        { ...f.history, amount: "2" },
+        written,
         ...f.lists.history.filter((v) => v !== f.history),
       ]);
     },
@@ -822,6 +834,7 @@ const mixedRuns: Record<string, WriterCase["run"] | undefined> = {
   setTransactionHistoryEntry: (f: Fixture) =>
     StorageUtil.setTransactionHistoryEntry(ACCOUNT, {
       ...f.history,
+      isQrc20Token: true,
       amount: "2",
     }),
 } satisfies Partial<Record<WriterName, WriterCase["run"]>>;
@@ -1110,7 +1123,7 @@ export const checkReadableSiblings = async () => {
     getStoredValue(h.session, "DAPPS", "DAPPS_REQUEST_DATA"),
   );
   expect(await StorageUtil.getTransactionValues()).toEqual(
-    h.local[`${active.chainId}_TRANSACTION_VALUES`] ?? {
+    draftAsRead(h.local[`${active.chainId}_TRANSACTION_VALUES`]) ?? {
       receiverAddress: "",
       amount: 0,
     },
@@ -1179,6 +1192,22 @@ export const writerGroups = {
     "removeAccountFromAllDApps",
   ],
 } as const satisfies Record<string, readonly WriterName[]>;
+
+// A stored draft as getTransactionValues returns it: the token flag under its
+// current name only, with the value it was stored under.
+const draftAsRead = (draft: unknown): unknown => {
+  if (!isRecord(draft) || !isRecord(draft.tokenDetails)) return draft;
+  const { isZrc20Token, isQrc20Token, ...rest } = draft.tokenDetails;
+  return {
+    ...draft,
+    // The same order as readStoredTokenFlag: the earlier name when it holds a
+    // boolean, the current one otherwise.
+    tokenDetails: {
+      ...rest,
+      isQrc20Token: typeof isZrc20Token === "boolean" ? isZrc20Token : isQrc20Token,
+    },
+  };
+};
 
 export const describeWriterOracle = (group: keyof typeof writerGroups) => {
   for (const name of writerGroups[group]) {

@@ -18,7 +18,7 @@ describe("GasFeeSelector", () => {
   afterEach(cleanup);
 
   const defaultProps: ComponentProps<typeof GasFeeSelector> = {
-    isZrc20Token: false,
+    isQrc20Token: false,
     tokenContractAddress: "",
     tokenDecimals: 18,
     from: "0x205046e6A6E159eD6ACedE46A36CAD6D449C80A1",
@@ -521,7 +521,7 @@ describe("GasFeeSelector", () => {
   it("should calculate gas for QRC-20 tokens", async () => {
     const getQrc20TokenGas = vi.fn().mockResolvedValue("1.5");
     renderComponent(mockedStore({ qrlStore: { getQrc20TokenGas } }), {
-      isZrc20Token: true,
+      isQrc20Token: true,
       tokenContractAddress: "0x28c4113a9d3a2e836f28c23ed8e3c1e7c243f566",
       tokenDecimals: 18,
     });

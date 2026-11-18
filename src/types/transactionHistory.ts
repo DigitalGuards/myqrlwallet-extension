@@ -14,10 +14,10 @@ export type TransactionHistoryEntry = {
   amount: string | number;
   tokenSymbol: string;
   tokenName: string;
-  // Keeps the token standard's earlier name (ZRC-20, now QRC-20): the field
-  // is stored with every history entry and transfer draft, and it decides
-  // whether Speed Up rebuilds a token transfer or a native one.
-  isZrc20Token: boolean;
+  // Stored with every history entry, together with its earlier name
+  // (isZrc20Token); see utilities/storedNames.ts. It decides whether Speed Up
+  // rebuilds a token transfer or a native one.
+  isQrc20Token: boolean;
   tokenContractAddress: string;
   tokenDecimals: number | null;
   transactionHash: string;

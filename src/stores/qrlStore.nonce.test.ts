@@ -110,7 +110,7 @@ describe("nonce reads at the signing boundary", () => {
       "1",
       "mnemonic",
       "contract",
-      "ZRC721",
+      "QRC721",
     );
 
     expect(result.error).toBe("");

@@ -50,7 +50,7 @@ describe("TokenListItem", () => {
       symbol: "QRL",
       contractAddress: "Q0db3981cb93db985e4e3a62ff695f7a1b242dd7c",
       decimals: 18,
-      isZrc20Token: false,
+      isQrc20Token: false,
       image: "",
     },
   ) =>
@@ -82,7 +82,7 @@ describe("TokenListItem", () => {
 
   it("should disable the hide token button if the token is not QRC-20", async () => {
     renderComponent(mockedStore(), {
-      isZrc20Token: false,
+      isQrc20Token: false,
       image: "",
       balance: "",
       name: "",
@@ -101,7 +101,7 @@ describe("TokenListItem", () => {
   it("should hide the token on clicking the hide token button", async () => {
     const mockedTriggerReRender = vi.fn(() => {});
     renderComponent(mockedStore(), {
-      isZrc20Token: true,
+      isQrc20Token: true,
       image: "",
       balance: "",
       name: "",
@@ -153,7 +153,7 @@ describe("TokenListItem", () => {
   it("copies the contract address of a QRC-20 token from the more menu", async () => {
     const contractAddress = `Q${"0123456789abcdef".repeat(8)}`;
     renderComponent(mockedStore(), {
-      isZrc20Token: true,
+      isQrc20Token: true,
       contractAddress,
       decimals: 18,
       image: "",
@@ -197,7 +197,7 @@ describe("TokenListItem", () => {
     const report = vi.spyOn(console, "error").mockImplementation(() => {});
     const triggerReRender = vi.fn();
     renderComponent(undefined, {
-      isZrc20Token: true,
+      isQrc20Token: true,
       contractAddress: "Q" + "c".repeat(128),
       image: "",
       balance: "1",
