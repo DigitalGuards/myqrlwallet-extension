@@ -80,7 +80,7 @@ describe("TokenListItem", () => {
     expect(moreButton).toBeEnabled();
   });
 
-  it("should disable the hide token button if the token is not ZRC 20", async () => {
+  it("should disable the hide token button if the token is not QRC-20", async () => {
     renderComponent(mockedStore(), {
       isZrc20Token: false,
       image: "",
@@ -150,7 +150,7 @@ describe("TokenListItem", () => {
     expect(screen.queryByText("Token transfer page")).not.toBeInTheDocument();
   });
 
-  it("copies the contract address of a ZRC-20 token from the more menu", async () => {
+  it("copies the contract address of a QRC-20 token from the more menu", async () => {
     const contractAddress = `Q${"0123456789abcdef".repeat(8)}`;
     renderComponent(mockedStore(), {
       isZrc20Token: true,

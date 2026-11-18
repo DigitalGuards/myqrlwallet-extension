@@ -79,7 +79,7 @@ describe("NFT boundary guards", () => {
     {},
     { ...gallery, contractAddress: 7 },
     { ...gallery, collectionName: {} },
-    { ...gallery, standard: "ZRC20" },
+    { ...gallery, standard: "QRC20" },
   ])("rejects malformed gallery state %j", (value) => {
     expect(isNFTGalleryState(value)).toBe(false);
   });

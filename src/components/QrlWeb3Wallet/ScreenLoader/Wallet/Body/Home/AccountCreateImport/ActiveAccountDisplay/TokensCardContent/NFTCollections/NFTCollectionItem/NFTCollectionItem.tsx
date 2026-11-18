@@ -82,7 +82,7 @@ const NFTCollectionItem = observer(
           setOwnedCount(details.collection.balance);
           return;
         }
-        // ZRC-1155 has no on-chain owner enumeration. On chains with an
+        // QRC-1155 has no on-chain owner enumeration. On chains with an
         // explorer, count via the same chain-verified path the gallery
         // uses (explorer candidates re-checked with balanceOf) so the
         // row and the gallery can never disagree. Without an explorer
@@ -117,7 +117,7 @@ const NFTCollectionItem = observer(
       return <TokenListItemLoading />;
     }
 
-    // ZRC-1155 contracts routinely omit name()/symbol(); fall back to a
+    // QRC-1155 contracts routinely omit name()/symbol(); fall back to a
     // shortened contract address so the row is never blank.
     const displayName =
       collection.name ||
@@ -158,7 +158,7 @@ const NFTCollectionItem = observer(
               <div className="text-xs [overflow-wrap:anywhere]">
                 {ownedCount !== undefined && displayName}
                 {collection.standard === "ZRC1155" && (
-                  <span className="ml-1 text-muted-foreground">ZRC-1155</span>
+                  <span className="ml-1 text-muted-foreground">QRC-1155</span>
                 )}
               </div>
             </div>

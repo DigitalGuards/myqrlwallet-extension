@@ -40,7 +40,7 @@ const ImportToken = observer(() => {
   const { qrlStore } = useStore();
   const [token, setToken] =
     useState<
-      Awaited<ReturnType<typeof qrlStore.getZrc20TokenDetails>>["token"]
+      Awaited<ReturnType<typeof qrlStore.getQrc20TokenDetails>>["token"]
     >();
   // The manually entered address under review. Discovered tokens are
   // picked and added from the list above the form, each one read from the
@@ -66,7 +66,7 @@ const ImportToken = observer(() => {
   } = form;
 
   async function onSubmit(formData: z.infer<typeof FormSchema>) {
-    const tokenDetails = await qrlStore.getZrc20TokenDetails(
+    const tokenDetails = await qrlStore.getQrc20TokenDetails(
       formData.contractAddress,
     );
     if (tokenDetails.error) {

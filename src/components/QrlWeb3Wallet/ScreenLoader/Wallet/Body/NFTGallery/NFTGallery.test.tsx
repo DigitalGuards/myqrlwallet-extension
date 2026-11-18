@@ -139,7 +139,7 @@ describe("NFTGallery", () => {
     null,
     [],
     { ...state, contractAddress: 7 },
-    { ...state, standard: "ZRC20" },
+    { ...state, standard: "QRC20" },
   ])(
     "rejects malformed route state %j before loading tokens",
     async (routeState) => {

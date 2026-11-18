@@ -64,7 +64,7 @@ describe("ImportNFTCollection", () => {
     await submitAddress();
     expect(lookup).toHaveBeenCalledWith(CONTRACT_ADDRESS);
     expect(await screen.findByText("Test Collection")).toBeInTheDocument();
-    expect(screen.getByText("ZRC-721")).toBeInTheDocument();
+    expect(screen.getByText("QRC-721")).toBeInTheDocument();
   });
 
   it("keeps the lookup error on the contract address field", async () => {

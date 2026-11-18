@@ -147,7 +147,7 @@ afterEach(() => {
 describe("contract response boundaries", () => {
   it("keeps token values and read ordering for valid responses", async () => {
     const store = createStore();
-    expect(await store.getZrc20TokenDetails(CONTRACT)).toEqual({
+    expect(await store.getQrc20TokenDetails(CONTRACT)).toEqual({
       error: "",
       token: {
         name: "Collection",
@@ -178,7 +178,7 @@ describe("contract response boundaries", () => {
     "rejects a malformed token %s through the existing error result",
     async (name, value) => {
       responses.set(name, value);
-      expect(await createStore().getZrc20TokenDetails(CONTRACT)).toEqual({
+      expect(await createStore().getQrc20TokenDetails(CONTRACT)).toEqual({
         token: undefined,
         error: "Could not retreive the token with the entered contract address",
       });
@@ -420,7 +420,7 @@ const signingPaths = [
   {
     name: "token",
     sign: (store: QrlStore) =>
-      store.signZrc20Token(OWNER, RECIPIENT, "1", "mnemonic", CONTRACT, 2),
+      store.signQrc20Token(OWNER, RECIPIENT, "1", "mnemonic", CONTRACT, 2),
   },
   {
     name: "NFT",
@@ -507,7 +507,7 @@ describe("signing and gas boundaries", () => {
         .error,
     ).toContain("Invalid provider response");
     await expect(
-      store.getZrc20TokenGas(OWNER, RECIPIENT, "1", CONTRACT, 2),
+      store.getQrc20TokenGas(OWNER, RECIPIENT, "1", CONTRACT, 2),
     ).rejects.toThrow("Invalid provider response");
     expect(rpc.accounts.signTransaction).not.toHaveBeenCalled();
   });

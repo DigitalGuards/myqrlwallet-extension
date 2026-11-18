@@ -114,7 +114,7 @@ describe("TransactionHistoryItem", () => {
     expect(screen.getByText("Send")).toBeInTheDocument();
   });
 
-  it("should render a ZRC-20 token transaction", () => {
+  it("should render a QRC-20 token transaction", () => {
     renderComponent(
       makeSampleEntry({
         isZrc20Token: true,
@@ -294,7 +294,7 @@ describe("TransactionHistoryItem", () => {
     expect(screen.queryByText(/≈/)).not.toBeInTheDocument();
   });
 
-  it("should not display fiat value for ZRC-20 tokens", () => {
+  it("should not display fiat value for QRC-20 tokens", () => {
     const storeWithPrice = mockedStore({
       priceStore: {
         getPrice: () => 1.5,

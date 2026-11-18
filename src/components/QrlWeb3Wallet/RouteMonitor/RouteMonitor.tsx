@@ -1,4 +1,5 @@
 import { scrollShellToTop } from "@/components/QrlWeb3Wallet/ScrollRegion/ScrollRegion";
+import { restoredPage } from "@/router/restoredPage";
 import { ROUTES } from "@/router/router";
 import StorageUtil from "@/utilities/storageUtil";
 import { useEffect, useState } from "react";
@@ -19,7 +20,7 @@ const RouteMonitor = () => {
       if (typeof activePage === "string" && activePage) {
         await StorageUtil.clearActivePage();
         setPreviousRouteUsed(true);
-        await navigate(activePage);
+        await navigate(restoredPage(activePage));
       } else {
         setPreviousRouteUsed(true);
         await navigate(ROUTES.HOME);

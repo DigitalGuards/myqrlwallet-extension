@@ -414,7 +414,7 @@ describe("NFTTransfer", () => {
     null,
     [],
     { ...defaultState, tokenId: 7 },
-    { ...defaultState, standard: "ZRC20" },
+    { ...defaultState, standard: "QRC20" },
     { ...defaultState, balance: 3 },
   ])("blocks signing for malformed route state %j", async (state) => {
     const signNftTransfer = vi.fn();

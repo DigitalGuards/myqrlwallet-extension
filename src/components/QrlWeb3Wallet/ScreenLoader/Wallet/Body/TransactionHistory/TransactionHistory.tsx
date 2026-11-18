@@ -96,7 +96,7 @@ const TransactionHistory = observer(() => {
                 if (
                   value === "all" ||
                   value === "native" ||
-                  value === "zrc20" ||
+                  value === "qrc20" ||
                   value === "nft"
                 ) {
                   transactionHistoryStore.setFilter(value);
@@ -110,8 +110,8 @@ const TransactionHistory = observer(() => {
                 <TabsTrigger value="native" className="flex-1">
                   {t("txHistory.filterNative")}
                 </TabsTrigger>
-                <TabsTrigger value="zrc20" className="flex-1">
-                  {t("txHistory.filterZrc20")}
+                <TabsTrigger value="qrc20" className="flex-1">
+                  {t("txHistory.filterQrc20")}
                 </TabsTrigger>
                 <TabsTrigger value="nft" className="flex-1">
                   {t("txHistory.filterNft")}

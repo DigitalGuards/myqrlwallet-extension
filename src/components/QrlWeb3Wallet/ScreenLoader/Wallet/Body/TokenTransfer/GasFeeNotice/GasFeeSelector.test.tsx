@@ -518,16 +518,16 @@ describe("GasFeeSelector", () => {
     expect(advancedCalls.length).toBeGreaterThan(0);
   });
 
-  it("should calculate gas for ZRC-20 tokens", async () => {
-    const getZrc20TokenGas = vi.fn().mockResolvedValue("1.5");
-    renderComponent(mockedStore({ qrlStore: { getZrc20TokenGas } }), {
+  it("should calculate gas for QRC-20 tokens", async () => {
+    const getQrc20TokenGas = vi.fn().mockResolvedValue("1.5");
+    renderComponent(mockedStore({ qrlStore: { getQrc20TokenGas } }), {
       isZrc20Token: true,
       tokenContractAddress: "0x28c4113a9d3a2e836f28c23ed8e3c1e7c243f566",
       tokenDecimals: 18,
     });
 
     await waitFor(() => {
-      expect(getZrc20TokenGas).toHaveBeenCalled();
+      expect(getQrc20TokenGas).toHaveBeenCalled();
     });
 
     expect(screen.getByText("Gas fee")).toBeInTheDocument();

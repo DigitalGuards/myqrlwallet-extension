@@ -151,7 +151,7 @@ const TokenTransfer = observer(() => {
   const [tokenDecimals, setTokenDecimals] = useState(0);
   const [tokenImage, setTokenImage] = useState<unknown>(NATIVE_TOKEN.image);
   const [tokenBalance, setTokenBalance] = useState("");
-  // Exact on-chain integer balance for the selected ZRC-20. Every guard
+  // Exact on-chain integer balance for the selected QRC-20. Every guard
   // and the Max button work off this; `tokenBalance` above is the
   // 4-decimal display string, for display.
   const [tokenBalanceBaseUnits, setTokenBalanceBaseUnits] = useState("");
@@ -270,7 +270,7 @@ const TokenTransfer = observer(() => {
     return result;
   };
 
-  const signZrc20TokenLocal = async (
+  const signQrc20TokenLocal = async (
     formData: z.infer<typeof FormSchema>,
   ): Promise<SignResult> => {
     if (ledgerStore.isLedgerAccount(accountAddress)) {
@@ -280,7 +280,7 @@ const TokenTransfer = observer(() => {
       return { error: t("transfer.errorLedgerTokenUnsupported") };
     }
     const mnemonicPhrases = await lockStore.getMnemonicPhrases(accountAddress);
-    return await qrlStore.signZrc20Token(
+    return await qrlStore.signQrc20Token(
       accountAddress,
       formData.receiverAddress,
       formData.amount,
@@ -307,7 +307,7 @@ const TokenTransfer = observer(() => {
       // Step 1: Sign the transaction (fast, no blockchain wait)
       let signResult: SignResult;
       if (isZrc20Token) {
-        signResult = await signZrc20TokenLocal(formData);
+        signResult = await signQrc20TokenLocal(formData);
       } else {
         signResult = await signNativeTokenLocal(formData);
       }
@@ -548,7 +548,7 @@ const TokenTransfer = observer(() => {
     if (!isZrc20Token || !tokenContractAddress || !accountAddress) return;
     const request = { cancelled: false };
     void (async () => {
-      const details = await qrlStore.getZrc20TokenDetails(tokenContractAddress);
+      const details = await qrlStore.getQrc20TokenDetails(tokenContractAddress);
       if (request.cancelled || details.error || !details.token) return;
       setTokenBalance(
         getOptimalTokenBalance(

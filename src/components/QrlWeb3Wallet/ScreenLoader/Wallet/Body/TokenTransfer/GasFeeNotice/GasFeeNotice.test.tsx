@@ -112,11 +112,11 @@ describe("GasFeeNotice", () => {
     expect(onGasFeeCalculated).toHaveBeenCalledWith("2.64");
   });
 
-  it("should display the estimated gas fee for ZRC 20 token", async () => {
+  it("should display the estimated gas fee for QRC-20 token", async () => {
     renderComponent(
       mockedStore({
         qrlStore: {
-          getZrc20TokenGas: vi.fn().mockResolvedValue("5.2564854"),
+          getQrc20TokenGas: vi.fn().mockResolvedValue("5.2564854"),
         },
       }),
       {
@@ -148,7 +148,7 @@ describe("GasFeeNotice", () => {
         mockedStore({
           qrlStore: {
             getNativeTokenGas: vi.fn().mockRejectedValue(failure),
-            getZrc20TokenGas: vi.fn().mockRejectedValue(failure),
+            getQrc20TokenGas: vi.fn().mockRejectedValue(failure),
           },
         }),
         {

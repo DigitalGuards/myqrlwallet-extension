@@ -88,8 +88,8 @@ describe("amount conversion at the signing boundary", () => {
     async (amount, decimals, baseUnits) => {
       const store = new QrlStore();
       store.qrlInstance = new Web3().qrl;
-      await store.getZrc20TokenGas("from", "to", amount, "contract", decimals);
-      const result = await store.signZrc20Token(
+      await store.getQrc20TokenGas("from", "to", amount, "contract", decimals);
+      const result = await store.signQrc20Token(
         "from",
         "to",
         amount,
@@ -111,7 +111,7 @@ describe("amount conversion at the signing boundary", () => {
   it("refuses excessive token precision before creating transfer calldata or signing", async () => {
     const store = new QrlStore();
     store.qrlInstance = new Web3().qrl;
-    const result = await store.signZrc20Token(
+    const result = await store.signQrc20Token(
       "from",
       "to",
       "1.1",

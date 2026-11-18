@@ -2,7 +2,7 @@
 // ERC-721 Enumerable interface ID: 0x780e9d63
 // ERC-165 (supportsInterface) interface ID: 0x01ffc9a7
 
-export const ZRC_721_CONTRACT_ABI = [
+export const QRC_721_CONTRACT_ABI = [
   // ERC-165
   {
     inputs: [{ internalType: "bytes4", name: "interfaceId", type: "bytes4" }],
@@ -113,7 +113,7 @@ export const ZRC_721_CONTRACT_ABI = [
 
 // ERC-1155 multi-token standard. Kept to the subset the wallet uses:
 // detection, per-id balance, metadata URI, and single transfers.
-export const ZRC_1155_CONTRACT_ABI = [
+export const QRC_1155_CONTRACT_ABI = [
   // ERC-165
   {
     inputs: [{ internalType: "bytes4", name: "interfaceId", type: "bytes4" }],

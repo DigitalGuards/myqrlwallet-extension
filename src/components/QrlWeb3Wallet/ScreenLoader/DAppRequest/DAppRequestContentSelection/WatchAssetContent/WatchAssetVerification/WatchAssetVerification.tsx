@@ -27,7 +27,7 @@ const WatchAssetVerification = observer(() => {
         setHasVerified(true);
         return;
       }
-      const tokenDetails = await qrlStore.getZrc20TokenDetails(contractAddress);
+      const tokenDetails = await qrlStore.getQrc20TokenDetails(contractAddress);
       if (tokenDetails.error || !tokenDetails.token) {
         setVerificationResult(
           t("dapp.watchAsset.fetchFailed", { address: contractAddress }),

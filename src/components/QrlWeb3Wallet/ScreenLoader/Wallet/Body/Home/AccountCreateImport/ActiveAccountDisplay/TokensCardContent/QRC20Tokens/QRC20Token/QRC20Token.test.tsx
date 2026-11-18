@@ -5,7 +5,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/UI/Tooltip";
-import ZRC20Token from "./ZRC20Token";
+import QRC20Token from "./QRC20Token";
 
 vi.mock("@/utilities/storageUtil", async () => {
   const originalModule = await vi.importActual<
@@ -43,7 +43,7 @@ vi.mock(
 );
 
 const CONTRACT = "Q0db3981cb93db985e4e3a62ff695f7a1b242dd7c";
-type GetTokenDetails = StoreType["qrlStore"]["getZrc20TokenDetails"];
+type GetTokenDetails = StoreType["qrlStore"]["getQrc20TokenDetails"];
 
 const successfulDetails = (balance: number) => ({
   token: {
@@ -58,7 +58,7 @@ const successfulDetails = (balance: number) => ({
   error: "",
 });
 
-describe("ZRC20Token", () => {
+describe("QRC20Token", () => {
   afterEach(cleanup);
 
   const renderComponent = (
@@ -69,7 +69,7 @@ describe("ZRC20Token", () => {
       <StoreProvider value={mockedStoreValues}>
         <MemoryRouter>
           <TooltipProvider>
-            <ZRC20Token
+            <QRC20Token
               contractAddress={CONTRACT}
               tokenImage=""
               storedSymbol={storedSymbol}
@@ -79,11 +79,11 @@ describe("ZRC20Token", () => {
       </StoreProvider>,
     );
 
-  it("should render the zrc 20 token component", async () => {
+  it("should render the QRC-20 token component", async () => {
     renderComponent(
       mockedStore({
         qrlStore: {
-          getZrc20TokenDetails: (_contractAddress: string) =>
+          getQrc20TokenDetails: (_contractAddress: string) =>
             Promise.resolve(successfulDetails(65)),
         },
       }),
@@ -95,12 +95,12 @@ describe("ZRC20Token", () => {
   });
 
   it("shows the stored symbol with a retry when the chain read fails", async () => {
-    const getZrc20TokenDetails = vi
+    const getQrc20TokenDetails = vi
       .fn()
       .mockResolvedValueOnce({ token: undefined, error: "rpc down" })
       .mockResolvedValueOnce(successfulDetails(12));
 
-    renderComponent(mockedStore({ qrlStore: { getZrc20TokenDetails } }), "POW");
+    renderComponent(mockedStore({ qrlStore: { getQrc20TokenDetails } }), "POW");
 
     // The error path used to set nothing at all, leaving the row a loading
     // skeleton for the rest of the session.
@@ -119,11 +119,11 @@ describe("ZRC20Token", () => {
   });
 
   it("shows a rejected lookup as unavailable and retries with the store receiver", async () => {
-    const getZrc20TokenDetails = vi
+    const getQrc20TokenDetails = vi
       .fn<GetTokenDetails>()
       .mockRejectedValueOnce(new Error("rpc disconnected"))
       .mockResolvedValueOnce(successfulDetails(12));
-    const store = mockedStore({ qrlStore: { getZrc20TokenDetails } });
+    const store = mockedStore({ qrlStore: { getQrc20TokenDetails } });
     renderComponent(store, "POW");
 
     expect(
@@ -139,9 +139,9 @@ describe("ZRC20Token", () => {
     expect(
       await screen.findByText("Mocked Token List Item 12.0 POW"),
     ).toBeInTheDocument();
-    expect(getZrc20TokenDetails).toHaveBeenNthCalledWith(1, CONTRACT);
-    expect(getZrc20TokenDetails).toHaveBeenNthCalledWith(2, CONTRACT);
-    expect(getZrc20TokenDetails.mock.contexts).toEqual([
+    expect(getQrc20TokenDetails).toHaveBeenNthCalledWith(1, CONTRACT);
+    expect(getQrc20TokenDetails).toHaveBeenNthCalledWith(2, CONTRACT);
+    expect(getQrc20TokenDetails.mock.contexts).toEqual([
       store.qrlStore,
       store.qrlStore,
     ]);
@@ -154,30 +154,30 @@ describe("ZRC20Token", () => {
         rejectFirst = reject;
       },
     );
-    const getZrc20TokenDetails = vi
+    const getQrc20TokenDetails = vi
       .fn<GetTokenDetails>()
       .mockReturnValueOnce(firstLookup)
       .mockResolvedValueOnce(successfulDetails(2));
     const view = renderComponent(
-      mockedStore({ qrlStore: { getZrc20TokenDetails } }),
+      mockedStore({ qrlStore: { getQrc20TokenDetails } }),
       "POW",
     );
 
     await waitFor(() => {
-      expect(getZrc20TokenDetails).toHaveBeenCalledTimes(1);
+      expect(getQrc20TokenDetails).toHaveBeenCalledTimes(1);
     });
     view.rerender(
       <StoreProvider
         value={mockedStore({
           qrlStore: {
             activeAccount: { accountAddress: `Q${"b".repeat(128)}` },
-            getZrc20TokenDetails,
+            getQrc20TokenDetails,
           },
         })}
       >
         <MemoryRouter>
           <TooltipProvider>
-            <ZRC20Token
+            <QRC20Token
               contractAddress={CONTRACT}
               tokenImage=""
               storedSymbol="POW"
@@ -205,7 +205,7 @@ describe("ZRC20Token", () => {
 
   it("discards a stale lookup after a fast account switch back and forth", async () => {
     let releaseFirst: (value: unknown) => void = () => {};
-    const getZrc20TokenDetails = vi
+    const getQrc20TokenDetails = vi
       .fn()
       // Account A's first lookup hangs.
       .mockReturnValueOnce(
@@ -222,7 +222,7 @@ describe("ZRC20Token", () => {
       mockedStore({
         qrlStore: {
           activeAccount: { accountAddress },
-          getZrc20TokenDetails,
+          getQrc20TokenDetails,
         },
       });
 
@@ -231,7 +231,7 @@ describe("ZRC20Token", () => {
 
     const view = renderComponent(storeFor(accountA));
     await waitFor(() => {
-      expect(getZrc20TokenDetails).toHaveBeenCalledTimes(1);
+      expect(getQrc20TokenDetails).toHaveBeenCalledTimes(1);
     });
 
     const rerenderWith = (accountAddress: string) => {
@@ -239,7 +239,7 @@ describe("ZRC20Token", () => {
         <StoreProvider value={storeFor(accountAddress)}>
           <MemoryRouter>
             <TooltipProvider>
-              <ZRC20Token contractAddress={CONTRACT} tokenImage="" />
+              <QRC20Token contractAddress={CONTRACT} tokenImage="" />
             </TooltipProvider>
           </MemoryRouter>
         </StoreProvider>,
@@ -248,11 +248,11 @@ describe("ZRC20Token", () => {
 
     rerenderWith(accountB);
     await waitFor(() => {
-      expect(getZrc20TokenDetails).toHaveBeenCalledTimes(2);
+      expect(getQrc20TokenDetails).toHaveBeenCalledTimes(2);
     });
     rerenderWith(accountA);
     await waitFor(() => {
-      expect(getZrc20TokenDetails).toHaveBeenCalledTimes(3);
+      expect(getQrc20TokenDetails).toHaveBeenCalledTimes(3);
     });
 
     await waitFor(() => {
@@ -272,7 +272,7 @@ describe("ZRC20Token", () => {
     );
   });
   it("drops the previous account's balance when the new account fails to read", async () => {
-    const getZrc20TokenDetails = vi
+    const getQrc20TokenDetails = vi
       .fn()
       .mockResolvedValueOnce(successfulDetails(65))
       .mockResolvedValueOnce({ token: undefined, error: "rpc down" });
@@ -283,7 +283,7 @@ describe("ZRC20Token", () => {
       mockedStore({
         qrlStore: {
           activeAccount: { accountAddress },
-          getZrc20TokenDetails,
+          getQrc20TokenDetails,
         },
       });
 
@@ -298,7 +298,7 @@ describe("ZRC20Token", () => {
       <StoreProvider value={storeFor(accountB)}>
         <MemoryRouter>
           <TooltipProvider>
-            <ZRC20Token
+            <QRC20Token
               contractAddress={CONTRACT}
               tokenImage=""
               storedSymbol="POW"
