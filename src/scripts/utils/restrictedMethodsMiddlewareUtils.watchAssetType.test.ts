@@ -29,7 +29,7 @@ describe("wallet_watchAsset asset type", () => {
     async (type) => {
       const result = await check(type);
       expect(result.canProceed).toBe(false);
-      expect(result.proceedError?.message).toBe("Asset type should be QRC20.");
+      expect(result.proceedError?.message).toBe("Asset type should be QRC20 or ZRC20.");
     },
   );
 });

@@ -752,6 +752,19 @@ describe("approval message boundaries and cleanup", () => {
     },
   );
 
+  // dApps written for the earlier name of the standard keep working.
+  it("takes a watch-asset request of the earlier type ZRC20 through approval", async () => {
+    const approval = await startApproval("wallet_watchAsset", [
+      {
+        type: "ZRC20",
+        options: { address: ACCOUNT_A, symbol: "TEST", decimals: 18 },
+      },
+    ]);
+    await respond(approval, { result: true });
+    expect(approval.res.result).toBe(true);
+    expect(approval.res.error).toBeUndefined();
+  });
+
   it("requires a boolean success flag from watch-asset approvals", async () => {
     const approval = await startApproval("wallet_watchAsset", [
       {
