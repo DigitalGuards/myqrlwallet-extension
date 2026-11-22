@@ -12,7 +12,7 @@ describe("GasFeeNotice", () => {
   const renderComponent = (
     mockedStoreValues = mockedStore(),
     mockedProps: ComponentProps<typeof GasFeeNotice> = {
-      isZrc20Token: false,
+      isQrc20Token: false,
       tokenContractAddress: "",
       tokenDecimals: 18,
       isSubmitting: false,
@@ -31,7 +31,7 @@ describe("GasFeeNotice", () => {
 
   it("should render the gas fee notice component", async () => {
     renderComponent(undefined, {
-      isZrc20Token: false,
+      isQrc20Token: false,
       tokenContractAddress: "",
       tokenDecimals: 18,
       isSubmitting: false,
@@ -66,7 +66,7 @@ describe("GasFeeNotice", () => {
         },
       }),
       {
-        isZrc20Token: false,
+        isQrc20Token: false,
         tokenContractAddress: "",
         tokenDecimals: 18,
         isSubmitting: false,
@@ -94,7 +94,7 @@ describe("GasFeeNotice", () => {
         },
       }),
       {
-        isZrc20Token: false,
+        isQrc20Token: false,
         tokenContractAddress: "",
         tokenDecimals: 18,
         isSubmitting: false,
@@ -112,15 +112,15 @@ describe("GasFeeNotice", () => {
     expect(onGasFeeCalculated).toHaveBeenCalledWith("2.64");
   });
 
-  it("should display the estimated gas fee for ZRC 20 token", async () => {
+  it("should display the estimated gas fee for QRC-20 token", async () => {
     renderComponent(
       mockedStore({
         qrlStore: {
-          getZrc20TokenGas: vi.fn().mockResolvedValue("5.2564854"),
+          getQrc20TokenGas: vi.fn().mockResolvedValue("5.2564854"),
         },
       }),
       {
-        isZrc20Token: true,
+        isQrc20Token: true,
         tokenContractAddress: "0x28c4113a9d3a2e836f28c23ed8e3c1e7c243f566",
         tokenDecimals: 18,
         isSubmitting: false,
@@ -141,18 +141,18 @@ describe("GasFeeNotice", () => {
 
   it.each([false, true])(
     "reports a rejected estimate for token mode %s",
-    async (isZrc20Token) => {
+    async (isQrc20Token) => {
       const failure = new Error("RPC unavailable");
       const onGasFeeCalculated = vi.fn();
       renderComponent(
         mockedStore({
           qrlStore: {
             getNativeTokenGas: vi.fn().mockRejectedValue(failure),
-            getZrc20TokenGas: vi.fn().mockRejectedValue(failure),
+            getQrc20TokenGas: vi.fn().mockRejectedValue(failure),
           },
         }),
         {
-          isZrc20Token,
+          isQrc20Token,
           tokenContractAddress: "token",
           tokenDecimals: 18,
           from: "sender",
@@ -174,7 +174,7 @@ describe("GasFeeNotice", () => {
     const report = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       renderComponent(undefined, {
-        isZrc20Token: false,
+        isQrc20Token: false,
         tokenContractAddress: "",
         tokenDecimals: 18,
         from: "sender",

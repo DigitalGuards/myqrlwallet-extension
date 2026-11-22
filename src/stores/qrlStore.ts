@@ -9,8 +9,8 @@ import {
 } from "@/utilities/approvalGuards";
 import { NATIVE_TOKEN_UNITS_OF_GAS } from "@/constants/nativeToken";
 import {
-  ZRC_721_CONTRACT_ABI,
-  ZRC_1155_CONTRACT_ABI,
+  QRC_721_CONTRACT_ABI,
+  QRC_1155_CONTRACT_ABI,
   ERC_721_INTERFACE_ID,
   ERC_721_ENUMERABLE_INTERFACE_ID,
   ERC_1155_INTERFACE_ID,
@@ -20,9 +20,9 @@ import { discoverOwnedNftTokens } from "@/services/assetDiscovery";
 import type { NFTStandard, OwnedNftToken } from "@/types/nft";
 import { substituteErc1155TokenId } from "@/utilities/ipfsUtil";
 import {
-  ZRC_20_CONTRACT_ABI,
-  ZRC_20_TOKEN_UNITS_OF_GAS,
-} from "@/constants/zrc20Token";
+  QRC_20_CONTRACT_ABI,
+  QRC_20_TOKEN_UNITS_OF_GAS,
+} from "@/constants/qrc20Token";
 import { SIGNING_NONCE_BLOCK_TAG } from "@/constants/transactionNonce";
 import { getHexSeedFromMnemonic } from "@/functions/getHexSeedFromMnemonic";
 import { getOptimalTokenBalance } from "@/functions/getOptimalTokenBalance";
@@ -243,9 +243,9 @@ class QrlStore {
       getAccountBalance: false,
       getNativeTokenGas: action.bound,
       signNativeToken: action.bound,
-      getZrc20TokenDetails: action.bound,
-      getZrc20TokenGas: action.bound,
-      signZrc20Token: action.bound,
+      getQrc20TokenDetails: action.bound,
+      getQrc20TokenGas: action.bound,
+      signQrc20Token: action.bound,
       signAndSendReplacementTransaction: action.bound,
       getTransactionReceipt: action.bound,
       sendRawTransaction: action.bound,
@@ -996,13 +996,13 @@ class QrlStore {
     return result;
   }
 
-  async getZrc20TokenDetails(contractAddress: string) {
+  async getQrc20TokenDetails(contractAddress: string) {
     const tokenDetails = {
       token: undefined,
       error: "",
     };
 
-    const contractAbi = ZRC_20_CONTRACT_ABI;
+    const contractAbi = QRC_20_CONTRACT_ABI;
 
     if (this.qrlInstance) {
       try {
@@ -1070,7 +1070,7 @@ class QrlStore {
       collection?: {
         name: string;
         symbol: string;
-        // Owned-token count. Undefined for ZRC-1155: the standard has no
+        // Owned-token count. Undefined for QRC-1155: the standard has no
         // per-owner enumeration, so the count comes from the explorer at
         // the UI layer instead of the chain.
         balance?: number;
@@ -1082,7 +1082,7 @@ class QrlStore {
     if (this.qrlInstance) {
       try {
         const contract = new this.qrlInstance.Contract(
-          ZRC_721_CONTRACT_ABI,
+          QRC_721_CONTRACT_ABI,
           contractAddress,
         );
 
@@ -1110,7 +1110,7 @@ class QrlStore {
           );
           return {
             ...result,
-            collection: { name, symbol, balance, standard: "ZRC721" as const },
+            collection: { name, symbol, balance, standard: "QRC721" as const },
           };
         }
 
@@ -1144,13 +1144,13 @@ class QrlStore {
           }
           return {
             ...result,
-            collection: { name, symbol, standard: "ZRC1155" as const },
+            collection: { name, symbol, standard: "QRC1155" as const },
           };
         }
 
         return {
           ...result,
-          error: "Contract does not support ZRC-721 or ZRC-1155",
+          error: "Contract does not support QRC-721 or QRC-1155",
         };
       } catch {
         return {
@@ -1167,18 +1167,18 @@ class QrlStore {
   /**
    * Lists the tokens the active account owns inside one collection.
    *
-   * ZRC-721: on-chain enumeration (tokenOfOwnerByIndex) when the contract
+   * QRC-721: on-chain enumeration (tokenOfOwnerByIndex) when the contract
    * implements the Enumerable extension; otherwise falls back to explorer
    * discovery with every candidate re-verified via ownerOf, so a stale
    * explorer index can't show a transferred-out token.
    *
-   * ZRC-1155: the standard has no owner enumeration, so candidates always
+   * QRC-1155: the standard has no owner enumeration, so candidates always
    * come from the explorer and are re-verified via balanceOf(account, id);
    * the live per-id balance is returned alongside each token.
    */
   async getOwnedNftTokens(
     contractAddress: string,
-    standard: NFTStandard = "ZRC721",
+    standard: NFTStandard = "QRC721",
   ): Promise<OwnedNftTokensResult> {
     if (!this.qrlInstance) {
       return { tokens: [], failed: true };
@@ -1186,13 +1186,13 @@ class QrlStore {
     const owner = this.activeAccount.accountAddress;
     if (!owner) return { tokens: [], failed: false };
 
-    if (standard === "ZRC1155") {
+    if (standard === "QRC1155") {
       return this.getOwned1155Tokens(contractAddress, owner);
     }
 
     try {
       const contract = new this.qrlInstance.Contract(
-        ZRC_721_CONTRACT_ABI,
+        QRC_721_CONTRACT_ABI,
         contractAddress,
       );
 
@@ -1269,7 +1269,7 @@ class QrlStore {
     if (!owner) return undefined;
     try {
       const contract = new this.qrlInstance.Contract(
-        ZRC_1155_CONTRACT_ABI,
+        QRC_1155_CONTRACT_ABI,
         contractAddress,
       );
       const balance = readProviderValue(
@@ -1289,7 +1289,7 @@ class QrlStore {
     if (!this.qrlInstance) return { tokens: [], failed: true };
     try {
       const contract = new this.qrlInstance.Contract(
-        ZRC_1155_CONTRACT_ABI,
+        QRC_1155_CONTRACT_ABI,
         contractAddress,
       );
       const discovered = await discoverOwnedNftTokens(
@@ -1325,13 +1325,13 @@ class QrlStore {
   async getNftTokenUri(
     contractAddress: string,
     tokenId: string,
-    standard: NFTStandard = "ZRC721",
+    standard: NFTStandard = "QRC721",
   ) {
     if (this.qrlInstance) {
       try {
-        if (standard === "ZRC1155") {
+        if (standard === "QRC1155") {
           const contract = new this.qrlInstance.Contract(
-            ZRC_1155_CONTRACT_ABI,
+            QRC_1155_CONTRACT_ABI,
             contractAddress,
           );
           const uri = readProviderValue(
@@ -1341,7 +1341,7 @@ class QrlStore {
           return substituteErc1155TokenId(uri, tokenId);
         }
         const contract = new this.qrlInstance.Contract(
-          ZRC_721_CONTRACT_ABI,
+          QRC_721_CONTRACT_ABI,
           contractAddress,
         );
         const uri = readProviderValue(
@@ -1362,7 +1362,7 @@ class QrlStore {
     tokenId: string,
     mnemonicPhrases: string,
     contractAddress: string,
-    standard: NFTStandard = "ZRC721",
+    standard: NFTStandard = "QRC721",
     // ERC-1155 only: how many copies of `tokenId` to send.
     amount = "1",
     overrides?: GasFeeOverrides,
@@ -1381,9 +1381,9 @@ class QrlStore {
     if (this.qrlInstance) {
       try {
         const transferCall =
-          standard === "ZRC1155"
+          standard === "QRC1155"
             ? new this.qrlInstance.Contract(
-                ZRC_1155_CONTRACT_ABI,
+                QRC_1155_CONTRACT_ABI,
                 contractAddress,
               ).methods.safeTransferFrom(
                 from,
@@ -1393,7 +1393,7 @@ class QrlStore {
                 "0x",
               )
             : new this.qrlInstance.Contract(
-                ZRC_721_CONTRACT_ABI,
+                QRC_721_CONTRACT_ABI,
                 contractAddress,
               ).methods.safeTransferFrom(from, to, BigInt(tokenId));
         // Run all RPC calls in parallel for speed
@@ -1466,9 +1466,9 @@ class QrlStore {
     return result;
   }
 
-  /** Worst-case fee for a ZRC-20 transfer, in Quanta. Priced the same way
+  /** Worst-case fee for a QRC-20 transfer, in Quanta. Priced the same way
    *  getNativeTokenGas is; see its comment. */
-  async getZrc20TokenGas(
+  async getQrc20TokenGas(
     from: string,
     to: string,
     value: string | number,
@@ -1478,7 +1478,7 @@ class QrlStore {
   ) {
     if (this.qrlInstance) {
       const contract = new this.qrlInstance.Contract(
-        ZRC_20_CONTRACT_ABI,
+        QRC_20_CONTRACT_ABI,
         contractAddress,
       );
       const advancedGasLimit =
@@ -1510,7 +1510,7 @@ class QrlStore {
     return "";
   }
 
-  async signZrc20Token(
+  async signQrc20Token(
     from: string,
     to: string,
     value: string | number,
@@ -1530,7 +1530,7 @@ class QrlStore {
       data?: string;
     } = { error: "" };
 
-    const contractAbi = ZRC_20_CONTRACT_ABI;
+    const contractAbi = QRC_20_CONTRACT_ABI;
 
     if (this.qrlInstance) {
       try {
@@ -1547,7 +1547,7 @@ class QrlStore {
         const gasLimit =
           overrides?.tier === "advanced" && overrides.gasLimit
             ? overrides.gasLimit
-            : ZRC_20_TOKEN_UNITS_OF_GAS;
+            : QRC_20_TOKEN_UNITS_OF_GAS;
         const nonce = await this.qrlInstance.getTransactionCount(
           from,
           SIGNING_NONCE_BLOCK_TAG,
@@ -1650,7 +1650,7 @@ class QrlStore {
       } else {
         // Any token/NFT entry carries a contract address; the real
         // transaction goes TO the contract with the transfer calldata, not to
-        // the human recipient. Keying only off isZrc20Token sent NFT
+        // the human recipient. Keying only off isQrc20Token sent NFT
         // replacements to the recipient EOA with the calldata as inert bytes,
         // consuming the nonce and destroying the transfer while it reported
         // success. Route every contract interaction to its contract, with
@@ -1668,7 +1668,7 @@ class QrlStore {
           gasLimit:
             originalTx.gasLimit ??
             (isContractInteraction
-              ? ZRC_20_TOKEN_UNITS_OF_GAS
+              ? QRC_20_TOKEN_UNITS_OF_GAS
               : NATIVE_TOKEN_UNITS_OF_GAS),
           maxFeePerGas: `0x${finalMaxFee.toString(16)}`,
           maxPriorityFeePerGas: `0x${finalPriorityFee.toString(16)}`,

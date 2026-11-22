@@ -350,7 +350,8 @@ it("replaces omitted valid fields and retains omitted unfamiliar metadata", asyn
   seed(f.local, f.session);
   await StorageUtil.setTransactionHistoryEntry(ACCOUNT, HISTORY);
   expect(getStoredValue(h.local, ...historyPath)).toEqual([
-    { ...f.history, maxFeePerGas: { future: true } },
+    // The seed holds the earlier flag name; the writer adds the current one.
+    { ...f.history, isQrc20Token: true, maxFeePerGas: { future: true } },
     null,
   ]);
   await StorageUtil.setSettings({ currency: "USD" });

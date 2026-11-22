@@ -132,7 +132,7 @@ describe("ImportToken", () => {
         decimals: 18,
       },
     ]);
-    const getZrc20TokenDetails = vi.fn().mockResolvedValue({
+    const getQrc20TokenDetails = vi.fn().mockResolvedValue({
       token: {
         name: "Discovered Token",
         symbol: "DSC",
@@ -144,7 +144,7 @@ describe("ImportToken", () => {
       },
       error: "",
     });
-    renderComponent(mockedStore({ qrlStore: { getZrc20TokenDetails } }));
+    renderComponent(mockedStore({ qrlStore: { getQrc20TokenDetails } }));
 
     await userEvent.click(
       await screen.findByRole("checkbox", { name: /Discovered Token/ }),
@@ -161,8 +161,8 @@ describe("ImportToken", () => {
         image: "",
       });
     });
-    expect(getZrc20TokenDetails).toHaveBeenCalledTimes(1);
-    expect(getZrc20TokenDetails).toHaveBeenCalledWith(DISCOVERED_ADDRESS);
+    expect(getQrc20TokenDetails).toHaveBeenCalledTimes(1);
+    expect(getQrc20TokenDetails).toHaveBeenCalledWith(DISCOVERED_ADDRESS);
     // The validation message of the empty manual field never shows: the
     // pick does not submit the form.
     expect(
@@ -171,7 +171,7 @@ describe("ImportToken", () => {
   });
 
   it("reviews a manually entered address before importing it", async () => {
-    const getZrc20TokenDetails = vi.fn().mockResolvedValue({
+    const getQrc20TokenDetails = vi.fn().mockResolvedValue({
       token: {
         name: "Manual Token",
         symbol: "MAN",
@@ -183,7 +183,7 @@ describe("ImportToken", () => {
       },
       error: "",
     });
-    renderComponent(mockedStore({ qrlStore: { getZrc20TokenDetails } }));
+    renderComponent(mockedStore({ qrlStore: { getQrc20TokenDetails } }));
 
     await userEvent.type(
       screen.getByRole("textbox", { name: "Token contract address" }),
@@ -208,11 +208,11 @@ describe("ImportToken", () => {
   });
 
   it("shows a failed chain read for a manual address on the field", async () => {
-    const getZrc20TokenDetails = vi.fn().mockResolvedValue({
+    const getQrc20TokenDetails = vi.fn().mockResolvedValue({
       token: undefined,
-      error: "Contract does not look like a ZRC-20 token",
+      error: "Contract does not look like a QRC-20 token",
     });
-    renderComponent(mockedStore({ qrlStore: { getZrc20TokenDetails } }));
+    renderComponent(mockedStore({ qrlStore: { getQrc20TokenDetails } }));
 
     await userEvent.type(
       screen.getByRole("textbox", { name: "Token contract address" }),
@@ -223,7 +223,7 @@ describe("ImportToken", () => {
     );
 
     expect(
-      await screen.findByText("Contract does not look like a ZRC-20 token"),
+      await screen.findByText("Contract does not look like a QRC-20 token"),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Import" }),
@@ -233,10 +233,10 @@ describe("ImportToken", () => {
   it("reports a rejected manual lookup and releases the submit state", async () => {
     const error = new Error("Lookup failed");
     const report = vi.spyOn(console, "error").mockImplementation(() => {});
-    const getZrc20TokenDetails = vi
-      .fn<ReturnType<typeof mockedStore>["qrlStore"]["getZrc20TokenDetails"]>()
+    const getQrc20TokenDetails = vi
+      .fn<ReturnType<typeof mockedStore>["qrlStore"]["getQrc20TokenDetails"]>()
       .mockRejectedValueOnce(error);
-    renderComponent(mockedStore({ qrlStore: { getZrc20TokenDetails } }));
+    renderComponent(mockedStore({ qrlStore: { getQrc20TokenDetails } }));
     await userEvent.type(
       screen.getByRole("textbox", { name: "Token contract address" }),
       DISCOVERED_ADDRESS,
@@ -250,7 +250,7 @@ describe("ImportToken", () => {
         error,
       );
     });
-    expect(getZrc20TokenDetails).toHaveBeenCalledWith(DISCOVERED_ADDRESS);
+    expect(getQrc20TokenDetails).toHaveBeenCalledWith(DISCOVERED_ADDRESS);
     expect(
       screen.getByRole("button", { name: "Fetch token details" }),
     ).toBeEnabled();

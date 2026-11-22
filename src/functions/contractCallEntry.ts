@@ -17,14 +17,14 @@ export const isContractCallEntry = (
     | "to"
     | "chainId"
     | "isInternal"
-    | "isZrc20Token"
+    | "isQrc20Token"
     | "tokenContractAddress"
   >,
 ): boolean => {
   if (entry.isInternal === true) return false;
   // A deployment has no recipient: its init code is not a call.
   if (entry.to === "") return false;
-  if (entry.isZrc20Token || entry.tokenContractAddress !== "") return false;
+  if (entry.isQrc20Token || entry.tokenContractAddress !== "") return false;
   const data = entry.data ?? "";
   if (data !== "" && data !== "0x") return true;
   return knownSwapEscrow(entry.chainId, entry.to) !== undefined;
@@ -42,7 +42,7 @@ export const isRolledBackContractCall = (
     | "to"
     | "chainId"
     | "isInternal"
-    | "isZrc20Token"
+    | "isQrc20Token"
     | "tokenContractAddress"
     | "status"
     | "pendingStatus"
@@ -63,13 +63,13 @@ export const isFailedOnChainWithoutTransfer = (
   entry: Pick<
     TransactionHistoryEntry,
     | "isInternal"
-    | "isZrc20Token"
+    | "isQrc20Token"
     | "status"
     | "pendingStatus"
     | "receiptStatusVerified"
   >,
 ): boolean =>
   entry.isInternal !== true &&
-  !entry.isZrc20Token &&
+  !entry.isQrc20Token &&
   entry.receiptStatusVerified === true &&
   (entry.pendingStatus ?? (entry.status ? "confirmed" : "failed")) === "failed";

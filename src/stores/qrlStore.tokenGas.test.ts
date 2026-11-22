@@ -50,7 +50,7 @@ const TO = `Q${"b".repeat(128)}`;
 const CONTRACT = `Q${"c".repeat(128)}`;
 
 /**
- * A store with just enough of a contract handle for getZrc20TokenGas.
+ * A store with just enough of a contract handle for getQrc20TokenGas.
  * `transfer` returns the call/estimate stubs handed in.
  */
 const storeWithContract = (transferStubs: {
@@ -68,7 +68,7 @@ const storeWithContract = (transferStubs: {
   return { store, transfer };
 };
 
-describe("getZrc20TokenGas", () => {
+describe("getQrc20TokenGas", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -78,7 +78,7 @@ describe("getZrc20TokenGas", () => {
     const call = vi.fn().mockResolvedValue(true);
     const { store } = storeWithContract({ call, estimateGas });
 
-    const fee = await store.getZrc20TokenGas(FROM, TO, "1", CONTRACT, 18);
+    const fee = await store.getQrc20TokenGas(FROM, TO, "1", CONTRACT, 18);
 
     expect(estimateGas).toHaveBeenCalledWith({ from: FROM });
     expect(call).not.toHaveBeenCalled();
@@ -90,7 +90,7 @@ describe("getZrc20TokenGas", () => {
     const call = vi.fn().mockResolvedValue(true);
     const { store } = storeWithContract({ call, estimateGas });
 
-    const fee = await store.getZrc20TokenGas(FROM, TO, "1", CONTRACT, 18, {
+    const fee = await store.getQrc20TokenGas(FROM, TO, "1", CONTRACT, 18, {
       tier: "advanced",
       gasLimit: 90000,
     });
@@ -107,7 +107,7 @@ describe("getZrc20TokenGas", () => {
     const { store } = storeWithContract({ call });
 
     await expect(
-      store.getZrc20TokenGas(FROM, TO, "1", CONTRACT, 18, {
+      store.getQrc20TokenGas(FROM, TO, "1", CONTRACT, 18, {
         tier: "advanced",
         gasLimit: 90000,
       }),

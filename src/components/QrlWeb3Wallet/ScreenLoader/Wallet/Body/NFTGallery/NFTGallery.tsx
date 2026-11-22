@@ -24,7 +24,7 @@ const NFTGallery = observer(() => {
   const validRoute = routeState !== undefined;
   const contractAddress = routeState?.contractAddress ?? "";
   const collectionName = routeState?.collectionName ?? "";
-  const standard = routeState?.standard ?? "ZRC721";
+  const standard = routeState?.standard ?? "QRC721";
 
   const [tokens, setTokens] = useState<OwnedNftToken[]>([]);
   const [isLoading, setIsLoading] = useState(true);

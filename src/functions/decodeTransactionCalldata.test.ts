@@ -51,8 +51,8 @@ describe("decodeTransactionCalldata", () => {
     expect(decoded).toMatchObject({
       status: "decoded",
       action: CALLDATA_ACTIONS.APPROVE,
-      // Shared with ZRC-721, where the second argument is a token ID.
-      standard: "ZRC20_OR_ZRC721",
+      // Shared with QRC-721, where the second argument is a token ID.
+      standard: "QRC20_OR_QRC721",
       selector: "0x095ea7b3",
       spender: toChecksumAddress(SPENDER),
       amount: 25n,
@@ -104,7 +104,7 @@ describe("decodeTransactionCalldata", () => {
       ),
     ).toMatchObject({
       action: CALLDATA_ACTIONS.TRANSFER,
-      standard: "ZRC20",
+      standard: "QRC20",
       recipient: toChecksumAddress(RECIPIENT),
       amount: 1000000000000000000n,
     });
@@ -121,7 +121,7 @@ describe("decodeTransactionCalldata", () => {
       ),
     ).toMatchObject({
       action: CALLDATA_ACTIONS.TRANSFER_FROM,
-      standard: "ZRC20_OR_ZRC721",
+      standard: "QRC20_OR_QRC721",
       source: toChecksumAddress(SOURCE),
       recipient: toChecksumAddress(RECIPIENT),
       amount: 5n,
@@ -141,14 +141,14 @@ describe("decodeTransactionCalldata", () => {
         ),
       ).toMatchObject({
         action: CALLDATA_ACTIONS.SET_APPROVAL_FOR_ALL,
-        standard: "ZRC721",
+        standard: "QRC721",
         operator: toChecksumAddress(SPENDER),
         approved,
       });
     },
   );
 
-  it("decodes both ZRC-721 safeTransferFrom overloads", () => {
+  it("decodes both QRC-721 safeTransferFrom overloads", () => {
     expect(
       decodeTransactionCalldata(
         call(
@@ -159,7 +159,7 @@ describe("decodeTransactionCalldata", () => {
       ),
     ).toMatchObject({
       action: CALLDATA_ACTIONS.SAFE_TRANSFER_FROM,
-      standard: "ZRC721",
+      standard: "QRC721",
       tokenIds: [77n],
     });
 
@@ -173,14 +173,14 @@ describe("decodeTransactionCalldata", () => {
       ),
     ).toMatchObject({
       action: CALLDATA_ACTIONS.SAFE_TRANSFER_FROM_WITH_DATA,
-      standard: "ZRC721",
+      standard: "QRC721",
       source: toChecksumAddress(SOURCE),
       recipient: toChecksumAddress(RECIPIENT),
       tokenIds: [78n],
     });
   });
 
-  it("decodes the ZRC-1155 single transfer", () => {
+  it("decodes the QRC-1155 single transfer", () => {
     expect(
       decodeTransactionCalldata(
         call(
@@ -191,13 +191,13 @@ describe("decodeTransactionCalldata", () => {
       ),
     ).toMatchObject({
       action: CALLDATA_ACTIONS.SAFE_TRANSFER_FROM_SINGLE,
-      standard: "ZRC1155",
+      standard: "QRC1155",
       tokenIds: [9n],
       tokenAmounts: [3n],
     });
   });
 
-  it("decodes the ZRC-1155 batch transfer", () => {
+  it("decodes the QRC-1155 batch transfer", () => {
     expect(
       decodeTransactionCalldata(
         call(
@@ -208,7 +208,7 @@ describe("decodeTransactionCalldata", () => {
       ),
     ).toMatchObject({
       action: CALLDATA_ACTIONS.SAFE_BATCH_TRANSFER_FROM,
-      standard: "ZRC1155",
+      standard: "QRC1155",
       source: toChecksumAddress(SOURCE),
       recipient: toChecksumAddress(RECIPIENT),
       tokenIds: [1n, 2n, 3n],

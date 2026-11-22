@@ -35,7 +35,7 @@ describe("NFTCollectionImportSuccess", () => {
             collection={{
               name: "Collection",
               symbol: "NFT",
-              standard: "ZRC1155",
+              standard: "QRC1155",
             }}
           />
         </MemoryRouter>
@@ -57,7 +57,7 @@ describe("NFTCollectionImportSuccess", () => {
     setNFTCollectionsList.mockReturnValueOnce(pending);
     const store = mockedStore();
     renderComponent(store);
-    expect(screen.getByText("ZRC-1155")).toBeInTheDocument();
+    expect(screen.getByText("QRC-1155")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Import" }));
     expect(setNFTCollectionsList).toHaveBeenCalledExactlyOnceWith(
       store.qrlStore.activeAccount.accountAddress,
@@ -65,7 +65,7 @@ describe("NFTCollectionImportSuccess", () => {
         address: CONTRACT_ADDRESS,
         name: "Collection",
         symbol: "NFT",
-        standard: "ZRC1155",
+        standard: "QRC1155",
         image: "",
       },
     );

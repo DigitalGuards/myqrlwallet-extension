@@ -20,7 +20,7 @@ const makeSampleEntry = (
   amount: 2.5,
   tokenSymbol: "QRL",
   tokenName: "QRL",
-  isZrc20Token: false,
+  isQrc20Token: false,
   tokenContractAddress: "",
   tokenDecimals: 18,
   transactionHash: "0xtxhash1",
@@ -114,10 +114,10 @@ describe("TransactionHistoryItem", () => {
     expect(screen.getByText("Send")).toBeInTheDocument();
   });
 
-  it("should render a ZRC-20 token transaction", () => {
+  it("should render a QRC-20 token transaction", () => {
     renderComponent(
       makeSampleEntry({
-        isZrc20Token: true,
+        isQrc20Token: true,
         tokenSymbol: "TST",
         amount: 100,
       }),
@@ -294,7 +294,7 @@ describe("TransactionHistoryItem", () => {
     expect(screen.queryByText(/≈/)).not.toBeInTheDocument();
   });
 
-  it("should not display fiat value for ZRC-20 tokens", () => {
+  it("should not display fiat value for QRC-20 tokens", () => {
     const storeWithPrice = mockedStore({
       priceStore: {
         getPrice: () => 1.5,
@@ -316,7 +316,7 @@ describe("TransactionHistoryItem", () => {
           <TransactionHistoryItem
             transaction={makeSampleEntry({
               amount: 10,
-              isZrc20Token: true,
+              isQrc20Token: true,
               tokenSymbol: "TST",
             })}
           />

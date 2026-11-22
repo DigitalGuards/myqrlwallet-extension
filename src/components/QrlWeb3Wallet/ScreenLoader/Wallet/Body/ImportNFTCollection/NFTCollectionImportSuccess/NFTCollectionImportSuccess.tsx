@@ -21,7 +21,7 @@ type NFTCollectionImportSuccessProps = {
   collection?: {
     name: string;
     symbol: string;
-    // Undefined for ZRC-1155 (no on-chain owner enumeration).
+    // Undefined for QRC-1155 (no on-chain owner enumeration).
     balance?: number;
     standard: NFTStandard;
   };
@@ -44,7 +44,7 @@ const NFTCollectionImportSuccess = observer(
     const name = collection?.name;
     const symbol = collection?.symbol;
     const balance = collection?.balance;
-    const standard = collection?.standard ?? "ZRC721";
+    const standard = collection?.standard ?? "QRC721";
 
     const onConfirmImport = async () => {
       await StorageUtil.setNFTCollectionsList(accountAddress, {
@@ -88,7 +88,7 @@ const NFTCollectionImportSuccess = observer(
             <div className="flex flex-col gap-1">
               <div>{t("nft.standard")}</div>
               <div className="font-bold text-secondary">
-                {standard === "ZRC1155" ? "ZRC-1155" : "ZRC-721"}
+                {standard === "QRC1155" ? "QRC-1155" : "QRC-721"}
               </div>
             </div>
             {balance !== undefined && (

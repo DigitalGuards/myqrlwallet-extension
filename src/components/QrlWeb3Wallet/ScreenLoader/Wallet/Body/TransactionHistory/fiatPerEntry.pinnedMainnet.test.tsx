@@ -50,7 +50,7 @@ const entryOn = (chainId: string): TransactionHistoryEntry => ({
   amount: 10,
   tokenSymbol: "Quanta",
   tokenName: "Quanta",
-  isZrc20Token: false,
+  isQrc20Token: false,
   tokenContractAddress: "",
   tokenDecimals: 18,
   transactionHash: "0xtxhash1",

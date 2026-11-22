@@ -74,7 +74,7 @@ const NFTDetail = () => {
   const metadata = readNFTMetadata(details.metadata);
   const imageUrl = isString(details.imageUrl) ? details.imageUrl : "";
   const standard: NFTStandard =
-    details.standard === "ZRC1155" ? "ZRC1155" : "ZRC721";
+    details.standard === "QRC1155" ? "QRC1155" : "QRC721";
   const balance = isString(details.balance) ? details.balance : undefined;
 
   // Validate transaction data before applying display fallbacks. A malformed
@@ -85,7 +85,7 @@ const NFTDetail = () => {
     collectionName: details.collectionName ?? "",
     imageUrl: details.imageUrl ?? "",
     nftName: metadata?.name ?? "",
-    standard: details.standard ?? "ZRC721",
+    standard: details.standard ?? "QRC721",
     balance: details.balance,
   };
   const transferState = isNFTTransferState(transferDetails)
@@ -154,7 +154,7 @@ const NFTDetail = () => {
               <div className="flex min-w-0 flex-col gap-1">
                 <div className="text-sm">{t("nft.standard")}</div>
                 <div className="text-sm font-bold text-secondary [overflow-wrap:anywhere]">
-                  {standard === "ZRC1155" ? "ZRC-1155" : "ZRC-721"}
+                  {standard === "QRC1155" ? "QRC-1155" : "QRC-721"}
                 </div>
               </div>
               {balance && (

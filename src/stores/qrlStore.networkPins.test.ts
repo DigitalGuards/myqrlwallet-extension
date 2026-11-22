@@ -148,7 +148,7 @@ describe("signing and fiat while mainnet is dormant", () => {
 
   it("refuses token signing on the mainnet RPC", async () => {
     const store = storeOn(mainnetRpcChain(V3_CHAIN_ID));
-    const token = await store.signZrc20Token(
+    const token = await store.signQrc20Token(
       "from",
       "to",
       "1",

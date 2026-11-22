@@ -11,7 +11,7 @@ import { toCanonicalQrlAddress } from "@/utilities/addressUtil";
  * unlimited `approve` to an attacker is indistinguishable from a harmless
  * swap (security review finding M2).
  *
- * Scope is deliberately narrow: the handful of ZRC-20 / ZRC-721 / ZRC-1155
+ * Scope is deliberately narrow: the handful of QRC-20 / QRC-721 / QRC-1155
  * entry points that move value or hand it away. Anything else is reported
  * as an undecoded contract interaction, with its 4-byte selector shown, so
  * the surface never invents a summary it cannot back up.
@@ -56,7 +56,7 @@ export type CalldataAction =
   (typeof CALLDATA_ACTIONS)[keyof typeof CALLDATA_ACTIONS];
 
 /**
- * Which token family the signature belongs to. `ZRC20_OR_ZRC721` covers the
+ * Which token family the signature belongs to. `QRC20_OR_QRC721` covers the
  * signatures both standards declare, `approve(address,uint256)` and
  * `transferFrom(address,address,uint256)`: the trailing argument is an
  * amount for a fungible token and a token ID for an NFT, and only the
@@ -65,10 +65,10 @@ export type CalldataAction =
  * knows neither.
  */
 export type TokenStandardHint =
-  | "ZRC20"
-  | "ZRC721"
-  | "ZRC1155"
-  | "ZRC20_OR_ZRC721";
+  | "QRC20"
+  | "QRC721"
+  | "QRC1155"
+  | "QRC20_OR_QRC721";
 
 export type DecodedCalldataFields = {
   /** approve / increaseAllowance / decreaseAllowance target. */
@@ -87,7 +87,7 @@ export type DecodedCalldataFields = {
   approved?: boolean;
   /** NFT token IDs, one entry for a single transfer, many for a batch. */
   tokenIds?: bigint[];
-  /** ZRC-1155 per-ID quantities, index-aligned with `tokenIds`. */
+  /** QRC-1155 per-ID quantities, index-aligned with `tokenIds`. */
   tokenAmounts?: bigint[];
 };
 
@@ -200,27 +200,27 @@ const allowanceFields = (values: unknown[]): DecodedCalldataFields => {
 
 const SPECS: CalldataSpec[] = [
   {
-    // Shared with ZRC-721, where the second argument is a token ID and the
+    // Shared with QRC-721, where the second argument is a token ID and the
     // call hands over that one item. Tagged ambiguous so the surface asks
     // the wallet's own lists which contract this is instead of announcing a
     // fungible allowance for an NFT approval.
     signature: "approve(address,uint256)",
     action: CALLDATA_ACTIONS.APPROVE,
-    standard: "ZRC20_OR_ZRC721",
+    standard: "QRC20_OR_QRC721",
     types: ["address", "uint256"],
     build: allowanceFields,
   },
   {
     signature: "increaseAllowance(address,uint256)",
     action: CALLDATA_ACTIONS.INCREASE_ALLOWANCE,
-    standard: "ZRC20",
+    standard: "QRC20",
     types: ["address", "uint256"],
     build: allowanceFields,
   },
   {
     signature: "decreaseAllowance(address,uint256)",
     action: CALLDATA_ACTIONS.DECREASE_ALLOWANCE,
-    standard: "ZRC20",
+    standard: "QRC20",
     types: ["address", "uint256"],
     // A decrease never widens an allowance, so it carries no unlimited flag.
     build: (values) => ({
@@ -231,7 +231,7 @@ const SPECS: CalldataSpec[] = [
   {
     signature: "transfer(address,uint256)",
     action: CALLDATA_ACTIONS.TRANSFER,
-    standard: "ZRC20",
+    standard: "QRC20",
     types: ["address", "uint256"],
     build: (values) => ({
       recipient: asAddress(values[0]),
@@ -241,7 +241,7 @@ const SPECS: CalldataSpec[] = [
   {
     signature: "transferFrom(address,address,uint256)",
     action: CALLDATA_ACTIONS.TRANSFER_FROM,
-    standard: "ZRC20_OR_ZRC721",
+    standard: "QRC20_OR_QRC721",
     types: ["address", "address", "uint256"],
     build: (values) => ({
       source: asAddress(values[0]),
@@ -252,7 +252,7 @@ const SPECS: CalldataSpec[] = [
   {
     signature: "setApprovalForAll(address,bool)",
     action: CALLDATA_ACTIONS.SET_APPROVAL_FOR_ALL,
-    standard: "ZRC721",
+    standard: "QRC721",
     types: ["address", "bool"],
     build: (values) => ({
       operator: asAddress(values[0]),
@@ -262,7 +262,7 @@ const SPECS: CalldataSpec[] = [
   {
     signature: "safeTransferFrom(address,address,uint256)",
     action: CALLDATA_ACTIONS.SAFE_TRANSFER_FROM,
-    standard: "ZRC721",
+    standard: "QRC721",
     types: ["address", "address", "uint256"],
     build: (values) => ({
       source: asAddress(values[0]),
@@ -273,7 +273,7 @@ const SPECS: CalldataSpec[] = [
   {
     signature: "safeTransferFrom(address,address,uint256,bytes)",
     action: CALLDATA_ACTIONS.SAFE_TRANSFER_FROM_WITH_DATA,
-    standard: "ZRC721",
+    standard: "QRC721",
     types: ["address", "address", "uint256", "bytes"],
     build: (values) => ({
       source: asAddress(values[0]),
@@ -284,7 +284,7 @@ const SPECS: CalldataSpec[] = [
   {
     signature: "safeTransferFrom(address,address,uint256,uint256,bytes)",
     action: CALLDATA_ACTIONS.SAFE_TRANSFER_FROM_SINGLE,
-    standard: "ZRC1155",
+    standard: "QRC1155",
     types: ["address", "address", "uint256", "uint256", "bytes"],
     build: (values) => ({
       source: asAddress(values[0]),
@@ -297,7 +297,7 @@ const SPECS: CalldataSpec[] = [
     signature:
       "safeBatchTransferFrom(address,address,uint256[],uint256[],bytes)",
     action: CALLDATA_ACTIONS.SAFE_BATCH_TRANSFER_FROM,
-    standard: "ZRC1155",
+    standard: "QRC1155",
     types: ["address", "address", "uint256[]", "uint256[]", "bytes"],
     build: (values) => {
       const tokenIds = asBigIntList(values[2]);

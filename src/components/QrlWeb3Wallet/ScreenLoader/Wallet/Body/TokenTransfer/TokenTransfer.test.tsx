@@ -99,7 +99,7 @@ const CONTRACT_D = toChecksumAddress(`Q${"d".repeat(128)}`);
 const QRNS_REGISTRY = toChecksumAddress(`Q${"e".repeat(128)}`);
 const QRNS_RPC_URL = "https://qns-rpc.example";
 const TOKEN_DETAILS = {
-  isZrc20Token: true,
+  isQrc20Token: true,
   tokenContractAddress: CONTRACT_C,
   tokenDecimals: 8,
   tokenImage: "token.png",
@@ -169,7 +169,7 @@ describe("TokenTransfer", () => {
   // Compare both classes with origin/dev while each dependency is pending.
   describe("origin/dev async timing", () => {
     const nativeDetails = {
-      isZrc20Token: false,
+      isQrc20Token: false,
       tokenContractAddress: "",
       tokenDecimals: 0,
       tokenImage: NATIVE_TOKEN.image,
@@ -181,9 +181,9 @@ describe("TokenTransfer", () => {
     const draftShapes = [
       { name: "native", tokenDetails: undefined },
       { name: "native metadata", tokenDetails: nativeDetails },
-      { name: "ZRC-20", tokenDetails: TOKEN_DETAILS },
+      { name: "QRC-20", tokenDetails: TOKEN_DETAILS },
       {
-        name: "legacy ZRC-20",
+        name: "legacy QRC-20",
         tokenDetails: { ...TOKEN_DETAILS, tokenBalanceBaseUnits: undefined },
       },
     ];
@@ -486,7 +486,7 @@ describe("TokenTransfer", () => {
           mockedStore({
             qrlStore: {
               signNativeToken: () => Promise.resolve(successSignResult),
-              signZrc20Token: () => Promise.resolve(successSignResult),
+              signQrc20Token: () => Promise.resolve(successSignResult),
               sendRawTransaction: () => broadcast.promise,
               getAccountBalance: () => "100.0 Quanta",
             },
@@ -504,7 +504,7 @@ describe("TokenTransfer", () => {
         });
         fireEvent.change(amount, { target: { value: "2" } });
         const send = screen.getByRole("button", {
-          name: tokenDetails?.isZrc20Token ? "Send TOK" : "Send Quanta",
+          name: tokenDetails?.isQrc20Token ? "Send TOK" : "Send Quanta",
         });
         await waitFor(() => {
           expect(send).toBeEnabled();
@@ -827,7 +827,7 @@ describe("TokenTransfer", () => {
         receiverAddress: ACCOUNT_B,
         amount: "1",
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals,
           tokenImage: "",
@@ -881,7 +881,7 @@ describe("TokenTransfer", () => {
     { shouldStartFresh: "true" },
     { tokenDetails: null },
     ...[
-      { isZrc20Token: "true" },
+      { isQrc20Token: "true" },
       { tokenContractAddress: 3 },
       { tokenDecimals: "8" },
       { tokenBalance: 3 },
@@ -902,7 +902,7 @@ describe("TokenTransfer", () => {
       renderComponentWithState(
         state,
         mockedStore({
-          qrlStore: { signNativeToken: sign, signZrc20Token: sign },
+          qrlStore: { signNativeToken: sign, signQrc20Token: sign },
         }),
       );
 
@@ -1066,7 +1066,7 @@ describe("TokenTransfer", () => {
     renderComponentWithState(
       { tokenDetails: TOKEN_DETAILS },
       mockedStore({
-        qrlStore: { getZrc20TokenDetails: () => Promise.reject(error) },
+        qrlStore: { getQrc20TokenDetails: () => Promise.reject(error) },
       }),
     );
     await screen.findByRole("button", { name: "Send TOK" });
@@ -1089,13 +1089,13 @@ describe("TokenTransfer", () => {
       image: "",
     };
     const previous =
-      deferred<Awaited<ReturnType<QrlStore["getZrc20TokenDetails"]>>>();
+      deferred<Awaited<ReturnType<QrlStore["getQrc20TokenDetails"]>>>();
     const getDetails = vi
-      .fn<QrlStore["getZrc20TokenDetails"]>()
+      .fn<QrlStore["getQrc20TokenDetails"]>()
       .mockReturnValueOnce(previous.promise)
       .mockResolvedValue({ token, error: "" });
     const store = mockedStore({
-      qrlStore: { getZrc20TokenDetails: getDetails },
+      qrlStore: { getQrc20TokenDetails: getDetails },
     });
     store.qrlStore.activeAccount = observable({ accountAddress: ACCOUNT_A });
     renderComponentWithState({ tokenDetails: TOKEN_DETAILS }, store);
@@ -1443,14 +1443,14 @@ describe("TokenTransfer", () => {
     });
   });
 
-  it("uses the bound QNS address for ZRC-20 gas estimation", async () => {
+  it("uses the bound QNS address for QRC-20 gas estimation", async () => {
     mockResolveQrnsName.mockResolvedValue(ACCOUNT_B);
-    const mockGetZrc20TokenGas = vi.fn().mockResolvedValue("0.001");
+    const mockGetQrc20TokenGas = vi.fn().mockResolvedValue("0.001");
 
     renderComponentWithState(
       {
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 18,
           tokenImage: "token.png",
@@ -1468,7 +1468,7 @@ describe("TokenTransfer", () => {
             },
           },
           getAccountBalance: () => "10.0 Quanta",
-          getZrc20TokenGas: mockGetZrc20TokenGas,
+          getQrc20TokenGas: mockGetQrc20TokenGas,
         },
       }),
     );
@@ -1482,7 +1482,7 @@ describe("TokenTransfer", () => {
 
     await waitFor(
       () => {
-        expect(mockGetZrc20TokenGas).toHaveBeenCalledWith(
+        expect(mockGetQrc20TokenGas).toHaveBeenCalledWith(
           ACCOUNT_A,
           ACCOUNT_B,
           "1",
@@ -1731,7 +1731,7 @@ describe("TokenTransfer", () => {
       renderComponentWithState(
         {
           tokenDetails: {
-            isZrc20Token: true,
+            isQrc20Token: true,
             tokenContractAddress: CONTRACT_C,
             tokenDecimals: decimals,
             tokenImage: "token.png",
@@ -1742,7 +1742,7 @@ describe("TokenTransfer", () => {
         },
         mockedStore({
           qrlStore: {
-            signZrc20Token: sign,
+            signQrc20Token: sign,
             sendRawTransaction: vi.fn().mockResolvedValue(undefined),
           },
         }),
@@ -1767,7 +1767,7 @@ describe("TokenTransfer", () => {
     renderComponentWithState(
       {
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 0,
           tokenImage: "token.png",
@@ -1776,7 +1776,7 @@ describe("TokenTransfer", () => {
           tokenSymbol: "TST",
         },
       },
-      mockedStore({ qrlStore: { signZrc20Token: sign } }),
+      mockedStore({ qrlStore: { signQrc20Token: sign } }),
     );
     await waitForEditing();
     await screen.findByRole("button", { name: "Send TST" });
@@ -1808,7 +1808,7 @@ describe("TokenTransfer", () => {
     // decimals, so the display string is "0.0 MQW" and every comparison
     // made against it read the balance as zero.
     const SMALL_BALANCE_DETAILS = {
-      isZrc20Token: true,
+      isQrc20Token: true,
       tokenContractAddress: CONTRACT_D,
       tokenDecimals: 8,
       tokenImage: "token.png",
@@ -1824,9 +1824,9 @@ describe("TokenTransfer", () => {
         { tokenDetails: SMALL_BALANCE_DETAILS },
         mockedStore({
           qrlStore: {
-            signZrc20Token: sign,
+            signQrc20Token: sign,
             getAccountBalance: () => "10.0 Quanta",
-            getZrc20TokenGas: () => Promise.resolve("0.001"),
+            getQrc20TokenGas: () => Promise.resolve("0.001"),
             sendRawTransaction: vi.fn().mockResolvedValue(undefined),
           },
         }),
@@ -1856,9 +1856,9 @@ describe("TokenTransfer", () => {
         { tokenDetails: SMALL_BALANCE_DETAILS },
         mockedStore({
           qrlStore: {
-            signZrc20Token: sign,
+            signQrc20Token: sign,
             getAccountBalance: () => "10.0 Quanta",
-            getZrc20TokenGas: () => Promise.resolve("0.001"),
+            getQrc20TokenGas: () => Promise.resolve("0.001"),
           },
         }),
       );
@@ -1892,7 +1892,7 @@ describe("TokenTransfer", () => {
         mockedStore({
           qrlStore: {
             getAccountBalance: () => "10.0 Quanta",
-            getZrc20TokenGas: () => Promise.resolve("0.001"),
+            getQrc20TokenGas: () => Promise.resolve("0.001"),
           },
         }),
       );
@@ -1914,7 +1914,7 @@ describe("TokenTransfer", () => {
     // DECIMAL_PLACES is 18 with ROUND_DOWN, so dividing by 10^24 dropped
     // that trailing unit and Max left dust behind.
     const WIDE_DECIMALS_DETAILS = {
-      isZrc20Token: true,
+      isQrc20Token: true,
       tokenContractAddress: CONTRACT_D,
       tokenDecimals: 24,
       tokenImage: "token.png",
@@ -1930,7 +1930,7 @@ describe("TokenTransfer", () => {
         mockedStore({
           qrlStore: {
             getAccountBalance: () => "10.0 Quanta",
-            getZrc20TokenGas: () => Promise.resolve("0.001"),
+            getQrc20TokenGas: () => Promise.resolve("0.001"),
           },
         }),
       );
@@ -1951,7 +1951,7 @@ describe("TokenTransfer", () => {
       // Storage still holds a whole token from an earlier session; the
       // chain says half of it is left. A stale ceiling let the send pass
       // this guard and revert on chain, burning the fee.
-      const getZrc20TokenDetails = vi.fn().mockResolvedValue({
+      const getQrc20TokenDetails = vi.fn().mockResolvedValue({
         token: {
           balance: 0.5,
           balanceBaseUnits: "50000000",
@@ -1967,7 +1967,7 @@ describe("TokenTransfer", () => {
       renderComponentWithState(
         {
           tokenDetails: {
-            isZrc20Token: true,
+            isQrc20Token: true,
             tokenContractAddress: CONTRACT_D,
             tokenDecimals: 8,
             tokenImage: "token.png",
@@ -1979,10 +1979,10 @@ describe("TokenTransfer", () => {
         },
         mockedStore({
           qrlStore: {
-            signZrc20Token: sign,
-            getZrc20TokenDetails,
+            signQrc20Token: sign,
+            getQrc20TokenDetails,
             getAccountBalance: () => "10.0 Quanta",
-            getZrc20TokenGas: () => Promise.resolve("0.001"),
+            getQrc20TokenGas: () => Promise.resolve("0.001"),
           },
         }),
       );
@@ -1990,7 +1990,7 @@ describe("TokenTransfer", () => {
 
       await screen.findByRole("button", { name: "Send MQW" });
       await waitFor(() => {
-        expect(getZrc20TokenDetails).toHaveBeenCalledWith(CONTRACT_D);
+        expect(getQrc20TokenDetails).toHaveBeenCalledWith(CONTRACT_D);
       });
 
       await waitFor(
@@ -2095,7 +2095,7 @@ describe("TokenTransfer", () => {
     renderComponentWithState(
       {
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 18,
           tokenImage: "token.png",
@@ -2108,9 +2108,9 @@ describe("TokenTransfer", () => {
       mockedStore({
         ledgerStore: { isLedgerAccount: () => true },
         qrlStore: {
-          signZrc20Token: sign,
+          signQrc20Token: sign,
           getAccountBalance: () => "10.0 Quanta",
-          getZrc20TokenGas: () => Promise.resolve("0.001"),
+          getQrc20TokenGas: () => Promise.resolve("0.001"),
         },
       }),
     );
@@ -2218,8 +2218,8 @@ describe("TokenTransfer", () => {
     expect(mockReadLockState).toHaveBeenCalled();
   });
 
-  it("should sign ZRC20 token and add pending transaction when token details are set from state", async () => {
-    const mockSignZrc20Token = vi.fn().mockResolvedValue({
+  it("should sign QRC20 token and add pending transaction when token details are set from state", async () => {
+    const mockSignQrc20Token = vi.fn().mockResolvedValue({
       ...successSignResult,
       data: "0xcontractdata",
     });
@@ -2228,7 +2228,7 @@ describe("TokenTransfer", () => {
     renderComponentWithState(
       {
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 18,
           tokenImage: "token.png",
@@ -2239,7 +2239,7 @@ describe("TokenTransfer", () => {
       },
       mockedStore({
         qrlStore: {
-          signZrc20Token: mockSignZrc20Token,
+          signQrc20Token: mockSignQrc20Token,
           sendRawTransaction: vi.fn().mockResolvedValue(undefined),
         },
         transactionHistoryStore: {
@@ -2254,7 +2254,7 @@ describe("TokenTransfer", () => {
     });
 
     await fillAndSubmitForm("Send TST");
-    expect(mockSignZrc20Token).toHaveBeenCalled();
+    expect(mockSignQrc20Token).toHaveBeenCalled();
     expect(mockAddTransaction).toHaveBeenCalledWith(
       ACCOUNT_A,
       expect.objectContaining({
@@ -2269,7 +2269,7 @@ describe("TokenTransfer", () => {
       receiverAddress: "",
       amount: 0,
       tokenDetails: {
-        isZrc20Token: true,
+        isQrc20Token: true,
         tokenContractAddress: CONTRACT_D,
         tokenDecimals: 8,
         tokenImage: "stored-token.png",
@@ -2424,11 +2424,11 @@ describe("TokenTransfer", () => {
     expect(sendButton).toBeEnabled();
   });
 
-  it("should display insufficient token balance error for ZRC-20 when amount exceeds token balance", async () => {
+  it("should display insufficient token balance error for QRC-20 when amount exceeds token balance", async () => {
     renderComponentWithState(
       {
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 18,
           tokenImage: "token.png",
@@ -2440,7 +2440,7 @@ describe("TokenTransfer", () => {
       mockedStore({
         qrlStore: {
           getAccountBalance: () => "10.0 Quanta",
-          getZrc20TokenGas: vi.fn(() => Promise.resolve("0.001")),
+          getQrc20TokenGas: vi.fn(() => Promise.resolve("0.001")),
         },
       }),
     );
@@ -2472,11 +2472,11 @@ describe("TokenTransfer", () => {
     );
   });
 
-  it("should display insufficient gas error for ZRC-20 when native balance cannot cover gas", async () => {
+  it("should display insufficient gas error for QRC-20 when native balance cannot cover gas", async () => {
     renderComponentWithState(
       {
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 18,
           tokenImage: "token.png",
@@ -2488,7 +2488,7 @@ describe("TokenTransfer", () => {
       mockedStore({
         qrlStore: {
           getAccountBalance: () => "0.0 Quanta",
-          getZrc20TokenGas: vi.fn(() => Promise.resolve("0.001")),
+          getQrc20TokenGas: vi.fn(() => Promise.resolve("0.001")),
         },
       }),
     );
@@ -2617,10 +2617,10 @@ describe("TokenTransfer", () => {
       });
     });
 
-    it("should use the full token balance for Max on ZRC-20 transfers", async () => {
+    it("should use the full token balance for Max on QRC-20 transfers", async () => {
       renderComponentWithState({
         tokenDetails: {
-          isZrc20Token: true,
+          isQrc20Token: true,
           tokenContractAddress: CONTRACT_C,
           tokenDecimals: 18,
           tokenImage: "token.png",

@@ -86,7 +86,7 @@ const originalTx: TransactionHistoryEntry = {
   amount: "1",
   tokenSymbol: "Quanta",
   tokenName: "Quanta",
-  isZrc20Token: false,
+  isQrc20Token: false,
   tokenContractAddress: "",
   tokenDecimals: 18,
   transactionHash: "0xoriginal",
@@ -134,7 +134,7 @@ beforeEach(() => {
   rpc.requestManager.send.mockResolvedValue("0x2");
   rpc.net.isListening.mockResolvedValue(true);
   rpc.accounts.signTransaction.mockResolvedValue(signed);
-  discover.mockResolvedValue([{ tokenId: "9", standard: "ZRC721" }]);
+  discover.mockResolvedValue([{ tokenId: "9", standard: "QRC721" }]);
   vi.spyOn(StorageUtil, "getAllAccounts").mockResolvedValue([OWNER]);
 });
 
@@ -147,7 +147,7 @@ afterEach(() => {
 describe("contract response boundaries", () => {
   it("keeps token values and read ordering for valid responses", async () => {
     const store = createStore();
-    expect(await store.getZrc20TokenDetails(CONTRACT)).toEqual({
+    expect(await store.getQrc20TokenDetails(CONTRACT)).toEqual({
       error: "",
       token: {
         name: "Collection",
@@ -178,7 +178,7 @@ describe("contract response boundaries", () => {
     "rejects a malformed token %s through the existing error result",
     async (name, value) => {
       responses.set(name, value);
-      expect(await createStore().getZrc20TokenDetails(CONTRACT)).toEqual({
+      expect(await createStore().getQrc20TokenDetails(CONTRACT)).toEqual({
         token: undefined,
         error: "Could not retreive the token with the entered contract address",
       });
@@ -193,7 +193,7 @@ describe("contract response boundaries", () => {
         name: "Collection",
         symbol: "COL",
         balance: 250,
-        standard: "ZRC721",
+        standard: "QRC721",
       },
     });
     call.mockImplementation((name, args) =>
@@ -205,7 +205,7 @@ describe("contract response boundaries", () => {
     );
     expect(await store.getNftCollectionDetails(CONTRACT)).toEqual({
       error: "",
-      collection: { name: "Collection", symbol: "COL", standard: "ZRC1155" },
+      collection: { name: "Collection", symbol: "COL", standard: "QRC1155" },
     });
   });
 
@@ -230,7 +230,7 @@ describe("contract response boundaries", () => {
     );
     expect(await createStore().getNftCollectionDetails(CONTRACT)).toEqual({
       error: "",
-      collection: { name: "", symbol: "", standard: "ZRC1155" },
+      collection: { name: "", symbol: "", standard: "QRC1155" },
     });
   });
 
@@ -283,17 +283,17 @@ describe("contract response boundaries", () => {
     expect(await store.getErc1155TokenBalance(CONTRACT, "9")).toBe(
       "9007199254740993",
     );
-    expect(await store.getOwnedNftTokens(CONTRACT, "ZRC1155")).toEqual({
+    expect(await store.getOwnedNftTokens(CONTRACT, "QRC1155")).toEqual({
       tokens: [{ tokenId: "9", balance: "9007199254740993" }],
       failed: false,
     });
     responses.set("balanceOf", "4");
     expect(await store.getErc1155TokenBalance(CONTRACT, "9")).toBeUndefined();
-    expect(await store.getOwnedNftTokens(CONTRACT, "ZRC1155")).toEqual({
+    expect(await store.getOwnedNftTokens(CONTRACT, "QRC1155")).toEqual({
       tokens: [],
       failed: false,
     });
-    expect(await store.getOwnedNftTokens(CONTRACT, "ZRC721")).toEqual({
+    expect(await store.getOwnedNftTokens(CONTRACT, "QRC721")).toEqual({
       tokens: [],
       failed: true,
     });
@@ -304,13 +304,13 @@ describe("contract response boundaries", () => {
     expect(await store.getNftTokenUri(CONTRACT, "9")).toBe(
       "ipfs://collection/9.json",
     );
-    expect(await store.getNftTokenUri(CONTRACT, "9", "ZRC1155")).toBe(
+    expect(await store.getNftTokenUri(CONTRACT, "9", "QRC1155")).toBe(
       `ipfs://collection/${"9".padStart(64, "0")}.json`,
     );
     responses.set("tokenURI", { url: "ipfs://collection/9.json" });
     responses.set("uri", null);
     expect(await store.getNftTokenUri(CONTRACT, "9")).toBe("");
-    expect(await store.getNftTokenUri(CONTRACT, "9", "ZRC1155")).toBe("");
+    expect(await store.getNftTokenUri(CONTRACT, "9", "QRC1155")).toBe("");
   });
 });
 
@@ -420,7 +420,7 @@ const signingPaths = [
   {
     name: "token",
     sign: (store: QrlStore) =>
-      store.signZrc20Token(OWNER, RECIPIENT, "1", "mnemonic", CONTRACT, 2),
+      store.signQrc20Token(OWNER, RECIPIENT, "1", "mnemonic", CONTRACT, 2),
   },
   {
     name: "NFT",
@@ -486,7 +486,7 @@ describe("signing and gas boundaries", () => {
       "9",
       "mnemonic",
       CONTRACT,
-      "ZRC1155",
+      "QRC1155",
       "2",
       {
         tier: "advanced",
@@ -507,7 +507,7 @@ describe("signing and gas boundaries", () => {
         .error,
     ).toContain("Invalid provider response");
     await expect(
-      store.getZrc20TokenGas(OWNER, RECIPIENT, "1", CONTRACT, 2),
+      store.getQrc20TokenGas(OWNER, RECIPIENT, "1", CONTRACT, 2),
     ).rejects.toThrow("Invalid provider response");
     expect(rpc.accounts.signTransaction).not.toHaveBeenCalled();
   });

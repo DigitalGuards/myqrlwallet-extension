@@ -34,7 +34,7 @@ import { useNavigate } from "react-router-dom";
 import TokenListItemIcon from "./TokenListItemIcon/TokenListItemIcon";
 
 type TokenListItemProps = {
-  isZrc20Token?: boolean;
+  isQrc20Token?: boolean;
   contractAddress?: string;
   decimals?: number;
   image?: string;
@@ -50,7 +50,7 @@ type TokenListItemProps = {
 
 const TokenListItem = observer(
   ({
-    isZrc20Token = false,
+    isQrc20Token = false,
     contractAddress,
     decimals,
     image,
@@ -83,7 +83,7 @@ const TokenListItem = observer(
         navigate(ROUTES.TOKEN_TRANSFER, {
           state: {
             tokenDetails: {
-              isZrc20Token,
+              isQrc20Token,
               tokenContractAddress: contractAddress,
               tokenDecimals: decimals,
               tokenImage: image,
@@ -186,7 +186,7 @@ const TokenListItem = observer(
                     </button>
                   </div>
                 </DropdownMenuItem>
-                {isZrc20Token && contractAddress && (
+                {isQrc20Token && contractAddress && (
                   <DropdownMenuItem
                     className="cursor-pointer data-[highlighted]:text-secondary"
                     onSelect={(e) => {
@@ -206,7 +206,7 @@ const TokenListItem = observer(
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
-                  disabled={!isZrc20Token}
+                  disabled={!isQrc20Token}
                   className="cursor-pointer data-[highlighted]:text-secondary"
                   onClick={() => {
                     setHideDialogOpen(true);
@@ -215,7 +215,7 @@ const TokenListItem = observer(
                   <div className="flex gap-2">
                     <CircleMinus size="16" />
                     <button
-                      disabled={!isZrc20Token}
+                      disabled={!isQrc20Token}
                       aria-label={t("tokens.hideToken")}
                     >
                       {t("tokens.hideToken")}

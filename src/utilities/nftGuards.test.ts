@@ -32,7 +32,7 @@ describe("NFT boundary guards", () => {
   it("accepts legacy route defaults and both NFT standards", () => {
     expect(isNFTGalleryState(gallery)).toBe(true);
     expect(isNFTTransferState(transfer)).toBe(true);
-    for (const standard of [undefined, null, "ZRC721", "ZRC1155"]) {
+    for (const standard of [undefined, null, "QRC721", "QRC1155"]) {
       expect(isNFTGalleryState({ ...gallery, standard })).toBe(true);
       expect(
         isNFTTransferState({
@@ -79,7 +79,7 @@ describe("NFT boundary guards", () => {
     {},
     { ...gallery, contractAddress: 7 },
     { ...gallery, collectionName: {} },
-    { ...gallery, standard: "ZRC20" },
+    { ...gallery, standard: "QRC20" },
   ])("rejects malformed gallery state %j", (value) => {
     expect(isNFTGalleryState(value)).toBe(false);
   });

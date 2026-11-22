@@ -38,6 +38,8 @@ import {
   checkAccountAndChainHaveBeenAuthorized,
   checkUrlOriginHasBeenConnected,
   checkSignMessageParams,
+  checkTransactionCallData,
+  checkTransactionTypeIsSupported,
   checkTypedDataPayload,
   checkWalletAddQrlChainParams,
   checkWalletRequestPermissionParams,
@@ -45,6 +47,7 @@ import {
   checkWalletWatchAssetParams,
   extractPendingDAppTransactionHash,
   registerDAppTransactionWatchIfApproved,
+  sendTransactionParamsForApproval,
   UNSUPPORTED_TYPED_DATA_V4_MESSAGE,
   updateAccountsAndBlockchainsForUrlOrigin,
   updatePermissionsForUrlOrigin,
@@ -373,7 +376,21 @@ const checkRequestCanProceed = async (req: JsonRpcRequest) => {
       const messageCheck = checkSignMessageParams(req.params);
       return messageCheck.canProceed ? authorization : messageCheck;
     }
-    case RESTRICTED_METHODS.QRL_SEND_TRANSACTION:
+    case RESTRICTED_METHODS.QRL_SEND_TRANSACTION: {
+      // Authorization leads, as for the signing methods above. It reads
+      // the transaction with its call data as `data`, so a call that came
+      // as `input` is checked as the call it is. The checks of the type
+      // and of the call data itself follow.
+      const authorization = await checkAccountAndChainHaveBeenAuthorized({
+        ...req,
+        params: sendTransactionParamsForApproval(req.params),
+      });
+      if (!authorization.canProceed) return authorization;
+      const transactionType = checkTransactionTypeIsSupported(req.params);
+      if (!transactionType.canProceed) return transactionType;
+      const callData = checkTransactionCallData(req.params);
+      return callData.canProceed ? authorization : callData;
+    }
     case RESTRICTED_METHODS.PERSONAL_SIGN:
       return await checkAccountAndChainHaveBeenAuthorized(req);
     default:
@@ -456,7 +473,12 @@ const getRestrictedMethodResult = async (
   const requestId = uuid();
   const request: DAppRequestType = {
     method: req.method,
-    params: req.params,
+    // The approval reads the call data of a send request as `data`. A dApp
+    // may name it `input`, as the library's contract calls do.
+    params:
+      req.method === RESTRICTED_METHODS.QRL_SEND_TRANSACTION
+        ? sendTransactionParamsForApproval(req.params)
+        : req.params,
     requestData: { senderData: req.senderData },
     phishingResult,
     requestId,

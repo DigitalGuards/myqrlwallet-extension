@@ -12,6 +12,7 @@ import {
   isNormalizableContact,
   isNormalizableQrlAddress,
   isPriceCache,
+  isStoredTransactionValues,
   isStoredBlockchain,
   isStoredKeystore,
   isStoredPermission,
@@ -36,7 +37,7 @@ import {
 } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
 
 const DETAILS = {
-  isZrc20Token: true,
+  isQrc20Token: true,
   tokenContractAddress: TOKEN.address,
   tokenDecimals: 18,
   tokenImage: "",
@@ -293,6 +294,15 @@ describe("storage record guards", () => {
         tokenDetails: { ...DETAILS, tokenDecimals: "18" },
       }),
     ).toBe(false);
+    // A draft from before the rename holds the flag under its earlier name:
+    // readable from storage, and outside the shape this version works with.
+    const { isQrc20Token: flag, ...earlier } = DETAILS;
+    const earlierDraft = { tokenDetails: { ...earlier, isZrc20Token: flag } };
+    expect(isStoredTransactionValues(earlierDraft)).toBe(true);
+    expect(isTransactionValues(earlierDraft)).toBe(false);
+    expect(isStoredTransactionValues({ tokenDetails: DETAILS })).toBe(true);
+    expect(isStoredTransactionValues({ tokenDetails: earlier })).toBe(false);
+    expect(isTransactionValues({ tokenDetails: earlier })).toBe(false);
   });
 
   it("accepts partial settings and both price-cache versions and rejects wrong field types", () => {

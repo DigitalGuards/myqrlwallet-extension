@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import TokenListItem from "../../TokenListItem/TokenListItem";
 import TokenListItemLoading from "../../TokenListItemLoading/TokenListItemLoading";
 
-type ZRC20TokenProps = {
+type QRC20TokenProps = {
   contractAddress: string;
   tokenImage: string;
   /** Symbol recorded when the token was imported. Labels the row when the
@@ -20,13 +20,13 @@ type ZRC20TokenProps = {
   triggerReRender?: () => void;
 };
 
-const ZRC20Token = observer(
+const QRC20Token = observer(
   ({
     contractAddress,
     tokenImage,
     storedSymbol,
     triggerReRender,
-  }: ZRC20TokenProps) => {
+  }: QRC20TokenProps) => {
     const { t } = useTranslation();
     const { qrlStore } = useStore();
     const { qrlConnection, activeAccount } = qrlStore;
@@ -35,7 +35,7 @@ const ZRC20Token = observer(
 
     const [token, setToken] =
       useState<
-        Awaited<ReturnType<typeof qrlStore.getZrc20TokenDetails>>["token"]
+        Awaited<ReturnType<typeof qrlStore.getQrc20TokenDetails>>["token"]
       >();
     const [hasError, setHasError] = useState(false);
     const [isRetrying, setIsRetrying] = useState(false);
@@ -58,7 +58,7 @@ const ZRC20Token = observer(
       setToken(undefined);
       (async () => {
         const tokenDetails =
-          await qrlStore.getZrc20TokenDetails(contractAddress);
+          await qrlStore.getQrc20TokenDetails(contractAddress);
         if (requestId !== requestIdRef.current) return;
         setIsRetrying(false);
         if (tokenDetails.error || !tokenDetails.token) {
@@ -123,7 +123,7 @@ const ZRC20Token = observer(
       <TokenListItemLoading />
     ) : (
       <TokenListItem
-        isZrc20Token={true}
+        isQrc20Token={true}
         contractAddress={contractAddress}
         decimals={Number(token.decimals)}
         balance={getOptimalTokenBalance(token.balance.toString(), token.symbol)}
@@ -137,4 +137,4 @@ const ZRC20Token = observer(
   },
 );
 
-export default ZRC20Token;
+export default QRC20Token;

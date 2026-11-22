@@ -158,9 +158,9 @@ const DiscoveredNFTCollections = observer(() => {
                         count: collection.tokenCount,
                       })}
                     </span>
-                    {collection.standard === "ZRC1155" && (
+                    {collection.standard === "QRC1155" && (
                       <span className="ml-1 text-xs text-muted-foreground">
-                        ZRC-1155
+                        QRC-1155
                       </span>
                     )}
                   </span>

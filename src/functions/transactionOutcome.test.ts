@@ -10,7 +10,7 @@ const historyEntry: TransactionHistoryEntry = {
   amount: "1",
   tokenSymbol: "QRL",
   tokenName: "Quantum Resistant Ledger",
-  isZrc20Token: false,
+  isQrc20Token: false,
   tokenContractAddress: "",
   tokenDecimals: 18,
   transactionHash: "0xabc",

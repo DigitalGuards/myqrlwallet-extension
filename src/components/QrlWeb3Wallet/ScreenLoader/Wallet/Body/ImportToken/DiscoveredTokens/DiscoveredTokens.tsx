@@ -24,7 +24,7 @@ import { useNavigate } from "react-router-dom";
  *
  * Every pick is read from the chain before it is stored, and the stored
  * symbol and decimals come from that read. The explorer only decides what
- * the list offers, so a token whose contract does not answer as ZRC-20
+ * the list offers, so a token whose contract does not answer as QRC-20
  * never lands in the wallet.
  */
 const DiscoveredTokens = observer(() => {
@@ -97,7 +97,7 @@ const DiscoveredTokens = observer(() => {
         picks.map(async (pick) => ({
           pick,
           details: await qrlStore
-            .getZrc20TokenDetails(pick.address)
+            .getQrc20TokenDetails(pick.address)
             .catch((error: unknown) => {
               console.error("[DiscoveredTokens] Failed to read token:", error);
               return { token: undefined, error: "read failed" };

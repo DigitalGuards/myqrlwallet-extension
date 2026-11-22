@@ -37,7 +37,7 @@ const renderItem = (store = mockedStore()) =>
   render(
     <StoreProvider value={store}>
       <MemoryRouter>
-        <NFTGalleryItem {...props} standard="ZRC1155" balance="3" />
+        <NFTGalleryItem {...props} standard="QRC1155" balance="3" />
       </MemoryRouter>
     </StoreProvider>,
   );
@@ -70,7 +70,7 @@ describe("NFTGalleryItem", () => {
     expect(getNftTokenUri).toHaveBeenCalledWith(
       contractAddress,
       "7",
-      "ZRC1155",
+      "QRC1155",
     );
     expect(fetchMetadata).toHaveBeenCalledWith("ipfs://metadata");
     expect(screen.getByText("×3")).toBeInTheDocument();
@@ -80,7 +80,7 @@ describe("NFTGalleryItem", () => {
     expect(navigate).toHaveBeenCalledWith(ROUTES.NFT_DETAIL, {
       state: {
         ...props,
-        standard: "ZRC1155",
+        standard: "QRC1155",
         balance: "3",
         metadata: { ...metadata, image: `ipfs://${path}` },
         imageUrl: `https://ipfs.io/ipfs/${path}`,
@@ -113,7 +113,7 @@ describe("NFTGalleryItem", () => {
     expect(navigate).toHaveBeenCalledWith(ROUTES.NFT_DETAIL, {
       state: {
         ...props,
-        standard: "ZRC1155",
+        standard: "QRC1155",
         balance: "3",
         metadata: null,
         imageUrl: "",
@@ -173,7 +173,7 @@ describe("NFTGalleryItem", () => {
           <NFTGalleryItem
             {...props}
             tokenId="8"
-            standard="ZRC1155"
+            standard="QRC1155"
             balance="3"
           />
         </MemoryRouter>

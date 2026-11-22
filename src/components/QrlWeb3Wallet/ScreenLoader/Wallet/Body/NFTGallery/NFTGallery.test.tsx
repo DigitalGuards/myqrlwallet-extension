@@ -106,7 +106,7 @@ describe("NFTGallery", () => {
     });
     renderComponent(
       { qrlStore: { getOwnedNftTokens } },
-      { ...state, standard: "ZRC1155" },
+      { ...state, standard: "QRC1155" },
     );
 
     await waitFor(() => {
@@ -114,7 +114,7 @@ describe("NFTGallery", () => {
     });
     expect(getOwnedNftTokens).toHaveBeenCalledWith(
       state.contractAddress,
-      "ZRC1155",
+      "QRC1155",
     );
   });
 
@@ -139,7 +139,7 @@ describe("NFTGallery", () => {
     null,
     [],
     { ...state, contractAddress: 7 },
-    { ...state, standard: "ZRC20" },
+    { ...state, standard: "QRC20" },
   ])(
     "rejects malformed route state %j before loading tokens",
     async (routeState) => {

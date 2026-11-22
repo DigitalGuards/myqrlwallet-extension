@@ -473,7 +473,7 @@ describe("NFTDetail", () => {
       screen.getByRole("textbox", { name: "receiverAddress" }),
       toChecksumAddress(`Q${"c".repeat(128)}`),
     );
-    if (standard === "ZRC1155") {
+    if (standard === "QRC1155") {
       const amount = screen.getByRole("textbox", { name: "amount" });
       await userEvent.clear(amount);
       await userEvent.type(amount, "2");
@@ -487,7 +487,7 @@ describe("NFTDetail", () => {
       expect(addTransaction).toHaveBeenCalledExactlyOnceWith(
         transferStore.qrlStore.activeAccount.accountAddress,
         expect.objectContaining({
-          tokenName: `${name} #42${standard === "ZRC1155" ? " ×2" : ""}`,
+          tokenName: `${name} #42${standard === "QRC1155" ? " ×2" : ""}`,
           tokenSymbol: defaultState.collectionName,
           tokenContractAddress: defaultState.contractAddress,
         }),
@@ -531,7 +531,7 @@ describe("NFTDetail", () => {
         imageUrl: defaultState.imageUrl,
         nftName: name,
         standard,
-        balance: standard === "ZRC1155" ? "2" : undefined,
+        balance: standard === "QRC1155" ? "2" : undefined,
       },
     });
     const transferState: unknown = navigate.mock.calls[0]?.[1]?.state;
@@ -565,7 +565,7 @@ describe("NFTDetail", () => {
             tokenId={defaultState.tokenId}
             collectionName={defaultState.collectionName}
             standard={standard}
-            balance={standard === "ZRC1155" ? "2" : undefined}
+            balance={standard === "QRC1155" ? "2" : undefined}
           />
         </MemoryRouter>
       </StoreProvider>,
@@ -583,7 +583,7 @@ describe("NFTDetail", () => {
     return state;
   };
 
-  describe.each<NFTStandard>(["ZRC721", "ZRC1155"])(
+  describe.each<NFTStandard>(["QRC721", "QRC1155"])(
     "%s deep gallery metadata",
     (standard) => {
       // origin/dev renders this response and forwards its name to transfer.
@@ -611,7 +611,7 @@ describe("NFTDetail", () => {
             imageUrl: "",
             nftName: "Depth review",
             standard,
-            balance: standard === "ZRC1155" ? "2" : undefined,
+            balance: standard === "QRC1155" ? "2" : undefined,
           },
         });
         expect(state.metadata.description).toBe(originalDescription);
@@ -735,7 +735,7 @@ describe("NFTDetail", () => {
         imageUrl: defaultState.imageUrl,
         nftName: value ?? "",
         standard,
-        balance: standard === "ZRC1155" ? "2" : undefined,
+        balance: standard === "QRC1155" ? "2" : undefined,
       },
     });
     const transferState: unknown = navigate.mock.calls[0]?.[1]?.state;
@@ -800,7 +800,7 @@ describe("NFTDetail", () => {
       imageUrl: defaultState.imageUrl,
       nftName: undefined,
       standard,
-      balance: standard === "ZRC1155" ? "2" : undefined,
+      balance: standard === "QRC1155" ? "2" : undefined,
     });
     expect(JSON.stringify(state)).toBe(originalState);
     await expectTransferHistory(
@@ -864,7 +864,7 @@ describe("NFTDetail", () => {
     expect(screen.getByTestId("backButtonTestId")).toBeInTheDocument();
   });
 
-  it.each(["ZRC721", "ZRC1155"])(
+  it.each(["QRC721", "QRC1155"])(
     "preserves %s transfer details",
     async (standard) => {
       renderComponent({ ...defaultState, standard, balance: "2" });
@@ -891,7 +891,7 @@ describe("NFTDetail", () => {
     });
     expect(screen.getByText("TestCollection #42")).toBeInTheDocument();
     expect(screen.getByText("0")).toBeInTheDocument();
-    expect(screen.getByText("ZRC-721")).toBeInTheDocument();
+    expect(screen.getByText("QRC-721")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Send NFT" }));
     expect(navigate).toHaveBeenCalledWith(ROUTES.NFT_TRANSFER, {
       state: {
@@ -899,14 +899,14 @@ describe("NFTDetail", () => {
         tokenId: defaultState.tokenId,
         collectionName: defaultState.collectionName,
         imageUrl: defaultState.imageUrl,
-        standard: "ZRC721",
+        standard: "QRC721",
         balance: undefined,
         nftName: "",
       },
     });
   });
 
-  describe.each<NFTStandard>(["ZRC721", "ZRC1155"])(
+  describe.each<NFTStandard>(["QRC721", "QRC1155"])(
     "%s valid metadata compatibility",
     (standard) => {
       describe.each(["gallery JSON", "route state"])(
@@ -945,7 +945,7 @@ describe("NFTDetail", () => {
                           ...defaultState,
                           metadata,
                           standard,
-                          balance: standard === "ZRC1155" ? "2" : undefined,
+                          balance: standard === "QRC1155" ? "2" : undefined,
                         };
                   await expectNestedMetadata(
                     state,
@@ -975,7 +975,7 @@ describe("NFTDetail", () => {
                           metadata: parseMetadataJSON(body),
                           imageUrl: "",
                           standard,
-                          balance: standard === "ZRC1155" ? "2" : undefined,
+                          balance: standard === "QRC1155" ? "2" : undefined,
                         };
                   if (!isRecord(state) || !isRecord(state.metadata)) {
                     throw new Error(
@@ -1017,7 +1017,7 @@ describe("NFTDetail", () => {
                     imageUrl: "",
                     nftName: undefined,
                     standard,
-                    balance: standard === "ZRC1155" ? "2" : undefined,
+                    balance: standard === "QRC1155" ? "2" : undefined,
                   });
                   expect(state.metadata).toBe(metadata);
                   expect(metadata[field]).toBe(value);
@@ -1040,7 +1040,7 @@ describe("NFTDetail", () => {
                   : {
                       ...defaultState,
                       standard,
-                      balance: standard === "ZRC1155" ? "2" : undefined,
+                      balance: standard === "QRC1155" ? "2" : undefined,
                       metadata: {
                         name: value,
                         description: value,
@@ -1083,7 +1083,7 @@ describe("NFTDetail", () => {
                       ...defaultState,
                       metadata,
                       standard,
-                      balance: standard === "ZRC1155" ? "2" : undefined,
+                      balance: standard === "QRC1155" ? "2" : undefined,
                     };
               await expectPreservedMetadata(state, standard, {
                 rows: ["ColorBlue", "undefined", "RarityLegendary"],
@@ -1134,7 +1134,7 @@ describe("NFTDetail", () => {
                   ...defaultState,
                   metadata,
                   standard,
-                  balance: standard === "ZRC1155" ? "2" : undefined,
+                  balance: standard === "QRC1155" ? "2" : undefined,
                 },
                 standard,
                 field,
@@ -1179,7 +1179,7 @@ describe("NFTDetail", () => {
             {
               ...defaultState,
               standard,
-              balance: standard === "ZRC1155" ? "2" : undefined,
+              balance: standard === "QRC1155" ? "2" : undefined,
               metadata: {
                 name: value,
                 description: value,
@@ -1241,7 +1241,7 @@ describe("NFTDetail", () => {
                 ...defaultState,
                 metadata,
                 standard,
-                balance: standard === "ZRC1155" ? "2" : undefined,
+                balance: standard === "QRC1155" ? "2" : undefined,
               };
               // Memory history formats its initial entries as JSON. Supply the
               // location directly to exercise structured-cloneable cycles too.
@@ -1312,7 +1312,7 @@ describe("NFTDetail", () => {
             tokenId: defaultState.tokenId,
             collectionName: defaultState.collectionName,
             standard,
-            balance: standard === "ZRC1155" ? "2" : undefined,
+            balance: standard === "QRC1155" ? "2" : undefined,
           };
           const fields = Object.entries({
             ...defaultState.metadata,
@@ -1380,7 +1380,7 @@ describe("NFTDetail", () => {
             {
               ...defaultState,
               standard,
-              balance: standard === "ZRC1155" ? "2" : undefined,
+              balance: standard === "QRC1155" ? "2" : undefined,
               metadata: {
                 ...defaultState.metadata,
                 attributes: [
@@ -1402,7 +1402,7 @@ describe("NFTDetail", () => {
             {
               ...defaultState,
               standard,
-              balance: standard === "ZRC1155" ? "2" : undefined,
+              balance: standard === "QRC1155" ? "2" : undefined,
               metadata: { ...defaultState.metadata, ...fields },
             },
             standard,
@@ -1418,7 +1418,7 @@ describe("NFTDetail", () => {
             tokenId: defaultState.tokenId,
             collectionName: defaultState.collectionName,
             standard,
-            balance: standard === "ZRC1155" ? "2" : undefined,
+            balance: standard === "QRC1155" ? "2" : undefined,
           };
           const metadata = {
             name: defaultState.metadata.name,
@@ -1506,7 +1506,7 @@ describe("NFTDetail", () => {
             tokenId: defaultState.tokenId,
             collectionName: defaultState.collectionName,
             standard,
-            balance: standard === "ZRC1155" ? "2" : undefined,
+            balance: standard === "QRC1155" ? "2" : undefined,
           };
           const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
             new Response(JSON.stringify(metadata), {
@@ -1600,7 +1600,7 @@ describe("NFTDetail", () => {
               ...defaultState,
               metadata: routeMetadata,
               standard,
-              balance: standard === "ZRC1155" ? "2" : undefined,
+              balance: standard === "QRC1155" ? "2" : undefined,
             };
             const originalState = structuredClone(state);
             renderComponent(state);
@@ -1675,7 +1675,7 @@ describe("NFTDetail", () => {
           tokenId: defaultState.tokenId,
           collectionName: defaultState.collectionName,
           imageUrl: defaultState.imageUrl,
-          standard: "ZRC721",
+          standard: "QRC721",
           balance: undefined,
           nftName: "",
         },

@@ -32,7 +32,7 @@ import TokensCardContent from "./ActiveAccountDisplay/TokensCardContent/TokensCa
 import NFTCollections from "./ActiveAccountDisplay/TokensCardContent/NFTCollections/NFTCollections";
 import { useEffect, useState } from "react";
 import StorageUtil from "@/utilities/storageUtil";
-import { ZRC_20_ITEMS_DISPLAY_LIMIT } from "@/constants/zrc20Token";
+import { QRC_20_ITEMS_DISPLAY_LIMIT } from "@/constants/qrc20Token";
 import { NFT_ITEMS_DISPLAY_LIMIT } from "@/constants/nftToken";
 import { cn } from "@/utilities/stylingUtil";
 import { wantsAddAccountsFirst } from "../homeNavigation";
@@ -253,8 +253,8 @@ const AccountCreateImport = observer(() => {
                   )}
                 </Button>
               </Link>
-              {tokenCount > ZRC_20_ITEMS_DISPLAY_LIMIT && (
-                <Link className="w-full" to={ROUTES.ALL_ZRC_20_TOKENS}>
+              {tokenCount > QRC_20_ITEMS_DISPLAY_LIMIT && (
+                <Link className="w-full" to={ROUTES.ALL_QRC_20_TOKENS}>
                   <Button
                     className="h-auto min-h-10 w-full whitespace-normal py-2"
                     type="button"

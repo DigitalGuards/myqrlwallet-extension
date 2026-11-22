@@ -54,13 +54,13 @@ vi.mock("@/utilities/storageUtil", () => ({
 }));
 
 describe("DiscoveredTokens", () => {
-  const getZrc20TokenDetails =
-    vi.fn<ReturnType<typeof mockedStore>["qrlStore"]["getZrc20TokenDetails"]>();
+  const getQrc20TokenDetails =
+    vi.fn<ReturnType<typeof mockedStore>["qrlStore"]["getQrc20TokenDetails"]>();
 
   const component = (accountAddress: string) => (
     <StoreProvider
       value={mockedStore({
-        qrlStore: { activeAccount: { accountAddress }, getZrc20TokenDetails },
+        qrlStore: { activeAccount: { accountAddress }, getQrc20TokenDetails },
       })}
     >
       <MemoryRouter initialEntries={[ROUTES.IMPORT_TOKEN]}>
@@ -78,7 +78,7 @@ describe("DiscoveredTokens", () => {
     vi.mocked(discoverTokens).mockResolvedValue([DISCOVERED]);
     getTokenContractsList.mockReset().mockResolvedValue([]);
     setTokenContractsList.mockReset().mockResolvedValue(undefined);
-    getZrc20TokenDetails
+    getQrc20TokenDetails
       .mockReset()
       .mockResolvedValue(chainToken("CHAIN", BigInt(9)));
   });
@@ -120,7 +120,7 @@ describe("DiscoveredTokens", () => {
 
   it("reads every pick from the chain and stores the chain values", async () => {
     vi.mocked(discoverTokens).mockResolvedValue([DISCOVERED, SECOND]);
-    getZrc20TokenDetails.mockImplementation((address) =>
+    getQrc20TokenDetails.mockImplementation((address) =>
       Promise.resolve(
         address === SECOND.address
           ? chainToken("SEC2", BigInt(8))
@@ -138,8 +138,8 @@ describe("DiscoveredTokens", () => {
     );
 
     expect(await screen.findByText("Home screen")).toBeInTheDocument();
-    expect(getZrc20TokenDetails).toHaveBeenCalledWith(CONTRACT_ADDRESS);
-    expect(getZrc20TokenDetails).toHaveBeenCalledWith(SECOND.address);
+    expect(getQrc20TokenDetails).toHaveBeenCalledWith(CONTRACT_ADDRESS);
+    expect(getQrc20TokenDetails).toHaveBeenCalledWith(SECOND.address);
     expect(setTokenContractsList).toHaveBeenCalledTimes(2);
     expect(setTokenContractsList).toHaveBeenCalledWith(`Q${"a".repeat(128)}`, {
       address: CONTRACT_ADDRESS,
@@ -189,7 +189,7 @@ describe("DiscoveredTokens", () => {
     async (_label, read) => {
       vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(discoverTokens).mockResolvedValue([DISCOVERED, SECOND]);
-      getZrc20TokenDetails.mockImplementation((address) =>
+      getQrc20TokenDetails.mockImplementation((address) =>
         address === CONTRACT_ADDRESS
           ? read()
           : Promise.resolve(chainToken("SEC", BigInt(6))),
@@ -228,7 +228,7 @@ describe("DiscoveredTokens", () => {
   it("reports a pick whose storage write fails and keeps it for a retry", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(discoverTokens).mockResolvedValue([DISCOVERED, SECOND]);
-    getZrc20TokenDetails.mockImplementation((address) =>
+    getQrc20TokenDetails.mockImplementation((address) =>
       Promise.resolve(
         address === CONTRACT_ADDRESS
           ? chainToken("CHAIN", BigInt(9))

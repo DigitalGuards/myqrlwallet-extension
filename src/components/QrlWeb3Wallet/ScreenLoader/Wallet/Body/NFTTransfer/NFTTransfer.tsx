@@ -50,7 +50,7 @@ const createFormSchema = (t: TFunction, maxAmount?: string) =>
   z
     .object({
       receiverAddress: z.string().min(1, t("validation.receiverRequired")),
-      // ERC-1155 only; hidden and defaulted to "1" for ZRC721.
+      // ERC-1155 only; hidden and defaulted to "1" for QRC721.
       amount: z
         .string()
         .refine((value) => /^[0-9]+$/.test(value) && BigInt(value) > 0n, {
@@ -93,8 +93,8 @@ const NFTTransfer = observer(() => {
   const collectionName = routeState?.collectionName ?? "";
   const nftImageUrl = routeState?.imageUrl ?? "";
   const nftName = routeState?.nftName ?? "";
-  const standard: NFTStandard = routeState?.standard ?? "ZRC721";
-  const is1155 = standard === "ZRC1155";
+  const standard: NFTStandard = routeState?.standard ?? "QRC721";
+  const is1155 = standard === "QRC1155";
 
   // Route state carries the balance snapshotted at gallery time; re-read
   // it live on mount so the max-amount validation can't let a stale
@@ -236,7 +236,7 @@ const NFTTransfer = observer(() => {
         amount: 0,
         tokenSymbol: collectionName,
         tokenName: `${metadataValueToString(nftName || collectionName)} #${tokenId}${sentAmountSuffix}`,
-        isZrc20Token: false,
+        isQrc20Token: false,
         tokenContractAddress: contractAddress,
         tokenDecimals: 0,
         transactionHash,

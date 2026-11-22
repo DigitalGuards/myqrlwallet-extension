@@ -1,0 +1,90 @@
+import type { NFTStandard } from "@/types/nft";
+
+/**
+ * Stored names from before the token standards were renamed from ZRC to QRC.
+ *
+ * Versions up to 1.4.4 read the token flag as `isZrc20Token` and the NFT
+ * standard as "ZRC721" or "ZRC1155", and a profile can be opened by such a
+ * version again (a rolled-back release, a test build swapped back). The flag
+ * decides whether Speed Up rebuilds a token transfer or a native one, so a
+ * record must read the same in both directions:
+ *
+ * - writers store the flag under both names, and the NFT standard under its
+ *   earlier value, which is the one value every version reads;
+ * - readers take the earlier name of the flag when it holds a boolean, and
+ *   the current name otherwise. Every version that writes the current name
+ *   writes the earlier one with the same value, so the two differ only after
+ *   a version from before the rename rewrote the record: it updates the
+ *   earlier name and carries the current one along unchanged. The earlier
+ *   name is then the fresh value.
+ *
+ * One release after the rename, writers can drop the earlier names. They
+ * must then remove the earlier name from every record they rewrite (it stays
+ * a known field of the storage shapes for that purpose), and this reader
+ * must take the current name first. Readers keep both names.
+ */
+
+type TokenFlagRecord = Record<string, unknown>;
+
+/** The token flag of a stored record, whichever name it was stored under. */
+export const readStoredTokenFlag = (stored: TokenFlagRecord): boolean => {
+  const flag =
+    typeof stored.isZrc20Token === "boolean"
+      ? stored.isZrc20Token
+      : stored.isQrc20Token;
+  return flag === true;
+};
+
+const isFlagOrAbsent = (value: unknown): boolean =>
+  value === undefined || typeof value === "boolean";
+
+/**
+ * True when a stored record carries a readable token flag: a boolean under
+ * at least one name, and nothing but a boolean under either. A record with
+ * anything else under one of the names is one the wallet cannot fully read,
+ * so it stays as it is.
+ */
+export const hasStoredTokenFlag = (stored: TokenFlagRecord): boolean =>
+  isFlagOrAbsent(stored.isQrc20Token) &&
+  isFlagOrAbsent(stored.isZrc20Token) &&
+  (typeof stored.isQrc20Token === "boolean" ||
+    typeof stored.isZrc20Token === "boolean");
+
+/** A stored record's fields, with the token flag under its current name only. */
+export const withCurrentTokenFlag = <T extends TokenFlagRecord>(
+  stored: T,
+): Omit<T, "isZrc20Token"> & { isQrc20Token: boolean } => {
+  // The current name keeps its position when the record has it.
+  const { isZrc20Token: _earlier, ...rest } = {
+    ...stored,
+    isQrc20Token: readStoredTokenFlag(stored),
+  };
+  return rest;
+};
+
+/** A record to store, with its token flag also under the earlier name. */
+export const withEarlierTokenFlag = <T extends { isQrc20Token?: unknown }>(
+  value: T,
+): T =>
+  typeof value.isQrc20Token === "boolean"
+    ? { ...value, isZrc20Token: value.isQrc20Token }
+    : value;
+
+/** The NFT standard of a stored collection, whichever value it was stored as. */
+export const readStoredNftStandard = (
+  stored: unknown,
+): NFTStandard | undefined => {
+  if (stored === "QRC721" || stored === "ZRC721") return "QRC721";
+  if (stored === "QRC1155" || stored === "ZRC1155") return "QRC1155";
+  return undefined;
+};
+
+/**
+ * The value a collection's standard is stored as: the one every version
+ * reads. Anything that is not a current standard name is stored as given.
+ */
+export const toStoredNftStandard = (standard: unknown): unknown => {
+  if (standard === "QRC721") return "ZRC721";
+  if (standard === "QRC1155") return "ZRC1155";
+  return standard;
+};

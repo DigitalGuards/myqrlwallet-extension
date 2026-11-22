@@ -90,7 +90,7 @@ const mockedStoreValues: StoreType = {
         maxFeePerGas: BigInt(0),
         maxPriorityFeePerGas: BigInt(0),
       }),
-    getZrc20TokenDetails: () =>
+    getQrc20TokenDetails: () =>
       Promise.resolve({ token: undefined, error: "" }),
     getNftCollectionDetails: () =>
       Promise.resolve({ collection: undefined, error: "" }),
@@ -103,8 +103,8 @@ const mockedStoreValues: StoreType = {
         rawTransaction: undefined,
         error: "",
       }),
-    getZrc20TokenGas: () => Promise.resolve(""),
-    signZrc20Token: () =>
+    getQrc20TokenGas: () => Promise.resolve(""),
+    signQrc20Token: () =>
       Promise.resolve({
         transactionHash: undefined,
         rawTransaction: undefined,
