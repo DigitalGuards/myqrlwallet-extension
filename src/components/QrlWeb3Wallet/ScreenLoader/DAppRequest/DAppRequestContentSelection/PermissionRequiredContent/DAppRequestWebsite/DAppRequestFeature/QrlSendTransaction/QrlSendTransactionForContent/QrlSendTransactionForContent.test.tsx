@@ -27,7 +27,11 @@ import QrlSendTransactionForContent from "./QrlSendTransactionForContent";
 import QrlSendTransaction, {
   SEND_TRANSACTION_TYPES,
 } from "../QrlSendTransaction";
-import { revalidateAuthorizedDAppRequest } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
+import {
+  revalidateAuthorizedDAppRequest,
+  sendTransactionParamsForApproval,
+} from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
+import { isRecord } from "@/utilities/storageGuards";
 
 const SENDER_ADDRESS = `Q${"a".repeat(128)}`;
 const RECIPIENT_ADDRESS = `Q${"b".repeat(128)}`;
@@ -802,45 +806,94 @@ describe("QrlSendTransactionForContent", () => {
       });
     });
 
-    it("should send QRL transfer with legacy gas pricing (non-0x2)", async () => {
+    it("signs a transfer that names no type as type 0x2 with the wallet's own fee values, and uses no gas price", async () => {
+      // QRL 2.0 has one transaction type and the library signs nothing
+      // else: it refuses a transaction that carries a gas price ("The
+      // following properties are invalid for the transaction type 0x2:
+      // gasPrice"). The library's own requests leave the type out.
       const mockSendRawTransaction = vi
         .fn<SendRequest>()
         .mockResolvedValue("0xtxhash");
-      const legacyRequest = { ...zndTransferRequest, type: "0x0" };
-
-      renderComponent(
-        createStoreWithCallback({
-          requestParams: legacyRequest,
-          qrlStore: {
-            qrlInstance: createQrlInstance({
-              getGasPrice: () => Promise.resolve(BigInt(1000)),
-              getTransactionCount: () => Promise.resolve(0),
-              accounts: {
-                // seedToAccount backs the sender-derivation guard in the signing path.
-                seedToAccount: () => ({
-                  address: SENDER_ADDRESS,
-                }),
-                signTransaction: () =>
-                  Promise.resolve(
-                    signedTransaction("0xsignedlegacy", "0xsignedlegacyhash"),
-                  ),
-              },
-              call: vi.fn<QrlInstance["call"]>().mockResolvedValue("0x"),
-              requestManager: { send: mockSendRawTransaction },
-            }),
-          },
-        }),
-        { transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER },
-      );
+      const getGasPrice = vi
+        .fn<QrlInstance["getGasPrice"]>()
+        .mockResolvedValue(1000n);
+      const { type: _type, ...withoutType } = zndTransferRequest;
+      const store = createStoreWithCallback({
+        requestParams: { ...withoutType, gasPrice: "0x3b9aca00" },
+        qrlStore: {
+          qrlInstance: createQrlInstance({
+            getGasPrice,
+            getTransactionCount: () => Promise.resolve(0),
+            accounts: {
+              // seedToAccount backs the sender-derivation guard in the signing path.
+              seedToAccount: () => ({
+                address: SENDER_ADDRESS,
+              }),
+              signTransaction: vi
+                .fn<SignTransaction>()
+                .mockResolvedValue(
+                  signedTransaction("0xsignedtyped", "0xsignedtypedhash"),
+                ),
+            },
+            call: vi.fn<QrlInstance["call"]>().mockResolvedValue("0x"),
+            requestManager: { send: mockSendRawTransaction },
+          }),
+        },
+      });
+      renderComponent(store, {
+        transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+      });
 
       await act(async () => {
         await invokePermissionCallback(true);
       });
 
+      const instance = store.qrlStore.qrlInstance;
+      // The fixture's fee data: a base fee of 100 doubled, plus a tip of 100.
+      expect(instance?.accounts.signTransaction).toHaveBeenCalledWith(
+        objectContaining({
+          type: "0x2",
+          maxFeePerGas: "0x12c",
+          maxPriorityFeePerGas: 100n,
+        }),
+        "0xhexseed",
+      );
+      const signed = vi.mocked(instance?.accounts.signTransaction)?.mock
+        .calls[0]?.[0];
+      expect(signed).not.toHaveProperty("gasPrice");
+      // The gas price lookup that only served the other branch is gone.
+      expect(getGasPrice).not.toHaveBeenCalled();
       expect(mockSendRawTransaction).toHaveBeenCalledWith({
         method: "qrl_sendRawTransaction",
-        params: ["0xsignedlegacy"],
+        params: ["0xsignedtyped"],
       });
+    });
+
+    it("refuses a stored transfer that names another type, with invalid params and before anything is signed", async () => {
+      // The service worker refuses such a request before the prompt. One
+      // that was stored by an earlier build can still be on screen.
+      const record = vi.fn<ResponseRecorder>();
+      const store = createStoreWithCallback({
+        requestParams: { ...zndTransferRequest, type: "0x0" },
+        addToResponseData: record,
+      });
+      renderComponent(store, {
+        transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+      });
+
+      await act(async () => {
+        await invokePermissionCallback(true);
+      });
+
+      expect(record).toHaveBeenCalledExactlyOnceWith({
+        error: objectContaining({
+          code: -32602,
+          message: 'QRL transactions are of type 0x2. Received type: "0x0"',
+        }),
+      });
+      expect(
+        store.qrlStore.qrlInstance?.accounts.signTransaction,
+      ).not.toHaveBeenCalled();
     });
 
     it("records a large transfer amount losslessly, for Speed Up to rebuild exactly", async () => {
@@ -1541,21 +1594,23 @@ describe("QrlSendTransactionForContent", () => {
       });
     });
 
-    it("should use legacy gasPrice for non-0x2 contract deployment via Ledger", async () => {
+    it("gives a Ledger account the fee fields for a contract deployment that names no type", async () => {
+      // Without a type this request used to reach the device with a gas
+      // price and without the two fee fields a type 0x2 transaction needs.
       const mockSendRawTransaction = vi
         .fn<SendRequest>()
         .mockResolvedValue("0xhash");
       const mockSignAndSerialize = vi
         .fn<SignAndSerializeTransaction>()
-        .mockResolvedValue("0xsigned");
-      const legacyDeployRequest = { ...contractDeploymentRequest, type: "0x0" };
+        .mockResolvedValue("0xdeadbeef4444");
+      const { type: _type, ...deploymentWithoutType } =
+        contractDeploymentRequest;
 
       renderComponent(
         createStoreWithCallback({
-          requestParams: legacyDeployRequest,
+          requestParams: deploymentWithoutType,
           qrlStore: {
             qrlInstance: createQrlInstance({
-              getGasPrice: () => Promise.resolve(BigInt(1000)),
               getTransactionCount: () => Promise.resolve(0),
               getChainId: () => Promise.resolve(1),
               call: vi.fn<QrlInstance["call"]>().mockResolvedValue("0x"),
@@ -1574,10 +1629,14 @@ describe("QrlSendTransactionForContent", () => {
         await invokePermissionCallback(true);
       });
 
-      // Verify the legacy transaction uses gasPrice.
       const txDataArg = mockSignAndSerialize.mock.calls[0][1];
-      expect(txDataArg.gasPrice).toBeDefined();
-      expect(txDataArg.maxFeePerGas).toBeUndefined();
+      expect(txDataArg.maxFeePerGas).toBe("0x12c");
+      expect(txDataArg.maxPriorityFeePerGas).toBe(100n);
+      expect(txDataArg).not.toHaveProperty("gasPrice");
+      expect(mockSendRawTransaction).toHaveBeenCalledWith({
+        method: "qrl_sendRawTransaction",
+        params: ["0xdeadbeef4444"],
+      });
     });
 
     it("should handle error when signing returns no rawTransaction", async () => {
@@ -1776,27 +1835,117 @@ describe("QrlSendTransactionForContent", () => {
       },
     );
 
-    it.each([0, 2, 0n, 2n])(
-      "preserves legacy pricing for a numeric transaction type: %s",
-      async (type) => {
+    it.each([
+      ["the number 2", 2],
+      ['"0x02"', "0x02"],
+      ['"0X2"', "0X2"],
+      ["null", null],
+      ["undefined", undefined],
+    ])("signs a request whose type is %s as type 0x2", async (_label, type) => {
+      const record = vi.fn<ResponseRecorder>();
+      const store = createStoreWithCallback({
+        requestParams: { ...zndTransferRequest, type },
+        addToResponseData: record,
+      });
+      renderComponent(store, {
+        transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+      });
+      await act(async () => {
+        await invokePermissionCallback(true);
+      });
+      expect(
+        store.qrlStore.qrlInstance?.accounts.signTransaction,
+      ).toHaveBeenCalledWith(
+        objectContaining({ type: "0x2", maxFeePerGas: "0x12c" }),
+        "0xhexseed",
+      );
+      expect(record).toHaveBeenCalledWith({ transactionHash: "0xtxhash" });
+    });
+
+    it.each([
+      [0, "0"],
+      [1, "1"],
+      ["0x1", '"0x1"'],
+      ["2", '"2"'],
+      [0n, "0n"],
+      [2n, "2n"],
+    ])(
+      "refuses a stored request of type %s on both signing paths",
+      async (type, named) => {
+        for (const [requestParams, transactionType] of [
+          [zndTransferRequest, SEND_TRANSACTION_TYPES.QRL_TRANSFER],
+          [
+            contractInteractionRequest,
+            SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION,
+          ],
+        ] as const) {
+          const record = vi.fn<ResponseRecorder>();
+          const store = createStoreWithCallback({
+            requestParams: { ...requestParams, type },
+            addToResponseData: record,
+          });
+          renderComponent(store, { transactionType });
+          await act(async () => {
+            await invokePermissionCallback(true);
+          });
+          expect(record).toHaveBeenCalledExactlyOnceWith({
+            error: objectContaining({
+              code: -32602,
+              message: `QRL transactions are of type 0x2. Received type: ${named}`,
+            }),
+          });
+          expect(
+            store.qrlStore.qrlInstance?.accounts.signTransaction,
+          ).not.toHaveBeenCalled();
+          cleanup();
+        }
+      },
+    );
+
+    it.each([
+      [
+        "a call shown as a transfer",
+        { ...zndTransferRequest, input: "0xa9059cbb" },
+        SEND_TRANSACTION_TYPES.QRL_TRANSFER,
+      ],
+      [
+        "a call shown as a plain call",
+        { ...contractInteractionRequest, data: undefined, input: "0xa9059cbb" },
+        SEND_TRANSACTION_TYPES.PLAIN_CALL,
+      ],
+      [
+        "a call that names both",
+        {
+          ...contractInteractionRequest,
+          input: contractInteractionRequest.data,
+        },
+        SEND_TRANSACTION_TYPES.CONTRACT_INTERACTION,
+      ],
+    ])(
+      "refuses a stored request that still names its call data as input: %s",
+      async (_label, requestParams, transactionType) => {
+        // The service worker stores a send request with its call data as
+        // `data`. Signed from the fields this screen reads, a request that
+        // still names `input` would go out without its call data.
         const record = vi.fn<ResponseRecorder>();
         const store = createStoreWithCallback({
-          requestParams: { ...zndTransferRequest, type },
+          requestParams,
           addToResponseData: record,
         });
-        renderComponent(store, {
-          transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
-        });
+        renderComponent(store, { transactionType });
         await act(async () => {
           await invokePermissionCallback(true);
         });
+        expect(record).toHaveBeenCalledExactlyOnceWith({
+          error: objectContaining({
+            code: -32602,
+            message:
+              'The request names call data as "input", which the approval does not read',
+          }),
+        });
         expect(
           store.qrlStore.qrlInstance?.accounts.signTransaction,
-        ).toHaveBeenCalledWith(
-          objectContaining({ gasPrice: 1000n }),
-          "0xhexseed",
-        );
-        expect(record).toHaveBeenCalledWith({ transactionHash: "0xtxhash" });
+        ).not.toHaveBeenCalled();
       },
     );
 
@@ -1972,6 +2121,45 @@ describe("QrlSendTransactionForContent", () => {
           },
           expectedAmount: 0,
         },
+        {
+          label: "transfer that names no type",
+          requestParams: { ...zndTransferRequest, type: undefined },
+          expectedAmount: "0.000000000000000048",
+        },
+        {
+          label: "transfer that names no type and carries a gas price",
+          requestParams: {
+            ...zndTransferRequest,
+            type: undefined,
+            gasPrice: "0x3b9aca00",
+          },
+          expectedAmount: "0.000000000000000048",
+        },
+        {
+          label: "transfer with a null type",
+          requestParams: { ...zndTransferRequest, type: null },
+          expectedAmount: "0.000000000000000048",
+        },
+        {
+          label: 'transfer of type "0x02"',
+          requestParams: { ...zndTransferRequest, type: "0x02" },
+          expectedAmount: "0.000000000000000048",
+        },
+        {
+          label: "transfer with the number 2 as its type",
+          requestParams: { ...zndTransferRequest, type: 2 },
+          expectedAmount: "0.000000000000000048",
+        },
+        {
+          label: "interaction that names no type",
+          requestParams: { ...contractInteractionRequest, type: undefined },
+          expectedAmount: 0,
+        },
+        {
+          label: "deployment that names no type",
+          requestParams: { ...contractDeploymentRequest, type: undefined },
+          expectedAmount: 0,
+        },
       ])(
         "authorizes, formats, signs and records $label",
         async ({ requestParams, expectedAmount }) => {
@@ -1998,7 +2186,9 @@ describe("QrlSendTransactionForContent", () => {
               }
               throw new Error(`Unexpected RPC call: ${method}`);
             });
-          vi.spyOn(instance, "getGasPrice").mockResolvedValue(1000n);
+          const gasPrice = vi
+            .spyOn(instance, "getGasPrice")
+            .mockResolvedValue(1000n);
           const record = vi.fn<ResponseRecorder>();
           const setCanProceed =
             vi.fn<StoreType["dAppRequestStore"]["setCanProceed"]>();
@@ -2091,6 +2281,16 @@ describe("QrlSendTransactionForContent", () => {
             hexToBytes(rawTransaction),
           );
           expect(decoded.verifySignature()).toBe(true);
+          // Every dApp transaction goes out as type 0x2 with the wallet's
+          // own fee values, whatever the request says about its type or a
+          // gas price: the fixture's base fee of 100 doubled, plus its tip.
+          if (!(decoded instanceof FeeMarketEIP1559Transaction)) {
+            throw new Error("Not a type 0x2 transaction");
+          }
+          expect(decoded.type).toBe(2);
+          expect(decoded.maxFeePerGas).toBe(300n);
+          expect(decoded.maxPriorityFeePerGas).toBe(100n);
+          expect(gasPrice).not.toHaveBeenCalled();
           expect(decoded.gasLimit).toBe(BigInt(requestParams.gas ?? 100_000));
           expect(decoded.value).toBe(BigInt(requestParams.value ?? 0));
           expect(bytesToHex(decoded.data)).toBe(
@@ -2113,6 +2313,220 @@ describe("QrlSendTransactionForContent", () => {
           expect(request).toEqual(originalRequest);
         },
       );
+
+      /**
+       * The request the library hands to an injected provider for
+       * contract.methods.deposit(...).send(...), caught on its way out and
+       * passed through JSON, the way a request crosses from the page to the
+       * service worker. (Ported from theQRL/qrl-web3-wallet #39.)
+       */
+      const contractCallFromLibrary = async (
+        from: string,
+        contract: string,
+      ): Promise<Record<string, unknown>> => {
+        const sent: unknown[] = [];
+        const answers: Record<string, unknown> = {
+          qrl_chainId: "0x301825",
+          net_version: "3151909",
+          qrl_getTransactionCount: "0x1",
+          qrl_estimateGas: "0x186a0",
+          qrl_maxPriorityFeePerGas: "0x3b9aca00",
+          qrl_call: "0x",
+          qrl_getBlockByNumber: {
+            baseFeePerGas: "0x3b9aca00",
+            number: "0x10",
+            hash: `0x${"11".repeat(32)}`,
+            transactions: [],
+          },
+        };
+        const dApp = new Web3({
+          request: ({
+            method,
+            params,
+          }: {
+            method: string;
+            params?: unknown;
+          }) => {
+            if (method === "qrl_sendTransaction") {
+              sent.push(Array.isArray(params) ? params[0] : undefined);
+              return Promise.reject(new Error("captured"));
+            }
+            return method in answers
+              ? Promise.resolve(answers[method])
+              : Promise.reject(new Error(`Unexpected RPC call: ${method}`));
+          },
+        });
+        const payable = [
+          {
+            type: "function",
+            name: "deposit",
+            stateMutability: "payable",
+            inputs: [{ name: "beneficiary", type: "address" }],
+            outputs: [],
+          },
+        ] as const;
+        await new dApp.qrl.Contract(payable, contract).methods
+          .deposit(from)
+          .send({ from, value: "1000000000000000000", gas: "100000" })
+          .catch(() => undefined);
+        const request: unknown = JSON.parse(JSON.stringify(sent[0] ?? null));
+        if (!isRecord(request)) {
+          throw new Error("The library sent no transaction");
+        }
+        return request;
+      };
+
+      /**
+       * One approval of a stored send request with the library's own
+       * signer: what the dApp was answered, the signer and what was
+       * broadcast.
+       */
+      const approveWithTheLibrarySigner = async (
+        stored: Record<string, unknown>,
+        sender: string,
+      ) => {
+        const instance = new Web3().qrl;
+        instance.defaultNetworkId = 3151909;
+        const signer = vi.spyOn(instance.accounts, "signTransaction");
+        const send = vi
+          .spyOn(instance.requestManager, "send")
+          .mockImplementation(({ method, params }) => {
+            if (method === "qrl_call") return Promise.resolve("0x");
+            if (method === "qrl_estimateGas") return Promise.resolve("0x186a0");
+            if (method === "qrl_getTransactionCount")
+              return Promise.resolve("0x7");
+            if (method === "qrl_chainId") return Promise.resolve("0x301825");
+            if (method === "net_version") return Promise.resolve("3151909");
+            if (
+              method === "qrl_sendRawTransaction" &&
+              Array.isArray(params) &&
+              typeof params[0] === "string"
+            ) {
+              return Promise.resolve(sha3Raw(params[0]));
+            }
+            throw new Error(`Unexpected RPC call: ${method}`);
+          });
+        const record = vi.fn<ResponseRecorder>();
+        const setCanProceed =
+          vi.fn<StoreType["dAppRequestStore"]["setCanProceed"]>();
+        const store = createStoreWithCallback({
+          addToResponseData: record,
+          qrlStore: { qrlInstance: instance },
+          dAppRequestStore: {
+            dAppRequestData: {
+              method: "qrl_sendTransaction",
+              params: [stored],
+              authorizedChainId: "0x301825",
+              requestData: {
+                senderData: { url: "https://dapp.example" },
+              },
+            },
+            setCanProceed,
+          },
+          transactionHistoryStore: {
+            addTransaction: vi
+              .fn<AddTransaction>()
+              .mockResolvedValue(undefined),
+          },
+        });
+        const chain = store.qrlStore.qrlConnection.blockchain;
+        vi.spyOn(StorageUtil, "getActiveBlockChain").mockResolvedValue(chain);
+        vi.spyOn(
+          StorageUtil,
+          "getDAppsConnectedAccountsData",
+        ).mockResolvedValue({
+          accounts: [sender],
+          blockchains: [chain],
+          permissions: [],
+          urlOrigin: "https://dapp.example",
+        });
+        render(
+          <StoreProvider value={store}>
+            <MemoryRouter>
+              <TooltipProvider>
+                <QrlSendTransaction />
+              </TooltipProvider>
+            </MemoryRouter>
+          </StoreProvider>,
+        );
+        await waitFor(() => {
+          expect(setCanProceed).toHaveBeenLastCalledWith(true);
+        });
+        await act(async () => invokePermissionCallback(true));
+        const broadcasts = send.mock.calls.flatMap(([rpc]) =>
+          rpc.method === "qrl_sendRawTransaction" &&
+          Array.isArray(rpc.params) &&
+          typeof rpc.params[0] === "string"
+            ? [rpc.params[0]]
+            : [],
+        );
+        return { record, signer, broadcasts };
+      };
+
+      it("signs a contract call made with the library with its call data and its value, stored the way the service worker stores it", async () => {
+        const account = new Web3().qrl.accounts.seedToAccount(EXTENDED_SEED);
+        const fromLibrary = await contractCallFromLibrary(
+          account.address,
+          CONTRACT_ADDRESS,
+        );
+        // The library names the call data `input`, and sends no `data` and
+        // no type.
+        expect(fromLibrary.input).toMatch(/^0xf340fa01/);
+        expect(fromLibrary).not.toHaveProperty("data");
+        expect(fromLibrary).not.toHaveProperty("type");
+
+        const stored = sendTransactionParamsForApproval([fromLibrary]);
+        const transaction: unknown = Array.isArray(stored) ? stored[0] : null;
+        if (!isRecord(transaction)) throw new Error("Nothing was stored");
+        const { record, broadcasts } = await approveWithTheLibrarySigner(
+          transaction,
+          account.address,
+        );
+
+        expect(
+          screen.getByText("Interact with a contract"),
+        ).toBeInTheDocument();
+        expect(broadcasts).toHaveLength(1);
+        const rawTransaction = broadcasts[0] ?? "";
+        const decoded = TransactionFactory.fromSerializedData(
+          hexToBytes(rawTransaction),
+        );
+        expect(decoded.type).toBe(2);
+        expect(bytesToHex(decoded.data)).toBe(fromLibrary.input);
+        expect(decoded.value).toBe(10n ** 18n);
+        expect(decoded.to?.toString().toLowerCase()).toBe(
+          CONTRACT_ADDRESS.toLowerCase(),
+        );
+        expect(decoded.verifySignature()).toBe(true);
+        expect(record).toHaveBeenCalledExactlyOnceWith({
+          transactionHash: sha3Raw(rawTransaction),
+        });
+      }, 60000);
+
+      it("reads the same call as a transfer when it is stored as it came, and refuses to sign it", async () => {
+        const account = new Web3().qrl.accounts.seedToAccount(EXTENDED_SEED);
+        const fromLibrary = await contractCallFromLibrary(
+          account.address,
+          CONTRACT_ADDRESS,
+        );
+
+        const { record, signer, broadcasts } =
+          await approveWithTheLibrarySigner(fromLibrary, account.address);
+
+        // The fault the stored form prevents: with its call data under a
+        // name this screen does not read, a payable call is a transfer of
+        // its value to the contract.
+        expect(screen.getByText("Transfer Quanta")).toBeInTheDocument();
+        expect(record).toHaveBeenCalledExactlyOnceWith({
+          error: objectContaining({
+            code: -32602,
+            message:
+              'The request names call data as "input", which the approval does not read',
+          }),
+        });
+        expect(signer).not.toHaveBeenCalled();
+        expect(broadcasts).toHaveLength(0);
+      }, 60000);
     });
 
     it("simulates a deployment through the library formatter with no recipient", async () => {
@@ -2241,36 +2655,6 @@ describe("QrlSendTransactionForContent", () => {
         store.qrlStore.qrlInstance?.accounts.signTransaction,
       ).not.toHaveBeenCalled();
     });
-
-    it.each([null, {}, -1, "invalid"])(
-      "refuses a malformed legacy gas price: %j",
-      async (gasPrice) => {
-        const record = vi.fn<ResponseRecorder>();
-        const setCanProceed =
-          vi.fn<StoreType["dAppRequestStore"]["setCanProceed"]>();
-        const store = createStoreWithCallback({
-          requestParams: { ...zndTransferRequest, type: "0x0" },
-          addToResponseData: record,
-          dAppRequestStore: { setCanProceed },
-        });
-        const instance = store.qrlStore.qrlInstance;
-        if (!instance) throw new Error("Missing test provider");
-        vi.spyOn(instance, "getGasPrice").mockResolvedValue(
-          malformed<bigint>(gasPrice),
-        );
-        renderComponent(store, {
-          transactionType: SEND_TRANSACTION_TYPES.QRL_TRANSFER,
-        });
-        await act(async () => {
-          await invokePermissionCallback(true);
-        });
-        expect(setCanProceed).toHaveBeenLastCalledWith(false);
-        expect(record).toHaveBeenCalledWith({
-          error: new Error("Invalid transaction quantity"),
-        });
-        expect(instance.accounts.signTransaction).not.toHaveBeenCalled();
-      },
-    );
 
     it.each([undefined, null, { symbol: 1, name: [] }])(
       "keeps history metadata fallbacks for an older stored chain: %j",
@@ -2401,12 +2785,13 @@ describe("QrlSendTransactionForContent fee disclosure", () => {
     gas,
     estimateGas,
     getGasPrice = () => Promise.resolve(ONE_GWEI),
-    type = "0x2",
+    type = { type: "0x2" },
   }: {
     gas: string;
     estimateGas: () => Promise<bigint>;
     getGasPrice?: () => Promise<bigint>;
-    type?: string;
+    /** The request's type field, or {} for a request that names none. */
+    type?: { type?: string };
   }) =>
     createApprovalStore({
       qrlStore: {
@@ -2435,7 +2820,7 @@ describe("QrlSendTransactionForContent fee disclosure", () => {
               data: "0x60806040",
               value: "0x0",
               gas,
-              type,
+              ...type,
             },
           ],
         },
@@ -2528,23 +2913,23 @@ describe("QrlSendTransactionForContent fee disclosure", () => {
     expect(screen.queryByText("Wallet gas estimate")).not.toBeInTheDocument();
   });
 
-  it("prices a legacy transaction from its gas price", async () => {
+  it("prices a request that names no type on the fee market, like every other, and reads no gas price", async () => {
     const getGasPrice = vi.fn(() => Promise.resolve(BigInt(2_000_000_000)));
     const storeValues = feeStore({
       gas: "0x5208",
       estimateGas: () => Promise.resolve(BigInt(21_000)),
-      type: "0x0",
+      type: {},
       getGasPrice,
     });
 
     renderFees(storeValues);
 
-    // 21,000 x 2 gwei. A legacy transaction is charged its gas price
-    // exactly, so its maximum carries no headroom.
-    expect(
-      (await screen.findAllByText("0.000042 Quanta")).length,
-    ).toBeGreaterThan(0);
-    expect(getGasPrice).toHaveBeenCalled();
+    // 21,000 x 1.5 gwei: the ceiling that gets signed, the base fee
+    // doubled plus the tip. It is what the request is signed with too.
+    expect(await screen.findByText("0.0000315 Quanta")).toBeInTheDocument();
+    // 21,000 x 1 gwei, what the block charges.
+    expect(screen.getByText("0.000021 Quanta")).toBeInTheDocument();
+    expect(getGasPrice).not.toHaveBeenCalled();
   });
 });
 

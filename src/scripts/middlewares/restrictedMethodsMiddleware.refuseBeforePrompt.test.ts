@@ -409,3 +409,229 @@ describe("authorization is answered before the payload is looked at", () => {
     }
   }
 });
+
+/**
+ * A send request names the chain's one transaction type or none, and its
+ * call data once. Ported from theQRL/qrl-web3-wallet #39: a contract call
+ * made with the library names its call data `input` and sends no `data`,
+ * and the approval reads `data` only.
+ */
+describe("qrl_sendTransaction: the type and the call data are settled before the prompt", () => {
+  const RECIPIENT = toChecksumAddress(`Q${"b".repeat(128)}`);
+  const OTHER_ACCOUNT = toChecksumAddress(`Q${"c".repeat(128)}`);
+  const CALL = `0xa9059cbb${"00".repeat(31)}ff`;
+  const transfer = (fields: Record<string, unknown> = {}) => ({
+    from: ACCOUNT,
+    to: RECIPIENT,
+    value: "0x1",
+    gas: "0x5208",
+    ...fields,
+  });
+  const contractCall = (fields: Record<string, unknown> = {}) => ({
+    from: ACCOUNT,
+    to: RECIPIENT,
+    gas: "0x186a0",
+    ...fields,
+  });
+  const send = (params: readonly unknown[]) =>
+    run(buildRequest("qrl_sendTransaction", params));
+
+  /** The params of the request as the service worker stored it for the approval. */
+  const storedParams = (): unknown => {
+    const key = profileStorageKey("DAPPS");
+    for (const [values] of mockedBrowser.storage.session.set.mock.calls) {
+      const dapps: unknown = isRecord(values) ? values[key] : undefined;
+      const request: unknown = isRecord(dapps)
+        ? dapps.DAPPS_REQUEST_DATA
+        : undefined;
+      if (isRecord(request) && request.method === "qrl_sendTransaction") {
+        return request.params;
+      }
+    }
+    throw new Error("No send request was stored for the approval");
+  };
+
+  it.each([
+    ["0x0", '"0x0"'],
+    ["0x1", '"0x1"'],
+    ["0x3", '"0x3"'],
+    ["2", '"2"'],
+    [0, "0"],
+    [1, "1"],
+    [true, "true"],
+  ])("refuses the type %j before any prompt", async (type, named) => {
+    const { res, end } = await send([transfer({ type })]);
+    expect(res.error?.code).toBe(INVALID_PARAMS);
+    expect(res.error?.message).toBe(
+      `QRL transactions are of type 0x2. Received type: ${named}`,
+    );
+    expect(end).toHaveBeenCalledTimes(1);
+    expectNoPrompt();
+  });
+
+  it.each([
+    ["no type", {}],
+    ["a null type", { type: null }],
+    ['"0x2"', { type: "0x2" }],
+    ['"0x02"', { type: "0x02" }],
+    ['"0X2"', { type: "0X2" }],
+    ["the number 2", { type: 2 }],
+    ["no type and a gas price", { gasPrice: "0x3b9aca00" }],
+  ])("still reaches the prompt with %s", async (_label, fields) => {
+    const { res } = await send([transfer(fields)]);
+    expect(res.error?.code).not.toBe(INVALID_PARAMS);
+    expect(mockOpenApprovalSurface).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "other bytes",
+      { data: "0x01", input: CALL },
+      '"data" and "input" are both set and differ',
+    ],
+    [
+      "an empty data beside an input",
+      { data: "0x", input: CALL },
+      '"data" and "input" are both set and differ',
+    ],
+    [
+      "a data that is no text",
+      { data: 1, input: CALL },
+      '"data" and "input" are both set and differ',
+    ],
+    [
+      "an input that is no text",
+      { input: 1 },
+      '"input" has to be a hex string',
+    ],
+    [
+      "an input that is a list",
+      { input: [CALL] },
+      '"input" has to be a hex string',
+    ],
+  ])(
+    "refuses call data named twice before any prompt: %s",
+    async (_label, fields, message) => {
+      const { res, end } = await send([contractCall(fields)]);
+      expect(res.error?.code).toBe(INVALID_PARAMS);
+      expect(res.error?.message).toBe(message);
+      expect(end).toHaveBeenCalledTimes(1);
+      expectNoPrompt();
+    },
+  );
+
+  it("stores a contract call whose call data came as input with it as data, and without input", async () => {
+    // What contract.methods.x().send() of the library hands over: `input`,
+    // no `data`, no `type`.
+    await send([contractCall({ input: CALL })]);
+    expect(mockOpenApprovalSurface).toHaveBeenCalledTimes(1);
+    expect(storedParams()).toEqual([contractCall({ data: CALL })]);
+  });
+
+  it("stores a payable call whose call data came as input as a call: read as it came it would be a plain transfer", async () => {
+    await send([transfer({ input: CALL })]);
+    expect(storedParams()).toEqual([transfer({ data: CALL })]);
+  });
+
+  it.each([
+    [
+      "data and input with the same bytes",
+      contractCall({
+        data: CALL.toUpperCase().replace("0X", "0x"),
+        input: CALL,
+      }),
+      contractCall({ data: CALL.toUpperCase().replace("0X", "0x") }),
+    ],
+    ["data only", contractCall({ data: CALL }), contractCall({ data: CALL })],
+    ["no call data", transfer(), transfer()],
+    ["an input that names nothing", transfer({ input: null }), transfer()],
+    [
+      "a null data beside an input",
+      contractCall({ data: null, input: CALL }),
+      contractCall({ data: CALL }),
+    ],
+  ])("stores %s as the approval reads it", async (_label, sent, stored) => {
+    await send([sent]);
+    expect(storedParams()).toEqual([stored]);
+  });
+
+  it("keeps whatever follows the transaction in the params", async () => {
+    await send([contractCall({ input: CALL }), "latest"]);
+    expect(storedParams()).toEqual([contractCall({ data: CALL }), "latest"]);
+  });
+
+  it("reads the transaction from indexed params the way the approval does", async () => {
+    const indexed: Record<string, Json> = {
+      0: { from: ACCOUNT, to: RECIPIENT, gas: "0x186a0", input: CALL },
+    };
+    await run({ ...buildRequest("qrl_sendTransaction", []), params: indexed });
+    expect(storedParams()).toEqual({ 0: contractCall({ data: CALL }) });
+  });
+
+  it("lets a contract creation with an amount through when its code came as input", async () => {
+    // Read as it came, this request has no recipient and no data, and was
+    // refused as a contract without code that could only burn the amount.
+    const creation = { from: ACCOUNT, value: "0x1", gas: "0x186a0" };
+    const { res } = await send([{ ...creation, input: "0x60806040" }]);
+    expect(res.error?.code).not.toBe(INVALID_PARAMS);
+    expect(storedParams()).toEqual([{ ...creation, data: "0x60806040" }]);
+  });
+
+  it("still refuses a contract creation with an amount and no code under either name", async () => {
+    const { res } = await send([
+      { from: ACCOUNT, value: "0x1", gas: "0x186a0" },
+    ]);
+    expect(res.error?.code).toBe(INVALID_PARAMS);
+    expect(res.error?.message).toContain("creates a contract with no code");
+    expectNoPrompt();
+  });
+
+  describe("authorization is answered before the transaction is looked at", () => {
+    const bad = [
+      ["another type", transfer({ type: "0x0" })],
+      ["call data named twice", contractCall({ data: "0x01", input: CALL })],
+    ] as const;
+    const scenarios = [
+      {
+        label: "a locked wallet",
+        prepare: () => {
+          mockIsLocked.mockResolvedValue({
+            isLocked: true,
+            hasPasswordSet: true,
+          });
+        },
+        from: (transaction: Record<string, unknown>) => send([transaction]),
+      },
+      {
+        label: "an unconnected origin",
+        prepare: () => undefined,
+        from: (transaction: Record<string, unknown>) =>
+          run({
+            ...buildRequest("qrl_sendTransaction", [transaction]),
+            senderData: { url: "https://unconnected.example/app", tabId: 7 },
+          }),
+      },
+      {
+        label: "an unauthorized account",
+        prepare: () => undefined,
+        from: (transaction: Record<string, unknown>) =>
+          send([{ ...transaction, from: OTHER_ACCOUNT }]),
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      it.each(bad)(
+        `from ${scenario.label}, %s gets the refusal a good transfer gets`,
+        async (_label, transaction) => {
+          scenario.prepare();
+          const good = await scenario.from(transfer());
+          const refused = await scenario.from(transaction);
+          expect(good.res.error).toBeDefined();
+          expect(good.res.error?.code).not.toBe(INVALID_PARAMS);
+          expect(refused.res.error).toEqual(good.res.error);
+          expect(mockOpenApprovalSurface).not.toHaveBeenCalled();
+        },
+      );
+    }
+  });
+});

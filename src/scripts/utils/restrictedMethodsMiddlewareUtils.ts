@@ -33,6 +33,11 @@ import {
   Permission,
 } from "../middlewares/middlewareTypes";
 import { registerDAppTransactionWatch } from "./dAppTransactionWatcher";
+import { callDataProblem, withCallDataAsData } from "./dappTransactionCallData";
+import {
+  isSupportedTransactionType,
+  unsupportedTransactionTypeMessage,
+} from "./dappTransactionType";
 import LockManager from "../lockManager/lockManager";
 
 type AuthorizationRequest = {
@@ -262,6 +267,65 @@ export const checkSignMessageParams = (params: unknown) => {
       }),
     };
   }
+};
+
+/**
+ * The params of a send request as the approval reads them: the call data of
+ * the transaction under `data`, whichever name the dApp used. `input` is the
+ * newer name and the one the library's contract calls use, with no `data`
+ * beside it. Read as it came, such a call looks like a plain transfer, or
+ * like a contract creation without code, and is signed without its call
+ * data. The checks before the prompt and the stored request both take their
+ * params from here.
+ *
+ * It mirrors readApprovalTransaction: the transaction sits at params[0] of
+ * an array or under "0" of an indexed object. A transaction whose call data
+ * has a problem comes back as it is; checkTransactionCallData refuses it.
+ */
+export const sendTransactionParamsForApproval = (params: unknown): unknown => {
+  if (isUnknownArray(params)) {
+    return params.length === 0
+      ? params
+      : [withCallDataAsData(params[0]), ...params.slice(1)];
+  }
+  if (isRecord(params) && Object.prototype.hasOwnProperty.call(params, "0")) {
+    return { ...params, "0": withCallDataAsData(params["0"]) };
+  }
+  return params;
+};
+
+/**
+ * A send request names the chain's one transaction type or none. Another
+ * type is refused here, before the user is asked to approve a transaction
+ * that the library does not sign.
+ */
+export const checkTransactionTypeIsSupported = (params: unknown) => {
+  const type = readApprovalTransaction(params)?.type;
+  if (isSupportedTransactionType(type)) {
+    return { canProceed: true, proceedError: undefined };
+  }
+  return {
+    canProceed: false,
+    proceedError: rpcErrors.invalidParams({
+      message: unsupportedTransactionTypeMessage(type),
+    }),
+  };
+};
+
+/**
+ * A send request names its call data once: as `data`, as `input`, or as
+ * both with the same bytes. Two that differ are refused here, before the
+ * user is asked: the wallet could only guess which one to show and sign.
+ */
+export const checkTransactionCallData = (params: unknown) => {
+  const problem = callDataProblem(readApprovalTransaction(params));
+  if (problem === undefined) {
+    return { canProceed: true, proceedError: undefined };
+  }
+  return {
+    canProceed: false,
+    proceedError: rpcErrors.invalidParams({ message: problem }),
+  };
 };
 
 /** True when the request carries constructor or call data worth running. */

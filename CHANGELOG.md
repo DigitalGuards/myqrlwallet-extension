@@ -7,6 +7,8 @@
 ### Fixed
 
 - Refuse add-network and typed-data signing requests the approval prompt cannot read with an invalid-params error before any prompt opens, and parse the typed-data payload before the seed is decrypted.
+- Read the call data of a dApp transaction that names it `input` (as contract calls made with `@theqrl/web3` do), so such a call is shown and signed as the contract call it is; a request whose `data` and `input` differ is refused with an invalid-params error before any prompt opens.
+- Sign a dApp transaction that names no type as type 0x2 with the wallet's own fee values, and refuse another transaction type with an invalid-params error before any prompt opens.
 
 ### Changed
 

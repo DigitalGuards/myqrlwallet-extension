@@ -45,6 +45,14 @@ import {
   normalizeChainId,
   revalidateAuthorizedDAppRequest,
 } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
+import {
+  hasInputField,
+  UNREAD_INPUT_MESSAGE,
+} from "@/scripts/utils/dappTransactionCallData";
+import {
+  isSupportedTransactionType,
+  unsupportedTransactionTypeMessage,
+} from "@/scripts/utils/dappTransactionType";
 import { TimeoutError, withTimeout } from "@/functions/withTimeout";
 import {
   capSimulationTimeoutMs,
@@ -159,7 +167,8 @@ type ApprovalTransaction = {
   gas?: TransactionQuantity | null;
   value?: TransactionQuantity | null;
   data?: string | null;
-  type?: TransactionQuantity;
+  // QRL 2.0 has one transaction type. A request names it or leaves it out.
+  type?: TransactionQuantity | null;
 };
 
 const isApprovalTransaction = (value: unknown): value is ApprovalTransaction =>
@@ -172,7 +181,27 @@ const isApprovalTransaction = (value: unknown): value is ApprovalTransaction =>
     value.value === "" ||
     isTransactionQuantity(value.value)) &&
   (value.data == null || typeof value.data === "string") &&
-  (value.type === undefined || isTransactionQuantity(value.type));
+  (value.type == null || isTransactionQuantity(value.type));
+
+/**
+ * Stops a stored send request that must not be signed from the fields this
+ * screen reads. The service worker refuses another transaction type before
+ * the prompt and stores a request with its call data as `data`
+ * (sendTransactionParamsForApproval). A request that names another type, or
+ * that still names `input`, did not come that way: the library would refuse
+ * the first after the approval, and the second would be signed without its
+ * call data.
+ */
+const assertSignableRequest = (transaction: ApprovalTransaction) => {
+  if (hasInputField(transaction)) {
+    throw rpcErrors.invalidParams({ message: UNREAD_INPUT_MESSAGE });
+  }
+  if (!isSupportedTransactionType(transaction.type)) {
+    throw rpcErrors.invalidParams({
+      message: unsupportedTransactionTypeMessage(transaction.type),
+    });
+  }
+};
 
 const isSignedTransaction = (
   value: unknown,
@@ -192,7 +221,6 @@ type TransactionObject = {
   type?: string;
   maxPriorityFeePerGas?: bigint;
   maxFeePerGas?: string;
-  gasPrice?: bigint | undefined;
 };
 
 // The runtime call formatter also accepts an omitted recipient for contract
@@ -298,34 +326,26 @@ const QrlSendTransactionForContent = observer(
     };
 
     /**
-     * Reads the current fee the same way the display did. A fee-market
-     * request gets the doubled-base ceiling; a legacy request is charged
-     * its gas price exactly, so there is no headroom to give it.
+     * Reads the current fee the same way the display did. QRL 2.0 has a
+     * single transaction type, 0x2, and every dApp transaction is built as
+     * that type, whether the request names it or leaves the type out. So
+     * every request gets the fee-market ceiling, the base fee doubled plus
+     * the tip. A gas price in the request is not used, as the request's
+     * other fee values never were; the library refuses a type 0x2
+     * transaction that carries one.
      */
     type ReadFee = {
       feePerGas: bigint;
       maxFeePerGas: bigint;
       maxPriorityFeePerGas: bigint;
     };
-    const readFeeBasis = async (
-      requestType: TransactionQuantity | undefined,
-    ): Promise<ReadFee> => {
-      if (requestType === "0x2") {
-        const feeData = await qrlStore.getGasFeeData();
-        const { baseFeePerGas, maxPriorityFeePerGas } = feeData;
-        return {
-          feePerGas: feeData.maxFeePerGas,
-          maxFeePerGas: baseFeePerGas * 2n + maxPriorityFeePerGas,
-          maxPriorityFeePerGas,
-        };
-      }
-      const gasPrice = BigInt(
-        readTransactionQuantity(await requireQrlInstance().getGasPrice()),
-      );
+    const readFeeBasis = async (): Promise<ReadFee> => {
+      const feeData = await qrlStore.getGasFeeData();
+      const { baseFeePerGas, maxPriorityFeePerGas } = feeData;
       return {
-        feePerGas: gasPrice,
-        maxFeePerGas: gasPrice,
-        maxPriorityFeePerGas: 0n,
+        feePerGas: feeData.maxFeePerGas,
+        maxFeePerGas: baseFeePerGas * 2n + maxPriorityFeePerGas,
+        maxPriorityFeePerGas,
       };
     };
 
@@ -367,7 +387,7 @@ const QrlSendTransactionForContent = observer(
         if (!qrlInstance || !request) return;
         let fee: ReadFee | undefined;
         try {
-          fee = await readFeeBasis(request.type);
+          fee = await readFeeBasis();
         } catch {
           fee = undefined;
         }
@@ -718,14 +738,14 @@ const QrlSendTransactionForContent = observer(
         // for it here is what keeps the ceiling the one that was shown.
         await awaitFeeBasis();
         if (!request) throw rpcErrors.invalidParams();
-        const { from, to, data, gas, type, value } = request;
+        assertSignableRequest(request);
+        const { from, to, data, gas, value } = request;
         if (!from) {
           throw rpcErrors.invalidParams();
         }
 
         const isLedgerAccount = ledgerStore.isLedgerAccount(from);
 
-        const gasPrice: unknown = await qrlInstance?.getGasPrice();
         const nonce: unknown = await qrlInstance?.getTransactionCount(
           from,
           SIGNING_NONCE_BLOCK_TAG,
@@ -743,26 +763,16 @@ const QrlSendTransactionForContent = observer(
           nonce: qrlInstance ? readTransactionQuantity(nonce) : undefined,
         };
         pendingTransactionObject = transactionObject;
-        if (type === "0x2") {
-          const freshFee = await readFeeBasis("0x2");
-          const signedMaxFeePerGas = resolveApprovedMaxFeePerGas(freshFee);
-          transactionObject.type = "0x2";
-          // The tip can never exceed the ceiling the user approved.
-          transactionObject.maxPriorityFeePerGas =
-            freshFee.maxPriorityFeePerGas > signedMaxFeePerGas
-              ? signedMaxFeePerGas
-              : freshFee.maxPriorityFeePerGas;
-          transactionObject.maxFeePerGas = `0x${signedMaxFeePerGas.toString(16)}`;
-        } else {
-          const legacyGasPrice = BigInt(
-            readTransactionQuantity(qrlInstance ? gasPrice : 0n),
-          );
-          transactionObject.gasPrice = resolveApprovedMaxFeePerGas({
-            feePerGas: legacyGasPrice,
-            maxFeePerGas: legacyGasPrice,
-            maxPriorityFeePerGas: 0n,
-          });
-        }
+        // Always type 0x2, with the wallet's own fee values (readFeeBasis).
+        const freshFee = await readFeeBasis();
+        const signedMaxFeePerGas = resolveApprovedMaxFeePerGas(freshFee);
+        transactionObject.type = "0x2";
+        // The tip can never exceed the ceiling the user approved.
+        transactionObject.maxPriorityFeePerGas =
+          freshFee.maxPriorityFeePerGas > signedMaxFeePerGas
+            ? signedMaxFeePerGas
+            : freshFee.maxPriorityFeePerGas;
+        transactionObject.maxFeePerGas = `0x${signedMaxFeePerGas.toString(16)}`;
 
         let rawTransactionToSend: string | undefined;
         let precomputedHash: string | undefined;
@@ -786,13 +796,8 @@ const QrlSendTransactionForContent = observer(
             txData.to = transactionObject.to;
           }
 
-          if (transactionObject.type === "0x2") {
-            txData.maxPriorityFeePerGas =
-              transactionObject.maxPriorityFeePerGas;
-            txData.maxFeePerGas = transactionObject.maxFeePerGas;
-          } else {
-            txData.gasPrice = `0x${BigInt(transactionObject.gasPrice ?? 0).toString(16)}`;
-          }
+          txData.maxPriorityFeePerGas = transactionObject.maxPriorityFeePerGas;
+          txData.maxFeePerGas = transactionObject.maxFeePerGas;
 
           rawTransactionToSend = await ledgerStore.signAndSerializeTransaction(
             from,
@@ -901,7 +906,8 @@ const QrlSendTransactionForContent = observer(
         // hand before anything decides what to sign.
         await awaitFeeBasis();
         if (!request) throw rpcErrors.invalidParams();
-        const { from, to, gas, type, value } = request;
+        assertSignableRequest(request);
+        const { from, to, gas, value } = request;
 
         if (!from) {
           throw new Error(
@@ -924,7 +930,6 @@ const QrlSendTransactionForContent = observer(
 
         const isLedgerAccount = ledgerStore.isLedgerAccount(from);
 
-        const gasPrice: unknown = await qrlInstance?.getGasPrice();
         const nonce: unknown = await qrlInstance?.getTransactionCount(
           from,
           SIGNING_NONCE_BLOCK_TAG,
@@ -941,26 +946,16 @@ const QrlSendTransactionForContent = observer(
         };
         pendingTransactionObject = transactionObject;
 
-        if (type === "0x2") {
-          const freshFee = await readFeeBasis("0x2");
-          const signedMaxFeePerGas = resolveApprovedMaxFeePerGas(freshFee);
-          transactionObject.type = "0x2";
-          // The tip can never exceed the ceiling the user approved.
-          transactionObject.maxPriorityFeePerGas =
-            freshFee.maxPriorityFeePerGas > signedMaxFeePerGas
-              ? signedMaxFeePerGas
-              : freshFee.maxPriorityFeePerGas;
-          transactionObject.maxFeePerGas = `0x${signedMaxFeePerGas.toString(16)}`;
-        } else {
-          const legacyGasPrice = BigInt(
-            readTransactionQuantity(qrlInstance ? gasPrice : 0n),
-          );
-          transactionObject.gasPrice = resolveApprovedMaxFeePerGas({
-            feePerGas: legacyGasPrice,
-            maxFeePerGas: legacyGasPrice,
-            maxPriorityFeePerGas: 0n,
-          });
-        }
+        // Always type 0x2, with the wallet's own fee values (readFeeBasis).
+        const freshFee = await readFeeBasis();
+        const signedMaxFeePerGas = resolveApprovedMaxFeePerGas(freshFee);
+        transactionObject.type = "0x2";
+        // The tip can never exceed the ceiling the user approved.
+        transactionObject.maxPriorityFeePerGas =
+          freshFee.maxPriorityFeePerGas > signedMaxFeePerGas
+            ? signedMaxFeePerGas
+            : freshFee.maxPriorityFeePerGas;
+        transactionObject.maxFeePerGas = `0x${signedMaxFeePerGas.toString(16)}`;
 
         let rawTransactionToSend: string | undefined;
         let precomputedHash: string | undefined;
