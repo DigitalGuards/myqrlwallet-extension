@@ -1,5 +1,7 @@
 import { mockedStore } from "@/__mocks__/mockedStore";
 import { StoreProvider } from "@/stores/store";
+import type { StoreType } from "@/stores/store";
+import type { ResponseRecorder } from "@/stores/dAppRequestStore";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -142,4 +144,62 @@ describe("QrlSendTransaction", () => {
       ),
     ).toBeInTheDocument();
   });
+  it.each([
+    [
+      "still names its call data as input",
+      { input: "0xa9059cbb" },
+      'The request names call data as "input", which the approval does not read',
+    ],
+    [
+      "names another transaction type",
+      { type: "0x0" },
+      'QRL transactions are of type 0x2. Received type: "0x0"',
+    ],
+  ])(
+    "shows a stored request that %s as one it cannot read, with nothing to approve",
+    async (_label, fields, message) => {
+      // Read from `data` alone, the first would be titled "Transfer Quanta"
+      // and signed as one. The service worker never stores such a request;
+      // one that is there all the same is not signed.
+      const setCanProceed =
+        vi.fn<StoreType["dAppRequestStore"]["setCanProceed"]>();
+      const record = vi.fn<ResponseRecorder>();
+      let approve: ((hasApproved: boolean) => Promise<void>) | undefined;
+      renderComponent(
+        mockedStore({
+          dAppRequestStore: {
+            dAppRequestData: {
+              params: [
+                {
+                  from: "0x20D20b8026B8F02540246f58120ddAAf35AECD9B",
+                  to: "0x20EE9760786AD48aB90E326c5cd78c6269Ba10AB",
+                  value: "0x1",
+                  gas: "0x5208",
+                  ...fields,
+                },
+              ],
+            },
+            setCanProceed,
+            setOnPermissionCallBack: (callback) => {
+              approve = (hasApproved) => callback(hasApproved, record);
+            },
+          },
+        }),
+      );
+
+      expect(screen.getByText("Review this request")).toBeInTheDocument();
+      expect(screen.queryByText("Transfer Quanta")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Mocked Qrl Send Transaction For Content"),
+      ).not.toBeInTheDocument();
+      expect(setCanProceed).toHaveBeenLastCalledWith(false);
+
+      await approve?.(true);
+      const answered: unknown = expect.objectContaining({
+        code: -32602,
+        message,
+      });
+      expect(record).toHaveBeenCalledExactlyOnceWith({ error: answered });
+    },
+  );
 });

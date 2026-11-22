@@ -3,6 +3,7 @@ import {
   closeFixtureServer,
   hasFixtureProvider,
   isRequestDone,
+  readRequestState,
   readRpcBody,
   reportFixtureError,
   writeStorage,
@@ -274,7 +275,13 @@ test("puts a decoded token approval in words on the approval screen", async () =
     // wallet in a loop. This spec walks through more refusals than that, so
     // it waits the cooldown out and asks again.
     const APPROVAL_COOLDOWN_WAIT_MS = 5_500;
-    const openApproval = async (data: string, to: string) => {
+    // "input" is the request as the library's contract API sends it: the
+    // call data under `input`, no `data` and no type.
+    const openApproval = async (
+      data: string,
+      to: string,
+      callDataAs: "data" | "input" = "data",
+    ) => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         await beginRequest(dAppPage, "qrl_sendTransaction", [
           {
@@ -283,8 +290,9 @@ test("puts a decoded token approval in words on the approval screen", async () =
             chainId: "0x301825",
             value: "0x0",
             gas: "0x7a120",
-            type: "0x2",
-            data,
+            ...(callDataAs === "input"
+              ? { input: data }
+              : { type: "0x2", data }),
           },
         ]);
         const opened = await extensionPage
@@ -401,6 +409,64 @@ test("puts a decoded token approval in words on the approval screen", async () =
       extensionPage.getByRole("button", { name: "Show raw data" }),
     ).toBeVisible();
     await rejectApproval();
+
+    // The unlimited approval once more, as contract.methods.approve().send()
+    // of the library hands it over: call data under `input`, no `data`, no
+    // type. Read as it came it was a bare call without its call data. It
+    // has to read as the approval it is, and it is priced on the fee market
+    // like the first one.
+    await openApproval(
+      call(
+        "approve(address,uint256)",
+        ["address", "uint256"],
+        [SPENDER, MAX_UINT256.toString()],
+      ),
+      TOKEN_CONTRACT,
+      "input",
+    );
+    await expect(
+      extensionPage.getByText("Approve token spending"),
+    ).toBeVisible();
+    await expect(
+      extensionPage.getByText("Unlimited", { exact: true }),
+    ).toBeVisible();
+    await expect(extensionPage.getByText("0.00175 Quanta")).toBeVisible();
+    await capture("unlimited-approve-as-input-360.png");
+    await rejectApproval();
+
+    // A request that names another transaction type is answered with
+    // invalid params, and the approval never opens for it.
+    await dAppPage.evaluate(beginFixtureRequest, {
+      stateKey: "requestState" as const,
+      method: "qrl_sendTransaction",
+      params: [
+        {
+          from: CHECKSUM_ACCOUNT,
+          to: TOKEN_CONTRACT,
+          chainId: "0x301825",
+          value: "0x1",
+          gas: "0x5208",
+          type: "0x0",
+        },
+      ],
+    });
+    await dAppPage.waitForFunction(isRequestDone, {
+      stateKey: "requestState" as const,
+    });
+    expect(
+      await dAppPage.evaluate(readRequestState, {
+        stateKey: "requestState" as const,
+      }),
+    ).toEqual({
+      done: true,
+      error: {
+        code: -32602,
+        message: 'QRL transactions are of type 0x2. Received type: "0x0"',
+      },
+    });
+    await expect(
+      extensionPage.getByRole("button", { name: "Yes" }),
+    ).toBeHidden();
   } finally {
     await context.close();
     await fixture.close();
