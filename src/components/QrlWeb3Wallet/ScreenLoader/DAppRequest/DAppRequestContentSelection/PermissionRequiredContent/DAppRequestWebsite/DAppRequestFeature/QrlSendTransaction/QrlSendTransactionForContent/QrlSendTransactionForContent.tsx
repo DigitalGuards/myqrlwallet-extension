@@ -45,14 +45,7 @@ import {
   normalizeChainId,
   revalidateAuthorizedDAppRequest,
 } from "@/scripts/utils/restrictedMethodsMiddlewareUtils";
-import {
-  hasInputField,
-  UNREAD_INPUT_MESSAGE,
-} from "@/scripts/utils/dappTransactionCallData";
-import {
-  isSupportedTransactionType,
-  unsupportedTransactionTypeMessage,
-} from "@/scripts/utils/dappTransactionType";
+import { storedSendRequestProblem } from "@/scripts/utils/dappStoredSendRequest";
 import { TimeoutError, withTimeout } from "@/functions/withTimeout";
 import {
   capSimulationTimeoutMs,
@@ -185,21 +178,14 @@ const isApprovalTransaction = (value: unknown): value is ApprovalTransaction =>
 
 /**
  * Stops a stored send request that must not be signed from the fields this
- * screen reads. The service worker refuses another transaction type before
- * the prompt and stores a request with its call data as `data`
- * (sendTransactionParamsForApproval). A request that names another type, or
- * that still names `input`, did not come that way: the library would refuse
- * the first after the approval, and the second would be signed without its
- * call data.
+ * screen reads (storedSendRequestProblem). QrlSendTransaction already shows
+ * such a request as one it cannot read and leaves this screen out; the
+ * check stands here as well, directly in front of each signature.
  */
 const assertSignableRequest = (transaction: ApprovalTransaction) => {
-  if (hasInputField(transaction)) {
-    throw rpcErrors.invalidParams({ message: UNREAD_INPUT_MESSAGE });
-  }
-  if (!isSupportedTransactionType(transaction.type)) {
-    throw rpcErrors.invalidParams({
-      message: unsupportedTransactionTypeMessage(transaction.type),
-    });
+  const problem = storedSendRequestProblem(transaction);
+  if (problem !== undefined) {
+    throw rpcErrors.invalidParams({ message: problem });
   }
 };
 

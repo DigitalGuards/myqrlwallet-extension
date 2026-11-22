@@ -2384,6 +2384,7 @@ describe("QrlSendTransactionForContent", () => {
       const approveWithTheLibrarySigner = async (
         stored: Record<string, unknown>,
         sender: string,
+        canProceed = true,
       ) => {
         const instance = new Web3().qrl;
         instance.defaultNetworkId = 3151909;
@@ -2450,7 +2451,7 @@ describe("QrlSendTransactionForContent", () => {
           </StoreProvider>,
         );
         await waitFor(() => {
-          expect(setCanProceed).toHaveBeenLastCalledWith(true);
+          expect(setCanProceed).toHaveBeenLastCalledWith(canProceed);
         });
         await act(async () => invokePermissionCallback(true));
         const broadcasts = send.mock.calls.flatMap(([rpc]) =>
@@ -2503,7 +2504,7 @@ describe("QrlSendTransactionForContent", () => {
         });
       }, 60000);
 
-      it("reads the same call as a transfer when it is stored as it came, and refuses to sign it", async () => {
+      it("shows the same call as a request it cannot read when it is stored as it came, and signs nothing", async () => {
         const account = new Web3().qrl.accounts.seedToAccount(EXTENDED_SEED);
         const fromLibrary = await contractCallFromLibrary(
           account.address,
@@ -2511,12 +2512,17 @@ describe("QrlSendTransactionForContent", () => {
         );
 
         const { record, signer, broadcasts } =
-          await approveWithTheLibrarySigner(fromLibrary, account.address);
+          await approveWithTheLibrarySigner(
+            fromLibrary,
+            account.address,
+            false,
+          );
 
         // The fault the stored form prevents: with its call data under a
         // name this screen does not read, a payable call is a transfer of
-        // its value to the contract.
-        expect(screen.getByText("Transfer Quanta")).toBeInTheDocument();
+        // its value to the contract. It is neither shown nor signed as one.
+        expect(screen.getByText("Review this request")).toBeInTheDocument();
+        expect(screen.queryByText("Transfer Quanta")).not.toBeInTheDocument();
         expect(record).toHaveBeenCalledExactlyOnceWith({
           error: objectContaining({
             code: -32602,

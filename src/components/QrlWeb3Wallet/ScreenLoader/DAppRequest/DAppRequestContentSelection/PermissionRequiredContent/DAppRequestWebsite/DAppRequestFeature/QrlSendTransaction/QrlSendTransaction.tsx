@@ -1,4 +1,5 @@
 import { readApprovalTransaction } from "@/utilities/approvalGuards";
+import { storedSendRequestProblem } from "@/scripts/utils/dappStoredSendRequest";
 import { useStore } from "@/stores/store";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -20,6 +21,12 @@ const QrlSendTransaction = observer(() => {
   const { dAppRequestStore } = useStore();
   const { dAppRequestData } = dAppRequestStore;
   const params = readApprovalTransaction(dAppRequestData?.params);
+  // A stored request that names another transaction type, or that still
+  // names its call data as `input`, is not one this screen can show
+  // truthfully: read from `data` alone, a contract call would be titled
+  // and signed as a transfer. It gets the screen of a request the wallet
+  // cannot read, with nothing to approve.
+  const problem = params ? storedSendRequestProblem(params) : undefined;
 
   // Every shape gets a heading and a description. An unclassified request
   // used to render an empty heading and hide its recipient while still
@@ -36,7 +43,7 @@ const QrlSendTransaction = observer(() => {
   >(SEND_TRANSACTION_TYPES.UNKNOWN);
 
   useEffect(() => {
-    if (!params) {
+    if (!params || problem !== undefined) {
       setTransactionHeading(t("dapp.sendTransaction.unknownShape"));
       setTransactionSubHeading(
         t("dapp.sendTransaction.unknownShapeDescription"),
@@ -45,7 +52,12 @@ const QrlSendTransaction = observer(() => {
       dAppRequestStore.setCanProceed(false);
       dAppRequestStore.setOnPermissionCallBack((hasApproved, record) => {
         if (hasApproved) {
-          record({ error: rpcErrors.invalidParams() });
+          record({
+            error:
+              problem === undefined
+                ? rpcErrors.invalidParams()
+                : rpcErrors.invalidParams({ message: problem }),
+          });
         }
         return Promise.resolve();
       });
@@ -97,7 +109,7 @@ const QrlSendTransaction = observer(() => {
         <div>{transactionSubHeading}</div>
       </div>
       <div className="flex flex-col gap-4">
-        {params && (
+        {params && problem === undefined && (
           <QrlSendTransactionForContent transactionType={transactionType} />
         )}
       </div>
