@@ -57,7 +57,7 @@
     --constructive: 152 62% 26%;
     --constructive-foreground: 0 0% 100%;
 
-    --destructive: 0 72% 44%;
+    --destructive: 0 72% 36%;
     --destructive-foreground: 0 0% 100%;
 
     --border: 220 16% 86%;
@@ -317,8 +317,9 @@
 }
 
 /* Primary buttons darken on hover in light (the dark theme's /90 mix would
-   pale toward white and drop below AA). Pointer devices only, so a tap on a
-   touch screen does not leave the hover colour behind. */
+   pale toward white and drop below AA). Tailwind 3.4 applies hover
+   utilities on touch screens too; this rule is limited to devices with a
+   hovering pointer, so a tap does not leave the darker colour behind. */
 @media (hover: hover) {
   :root:not(.dark) .hover\:bg-primary\/90:hover {
     background-color: hsl(var(--primary-hover));
@@ -328,30 +329,67 @@
 /* Status text shades the components use without a dark: pair, deepened in
    light so small text clears WCAG AA on white and on its own 10 to 20
    percent tint (the 500 and 600 steps of amber, red and green are about
-   2 to 4:1 on white). */
-:root:not(.dark) .text-amber-500,
-:root:not(.dark) .text-amber-600 {
+   2 to 4:1 on white; amber-700 is 4.26:1 on its 10 percent tint). The scope
+   sits in :where() at single-class specificity, so hover and focus
+   utilities such as hover:text-foreground still win. */
+:where(:root:not(.dark)) .text-amber-500,
+:where(:root:not(.dark)) .text-amber-600,
+:where(:root:not(.dark)) .text-amber-700 {
   color: #92400e;
 }
-:root:not(.dark) .text-yellow-400 {
+:where(:root:not(.dark)) .text-yellow-400 {
   color: #854d0e;
 }
-:root:not(.dark) .text-green-600 {
+:where(:root:not(.dark)) .text-green-600 {
   color: #166534;
 }
-:root:not(.dark) .text-red-600 {
+:where(:root:not(.dark)) .text-red-600 {
   color: #b91c1c;
 }
 /* Collection and account markers pick a random 500-step hue. Yellow, green
    and orange fall under 3:1 on white as icons, so light takes the 700 step. */
-:root:not(.dark) .text-yellow-500 {
+:where(:root:not(.dark)) .text-yellow-500 {
   color: #a16207;
 }
-:root:not(.dark) .text-green-500 {
+:where(:root:not(.dark)) .text-green-500 {
   color: #15803d;
 }
-:root:not(.dark) .text-orange-500 {
+:where(:root:not(.dark)) .text-orange-500 {
   color: #c2410c;
+}
+
+/* Inside the blue block the deepened shades above would read as dark on
+   blue, so the block takes the lifted shades of its own tokens. Two
+   classes beat the :where() rules above. */
+:root:not(.dark) .surface-balance .text-amber-500,
+:root:not(.dark) .surface-balance .text-amber-600,
+:root:not(.dark) .surface-balance .text-amber-700 {
+  color: #fde68a;
+}
+:root:not(.dark) .surface-balance .text-yellow-400,
+:root:not(.dark) .surface-balance .text-yellow-500 {
+  color: #fde047;
+}
+:root:not(.dark) .surface-balance .text-green-500,
+:root:not(.dark) .surface-balance .text-green-600 {
+  color: #86efac;
+}
+:root:not(.dark) .surface-balance .text-red-600 {
+  color: #fecaca;
+}
+:root:not(.dark) .surface-balance .text-orange-500 {
+  color: #fdba74;
+}
+
+/* Borders inside the blue block: the outline button (border-foreground/15)
+   and the address chip (border-identity-accent/30) are 1.4:1 and lower
+   against the lightest point of the blue. A 60 percent border reaches 3:1
+   or better. */
+:root:not(.dark) .surface-balance .border-foreground\/15 {
+  border-color: hsl(var(--foreground) / 0.6);
+}
+:root:not(.dark) .surface-balance .border-identity-accent\/30 {
+  border-color: hsl(var(--identity-accent) / 0.6);
 }
 
 /* Plain CSS on purpose: Tailwind v3 tree-shakes custom classes and
