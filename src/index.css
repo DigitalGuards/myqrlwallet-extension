@@ -245,7 +245,7 @@
    such as bg-destructive on a Card used as a status dot. */
 @layer components {
   /* Cards: flat white with a hairline and a soft shadow. The dark theme's
-     glow and gradient sheen are tuned for ink, not paper. */
+     glow and gradient sheen are tuned for a dark ground. */
   :where(:root:not(.dark)) .surface-glass,
   :where(:root:not(.dark)) .surface-ember {
     background: hsl(var(--card));
@@ -298,6 +298,13 @@
     --ring: 0 0% 100%;
 
     color: hsl(var(--foreground));
+  }
+
+  /* The copy icon in the address chip is the identity color at 60 percent,
+     which falls under 3:1 on the chip's hover tint over the blue. Light
+     draws it at 85 percent. */
+  :where(:root:not(.dark)) .surface-balance .text-identity-accent\/60 {
+    color: hsl(var(--identity-accent) / 0.85);
   }
 
   /* Selected text inside the block: a deep navy highlight, on which the
