@@ -42,7 +42,7 @@ const Welcome = observer(({ selectStep }: WelcomeProps) => {
   }, []);
 
   return (
-    <Card className="surface-ember animate-appear-in">
+    <Card className="surface-ember surface-balance animate-appear-in">
       <CardHeader>
         <CardTitle>{t("welcome.title")}</CardTitle>
         <CardDescription className="break-words">
