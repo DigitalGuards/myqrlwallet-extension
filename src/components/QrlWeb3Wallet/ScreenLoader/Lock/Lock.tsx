@@ -18,7 +18,7 @@ const Lock = observer(() => {
     <div className="relative flex min-h-full w-full shrink-0 flex-col items-center justify-center gap-10 overflow-hidden p-8">
       <div
         aria-hidden
-        className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-primary/20 blur-3xl"
+        className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-primary/20 blur-3xl hidden dark:block"
       />
       <div className="relative z-10 flex flex-col items-center gap-4">
         <BrandMark className="h-16 w-16 text-primary" title="MyQRLWallet" />
