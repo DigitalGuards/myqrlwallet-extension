@@ -44,7 +44,7 @@ const QrlWeb3WalletMoreOptions = withSuspense(
 
 const Header = () => {
   return (
-    <div className="relative z-20 flex h-16 shrink-0 items-center justify-between gap-2 border-b border-transparent bg-card px-3 dark:border-foreground/10 dark:bg-background/85">
+    <div className="relative z-20 flex h-16 shrink-0 items-center justify-between gap-2 bg-card px-3 dark:border-b dark:border-foreground/10 dark:bg-background/85">
       <QrlWeb3WalletLogo />
       {/* min-w-0 lets the account chip truncate so the three status chips and
           the menu stay inside a narrow side panel. */}
@@ -54,7 +54,7 @@ const Header = () => {
         <ChainBadge displayChainName={false} />
         <QrlWeb3WalletMoreOptions />
       </div>
-      {/* Dark: sky-blue hairline, the brand rail. Light: the border is transparent and
+      {/* Dark: sky-blue hairline, the brand rail. Light: no border, and
           this rail is the single neutral hairline under the white header. */}
       <div
         aria-hidden
