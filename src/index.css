@@ -239,12 +239,15 @@
 }
 
 /* Light theme ("Ink and blue"). Every rule is scoped to :root:not(.dark), so
-   the dark theme is untouched. */
+   the dark theme is untouched. The surface rules wrap that scope in :where()
+   to keep the specificity of a single class: Tailwind v3 has no native
+   cascade layers, so a heavier selector would beat per-element utilities
+   such as bg-destructive on a Card used as a status dot. */
 @layer components {
   /* Cards: flat white with a hairline and a soft shadow. The dark theme's
      glow and gradient sheen are tuned for ink, not paper. */
-  :root:not(.dark) .surface-glass,
-  :root:not(.dark) .surface-ember {
+  :where(:root:not(.dark)) .surface-glass,
+  :where(:root:not(.dark)) .surface-ember {
     background: hsl(var(--card));
     border: 1px solid hsl(var(--border));
     box-shadow: 0 1px 2px hsl(222 47% 10% / 0.06);
@@ -262,7 +265,7 @@
      text color below is measured against it. The ring offset color
      (--background) is the block's blue, so a focus ring has no dark band.
      Add a token here when a component inside the block starts using one. */
-  :root:not(.dark) .surface-balance {
+  :where(:root:not(.dark)) .surface-balance {
     background: linear-gradient(165deg, hsl(206 85% 30%), hsl(212 80% 22%));
     border: 1px solid hsl(212 80% 18%);
     box-shadow: 0 1px 2px hsl(222 47% 10% / 0.12);
