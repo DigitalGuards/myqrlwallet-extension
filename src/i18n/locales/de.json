@@ -14,7 +14,7 @@
   "lock.unlock.forgotPassword": "Passwort vergessen? Wallet zurücksetzen",
   "welcome.headline": "Deine Wallet für QRL 2.0",
   "welcome.keysTitle": "Deine Schlüssel bleiben auf diesem Gerät",
-  "welcome.keysBody": "Sie werden hier erstellt und mit deinem Passwort verschlüsselt gespeichert.",
+  "welcome.keysBody": "Sie werden hier gespeichert, verschlüsselt mit deinem Passwort.",
   "welcome.signTitle": "Post-Quanten-Signaturen",
   "welcome.signBody": "Jede Transaktion wird mit ML-DSA-87 signiert.",
   "welcome.connectTitle": "Mit dApps verbinden",

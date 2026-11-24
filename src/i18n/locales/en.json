@@ -14,7 +14,7 @@
   "lock.unlock.forgotPassword": "Forgot password? Reset the wallet",
   "welcome.headline": "Your wallet for QRL 2.0",
   "welcome.keysTitle": "Your keys stay on this device",
-  "welcome.keysBody": "They are created here and stored encrypted with your password.",
+  "welcome.keysBody": "They are stored here, encrypted with your password.",
   "welcome.signTitle": "Post-quantum signatures",
   "welcome.signBody": "Every transaction is signed with ML-DSA-87.",
   "welcome.connectTitle": "Connect to dApps",

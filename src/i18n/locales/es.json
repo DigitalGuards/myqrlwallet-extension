@@ -14,7 +14,7 @@
   "lock.unlock.forgotPassword": "¿Olvidaste la contraseña? Restablece la billetera",
   "welcome.headline": "Tu billetera para QRL 2.0",
   "welcome.keysTitle": "Tus claves permanecen en este dispositivo",
-  "welcome.keysBody": "Se crean aquí y se guardan cifradas con tu contraseña.",
+  "welcome.keysBody": "Se guardan aquí, cifradas con tu contraseña.",
   "welcome.signTitle": "Firmas poscuánticas",
   "welcome.signBody": "Cada transacción se firma con ML-DSA-87.",
   "welcome.connectTitle": "Conéctate a dApps",

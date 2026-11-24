@@ -48,7 +48,7 @@ describe("Welcome", () => {
     ).toBeInTheDocument();
     for (const text of [
       "Your keys stay on this device",
-      "They are created here and stored encrypted with your password.",
+      "They are stored here, encrypted with your password.",
       "Post-quantum signatures",
       "Every transaction is signed with ML-DSA-87.",
       "Connect to dApps",

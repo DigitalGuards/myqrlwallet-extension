@@ -14,7 +14,7 @@
   "lock.unlock.forgotPassword": "忘记密码？重置钱包",
   "welcome.headline": "适用于 QRL 2.0 的钱包",
   "welcome.keysTitle": "您的密钥保留在此设备上",
-  "welcome.keysBody": "密钥在此创建，并使用您的密码加密保存。",
+  "welcome.keysBody": "密钥保存在此设备上，并使用您的密码加密。",
   "welcome.signTitle": "后量子签名",
   "welcome.signBody": "每笔交易都使用 ML-DSA-87 签名。",
   "welcome.connectTitle": "连接 dApps",

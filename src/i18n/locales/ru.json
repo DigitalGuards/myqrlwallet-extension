@@ -14,7 +14,7 @@
   "lock.unlock.forgotPassword": "Забыли пароль? Сбросьте кошелёк",
   "welcome.headline": "Ваш кошелёк для QRL 2.0",
   "welcome.keysTitle": "Ваши ключи остаются на этом устройстве",
-  "welcome.keysBody": "Они создаются здесь и хранятся в зашифрованном виде с вашим паролем.",
+  "welcome.keysBody": "Они хранятся здесь и зашифрованы вашим паролем.",
   "welcome.signTitle": "Постквантовые подписи",
   "welcome.signBody": "Каждая транзакция подписывается с помощью ML-DSA-87.",
   "welcome.connectTitle": "Подключение к dApps",
