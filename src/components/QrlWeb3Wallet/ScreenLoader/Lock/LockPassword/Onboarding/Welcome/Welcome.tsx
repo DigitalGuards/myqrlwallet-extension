@@ -1,4 +1,5 @@
 import { Button } from "@/components/UI/Button";
+import { pinnedMainnet } from "@/configuration/pinnedNetworks";
 import { hasLegacyWalletData } from "@/utilities/legacyWalletData";
 import { MoveRight } from "lucide-react";
 import { ONBOARDING_STEPS, OnboardingStepType } from "../Onboarding";
@@ -38,15 +39,10 @@ const Welcome = ({ selectStep }: WelcomeProps) => {
   }, []);
 
   return (
-    <section className="animate-appear-in flex flex-col gap-6">
+    <section className="flex animate-appear-in flex-col gap-6">
       <h2 className="text-balance text-center text-2xl font-semibold leading-tight tracking-tight text-foreground">
         {t("welcome.headline")}
       </h2>
-      {showLegacyNotice && (
-        <p className="text-sm text-muted-foreground">
-          {t("welcome.legacyNotice")}
-        </p>
-      )}
       <ul className="divide-y divide-border border-y border-border">
         {ROWS.map((row) => (
           <li key={row.title} className="py-4">
@@ -57,6 +53,14 @@ const Welcome = ({ selectStep }: WelcomeProps) => {
           </li>
         ))}
       </ul>
+      {showLegacyNotice && (
+        <p
+          role="note"
+          className="rounded-md border border-border bg-muted/40 p-3 text-sm text-foreground"
+        >
+          {t("welcome.legacyNotice")}
+        </p>
+      )}
       <Button
         className="w-full"
         onClick={() => {
@@ -67,7 +71,7 @@ const Welcome = ({ selectStep }: WelcomeProps) => {
         {t("welcome.button")}
       </Button>
       <p className="text-center text-sm text-muted-foreground">
-        {t("welcome.note")}
+        {t(pinnedMainnet() ? "welcome.noteMainnet" : "welcome.note")}
       </p>
     </section>
   );
