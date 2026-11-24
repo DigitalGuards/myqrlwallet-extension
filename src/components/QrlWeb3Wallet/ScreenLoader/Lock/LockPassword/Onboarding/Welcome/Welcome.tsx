@@ -1,17 +1,7 @@
-import BrandMark from "@/components/QrlWeb3Wallet/ScreenLoader/Shared/BrandMark/BrandMark";
 import { Button } from "@/components/UI/Button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/UI/Card";
 import { hasLegacyWalletData } from "@/utilities/legacyWalletData";
 import { MoveRight } from "lucide-react";
 import { ONBOARDING_STEPS, OnboardingStepType } from "../Onboarding";
-import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -19,7 +9,13 @@ type WelcomeProps = {
   selectStep: (step: OnboardingStepType) => void;
 };
 
-const Welcome = observer(({ selectStep }: WelcomeProps) => {
+const ROWS = [
+  { title: "welcome.keysTitle", body: "welcome.keysBody" },
+  { title: "welcome.signTitle", body: "welcome.signBody" },
+  { title: "welcome.connectTitle", body: "welcome.connectBody" },
+] as const;
+
+const Welcome = ({ selectStep }: WelcomeProps) => {
   const { t } = useTranslation();
   // The v3 storage notice only makes sense when there are pre-v3 records to
   // talk about, so it starts hidden and appears once storage confirms them.
@@ -42,50 +38,39 @@ const Welcome = observer(({ selectStep }: WelcomeProps) => {
   }, []);
 
   return (
-    <Card className="surface-ember surface-balance animate-appear-in">
-      <CardHeader>
-        <CardTitle>{t("welcome.title")}</CardTitle>
-        <CardDescription className="break-words">
-          {t("welcome.description")}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {showLegacyNotice && (
-          <p className="mb-4 text-sm text-muted-foreground">
-            {t("welcome.legacyNotice")}
-          </p>
-        )}
-        <div className="flex h-32 w-full items-center gap-5 overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/40 to-secondary/10 px-6">
-          <BrandMark
-            className="h-16 w-16 shrink-0 text-primary"
-            title="MyQRLWallet"
-          />
-          <div className="flex flex-col leading-tight">
-            <span className="text-xs uppercase tracking-widest text-muted-foreground">
-              {t("welcome.tagline1")}
-            </span>
-            <span className="text-lg font-bold text-secondary">
-              {t("welcome.tagline2")}
-            </span>
-            <span className="text-lg font-bold text-secondary">
-              {t("welcome.tagline3")}
-            </span>
-          </div>
-        </div>
-      </CardContent>
-      <CardFooter>
-        <Button
-          className="w-full"
-          onClick={() => {
-            selectStep(ONBOARDING_STEPS.SET_PASSWORD);
-          }}
-        >
-          <MoveRight className="mr-2 h-4 w-4" />
-          {t("welcome.button")}
-        </Button>
-      </CardFooter>
-    </Card>
+    <section className="animate-appear-in flex flex-col gap-6">
+      <h2 className="text-balance text-center text-2xl font-semibold leading-tight tracking-tight text-foreground">
+        {t("welcome.headline")}
+      </h2>
+      {showLegacyNotice && (
+        <p className="text-sm text-muted-foreground">
+          {t("welcome.legacyNotice")}
+        </p>
+      )}
+      <ul className="divide-y divide-border border-y border-border">
+        {ROWS.map((row) => (
+          <li key={row.title} className="py-4">
+            <p className="text-base font-semibold text-foreground">
+              {t(row.title)}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">{t(row.body)}</p>
+          </li>
+        ))}
+      </ul>
+      <Button
+        className="w-full"
+        onClick={() => {
+          selectStep(ONBOARDING_STEPS.SET_PASSWORD);
+        }}
+      >
+        <MoveRight className="mr-2 h-4 w-4" />
+        {t("welcome.button")}
+      </Button>
+      <p className="text-center text-sm text-muted-foreground">
+        {t("welcome.note")}
+      </p>
+    </section>
   );
-});
+};
 
 export default Welcome;
