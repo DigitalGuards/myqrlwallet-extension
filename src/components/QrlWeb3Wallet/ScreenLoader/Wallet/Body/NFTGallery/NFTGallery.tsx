@@ -40,6 +40,7 @@ const NFTGallery = observer(() => {
 
   useEffect(() => {
     let cancelled = false;
+    const isCancelled = () => cancelled;
     const loadTokens = async () => {
       setIsLoading(true);
       if (!validRoute) {
@@ -51,7 +52,7 @@ const NFTGallery = observer(() => {
         contractAddress,
         routeStandard,
       );
-      if (cancelled) return;
+      if (isCancelled()) return;
       if (verified.error || !verified.standard) {
         // Nothing is listed or offered for transfer on the stored standard
         // when the contract cannot confirm it.
@@ -66,7 +67,7 @@ const NFTGallery = observer(() => {
         contractAddress,
         verified.standard,
       );
-      if (cancelled) return;
+      if (isCancelled()) return;
       // An unreadable chain is not an empty collection. Reporting the
       // failure keeps "you own nothing here" from standing in for "the
       // node did not answer".
@@ -77,7 +78,7 @@ const NFTGallery = observer(() => {
     };
     loadTokens().catch((error: unknown) => {
       console.error("Failed to load NFT gallery:", error);
-      if (cancelled) return;
+      if (isCancelled()) return;
       setLoadFailed(true);
       setIsLoading(false);
     });

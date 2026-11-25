@@ -259,6 +259,10 @@ describe("NFTGallery", () => {
         failed: false,
       });
     const view = renderComponent({ qrlStore: { getOwnedNftTokens } });
+    // The standard check runs first; the first listing starts after it.
+    await waitFor(() => {
+      expect(getOwnedNftTokens).toHaveBeenCalledTimes(1);
+    });
     view.rerender(
       <StoreProvider
         value={mockedStore({
