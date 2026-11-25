@@ -211,7 +211,7 @@ describe("DiscoveredNFTCollections", () => {
     expect(navigate).toHaveBeenCalledExactlyOnceWith("/");
   });
 
-  it("stores what the contract reports, not what the explorer claims", async () => {
+  it("stores the name, symbol and standard the contract reports", async () => {
     vi.mocked(discoverNftCollections).mockResolvedValueOnce([
       {
         ...DISCOVERED,

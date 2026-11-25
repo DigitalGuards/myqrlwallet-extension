@@ -209,8 +209,8 @@ export async function fetchOnChainHistory(
     const rows = isUnknownArray(data.transactions_by_address)
       ? data.transactions_by_address
       : [];
-    // The page size is requested, not guaranteed: read at most one page
-    // from each list, whatever the explorer sends.
+    // The explorer may ignore the requested page size: read at most one
+    // page from each list, whatever it sends.
     const txEntries = rows
       .slice(0, ON_CHAIN_PAGE_SIZE)
       .filter(isExplorerAggregateTx)

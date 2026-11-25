@@ -278,7 +278,7 @@ describe("contract response boundaries", () => {
     });
   });
 
-  it("reports an explorer that cannot answer instead of an empty collection", async () => {
+  it("reports an explorer that cannot answer as unknown, never as an empty collection", async () => {
     // QRC-721 without the Enumerable extension, and QRC-1155, can only be
     // listed through the explorer. When it fails the answer is "unknown".
     responses.set("supportsInterface", "true");
