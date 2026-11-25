@@ -516,6 +516,19 @@ export const cases = {
       ]);
     },
   },
+  setNFTKnownTokens: {
+    run: () =>
+      StorageUtil.setNFTKnownTokens(ACCOUNT, NFT.address, [{ tokenId: "7" }]),
+    edit: (e, f) => {
+      set(
+        e.local,
+        nftPath,
+        f.lists.nfts.map((v) =>
+          v === f.nft ? { ...f.nft, knownTokens: [{ tokenId: "7" }] } : v,
+        ),
+      );
+    },
+  },
   clearFromNFTCollectionsList: {
     run: () => StorageUtil.clearFromNFTCollectionsList(ACCOUNT, NFT.address),
     edit: (e, f) => {
@@ -1172,6 +1185,7 @@ export const writerGroups = {
     "setTokenContractsList",
     "clearFromTokenContractsList",
     "setNFTCollectionsList",
+    "setNFTKnownTokens",
     "clearFromNFTCollectionsList",
   ],
   transactions: [
