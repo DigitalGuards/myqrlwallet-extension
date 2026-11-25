@@ -13,7 +13,7 @@
 // Cf in current Unicode, a space in older tables) and the variation
 // selectors. Each becomes a plain space; runs of whitespace collapse.
 const HIDDEN_CHARACTERS =
-  /[\p{Cc}\p{Cf}\u115f\u1160\u3164\uffa0\u180e\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/gu;
+  /\p{Cc}|\p{Cf}|[\u115f\u1160\u3164\uffa0\u180e]|[\ufe00-\ufe0f]|[\u{e0100}-\u{e01ef}]/gu;
 
 export const MAX_UNTRUSTED_NAME_LENGTH = 50;
 export const MAX_UNTRUSTED_SYMBOL_LENGTH = 20;

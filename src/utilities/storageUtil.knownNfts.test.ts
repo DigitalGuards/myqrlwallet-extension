@@ -230,7 +230,7 @@ describe("serialised writes to the NFT collections store", () => {
   const slowReads = () => {
     const original = h.local.get.getMockImplementation();
     h.local.get.mockImplementation(async (key: string) => {
-      const value = await original?.(key);
+      const value = (await original?.(key)) ?? {};
       await new Promise((resolve) => setTimeout(resolve, 15));
       return value;
     });
