@@ -95,6 +95,8 @@ const mockedStoreValues: StoreType = {
     getNftCollectionDetails: () =>
       Promise.resolve({ collection: undefined, error: "" }),
     getOwnedNftTokens: () => Promise.resolve({ tokens: [], failed: false }),
+    verifyCollectionStandard: (_address: string, standard: string) =>
+      Promise.resolve({ standard }),
     getErc1155TokenBalance: () => Promise.resolve(undefined),
     getNftTokenUri: () => Promise.resolve(""),
     signNftTransfer: () =>

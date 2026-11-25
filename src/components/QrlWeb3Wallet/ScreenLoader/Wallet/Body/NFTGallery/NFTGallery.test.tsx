@@ -205,6 +205,47 @@ describe("NFTGallery", () => {
     expect(getOwnedNftTokens).toHaveBeenCalledTimes(2);
   });
 
+  it("lists and offers transfers on the chain's standard, not the stored one", async () => {
+    const getOwnedNftTokens = vi
+      .fn()
+      .mockResolvedValue({ tokens: [{ tokenId: "7" }], failed: false });
+    const verifyCollectionStandard = vi
+      .fn()
+      .mockResolvedValue({ standard: "QRC721" });
+    renderComponent(
+      { qrlStore: { getOwnedNftTokens, verifyCollectionStandard } },
+      { ...state, standard: "QRC1155" },
+    );
+
+    expect(await screen.findByTestId("gallery-item-7")).toBeInTheDocument();
+    expect(verifyCollectionStandard).toHaveBeenCalledWith(
+      state.contractAddress,
+      "QRC1155",
+    );
+    expect(getOwnedNftTokens).toHaveBeenCalledWith(
+      state.contractAddress,
+      "QRC721",
+    );
+  });
+
+  it("shows the existing error and lists nothing when the standard cannot be confirmed", async () => {
+    const getOwnedNftTokens = vi.fn();
+    renderComponent({
+      qrlStore: {
+        getOwnedNftTokens,
+        verifyCollectionStandard: vi
+          .fn()
+          .mockResolvedValue({ error: "Could not read" }),
+      },
+    });
+
+    expect(
+      await screen.findByText("Could not read this collection from the chain."),
+    ).toBeInTheDocument();
+    expect(getOwnedNftTokens).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
   it("ignores a token response after the active account changes", async () => {
     const pending = deferred<{
       tokens: { tokenId: string }[];

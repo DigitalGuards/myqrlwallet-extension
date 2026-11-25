@@ -210,6 +210,55 @@ describe("contract response boundaries", () => {
     });
   });
 
+  it("corrects a collection stored under the wrong standard from the chain", async () => {
+    // The contract answers as QRC-721; an earlier build stored QRC-1155.
+    vi.spyOn(StorageUtil, "getNFTCollectionsList").mockResolvedValue([
+      {
+        address: CONTRACT,
+        name: "Stored",
+        symbol: "STO",
+        standard: "ZRC1155",
+        image: "",
+      },
+    ]);
+    const write = vi
+      .spyOn(StorageUtil, "setNFTCollectionsList")
+      .mockResolvedValue(undefined);
+    const store = createStore();
+
+    expect(await store.verifyCollectionStandard(CONTRACT, "QRC1155")).toEqual({
+      standard: "QRC721",
+    });
+    expect(write).toHaveBeenCalledExactlyOnceWith(OWNER, {
+      address: CONTRACT,
+      name: "Stored",
+      symbol: "STO",
+      standard: "QRC721",
+      image: "",
+    });
+
+    // A matching stored value is left alone.
+    write.mockClear();
+    expect(await store.verifyCollectionStandard(CONTRACT, "QRC721")).toEqual({
+      standard: "QRC721",
+    });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("offers nothing when the contract cannot confirm the standard", async () => {
+    responses.set("supportsInterface", "not a boolean");
+    const write = vi
+      .spyOn(StorageUtil, "setNFTCollectionsList")
+      .mockResolvedValue(undefined);
+    const result = await createStore().verifyCollectionStandard(
+      CONTRACT,
+      "QRC1155",
+    );
+    expect(result.standard).toBeUndefined();
+    expect(result.error).toBeTruthy();
+    expect(write).not.toHaveBeenCalled();
+  });
+
   it.each(["false", 1, {}, null])(
     "rejects non-boolean NFT interface responses: %j",
     async (value) => {

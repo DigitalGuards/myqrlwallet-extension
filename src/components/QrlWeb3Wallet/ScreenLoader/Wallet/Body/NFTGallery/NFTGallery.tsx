@@ -1,7 +1,7 @@
 import { Button } from "@/components/UI/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { useStore } from "@/stores/store";
-import type { OwnedNftToken } from "@/types/nft";
+import type { NFTStandard, OwnedNftToken } from "@/types/nft";
 import { isNFTGalleryState } from "@/utilities/nftGuards";
 import { Image } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -24,7 +24,11 @@ const NFTGallery = observer(() => {
   const validRoute = routeState !== undefined;
   const contractAddress = routeState?.contractAddress ?? "";
   const collectionName = routeState?.collectionName ?? "";
-  const standard = routeState?.standard ?? "QRC721";
+  const routeStandard = routeState?.standard ?? "QRC721";
+  // What the contract says it is, which can differ from what an earlier
+  // build stored. Everything below (listing, tiles, transfers) uses it.
+  const [chainStandard, setChainStandard] = useState<NFTStandard>();
+  const standard = chainStandard ?? routeStandard;
 
   const [tokens, setTokens] = useState<OwnedNftToken[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,7 +47,25 @@ const NFTGallery = observer(() => {
         setIsLoading(false);
         return;
       }
-      const owned = await qrlStore.getOwnedNftTokens(contractAddress, standard);
+      const verified = await qrlStore.verifyCollectionStandard(
+        contractAddress,
+        routeStandard,
+      );
+      if (cancelled) return;
+      if (verified.error || !verified.standard) {
+        // Nothing is listed or offered for transfer on the stored standard
+        // when the contract cannot confirm it.
+        setLoadFailed(true);
+        setExplorerNeeded(false);
+        setTokens([]);
+        setIsLoading(false);
+        return;
+      }
+      setChainStandard(verified.standard);
+      const owned = await qrlStore.getOwnedNftTokens(
+        contractAddress,
+        verified.standard,
+      );
       if (cancelled) return;
       // An unreadable chain is not an empty collection. Reporting the
       // failure keeps "you own nothing here" from standing in for "the
@@ -64,7 +86,7 @@ const NFTGallery = observer(() => {
     };
   }, [
     contractAddress,
-    standard,
+    routeStandard,
     accountAddress,
     blockchain,
     reloadKey,

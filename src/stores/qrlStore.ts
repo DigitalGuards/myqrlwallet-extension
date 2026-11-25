@@ -37,6 +37,7 @@ import type { GasFeeOverrides } from "@/types/gasFee";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import { toCanonicalQrlAddress } from "@/utilities/addressUtil";
 import StorageUtil from "@/utilities/storageUtil";
+import { nftCollectionView } from "@/utilities/storageViews";
 import { isRecord } from "@/utilities/storageGuards";
 import {
   assertPinnedIdentity,
@@ -271,6 +272,7 @@ class QrlStore {
       sendRawTransaction: action.bound,
       getNftCollectionDetails: action.bound,
       getOwnedNftTokens: action.bound,
+      verifyCollectionStandard: action.bound,
       getErc1155TokenBalance: action.bound,
       getNftTokenUri: action.bound,
       signNftTransfer: action.bound,
@@ -1201,6 +1203,42 @@ class QrlStore {
    * come from the explorer and are re-verified via balanceOf(account, id);
    * the live per-id balance is returned alongside each token.
    */
+  /**
+   * The standard of a stored collection as the contract itself reports it.
+   * A stored value that differs (an earlier build stored what the explorer
+   * claimed) is corrected silently; a read that fails returns an error so
+   * the caller offers nothing built on the stored value.
+   */
+  async verifyCollectionStandard(
+    contractAddress: string,
+    storedStandard: NFTStandard,
+  ): Promise<{ standard?: NFTStandard; error?: string }> {
+    const { collection, error } =
+      await this.getNftCollectionDetails(contractAddress);
+    if (error || !collection) {
+      return { error: error || "Could not read the collection" };
+    }
+    if (collection.standard !== storedStandard) {
+      try {
+        const owner = this.activeAccount.accountAddress;
+        const entry = (await StorageUtil.getNFTCollectionsList(owner)).find(
+          (item) => item.address === contractAddress,
+        );
+        if (entry) {
+          const stored = nftCollectionView(entry);
+          await StorageUtil.setNFTCollectionsList(owner, {
+            ...stored,
+            standard: collection.standard,
+          });
+        }
+      } catch {
+        // The correction is retried on the next load; this one still uses
+        // the chain's answer.
+      }
+    }
+    return { standard: collection.standard };
+  }
+
   async getOwnedNftTokens(
     contractAddress: string,
     standard: NFTStandard = "QRC721",
