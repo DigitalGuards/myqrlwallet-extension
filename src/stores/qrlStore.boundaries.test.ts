@@ -302,6 +302,59 @@ describe("contract response boundaries", () => {
     });
   });
 
+  it("remembers verified ids and shows the ones that still verify when the explorer fails", async () => {
+    responses.set("supportsInterface", "true");
+    const remember = vi
+      .spyOn(StorageUtil, "setNFTKnownTokens")
+      .mockResolvedValue(undefined);
+    const store = createStore();
+    // A healthy listing writes what it verified on chain.
+    expect(await store.getOwnedNftTokens(CONTRACT)).toEqual({
+      tokens: [{ tokenId: "9" }],
+      failed: false,
+    });
+    expect(remember).toHaveBeenCalledWith(OWNER, CONTRACT, [{ tokenId: "9" }]);
+
+    // The explorer fails: the remembered ids are checked on chain again.
+    // Id 4 is owned by someone else now and is dropped and forgotten.
+    discover.mockRejectedValue(new ExplorerUnavailableError());
+    vi.spyOn(StorageUtil, "getNFTKnownTokens").mockResolvedValue([
+      { tokenId: "9" },
+      { tokenId: "4" },
+    ]);
+    call.mockImplementation((name, args) =>
+      Promise.resolve(
+        name === "ownerOf" && args[0] === 4n
+          ? "Qsomeoneelse"
+          : responses.get(name),
+      ),
+    );
+    remember.mockClear();
+    expect(await store.getOwnedNftTokens(CONTRACT)).toEqual({
+      tokens: [{ tokenId: "9" }],
+      failed: true,
+      explorerUnavailable: true,
+    });
+    expect(remember).toHaveBeenCalledWith(OWNER, CONTRACT, [{ tokenId: "9" }]);
+  });
+
+  it("shows remembered 1155 ids with their live balance when the explorer fails", async () => {
+    vi.spyOn(StorageUtil, "getNFTKnownTokens").mockResolvedValue([
+      { tokenId: "9", balance: "1" },
+      { tokenId: "8", balance: "2" },
+    ]);
+    vi.spyOn(StorageUtil, "setNFTKnownTokens").mockResolvedValue(undefined);
+    discover.mockRejectedValue(new ExplorerUnavailableError());
+    call.mockImplementation((name, args) =>
+      Promise.resolve(name === "balanceOf" ? (args[1] === 8n ? 0n : 7n) : 0n),
+    );
+    expect(await createStore().getOwnedNftTokens(CONTRACT, "QRC1155")).toEqual({
+      tokens: [{ tokenId: "9", balance: "7" }],
+      failed: true,
+      explorerUnavailable: true,
+    });
+  });
+
   it("preserves exact 1155 balances and skips malformed discovered balances", async () => {
     const store = createStore();
     responses.set("balanceOf", 9007199254740993n);

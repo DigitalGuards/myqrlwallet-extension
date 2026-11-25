@@ -688,6 +688,7 @@
   "nft.emptyGallery": "No NFTs found in this collection for this account.",
   "nft.galleryLoadFailed": "Could not read this collection from the chain.",
   "nft.galleryExplorerNeeded": "This collection can only be listed through the explorer, and the explorer did not answer.",
+  "nft.galleryRefreshFailed": "Could not refresh this list from the explorer. Showing the NFTs checked earlier.",
   "nft.amount": "Amount",
   "nft.amountDescription": "How many copies to send (you own {{count}})",
   "nft.description": "Description",

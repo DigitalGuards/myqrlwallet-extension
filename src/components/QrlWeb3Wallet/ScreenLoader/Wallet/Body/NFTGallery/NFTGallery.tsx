@@ -72,6 +72,10 @@ const NFTGallery = observer(() => {
     qrlStore,
   ]);
 
+  // The explorer could not refresh the list, but ids remembered from an
+  // earlier listing still verify on chain: show them with a calm notice.
+  const showRemembered = loadFailed && explorerNeeded && tokens.length > 0;
+
   return (
     <>
       <CircuitBackground />
@@ -93,7 +97,7 @@ const NFTGallery = observer(() => {
                   </Card>
                 ))}
               </div>
-            ) : loadFailed ? (
+            ) : loadFailed && !showRemembered ? (
               <div className="flex flex-col items-center gap-4 py-8 text-center text-muted-foreground">
                 <Image className="h-12 w-12" />
                 <p className="text-sm">
@@ -120,17 +124,34 @@ const NFTGallery = observer(() => {
                 <p className="text-sm">{t("nft.emptyGallery")}</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-3">
-                {tokens.map((token) => (
-                  <NFTGalleryItem
-                    key={token.tokenId}
-                    contractAddress={contractAddress}
-                    tokenId={token.tokenId}
-                    collectionName={collectionName}
-                    standard={standard}
-                    balance={token.balance}
-                  />
-                ))}
+              <div className="flex flex-col gap-3">
+                {showRemembered && (
+                  <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                    <p>{t("nft.galleryRefreshFailed")}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setReloadKey((key) => key + 1);
+                      }}
+                    >
+                      {t("common.retry")}
+                    </Button>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  {tokens.map((token) => (
+                    <NFTGalleryItem
+                      key={token.tokenId}
+                      contractAddress={contractAddress}
+                      tokenId={token.tokenId}
+                      collectionName={collectionName}
+                      standard={standard}
+                      balance={token.balance}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </CardContent>

@@ -187,6 +187,24 @@ describe("NFTGallery", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
+  it("shows ids that still verify, with a notice and Retry, when the explorer could not refresh the list", async () => {
+    const getOwnedNftTokens = vi.fn().mockResolvedValue({
+      tokens: [{ tokenId: "9" }],
+      failed: true,
+      explorerUnavailable: true,
+    });
+    renderComponent({ qrlStore: { getOwnedNftTokens } });
+
+    expect(await screen.findByTestId("gallery-item-9")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Could not refresh this list from the explorer. Showing the NFTs checked earlier.",
+      ),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(getOwnedNftTokens).toHaveBeenCalledTimes(2);
+  });
+
   it("ignores a token response after the active account changes", async () => {
     const pending = deferred<{
       tokens: { tokenId: string }[];

@@ -688,6 +688,7 @@
   "nft.emptyGallery": "此账户在该集合中没有 NFT。",
   "nft.galleryLoadFailed": "无法从链上读取此集合。",
   "nft.galleryExplorerNeeded": "此集合只能通过区块浏览器列出，而区块浏览器没有响应。",
+  "nft.galleryRefreshFailed": "无法通过区块浏览器刷新此列表。显示之前已核验的 NFT。",
   "nft.amount": "数量",
   "nft.amountDescription": "要发送的份数（您持有 {{count}} 份）",
   "nft.description": "描述",

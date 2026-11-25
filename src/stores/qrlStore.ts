@@ -1255,25 +1255,41 @@ class QrlStore {
 
       // Non-enumerable: ask the explorer which ids this account holds,
       // then confirm each against the chain.
-      const discovered = await discoverOwnedNftTokens(
-        owner,
-        this.qrlConnection.blockchain.chainId,
-        contractAddress,
-      );
-      const tokens: OwnedNftToken[] = [];
-      for (const candidate of discovered) {
+      const verify721 = async (
+        tokenId: string,
+      ): Promise<OwnedNftToken | undefined> => {
         try {
           const currentOwner = readProviderValue(
-            await contract.methods.ownerOf(BigInt(candidate.tokenId)).call(),
+            await contract.methods.ownerOf(BigInt(tokenId)).call(),
             isString,
           );
-          if (currentOwner.toLowerCase() === owner.toLowerCase()) {
-            tokens.push({ tokenId: candidate.tokenId });
-          }
+          return currentOwner.toLowerCase() === owner.toLowerCase()
+            ? { tokenId }
+            : undefined;
         } catch {
           // Reverted ownerOf (burned id / stale index row): skip.
+          return undefined;
         }
+      };
+      let discovered;
+      try {
+        discovered = await discoverOwnedNftTokens(
+          owner,
+          this.qrlConnection.blockchain.chainId,
+          contractAddress,
+        );
+      } catch (error) {
+        if (error instanceof ExplorerUnavailableError) {
+          return this.recallVerifiedNfts(owner, contractAddress, verify721);
+        }
+        throw error;
       }
+      const tokens: OwnedNftToken[] = [];
+      for (const candidate of discovered) {
+        const verified = await verify721(candidate.tokenId);
+        if (verified) tokens.push(verified);
+      }
+      await this.rememberVerifiedNfts(owner, contractAddress, tokens);
       return { tokens, failed: false };
     } catch (error) {
       return failedOwnedLookup(error);
@@ -1307,6 +1323,56 @@ class QrlStore {
     }
   }
 
+  /**
+   * Writes the ids a listing just verified on chain, so they can be shown
+   * again when a later listing cannot reach the explorer. A storage failure
+   * never breaks the listing.
+   */
+  private async rememberVerifiedNfts(
+    owner: string,
+    contractAddress: string,
+    tokens: OwnedNftToken[],
+  ) {
+    try {
+      await StorageUtil.setNFTKnownTokens(owner, contractAddress, tokens);
+    } catch {
+      // Remembering is a convenience; the listing itself succeeded.
+    }
+  }
+
+  /**
+   * The explorer could not list a collection. Shows the ids remembered
+   * from an earlier verified listing, each checked on chain again; an id
+   * that no longer verifies is left out and forgotten. The result stays
+   * marked as failed so the screen can say the list could not be
+   * refreshed.
+   */
+  private async recallVerifiedNfts(
+    owner: string,
+    contractAddress: string,
+    verify: (tokenId: string) => Promise<OwnedNftToken | undefined>,
+  ): Promise<OwnedNftTokensResult> {
+    const unavailable = {
+      tokens: [],
+      failed: true,
+      explorerUnavailable: true,
+    };
+    try {
+      const known = await StorageUtil.getNFTKnownTokens(owner, contractAddress);
+      const tokens: OwnedNftToken[] = [];
+      for (const candidate of known) {
+        const verified = await verify(candidate.tokenId);
+        if (verified) tokens.push(verified);
+      }
+      if (tokens.length !== known.length) {
+        await this.rememberVerifiedNfts(owner, contractAddress, tokens);
+      }
+      return { ...unavailable, tokens };
+    } catch {
+      return unavailable;
+    }
+  }
+
   private async getOwned1155Tokens(
     contractAddress: string,
     owner: string,
@@ -1317,30 +1383,41 @@ class QrlStore {
         QRC_1155_CONTRACT_ABI,
         contractAddress,
       );
-      const discovered = await discoverOwnedNftTokens(
-        owner,
-        this.qrlConnection.blockchain.chainId,
-        contractAddress,
-      );
-      const tokens: OwnedNftToken[] = [];
-      for (const candidate of discovered) {
+      const verify1155 = async (
+        tokenId: string,
+      ): Promise<OwnedNftToken | undefined> => {
         try {
           const balance = readProviderValue(
-            await contract.methods
-              .balanceOf(owner, BigInt(candidate.tokenId))
-              .call(),
+            await contract.methods.balanceOf(owner, BigInt(tokenId)).call(),
             isUnsignedBigInt,
           );
-          if (balance > 0n) {
-            tokens.push({
-              tokenId: candidate.tokenId,
-              balance: balance.toString(),
-            });
-          }
+          return balance > 0n
+            ? { tokenId, balance: balance.toString() }
+            : undefined;
         } catch {
           // Skip ids the contract rejects.
+          return undefined;
         }
+      };
+      let discovered;
+      try {
+        discovered = await discoverOwnedNftTokens(
+          owner,
+          this.qrlConnection.blockchain.chainId,
+          contractAddress,
+        );
+      } catch (error) {
+        if (error instanceof ExplorerUnavailableError) {
+          return this.recallVerifiedNfts(owner, contractAddress, verify1155);
+        }
+        throw error;
       }
+      const tokens: OwnedNftToken[] = [];
+      for (const candidate of discovered) {
+        const verified = await verify1155(candidate.tokenId);
+        if (verified) tokens.push(verified);
+      }
+      await this.rememberVerifiedNfts(owner, contractAddress, tokens);
       return { tokens, failed: false };
     } catch (error) {
       return failedOwnedLookup(error);
