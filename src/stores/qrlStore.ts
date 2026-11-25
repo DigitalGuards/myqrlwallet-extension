@@ -17,6 +17,12 @@ import {
   NFT_UNITS_OF_GAS,
 } from "@/constants/nftToken";
 import { discoverOwnedNftTokens } from "@/services/assetDiscovery";
+import { ExplorerUnavailableError } from "@/services/explorerUnavailableError";
+import {
+  cleanUntrustedText,
+  MAX_UNTRUSTED_NAME_LENGTH,
+  MAX_UNTRUSTED_SYMBOL_LENGTH,
+} from "@/utilities/untrustedText";
 import type { NFTStandard, OwnedNftToken } from "@/types/nft";
 import { substituteErc1155TokenId } from "@/utilities/ipfsUtil";
 import {
@@ -89,7 +95,21 @@ const isSignedTransaction = (
 export type OwnedNftTokensResult = {
   tokens: OwnedNftToken[];
   failed: boolean;
+  /**
+   * With `failed`: the collection can only be listed through the explorer
+   * (QRC-1155, or QRC-721 without the Enumerable extension) and the
+   * explorer did not answer. The chain itself may be fine.
+   */
+  explorerUnavailable?: boolean;
 };
+
+const failedOwnedLookup = (error: unknown): OwnedNftTokensResult => ({
+  tokens: [],
+  failed: true,
+  ...(error instanceof ExplorerUnavailableError
+    ? { explorerUnavailable: true }
+    : {}),
+});
 
 /** What a probe did and what it found. */
 export type ConnectionProbeResult = {
@@ -1010,13 +1030,15 @@ class QrlStore {
           contractAbi,
           contractAddress,
         );
-        const name = readProviderValue(
-          await contract.methods.name().call(),
-          isString,
+        // A contract chooses its own name and symbol, so both are cleaned
+        // and bounded before they reach the screen or storage.
+        const name = cleanUntrustedText(
+          readProviderValue(await contract.methods.name().call(), isString),
+          MAX_UNTRUSTED_NAME_LENGTH,
         );
-        const symbol = readProviderValue(
-          await contract.methods.symbol().call(),
-          isString,
+        const symbol = cleanUntrustedText(
+          readProviderValue(await contract.methods.symbol().call(), isString),
+          MAX_UNTRUSTED_SYMBOL_LENGTH,
         );
         const decimals = readProviderValue(
           await contract.methods.decimals().call(),
@@ -1092,13 +1114,13 @@ class QrlStore {
         );
 
         if (isErc721) {
-          const name = readProviderValue(
-            await contract.methods.name().call(),
-            isString,
+          const name = cleanUntrustedText(
+            readProviderValue(await contract.methods.name().call(), isString),
+            MAX_UNTRUSTED_NAME_LENGTH,
           );
-          const symbol = readProviderValue(
-            await contract.methods.symbol().call(),
-            isString,
+          const symbol = cleanUntrustedText(
+            readProviderValue(await contract.methods.symbol().call(), isString),
+            MAX_UNTRUSTED_SYMBOL_LENGTH,
           );
           const balance = Number(
             readProviderValue(
@@ -1127,17 +1149,20 @@ class QrlStore {
           let name = "";
           let symbol = "";
           try {
-            name = readProviderValue(
-              await contract.methods.name().call(),
-              isString,
+            name = cleanUntrustedText(
+              readProviderValue(await contract.methods.name().call(), isString),
+              MAX_UNTRUSTED_NAME_LENGTH,
             );
           } catch {
             // Optional in ERC-1155.
           }
           try {
-            symbol = readProviderValue(
-              await contract.methods.symbol().call(),
-              isString,
+            symbol = cleanUntrustedText(
+              readProviderValue(
+                await contract.methods.symbol().call(),
+                isString,
+              ),
+              MAX_UNTRUSTED_SYMBOL_LENGTH,
             );
           } catch {
             // Optional in ERC-1155.
@@ -1250,8 +1275,8 @@ class QrlStore {
         }
       }
       return { tokens, failed: false };
-    } catch {
-      return { tokens: [], failed: true };
+    } catch (error) {
+      return failedOwnedLookup(error);
     }
   }
 
@@ -1317,8 +1342,8 @@ class QrlStore {
         }
       }
       return { tokens, failed: false };
-    } catch {
-      return { tokens: [], failed: true };
+    } catch (error) {
+      return failedOwnedLookup(error);
     }
   }
 

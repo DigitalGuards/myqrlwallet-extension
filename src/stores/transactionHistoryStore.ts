@@ -232,7 +232,9 @@ class TransactionHistoryStore {
         if (requestId !== this.onChainRequestId) return;
         this.onChainTransactions = entries;
         this.onChainTotal = totalCount;
-        this.onChainPage = 1;
+        // A failed first page leaves nothing loaded, so the screen can
+        // tell a retry of page one from a retry of a later page.
+        this.onChainPage = failed ? 0 : 1;
         this.onChainFailed = failed;
       });
     } finally {

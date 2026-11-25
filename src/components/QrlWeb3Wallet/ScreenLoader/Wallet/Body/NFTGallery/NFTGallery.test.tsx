@@ -168,6 +168,25 @@ describe("NFTGallery", () => {
     expect(report).toHaveBeenCalledWith("Failed to load NFT gallery:", error);
   });
 
+  it("says the explorer is needed when only it can list the collection", async () => {
+    const getOwnedNftTokens = vi.fn().mockResolvedValue({
+      tokens: [],
+      failed: true,
+      explorerUnavailable: true,
+    });
+    renderComponent({ qrlStore: { getOwnedNftTokens } });
+
+    expect(
+      await screen.findByText(
+        "This collection can only be listed through the explorer, and the explorer did not answer.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("No NFTs found in this collection for this account."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
   it("ignores a token response after the active account changes", async () => {
     const pending = deferred<{
       tokens: { tokenId: string }[];

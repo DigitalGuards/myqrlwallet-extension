@@ -9,6 +9,7 @@ import { malformed } from "@/test-utils/malformed";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import StorageUtil from "@/utilities/storageUtil";
 import type { AddedBlockchainData } from "@/utilities/approvalGuards";
+import { ExplorerUnavailableError } from "@/services/explorerUnavailableError";
 import QrlStore, { BALANCE_POLL_INTERVAL_MS } from "./qrlStore";
 
 const { responses, call, estimateGas, encodeABI, rpc, discover } = vi.hoisted(
@@ -274,6 +275,30 @@ describe("contract response boundaries", () => {
     expect(await store.getOwnedNftTokens(CONTRACT)).toEqual({
       tokens: [],
       failed: false,
+    });
+  });
+
+  it("reports an explorer that cannot answer instead of an empty collection", async () => {
+    // QRC-721 without the Enumerable extension, and QRC-1155, can only be
+    // listed through the explorer. When it fails the answer is "unknown".
+    responses.set("supportsInterface", "true");
+    discover.mockRejectedValue(new ExplorerUnavailableError());
+    const store = createStore();
+    expect(await store.getOwnedNftTokens(CONTRACT)).toEqual({
+      tokens: [],
+      failed: true,
+      explorerUnavailable: true,
+    });
+    expect(await store.getOwnedNftTokens(CONTRACT, "QRC1155")).toEqual({
+      tokens: [],
+      failed: true,
+      explorerUnavailable: true,
+    });
+    // Any other failure is not the explorer's.
+    discover.mockRejectedValue(new Error("boom"));
+    expect(await store.getOwnedNftTokens(CONTRACT, "QRC1155")).toEqual({
+      tokens: [],
+      failed: true,
     });
   });
 

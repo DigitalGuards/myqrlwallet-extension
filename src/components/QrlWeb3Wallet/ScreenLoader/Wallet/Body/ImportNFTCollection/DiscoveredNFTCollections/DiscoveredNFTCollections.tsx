@@ -35,6 +35,9 @@ const DiscoveredNFTCollections = observer(() => {
   >([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [isAdding, setIsAdding] = useState(false);
+  // Names of picks whose chain read failed on the last add. They stay
+  // listed and unimported; one line names them all.
+  const [failedNames, setFailedNames] = useState<string[]>([]);
   // The explorer response is capped, so a heavily airdropped account sees
   // only part of what it holds. Saying so beats a list that silently ends.
   const [wasTruncated, setWasTruncated] = useState(false);
@@ -42,6 +45,7 @@ const DiscoveredNFTCollections = observer(() => {
   useEffect(() => {
     let cancelled = false;
     setSelected(new Set());
+    setFailedNames([]);
     const loadCollections = async () => {
       if (!accountAddress) return;
       const [discovered, stored] = await Promise.all([
@@ -81,22 +85,62 @@ const DiscoveredNFTCollections = observer(() => {
   };
 
   const addSelected = async () => {
-    if (selected.size === 0) return;
+    if (selected.size === 0 || isAdding) return;
     setIsAdding(true);
+    setFailedNames([]);
     try {
       const picks = pendingCollections.filter((collection) =>
         selected.has(collection.address.toLowerCase()),
       );
-      for (const pick of picks) {
+      // The explorer only decides what the list offers. Name, symbol and
+      // standard that get stored come from the contract itself, and a
+      // contract that does not answer as QRC-721 or QRC-1155 stays out.
+      const reads = await Promise.all(
+        picks.map(async (pick) => ({
+          pick,
+          details: await qrlStore
+            .getNftCollectionDetails(pick.address)
+            .catch((error: unknown) => {
+              console.error(
+                "[DiscoveredNFTCollections] Failed to read collection:",
+                error,
+              );
+              return { collection: undefined, error: "read failed" };
+            }),
+        })),
+      );
+      const added = new Set<string>();
+      const failed: string[] = [];
+      // One write at a time: each write rewrites the whole stored record.
+      for (const { pick, details } of reads) {
+        const { collection, error } = details;
+        const label = pick.name || pick.symbol || pick.address;
+        if (error || !collection) {
+          failed.push(label);
+          continue;
+        }
         await StorageUtil.setNFTCollectionsList(accountAddress, {
           address: pick.address,
-          name: pick.name,
-          symbol: pick.symbol,
-          standard: pick.standard,
+          name: collection.name,
+          symbol: collection.symbol,
+          standard: collection.standard,
           image: "",
         });
+        added.add(pick.address.toLowerCase());
       }
-      await navigate(ROUTES.HOME);
+      if (failed.length === 0) {
+        await navigate(ROUTES.HOME);
+        return;
+      }
+      setPendingCollections((prev) =>
+        prev.filter(
+          (collection) => !added.has(collection.address.toLowerCase()),
+        ),
+      );
+      setSelected(
+        (prev) => new Set([...prev].filter((key) => !added.has(key))),
+      );
+      setFailedNames(failed);
     } finally {
       setIsAdding(false);
     }
@@ -121,6 +165,17 @@ const DiscoveredNFTCollections = observer(() => {
         {wasTruncated && (
           <p className="text-xs text-muted-foreground">
             {t("discovery.truncated", { limit: MAX_DISCOVERED_COLLECTIONS })}
+          </p>
+        )}
+        {failedNames.length > 0 && (
+          <p
+            className="text-sm font-medium text-destructive [overflow-wrap:anywhere]"
+            role="alert"
+          >
+            {t("discovery.collectionAddFailed", {
+              count: failedNames.length,
+              names: failedNames.join(", "),
+            })}
           </p>
         )}
         <ul className="flex max-h-60 flex-col gap-2 overflow-y-auto">

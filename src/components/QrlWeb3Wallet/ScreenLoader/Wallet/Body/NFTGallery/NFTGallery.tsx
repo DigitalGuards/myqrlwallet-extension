@@ -29,6 +29,9 @@ const NFTGallery = observer(() => {
   const [tokens, setTokens] = useState<OwnedNftToken[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  // The failure is the explorer's: this collection can only be listed
+  // through it. Its own line names the explorer as the cause.
+  const [explorerNeeded, setExplorerNeeded] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -46,6 +49,7 @@ const NFTGallery = observer(() => {
       // failure keeps "you own nothing here" from standing in for "the
       // node did not answer".
       setLoadFailed(owned.failed);
+      setExplorerNeeded(owned.failed && owned.explorerUnavailable === true);
       setTokens(owned.tokens);
       setIsLoading(false);
     };
@@ -92,7 +96,13 @@ const NFTGallery = observer(() => {
             ) : loadFailed ? (
               <div className="flex flex-col items-center gap-4 py-8 text-center text-muted-foreground">
                 <Image className="h-12 w-12" />
-                <p className="text-sm">{t("nft.galleryLoadFailed")}</p>
+                <p className="text-sm">
+                  {t(
+                    explorerNeeded
+                      ? "nft.galleryExplorerNeeded"
+                      : "nft.galleryLoadFailed",
+                  )}
+                </p>
                 <Button
                   type="button"
                   variant="outline"
