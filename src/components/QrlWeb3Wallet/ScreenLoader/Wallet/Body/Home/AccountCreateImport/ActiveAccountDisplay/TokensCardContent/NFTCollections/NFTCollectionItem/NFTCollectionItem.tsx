@@ -86,6 +86,8 @@ const NFTCollectionItem = observer(
             details.collection.standard,
           );
         }
+        // The await above let the account change; check again before state.
+        if (isCancelled()) return;
         if (details.collection.balance !== undefined) {
           setOwnedCount(details.collection.balance);
           return;

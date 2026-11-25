@@ -15,6 +15,11 @@ describe("cleanUntrustedText", () => {
     ["an escape character", "A\u001bB", "A B"],
     ["a zero-width space", "A\u200bB", "A B"],
     ["a line break", "A\r\nB", "A B"],
+    ["a tag character", "A\u{e0041}B", "A B"],
+    ["a Mongolian vowel separator", "A\u180eB", "A B"],
+    ["Hangul fillers", "A\u115f\u1160\u3164B", "A B"],
+    ["a variation selector", "A\ufe0eB", "A B"],
+    ["a supplementary variation selector", "A\u{e0100}B", "A B"],
     ["runs of whitespace", "  A   B  ", "A B"],
   ])("replaces %s", (_label, input, expected) => {
     expect(cleanUntrustedText(input, 50)).toBe(expected);

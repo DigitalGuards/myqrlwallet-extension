@@ -648,7 +648,7 @@ describe("explorer text and ids", () => {
   });
 
   it("counts one token id once however it is spelled", async () => {
-    const rows = ["7", "07", "0x7", "7 "].map((tokenID) => ({
+    const rows = ["7", "07", "0x7"].map((tokenID) => ({
       contractAddress,
       tokenID,
       tokenStandard: "ERC-721",
@@ -658,6 +658,17 @@ describe("explorer text and ids", () => {
         ...rows,
         { ...rows[0], tokenID: "-1" },
         { ...rows[0], tokenID: "0x" },
+        // Anything but plain decimal or 0x hex is not a token id.
+        ...[
+          " 7",
+          "7 ",
+          "0b111",
+          "0o7",
+          "+7",
+          "1e3",
+          "9".repeat(79),
+          `0x${"f".repeat(65)}`,
+        ].map((tokenID) => ({ ...rows[0], tokenID })),
       ],
     });
     const [collection] = await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID);

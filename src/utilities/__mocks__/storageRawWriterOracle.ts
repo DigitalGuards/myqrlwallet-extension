@@ -529,6 +529,24 @@ export const cases = {
       );
     },
   },
+  setNFTCollectionStandard: {
+    run: () =>
+      StorageUtil.setNFTCollectionStandard(ACCOUNT, NFT.address, "QRC1155"),
+    edit: (e, f) => {
+      set(
+        e.local,
+        nftPath,
+        f.lists.nfts.map((v) => {
+          if (v !== f.nft) return v;
+          // A record stored without a standard gets the field appended.
+          const { standard, ...rest } = f.nft;
+          return standard === undefined
+            ? { ...rest, standard: "ZRC1155" }
+            : { ...f.nft, standard: "ZRC1155" };
+        }),
+      );
+    },
+  },
   clearFromNFTCollectionsList: {
     run: () => StorageUtil.clearFromNFTCollectionsList(ACCOUNT, NFT.address),
     edit: (e, f) => {
@@ -1186,6 +1204,7 @@ export const writerGroups = {
     "clearFromTokenContractsList",
     "setNFTCollectionsList",
     "setNFTKnownTokens",
+    "setNFTCollectionStandard",
     "clearFromNFTCollectionsList",
   ],
   transactions: [

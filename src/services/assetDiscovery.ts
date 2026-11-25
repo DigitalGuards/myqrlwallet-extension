@@ -4,6 +4,7 @@ import {
 } from "@/configuration/assetDiscoveryConfig";
 import type { NFTStandard } from "@/types/nft";
 import { toCanonicalQrlAddress } from "@/utilities/addressUtil";
+import { toCanonicalTokenId } from "@/utilities/nftTokenId";
 import {
   cleanUntrustedText,
   MAX_UNTRUSTED_NAME_LENGTH,
@@ -224,18 +225,7 @@ async function fetchExplorerNfts(
   }
 }
 
-// The explorer may spell one token id several ways ("1", "01", "0x1").
-// The wallet's identity for a token is the decimal form of an integer in
-// the uint256 range; anything else is not a token id.
-const toTokenId = (raw: string): string | null => {
-  if (raw.trim() === "") return null;
-  try {
-    const id = BigInt(raw);
-    return id >= 0n && id < 1n << 256n ? id.toString() : null;
-  } catch {
-    return null;
-  }
-};
+const toTokenId = toCanonicalTokenId;
 
 /**
  * Discovers NFT collections (QRC-721 and QRC-1155) holding at least one

@@ -205,7 +205,7 @@ describe("NFTGallery", () => {
     expect(getOwnedNftTokens).toHaveBeenCalledTimes(2);
   });
 
-  it("lists and offers transfers on the chain's standard, not the stored one", async () => {
+  it("lists and offers transfers on the standard the contract reports", async () => {
     const getOwnedNftTokens = vi
       .fn()
       .mockResolvedValue({ tokens: [{ tokenId: "7" }], failed: false });

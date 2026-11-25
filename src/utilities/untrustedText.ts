@@ -6,14 +6,14 @@
  * of a 360px panel or into storage.
  */
 
-// C0 and C1 controls, soft hyphen, zero-width and bidirectional formatting
-// characters, line and paragraph separators, BOM and the interlinear
-// annotation marks. Each becomes a plain space; runs of whitespace collapse.
-const HIDDEN_CHARACTERS = new RegExp(
-  // eslint-disable-next-line no-control-regex
-  "[\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u061c\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\ufeff\\ufff9-\\ufffb]",
-  "g",
-);
+// Control (Cc) and format (Cf) characters: C0 and C1 controls, soft hyphen,
+// zero-width and bidirectional marks, the BOM, the tag characters (U+E0000
+// range). Plus what looks blank but is a letter or mark: the Hangul fillers
+// (U+115F, U+1160, U+3164, U+FFA0), the Mongolian vowel separator (U+180E,
+// Cf in current Unicode, a space in older tables) and the variation
+// selectors. Each becomes a plain space; runs of whitespace collapse.
+const HIDDEN_CHARACTERS =
+  /[\p{Cc}\p{Cf}\u115f\u1160\u3164\uffa0\u180e\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/gu;
 
 export const MAX_UNTRUSTED_NAME_LENGTH = 50;
 export const MAX_UNTRUSTED_SYMBOL_LENGTH = 20;
