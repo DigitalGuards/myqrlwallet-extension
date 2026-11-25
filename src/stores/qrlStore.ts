@@ -273,6 +273,7 @@ class QrlStore {
       getNftCollectionDetails: action.bound,
       getOwnedNftTokens: action.bound,
       verifyCollectionStandard: action.bound,
+      correctStoredCollectionStandard: action.bound,
       getErc1155TokenBalance: action.bound,
       getNftTokenUri: action.bound,
       signNftTransfer: action.bound,
@@ -1209,6 +1210,28 @@ class QrlStore {
    * claimed) is corrected silently; a read that fails returns an error so
    * the caller offers nothing built on the stored value.
    */
+  /**
+   * Rewrites the stored standard of a collection to the one the contract
+   * reported. Never throws: a failed write is retried at the next load.
+   */
+  async correctStoredCollectionStandard(
+    contractAddress: string,
+    standard: NFTStandard,
+  ): Promise<void> {
+    try {
+      const owner = this.activeAccount.accountAddress;
+      const entry = (await StorageUtil.getNFTCollectionsList(owner)).find(
+        (item) => item.address === contractAddress,
+      );
+      if (!entry) return;
+      const stored = nftCollectionView(entry);
+      if (stored.standard === standard) return;
+      await StorageUtil.setNFTCollectionsList(owner, { ...stored, standard });
+    } catch {
+      // The correction is retried on the next load.
+    }
+  }
+
   async verifyCollectionStandard(
     contractAddress: string,
     storedStandard: NFTStandard,
@@ -1219,22 +1242,10 @@ class QrlStore {
       return { error: error || "Could not read the collection" };
     }
     if (collection.standard !== storedStandard) {
-      try {
-        const owner = this.activeAccount.accountAddress;
-        const entry = (await StorageUtil.getNFTCollectionsList(owner)).find(
-          (item) => item.address === contractAddress,
-        );
-        if (entry) {
-          const stored = nftCollectionView(entry);
-          await StorageUtil.setNFTCollectionsList(owner, {
-            ...stored,
-            standard: collection.standard,
-          });
-        }
-      } catch {
-        // The correction is retried on the next load; this one still uses
-        // the chain's answer.
-      }
+      await this.correctStoredCollectionStandard(
+        contractAddress,
+        collection.standard,
+      );
     }
     return { standard: collection.standard };
   }
