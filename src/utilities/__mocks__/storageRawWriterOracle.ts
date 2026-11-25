@@ -1218,7 +1218,8 @@ const draftAsRead = (draft: unknown): unknown => {
     // boolean, the current one otherwise.
     tokenDetails: {
       ...rest,
-      isQrc20Token: typeof isZrc20Token === "boolean" ? isZrc20Token : isQrc20Token,
+      isQrc20Token:
+        typeof isZrc20Token === "boolean" ? isZrc20Token : isQrc20Token,
     },
   };
 };

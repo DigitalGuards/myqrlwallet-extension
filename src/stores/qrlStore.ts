@@ -1280,7 +1280,11 @@ class QrlStore {
         );
       } catch (error) {
         if (error instanceof ExplorerUnavailableError) {
-          return await this.recallVerifiedNfts(owner, contractAddress, verify721);
+          return await this.recallVerifiedNfts(
+            owner,
+            contractAddress,
+            verify721,
+          );
         }
         throw error;
       }
@@ -1408,7 +1412,11 @@ class QrlStore {
         );
       } catch (error) {
         if (error instanceof ExplorerUnavailableError) {
-          return await this.recallVerifiedNfts(owner, contractAddress, verify1155);
+          return await this.recallVerifiedNfts(
+            owner,
+            contractAddress,
+            verify1155,
+          );
         }
         throw error;
       }
