@@ -9,6 +9,9 @@
 - Refuse add-network and typed-data signing requests the approval prompt cannot read with an invalid-params error before any prompt opens, and parse the typed-data payload before the seed is decrypted.
 - Read the call data of a dApp transaction that names it `input` (as contract calls made with `@theqrl/web3` do), so such a call is shown and signed as the contract call it is; a request whose `data` and `input` differ is refused with an invalid-params error before any prompt opens.
 - Sign a dApp transaction that names no type as type 0x2 with the wallet's own fee values, and refuse another transaction type with an invalid-params error before any prompt opens.
+- Stop reading an unreachable explorer as an empty collection: a QRC-1155 or non-enumerable QRC-721 collection that only the explorer can list now says so with a Retry, and every explorer request gives up after eight seconds.
+- Read name, symbol and standard of an explorer-suggested NFT collection from its contract before it is stored, and keep a contract that is not an NFT out of the wallet.
+- Clean and cap text from explorers and contracts, count one token id once however it is spelled, and bound the rows read from one explorer response; explorer history rows need a real transaction hash and keep only QRL addresses as parties. The explorer history warning gets a Retry.
 
 ### Changed
 

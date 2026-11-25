@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { toChecksumAddress } from "@theqrl/wallet.js";
+import { ExplorerUnavailableError } from "./explorerUnavailableError";
+import { EXPLORER_TIMEOUT_MS } from "@/configuration/assetDiscoveryConfig";
+import { MAX_UNTRUSTED_NAME_LENGTH } from "@/utilities/untrustedText";
 import {
   discoverNftCollections,
   discoverOwnedNftTokens,
   discoverTokens,
   MAX_DISCOVERED_COLLECTIONS,
   MAX_DISCOVERED_TOKENS,
+  MAX_EXPLORER_ROWS,
 } from "./assetDiscovery";
 
 const TESTNET_CHAIN_ID = "0x301825";
@@ -56,7 +60,10 @@ describe("discoverTokens", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       `https://shorscan.com/api/address/${HOLDER}/tokens?standard=ERC-20`,
+      expect.anything(),
     );
+    const init: unknown = fetchMock.mock.calls[0][1];
+    expect(init).toHaveProperty("signal", expect.any(AbortSignal));
     expect(tokens).toEqual([
       {
         address: toChecksumAddress(`Q${"a".repeat(128)}`),
@@ -149,7 +156,15 @@ describe("discoverTokens", () => {
     "skips malformed token rows and keeps valid row order: %j",
     async (row) => {
       mockFetchJson({
-        tokens: [tokenRow, row, { ...tokenRow, decimals: 255 }],
+        tokens: [
+          tokenRow,
+          row,
+          {
+            ...tokenRow,
+            contractAddress: `Q${"b".repeat(128)}`,
+            decimals: 255,
+          },
+        ],
       });
 
       expect(await discoverTokens(HOLDER, TESTNET_CHAIN_ID)).toEqual([
@@ -160,7 +175,7 @@ describe("discoverTokens", () => {
           decimals: 18,
         },
         {
-          address: toChecksumAddress(tokenRow.contractAddress),
+          address: toChecksumAddress(`Q${"b".repeat(128)}`),
           name: "Alpha",
           symbol: "ALP",
           decimals: 255,
@@ -233,7 +248,10 @@ describe("discoverNftCollections", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       `https://shorscan.com/api/address/${HOLDER}/nfts`,
+      expect.anything(),
     );
+    const init: unknown = fetchMock.mock.calls[0][1];
+    expect(init).toHaveProperty("signal", expect.any(AbortSignal));
     expect(collections).toEqual([
       {
         address: toChecksumAddress(`Q${"d".repeat(128)}`),
@@ -344,9 +362,10 @@ describe("NFT explorer validation", () => {
       expect(await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID)).toEqual(
         [],
       );
-      expect(
-        await discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
-      ).toEqual([]);
+      // Owned-id discovery must not read a bad answer as "owns nothing".
+      await expect(
+        discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
+      ).rejects.toBeInstanceOf(ExplorerUnavailableError);
     },
   );
 
@@ -361,9 +380,9 @@ describe("NFT explorer validation", () => {
 
     expect(await discoverTokens(HOLDER, TESTNET_CHAIN_ID)).toEqual([]);
     expect(await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID)).toEqual([]);
-    expect(
-      await discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
-    ).toEqual([]);
+    await expect(
+      discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
+    ).rejects.toBeInstanceOf(ExplorerUnavailableError);
   });
 });
 
@@ -422,15 +441,15 @@ describe("discoverOwnedNftTokens", () => {
     ]);
   });
 
-  it("returns an empty list on chains without an explorer", async () => {
+  it("reports that nothing can be listed on chains without an explorer", async () => {
     const fetchMock = mockFetchJson(NFTS);
-    expect(
-      await discoverOwnedNftTokens(
+    await expect(
+      discoverOwnedNftTokens(
         HOLDER,
         "0x1",
         toChecksumAddress(`Q${"d".repeat(128)}`),
       ),
-    ).toEqual([]);
+    ).rejects.toBeInstanceOf(ExplorerUnavailableError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -527,5 +546,147 @@ describe("discovery caps", () => {
 
     expect(collections).toHaveLength(1);
     expect(collections[0].tokenCount).toBe(2);
+  });
+});
+
+describe("an explorer that cannot answer", () => {
+  const contractAddress = toChecksumAddress(`Q${"d".repeat(128)}`);
+
+  it("is told apart from an account that owns nothing", async () => {
+    // 404: the explorer knows no NFTs for the address. That is an answer.
+    mockFetchJson({}, false, 404);
+    expect(
+      await discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
+    ).toEqual([]);
+
+    // Any other status, or a dropped connection, is no answer.
+    mockFetchJson({ error: "boom" }, false, 500);
+    await expect(
+      discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
+    ).rejects.toBeInstanceOf(ExplorerUnavailableError);
+    mockFetchJson({}, false, 429);
+    await expect(
+      discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
+    ).rejects.toBeInstanceOf(ExplorerUnavailableError);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("refused")));
+    await expect(
+      discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
+    ).rejects.toBeInstanceOf(ExplorerUnavailableError);
+  });
+
+  it("is cut off by a time limit on every request", async () => {
+    const timeout = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(AbortSignal.abort());
+    const fetchMock = vi.fn((_url: string, init: RequestInit) =>
+      init.signal?.aborted
+        ? Promise.reject(new DOMException("aborted", "TimeoutError"))
+        : new Promise<Response>(() => {}),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await discoverTokens(HOLDER, TESTNET_CHAIN_ID)).toEqual([]);
+    expect(await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID)).toEqual([]);
+    await expect(
+      discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
+    ).rejects.toBeInstanceOf(ExplorerUnavailableError);
+    expect(timeout).toHaveBeenCalledWith(EXPLORER_TIMEOUT_MS);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    timeout.mockRestore();
+  });
+});
+
+describe("explorer text and ids", () => {
+  const contractAddress = toChecksumAddress(`Q${"d".repeat(128)}`);
+
+  it("bounds and cleans names and symbols in both pickers", async () => {
+    mockFetchJson({
+      tokens: [
+        {
+          contractAddress,
+          name: "N".repeat(500),
+          symbol: "S\u202EY\u0000M\u001b",
+          decimals: 18,
+        },
+      ],
+    });
+    const [token] = await discoverTokens(HOLDER, TESTNET_CHAIN_ID);
+    expect(token.name).toHaveLength(MAX_UNTRUSTED_NAME_LENGTH);
+    expect(token.name.endsWith("\u2026")).toBe(true);
+    expect(token.symbol).toBe("S Y M");
+
+    mockFetchJson({
+      nfts: [
+        {
+          contractAddress,
+          tokenID: "1",
+          tokenStandard: "ERC-721",
+          collectionName: "Fake\u202Ename".repeat(100),
+          collectionSymbol: "\u0007".repeat(5),
+        },
+      ],
+    });
+    const [collection] = await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID);
+    expect(collection.name).toHaveLength(MAX_UNTRUSTED_NAME_LENGTH);
+    expect(collection.name).not.toMatch(/\u202e/);
+    expect(collection.symbol).toBe("");
+  });
+
+  it("lists a token contract once however often the explorer repeats it", async () => {
+    mockFetchJson({
+      tokens: [
+        { contractAddress, name: "A", symbol: "A", decimals: 18 },
+        {
+          contractAddress: `0x${"d".repeat(128)}`,
+          name: "B",
+          symbol: "B",
+          decimals: 6,
+        },
+      ],
+    });
+    expect(await discoverTokens(HOLDER, TESTNET_CHAIN_ID)).toHaveLength(1);
+  });
+
+  it("counts one token id once however it is spelled", async () => {
+    const rows = ["7", "07", "0x7"].map((tokenID) => ({
+      contractAddress,
+      tokenID,
+      tokenStandard: "ERC-721",
+    }));
+    mockFetchJson({
+      nfts: [
+        ...rows,
+        { ...rows[0], tokenID: "-1" },
+        { ...rows[0], tokenID: "0x" },
+        // Anything but plain decimal or 0x hex is not a token id.
+        ...[
+          " 7",
+          "7 ",
+          "0b111",
+          "0o7",
+          "+7",
+          "1e3",
+          "9".repeat(79),
+          `0x${"f".repeat(65)}`,
+        ].map((tokenID) => ({ ...rows[0], tokenID })),
+      ],
+    });
+    const [collection] = await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID);
+    expect(collection.tokenCount).toBe(1);
+    expect(
+      await discoverOwnedNftTokens(HOLDER, TESTNET_CHAIN_ID, contractAddress),
+    ).toEqual([{ tokenId: "7", standard: "QRC721", balance: undefined }]);
+  });
+
+  it("reads at most MAX_EXPLORER_ROWS rows of one response", async () => {
+    mockFetchJson({
+      nfts: Array.from({ length: MAX_EXPLORER_ROWS + 500 }, (_unused, i) => ({
+        contractAddress,
+        tokenID: String(i),
+        tokenStandard: "ERC-721",
+      })),
+    });
+    const [collection] = await discoverNftCollections(HOLDER, TESTNET_CHAIN_ID);
+    expect(collection.tokenCount).toBe(MAX_EXPLORER_ROWS);
   });
 });

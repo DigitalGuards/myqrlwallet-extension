@@ -24,3 +24,6 @@ export const getExplorerApiBase = (chainId: unknown): string | undefined =>
   typeof chainId === "string"
     ? EXPLORER_API_BASES.get(chainId.toLowerCase())
     : undefined;
+
+/** How long one explorer request may take, headers and body together. */
+export const EXPLORER_TIMEOUT_MS = 8000;

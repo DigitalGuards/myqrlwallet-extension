@@ -17,6 +17,12 @@ import {
   NFT_UNITS_OF_GAS,
 } from "@/constants/nftToken";
 import { discoverOwnedNftTokens } from "@/services/assetDiscovery";
+import { ExplorerUnavailableError } from "@/services/explorerUnavailableError";
+import {
+  cleanUntrustedText,
+  MAX_UNTRUSTED_NAME_LENGTH,
+  MAX_UNTRUSTED_SYMBOL_LENGTH,
+} from "@/utilities/untrustedText";
 import type { NFTStandard, OwnedNftToken } from "@/types/nft";
 import { substituteErc1155TokenId } from "@/utilities/ipfsUtil";
 import {
@@ -89,7 +95,36 @@ const isSignedTransaction = (
 export type OwnedNftTokensResult = {
   tokens: OwnedNftToken[];
   failed: boolean;
+  /**
+   * With `failed`: the collection can only be listed through the explorer
+   * (QRC-1155, or QRC-721 without the Enumerable extension) and the
+   * explorer did not answer. The chain itself may be fine.
+   */
+  explorerUnavailable?: boolean;
 };
+
+/** A call the contract rejected, as opposed to a call that did not get through. */
+const isContractRevert = (error: unknown): boolean =>
+  isRecord(error) &&
+  (error.code === 310 ||
+    error.name === "ContractExecutionError" ||
+    (typeof error.message === "string" && /revert/i.test(error.message)));
+
+/** What an on-chain ownership check found for one token id. */
+type NftCheck =
+  | { kind: "owned"; token: OwnedNftToken }
+  | { kind: "gone" }
+  | { kind: "error" };
+
+const MAX_REMEMBERED_NFTS = 50;
+
+const failedOwnedLookup = (error: unknown): OwnedNftTokensResult => ({
+  tokens: [],
+  failed: true,
+  ...(error instanceof ExplorerUnavailableError
+    ? { explorerUnavailable: true }
+    : {}),
+});
 
 /** What a probe did and what it found. */
 export type ConnectionProbeResult = {
@@ -251,6 +286,8 @@ class QrlStore {
       sendRawTransaction: action.bound,
       getNftCollectionDetails: action.bound,
       getOwnedNftTokens: action.bound,
+      verifyCollectionStandard: action.bound,
+      correctStoredCollectionStandard: action.bound,
       getErc1155TokenBalance: action.bound,
       getNftTokenUri: action.bound,
       signNftTransfer: action.bound,
@@ -1010,13 +1047,15 @@ class QrlStore {
           contractAbi,
           contractAddress,
         );
-        const name = readProviderValue(
-          await contract.methods.name().call(),
-          isString,
+        // A contract chooses its own name and symbol, so both are cleaned
+        // and bounded before they reach the screen or storage.
+        const name = cleanUntrustedText(
+          readProviderValue(await contract.methods.name().call(), isString),
+          MAX_UNTRUSTED_NAME_LENGTH,
         );
-        const symbol = readProviderValue(
-          await contract.methods.symbol().call(),
-          isString,
+        const symbol = cleanUntrustedText(
+          readProviderValue(await contract.methods.symbol().call(), isString),
+          MAX_UNTRUSTED_SYMBOL_LENGTH,
         );
         const decimals = readProviderValue(
           await contract.methods.decimals().call(),
@@ -1092,13 +1131,13 @@ class QrlStore {
         );
 
         if (isErc721) {
-          const name = readProviderValue(
-            await contract.methods.name().call(),
-            isString,
+          const name = cleanUntrustedText(
+            readProviderValue(await contract.methods.name().call(), isString),
+            MAX_UNTRUSTED_NAME_LENGTH,
           );
-          const symbol = readProviderValue(
-            await contract.methods.symbol().call(),
-            isString,
+          const symbol = cleanUntrustedText(
+            readProviderValue(await contract.methods.symbol().call(), isString),
+            MAX_UNTRUSTED_SYMBOL_LENGTH,
           );
           const balance = Number(
             readProviderValue(
@@ -1127,17 +1166,20 @@ class QrlStore {
           let name = "";
           let symbol = "";
           try {
-            name = readProviderValue(
-              await contract.methods.name().call(),
-              isString,
+            name = cleanUntrustedText(
+              readProviderValue(await contract.methods.name().call(), isString),
+              MAX_UNTRUSTED_NAME_LENGTH,
             );
           } catch {
             // Optional in ERC-1155.
           }
           try {
-            symbol = readProviderValue(
-              await contract.methods.symbol().call(),
-              isString,
+            symbol = cleanUntrustedText(
+              readProviderValue(
+                await contract.methods.symbol().call(),
+                isString,
+              ),
+              MAX_UNTRUSTED_SYMBOL_LENGTH,
             );
           } catch {
             // Optional in ERC-1155.
@@ -1162,6 +1204,79 @@ class QrlStore {
     }
 
     return result;
+  }
+
+  /**
+   * Rewrites the stored standard of a collection to the one the contract
+   * reported. Only that field changes, in place. Never throws: a failed
+   * write is retried at the next load.
+   */
+  async correctStoredCollectionStandard(
+    contractAddress: string,
+    standard: NFTStandard,
+  ): Promise<void> {
+    try {
+      await StorageUtil.setNFTCollectionStandard(
+        this.activeAccount.accountAddress,
+        contractAddress,
+        standard,
+      );
+    } catch {
+      // The correction is retried on the next load.
+    }
+  }
+
+  /**
+   * The standard of a stored collection as the contract itself reports it.
+   * Only the two ERC-165 probes decide it; name, symbol and balance are not
+   * needed, so a collection without metadata is still listed. A stored value
+   * that differs from the contract's answer (an earlier build stored what
+   * the explorer claimed) is corrected silently.
+   *
+   * A contract with no ERC-165 (the probe reverts) or one that answers
+   * neither interface keeps the stored standard, as before this check
+   * existed: it was imported earlier and stays usable. New picks are held to
+   * the stricter getNftCollectionDetails, which refuses such a contract. Any
+   * other failure (the node did not answer) returns an error so nothing is
+   * offered on a value that could not be confirmed.
+   */
+  async verifyCollectionStandard(
+    contractAddress: string,
+    storedStandard: NFTStandard,
+  ): Promise<{ standard?: NFTStandard; error?: string }> {
+    if (!this.qrlInstance) return { error: "No connection to the network" };
+    try {
+      const contract = new this.qrlInstance.Contract(
+        QRC_721_CONTRACT_ABI,
+        contractAddress,
+      );
+      let standard: NFTStandard | undefined;
+      if (
+        readProviderValue(
+          await contract.methods.supportsInterface(ERC_721_INTERFACE_ID).call(),
+          isBoolean,
+        )
+      ) {
+        standard = "QRC721";
+      } else if (
+        readProviderValue(
+          await contract.methods
+            .supportsInterface(ERC_1155_INTERFACE_ID)
+            .call(),
+          isBoolean,
+        )
+      ) {
+        standard = "QRC1155";
+      }
+      if (!standard) return { standard: storedStandard };
+      if (standard !== storedStandard) {
+        await this.correctStoredCollectionStandard(contractAddress, standard);
+      }
+      return { standard };
+    } catch (error) {
+      if (isContractRevert(error)) return { standard: storedStandard };
+      return { error: "Could not read the collection" };
+    }
   }
 
   /**
@@ -1230,28 +1345,24 @@ class QrlStore {
 
       // Non-enumerable: ask the explorer which ids this account holds,
       // then confirm each against the chain.
-      const discovered = await discoverOwnedNftTokens(
-        owner,
-        this.qrlConnection.blockchain.chainId,
-        contractAddress,
-      );
-      const tokens: OwnedNftToken[] = [];
-      for (const candidate of discovered) {
+      const check721 = async (tokenId: string): Promise<NftCheck> => {
         try {
           const currentOwner = readProviderValue(
-            await contract.methods.ownerOf(BigInt(candidate.tokenId)).call(),
+            await contract.methods.ownerOf(BigInt(tokenId)).call(),
             isString,
           );
-          if (currentOwner.toLowerCase() === owner.toLowerCase()) {
-            tokens.push({ tokenId: candidate.tokenId });
-          }
-        } catch {
-          // Reverted ownerOf (burned id / stale index row): skip.
+          return currentOwner.toLowerCase() === owner.toLowerCase()
+            ? { kind: "owned", token: { tokenId } }
+            : { kind: "gone" };
+        } catch (error) {
+          // A reverted ownerOf is a burned id or a stale index row. Any
+          // other failure says nothing about ownership.
+          return isContractRevert(error) ? { kind: "gone" } : { kind: "error" };
         }
-      }
-      return { tokens, failed: false };
-    } catch {
-      return { tokens: [], failed: true };
+      };
+      return await this.listCheckedNfts(owner, contractAddress, check721);
+    } catch (error) {
+      return failedOwnedLookup(error);
     }
   }
 
@@ -1282,6 +1393,66 @@ class QrlStore {
     }
   }
 
+  /**
+   * Lists a collection the chain cannot enumerate: the explorer's candidates
+   * and the ids remembered from earlier listings are each checked on chain.
+   * An id is shown when the chain says the account holds it. It is
+   * forgotten only when the chain says it does not (a revert or a zero
+   * balance). A check that errors shows nothing for that id and keeps it
+   * remembered, so a short node failure never costs the account its list.
+   * When the explorer cannot answer, the remembered ids alone are checked
+   * and the result is marked as failed so the screen can say the list could
+   * not be refreshed.
+   */
+  private async listCheckedNfts(
+    owner: string,
+    contractAddress: string,
+    check: (tokenId: string) => Promise<NftCheck>,
+  ): Promise<OwnedNftTokensResult> {
+    let known: OwnedNftToken[] = [];
+    try {
+      known = await StorageUtil.getNFTKnownTokens(owner, contractAddress);
+    } catch {
+      // Remembered ids are a convenience.
+    }
+    let discovered: { tokenId: string }[] = [];
+    let explorerFailed = false;
+    try {
+      discovered = await discoverOwnedNftTokens(
+        owner,
+        this.qrlConnection.blockchain.chainId,
+        contractAddress,
+      );
+    } catch (error) {
+      if (!(error instanceof ExplorerUnavailableError)) throw error;
+      explorerFailed = true;
+    }
+
+    const ids = [
+      ...new Set([...discovered, ...known].map(({ tokenId }) => tokenId)),
+    ].slice(0, 2 * MAX_REMEMBERED_NFTS);
+    const owned: OwnedNftToken[] = [];
+    const keep: OwnedNftToken[] = [];
+    for (const tokenId of ids) {
+      const result = await check(tokenId);
+      if (result.kind === "owned") {
+        owned.push(result.token);
+        keep.push(result.token);
+      } else if (result.kind === "error") {
+        const remembered = known.find((entry) => entry.tokenId === tokenId);
+        if (remembered) keep.push(remembered);
+      }
+    }
+    try {
+      await StorageUtil.setNFTKnownTokens(owner, contractAddress, keep);
+    } catch {
+      // Remembering is a convenience; the listing itself succeeded.
+    }
+    return explorerFailed
+      ? { tokens: owned, failed: true, explorerUnavailable: true }
+      : { tokens: owned, failed: false };
+  }
+
   private async getOwned1155Tokens(
     contractAddress: string,
     owner: string,
@@ -1292,33 +1463,25 @@ class QrlStore {
         QRC_1155_CONTRACT_ABI,
         contractAddress,
       );
-      const discovered = await discoverOwnedNftTokens(
-        owner,
-        this.qrlConnection.blockchain.chainId,
-        contractAddress,
-      );
-      const tokens: OwnedNftToken[] = [];
-      for (const candidate of discovered) {
+      const check1155 = async (tokenId: string): Promise<NftCheck> => {
         try {
           const balance = readProviderValue(
-            await contract.methods
-              .balanceOf(owner, BigInt(candidate.tokenId))
-              .call(),
+            await contract.methods.balanceOf(owner, BigInt(tokenId)).call(),
             isUnsignedBigInt,
           );
-          if (balance > 0n) {
-            tokens.push({
-              tokenId: candidate.tokenId,
-              balance: balance.toString(),
-            });
-          }
-        } catch {
-          // Skip ids the contract rejects.
+          return balance > 0n
+            ? {
+                kind: "owned",
+                token: { tokenId, balance: balance.toString() },
+              }
+            : { kind: "gone" };
+        } catch (error) {
+          return isContractRevert(error) ? { kind: "gone" } : { kind: "error" };
         }
-      }
-      return { tokens, failed: false };
-    } catch {
-      return { tokens: [], failed: true };
+      };
+      return await this.listCheckedNfts(owner, contractAddress, check1155);
+    } catch (error) {
+      return failedOwnedLookup(error);
     }
   }
 

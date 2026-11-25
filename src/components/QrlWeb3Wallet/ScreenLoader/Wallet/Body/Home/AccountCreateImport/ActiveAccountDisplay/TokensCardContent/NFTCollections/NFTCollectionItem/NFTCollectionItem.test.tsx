@@ -208,6 +208,49 @@ describe("NFTCollectionItem", () => {
     expect(triggerReRender).not.toHaveBeenCalled();
   });
 
+  it("corrects a stored standard that the contract contradicts, and only then", async () => {
+    const correct = vi.fn().mockResolvedValue(undefined);
+    const details = {
+      collection: {
+        name: "Test Collection",
+        symbol: "TST",
+        standard: "QRC721" as const,
+        balance: 3,
+      },
+      error: "",
+    };
+    const view = (storedStandard: "QRC721" | "QRC1155") => (
+      <StoreProvider
+        value={mockedStore({
+          qrlStore: {
+            getNftCollectionDetails: () => Promise.resolve(details),
+            correctStoredCollectionStandard: correct,
+          },
+        })}
+      >
+        <MemoryRouter>
+          <NFTCollectionItem
+            contractAddress={contractAddress}
+            storedStandard={storedStandard}
+          />
+        </MemoryRouter>
+      </StoreProvider>
+    );
+
+    const matching = render(view("QRC721"));
+    await screen.findByText("Test Collection");
+    expect(correct).not.toHaveBeenCalled();
+    matching.unmount();
+
+    render(view("QRC1155"));
+    await waitFor(() => {
+      expect(correct).toHaveBeenCalledExactlyOnceWith(
+        contractAddress,
+        "QRC721",
+      );
+    });
+  });
+
   it("reports an unexpected collection details rejection", async () => {
     const error = new Error("Collection lookup failed");
     const report = vi.spyOn(console, "error").mockImplementation(() => {});

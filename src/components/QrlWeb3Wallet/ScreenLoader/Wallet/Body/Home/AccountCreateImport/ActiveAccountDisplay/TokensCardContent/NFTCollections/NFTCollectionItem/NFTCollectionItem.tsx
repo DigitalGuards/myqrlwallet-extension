@@ -78,6 +78,16 @@ const NFTCollectionItem = observer(
           return;
         }
         setCollection(details.collection);
+        // An earlier build stored what the explorer claimed. The contract
+        // has just answered, so the stored value is corrected silently.
+        if (details.collection.standard !== storedStandard) {
+          await qrlStore.correctStoredCollectionStandard(
+            contractAddress,
+            details.collection.standard,
+          );
+        }
+        // The await above let the account change; check again before state.
+        if (isCancelled()) return;
         if (details.collection.balance !== undefined) {
           setOwnedCount(details.collection.balance);
           return;

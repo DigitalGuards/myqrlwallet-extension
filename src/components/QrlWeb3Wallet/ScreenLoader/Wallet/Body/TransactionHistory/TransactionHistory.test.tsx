@@ -208,6 +208,36 @@ describe("TransactionHistory", () => {
     ).toBeInTheDocument();
   });
 
+  it("retries the first page of explorer history from the warning line", async () => {
+    const loadOnChainHistory = vi.fn().mockResolvedValue(undefined);
+    renderComponent(
+      mockedStore({
+        transactionHistoryStore: {
+          onChainFailed: true,
+          onChainPage: 0,
+          loadOnChainHistory,
+        },
+      }),
+    );
+    await waitFor(() => {
+      expect(loadOnChainHistory).toHaveBeenCalledTimes(1);
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(loadOnChainHistory).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves a failed later page to Load more", () => {
+    renderComponent(
+      mockedStore({
+        transactionHistoryStore: { onChainFailed: true, onChainPage: 2 },
+      }),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Retry" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows no explorer warning when the explorer answered", () => {
     renderComponent();
 

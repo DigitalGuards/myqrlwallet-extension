@@ -1,7 +1,7 @@
 import { Button } from "@/components/UI/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/UI/Card";
 import { useStore } from "@/stores/store";
-import type { OwnedNftToken } from "@/types/nft";
+import type { NFTStandard, OwnedNftToken } from "@/types/nft";
 import { isNFTGalleryState } from "@/utilities/nftGuards";
 import { Image } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -24,15 +24,23 @@ const NFTGallery = observer(() => {
   const validRoute = routeState !== undefined;
   const contractAddress = routeState?.contractAddress ?? "";
   const collectionName = routeState?.collectionName ?? "";
-  const standard = routeState?.standard ?? "QRC721";
+  const routeStandard = routeState?.standard ?? "QRC721";
+  // What the contract says it is, which can differ from what an earlier
+  // build stored. Everything below (listing, tiles, transfers) uses it.
+  const [chainStandard, setChainStandard] = useState<NFTStandard>();
+  const standard = chainStandard ?? routeStandard;
 
   const [tokens, setTokens] = useState<OwnedNftToken[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  // The failure is the explorer's: this collection can only be listed
+  // through it. Its own line names the explorer as the cause.
+  const [explorerNeeded, setExplorerNeeded] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    const isCancelled = () => cancelled;
     const loadTokens = async () => {
       setIsLoading(true);
       if (!validRoute) {
@@ -40,18 +48,37 @@ const NFTGallery = observer(() => {
         setIsLoading(false);
         return;
       }
-      const owned = await qrlStore.getOwnedNftTokens(contractAddress, standard);
-      if (cancelled) return;
+      const verified = await qrlStore.verifyCollectionStandard(
+        contractAddress,
+        routeStandard,
+      );
+      if (isCancelled()) return;
+      if (verified.error || !verified.standard) {
+        // Nothing is listed or offered for transfer on the stored standard
+        // when the contract cannot confirm it.
+        setLoadFailed(true);
+        setExplorerNeeded(false);
+        setTokens([]);
+        setIsLoading(false);
+        return;
+      }
+      setChainStandard(verified.standard);
+      const owned = await qrlStore.getOwnedNftTokens(
+        contractAddress,
+        verified.standard,
+      );
+      if (isCancelled()) return;
       // An unreadable chain is not an empty collection. Reporting the
       // failure keeps "you own nothing here" from standing in for "the
       // node did not answer".
       setLoadFailed(owned.failed);
+      setExplorerNeeded(owned.failed && owned.explorerUnavailable === true);
       setTokens(owned.tokens);
       setIsLoading(false);
     };
     loadTokens().catch((error: unknown) => {
       console.error("Failed to load NFT gallery:", error);
-      if (cancelled) return;
+      if (isCancelled()) return;
       setLoadFailed(true);
       setIsLoading(false);
     });
@@ -60,13 +87,17 @@ const NFTGallery = observer(() => {
     };
   }, [
     contractAddress,
-    standard,
+    routeStandard,
     accountAddress,
     blockchain,
     reloadKey,
     validRoute,
     qrlStore,
   ]);
+
+  // The explorer could not refresh the list, but ids remembered from an
+  // earlier listing still verify on chain: show them with a calm notice.
+  const showRemembered = loadFailed && explorerNeeded && tokens.length > 0;
 
   return (
     <>
@@ -89,10 +120,16 @@ const NFTGallery = observer(() => {
                   </Card>
                 ))}
               </div>
-            ) : loadFailed ? (
+            ) : loadFailed && !showRemembered ? (
               <div className="flex flex-col items-center gap-4 py-8 text-center text-muted-foreground">
                 <Image className="h-12 w-12" />
-                <p className="text-sm">{t("nft.galleryLoadFailed")}</p>
+                <p className="text-sm">
+                  {t(
+                    explorerNeeded
+                      ? "nft.galleryExplorerNeeded"
+                      : "nft.galleryLoadFailed",
+                  )}
+                </p>
                 <Button
                   type="button"
                   variant="outline"
@@ -110,17 +147,34 @@ const NFTGallery = observer(() => {
                 <p className="text-sm">{t("nft.emptyGallery")}</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-3">
-                {tokens.map((token) => (
-                  <NFTGalleryItem
-                    key={token.tokenId}
-                    contractAddress={contractAddress}
-                    tokenId={token.tokenId}
-                    collectionName={collectionName}
-                    standard={standard}
-                    balance={token.balance}
-                  />
-                ))}
+              <div className="flex flex-col gap-3">
+                {showRemembered && (
+                  <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                    <p>{t("nft.galleryRefreshFailed")}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setReloadKey((key) => key + 1);
+                      }}
+                    >
+                      {t("common.retry")}
+                    </Button>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  {tokens.map((token) => (
+                    <NFTGalleryItem
+                      key={token.tokenId}
+                      contractAddress={contractAddress}
+                      tokenId={token.tokenId}
+                      collectionName={collectionName}
+                      standard={standard}
+                      balance={token.balance}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </CardContent>

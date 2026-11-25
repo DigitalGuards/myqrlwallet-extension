@@ -1036,6 +1036,19 @@ describe("TransactionHistoryStore", () => {
       expect(store.onChainTransactions).toHaveLength(1);
     });
 
+    it("leaves page zero after a failed first page so the screen offers a retry", async () => {
+      mockFetchOnChainHistory.mockResolvedValueOnce({
+        entries: [],
+        totalCount: 0,
+        failed: true,
+      });
+      const store = new TransactionHistoryStore();
+      await store.loadOnChainHistory(ADDRESS, CHAIN);
+
+      expect(store.onChainFailed).toBe(true);
+      expect(store.onChainPage).toBe(0);
+    });
+
     it("keeps the loaded page when a Load More call fails", async () => {
       mockFetchOnChainHistory.mockResolvedValueOnce({
         entries: [makeSampleEntry({ id: "0xone", transactionHash: "0xone" })],

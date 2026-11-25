@@ -516,6 +516,37 @@ export const cases = {
       ]);
     },
   },
+  setNFTKnownTokens: {
+    run: () =>
+      StorageUtil.setNFTKnownTokens(ACCOUNT, NFT.address, [{ tokenId: "7" }]),
+    edit: (e, f) => {
+      set(
+        e.local,
+        nftPath,
+        f.lists.nfts.map((v) =>
+          v === f.nft ? { ...f.nft, knownTokens: [{ tokenId: "7" }] } : v,
+        ),
+      );
+    },
+  },
+  setNFTCollectionStandard: {
+    run: () =>
+      StorageUtil.setNFTCollectionStandard(ACCOUNT, NFT.address, "QRC1155"),
+    edit: (e, f) => {
+      set(
+        e.local,
+        nftPath,
+        f.lists.nfts.map((v) => {
+          if (v !== f.nft) return v;
+          // A record stored without a standard gets the field appended.
+          const { standard, ...rest } = f.nft;
+          return standard === undefined
+            ? { ...rest, standard: "ZRC1155" }
+            : { ...f.nft, standard: "ZRC1155" };
+        }),
+      );
+    },
+  },
   clearFromNFTCollectionsList: {
     run: () => StorageUtil.clearFromNFTCollectionsList(ACCOUNT, NFT.address),
     edit: (e, f) => {
@@ -1172,6 +1203,8 @@ export const writerGroups = {
     "setTokenContractsList",
     "clearFromTokenContractsList",
     "setNFTCollectionsList",
+    "setNFTKnownTokens",
+    "setNFTCollectionStandard",
     "clearFromNFTCollectionsList",
   ],
   transactions: [
@@ -1204,7 +1237,8 @@ const draftAsRead = (draft: unknown): unknown => {
     // boolean, the current one otherwise.
     tokenDetails: {
       ...rest,
-      isQrc20Token: typeof isZrc20Token === "boolean" ? isZrc20Token : isQrc20Token,
+      isQrc20Token:
+        typeof isZrc20Token === "boolean" ? isZrc20Token : isQrc20Token,
     },
   };
 };

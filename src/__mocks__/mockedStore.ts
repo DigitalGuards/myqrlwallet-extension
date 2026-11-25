@@ -1,5 +1,6 @@
 import { DEFAULT_BLOCKCHAIN } from "@/configuration/qrlBlockchainConfig";
 import type { StoreType } from "@/stores/store";
+import type { NFTStandard } from "@/types/nft";
 import deepmerge from "deepmerge";
 import { createContext, useContext } from "react";
 import type { PartialDeep } from "type-fest";
@@ -95,6 +96,9 @@ const mockedStoreValues: StoreType = {
     getNftCollectionDetails: () =>
       Promise.resolve({ collection: undefined, error: "" }),
     getOwnedNftTokens: () => Promise.resolve({ tokens: [], failed: false }),
+    correctStoredCollectionStandard: () => Promise.resolve(),
+    verifyCollectionStandard: (_address: string, standard: NFTStandard) =>
+      Promise.resolve({ standard }),
     getErc1155TokenBalance: () => Promise.resolve(undefined),
     getNftTokenUri: () => Promise.resolve(""),
     signNftTransfer: () =>

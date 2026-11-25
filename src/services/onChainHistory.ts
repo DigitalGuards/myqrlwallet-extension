@@ -1,6 +1,10 @@
-import { getExplorerApiBase } from "@/configuration/assetDiscoveryConfig";
 import { NATIVE_TOKEN } from "@/constants/nativeToken";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
+import {
+  EXPLORER_TIMEOUT_MS,
+  getExplorerApiBase,
+} from "@/configuration/assetDiscoveryConfig";
+import { toCanonicalQrlAddress } from "@/utilities/addressUtil";
 import { isNullishString, isRecord, isUnknownArray } from "./explorerGuards";
 
 /**
@@ -23,6 +27,24 @@ export type OnChainHistoryPage = {
   failed: boolean;
 };
 
+// A transaction hash is 32 bytes of hex. The hash becomes a row id and an
+// explorer link, so anything else is not a row worth showing.
+const isTransactionHash = (value: unknown): value is string =>
+  typeof value === "string" && /^(?:0x)?[0-9a-fA-F]{64}$/.test(value);
+
+// Party fields are shown as addresses. A value that is a QRL address is
+// kept as the explorer spelled it; anything else is dropped (contract
+// creation has no recipient) and never rendered as given.
+const toParty = (value: string | null | undefined): string => {
+  if (!value) return "";
+  try {
+    toCanonicalQrlAddress(value);
+    return value;
+  } catch {
+    return "";
+  }
+};
+
 // One row of the ShorScan /api/address/aggregate/:addr response,
 // restricted to the fields the extension consumes.
 type ExplorerAggregateTx = {
@@ -41,8 +63,7 @@ type ExplorerAggregateTx = {
 
 const isExplorerAggregateTx = (value: unknown): value is ExplorerAggregateTx =>
   isRecord(value) &&
-  typeof value.TxHash === "string" &&
-  value.TxHash.length > 0 &&
+  isTransactionHash(value.TxHash) &&
   isNullishString(value.From) &&
   isNullishString(value.To) &&
   isNullishString(value.TimeStamp) &&
@@ -69,8 +90,7 @@ const isExplorerAggregateInternalTx = (
   value: unknown,
 ): value is ExplorerAggregateInternalTx =>
   isRecord(value) &&
-  typeof value.Hash === "string" &&
-  value.Hash.length > 0 &&
+  isTransactionHash(value.Hash) &&
   isNullishString(value.From) &&
   isNullishString(value.To) &&
   isNullishString(value.BlockTimestamp) &&
@@ -103,8 +123,8 @@ const toEntry = (
   const txHash = row.TxHash;
   return {
     id: txHash,
-    from: row.From ?? "",
-    to: row.To ?? "",
+    from: toParty(row.From),
+    to: toParty(row.To),
     amount,
     tokenSymbol: NATIVE_TOKEN.symbol,
     tokenName: NATIVE_TOKEN.name,
@@ -145,8 +165,8 @@ const toInternalEntry = (
     // The outer transaction may appear as its own entry with the same
     // hash, so internal entries need a distinct id (hash + tree position).
     id: `${txHash}-internal-${trace}`,
-    from: row.From ?? "",
-    to: row.To ?? "",
+    from: toParty(row.From),
+    to: toParty(row.To),
     amount:
       typeof row.Value === "number" && Number.isFinite(row.Value)
         ? row.Value
@@ -180,6 +200,7 @@ export async function fetchOnChainHistory(
   try {
     const response = await fetch(
       `${apiBase}/api/address/aggregate/${address}?page=${page}&limit=${ON_CHAIN_PAGE_SIZE}`,
+      { signal: AbortSignal.timeout(EXPLORER_TIMEOUT_MS) },
     );
     if (!response.ok) return emptyPage(true);
 
@@ -188,7 +209,10 @@ export async function fetchOnChainHistory(
     const rows = isUnknownArray(data.transactions_by_address)
       ? data.transactions_by_address
       : [];
+    // The explorer may ignore the requested page size: read at most one
+    // page from each list, whatever it sends.
     const txEntries = rows
+      .slice(0, ON_CHAIN_PAGE_SIZE)
       .filter(isExplorerAggregateTx)
       .map((row) => toEntry(row, chainId));
 
@@ -199,6 +223,7 @@ export async function fetchOnChainHistory(
       ? data.internal_transactions_by_address
       : [];
     const internalEntries = internalRows
+      .slice(0, ON_CHAIN_PAGE_SIZE)
       .filter(isExplorerAggregateInternalTx)
       .map((row) => toInternalEntry(row, chainId));
 

@@ -16,6 +16,8 @@ import type {
   DAppRequestType,
 } from "@/scripts/middlewares/middlewareTypes";
 import type { GasTier } from "@/types/gasFee";
+import type { NFTStandard, OwnedNftToken } from "@/types/nft";
+import { toCanonicalTokenId } from "@/utilities/nftTokenId";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import {
   isLegacyQrlAddress,
@@ -79,10 +81,59 @@ import {
   type StoredHistoryEntry,
 } from "@/utilities/storageGuards";
 import {
+  readStoredNftStandard,
   toStoredNftStandard,
   withCurrentTokenFlag,
   withEarlierTokenFlag,
 } from "@/utilities/storedNames";
+
+// Token ids the wallet has checked on chain inside one stored collection.
+// They ride along inside the collection's own record (under `knownTokens`),
+// so removing the collection or the account removes them too.
+const MAX_KNOWN_NFT_TOKENS = 50;
+const DECIMAL_INTEGER = /^\d{1,78}$/;
+const readKnownNftTokens = (value: unknown): OwnedNftToken[] => {
+  const seen = new Set<string>();
+  return getStorageArray(value, "knownTokens")
+    .flatMap((item): OwnedNftToken[] => {
+      if (!isRecord(item)) return [];
+      const tokenId = toCanonicalTokenId(item.tokenId);
+      if (tokenId === null || seen.has(tokenId)) return [];
+      if (item.balance === undefined) {
+        seen.add(tokenId);
+        return [{ tokenId }];
+      }
+      if (!isString(item.balance) || !DECIMAL_INTEGER.test(item.balance))
+        return [];
+      seen.add(tokenId);
+      return [{ tokenId, balance: item.balance }];
+    })
+    .slice(0, MAX_KNOWN_NFT_TOKENS);
+};
+
+// Every write to the NFT collections store reads the whole blob, changes it
+// and writes it back. Those writes run on their own (gallery loads, Home
+// rows), so they are serialised: through a promise chain inside one page and
+// through a Web Lock across extension pages where the browser has them. Each
+// writer re-reads inside the lock, so no write starts from a stale copy.
+let nftWrites: Promise<void> = Promise.resolve();
+const withNftCollectionsLock = async <T>(
+  work: () => Promise<T>,
+): Promise<T> => {
+  const previous = nftWrites;
+  let release: () => void = () => undefined;
+  nftWrites = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await ("locks" in navigator
+      ? navigator.locks.request("myqrlwallet-nft-collections", work)
+      : work());
+  } finally {
+    release();
+  }
+};
 
 const readLocalStorage = async (
   key: string,
@@ -753,37 +804,39 @@ const StorageUtil = {
     accountAddress: string,
     collection: StoredNFTCollection,
   ) {
-    if (!isNFTCollection(collection))
-      throw new Error("Invalid stored NFT identity");
-    const { chainId } = await this.getActiveBlockChain();
+    return withNftCollectionsLock(async () => {
+      if (!isNFTCollection(collection))
+        throw new Error("Invalid stored NFT identity");
+      const { chainId } = await this.getActiveBlockChain();
 
-    const storageData = await readLocalStorage(NFT_COLLECTIONS_IDENTIFIER);
-    const chainData = ensureStorageRecord(
-      storageData,
-      NFT_COLLECTIONS_IDENTIFIER,
-      ALL_NFT_COLLECTIONS_IDENTIFIER,
-      accountAddress,
-      chainId,
-    );
-    const storedCollections = getStorageArray(
-      chainData.collections,
-      ALL_NFT_COLLECTIONS_IDENTIFIER,
-    );
-    chainData.collections = [
-      ...storedCollections.filter(
-        (c) => !isNFTCollection(c) || c.address !== collection.address,
-      ),
-      replaceStoredEntry(
-        "nft",
-        storedCollections.find(
-          (item) =>
-            isNFTCollection(item) && item.address === collection.address,
+      const storageData = await readLocalStorage(NFT_COLLECTIONS_IDENTIFIER);
+      const chainData = ensureStorageRecord(
+        storageData,
+        NFT_COLLECTIONS_IDENTIFIER,
+        ALL_NFT_COLLECTIONS_IDENTIFIER,
+        accountAddress,
+        chainId,
+      );
+      const storedCollections = getStorageArray(
+        chainData.collections,
+        ALL_NFT_COLLECTIONS_IDENTIFIER,
+      );
+      chainData.collections = [
+        ...storedCollections.filter(
+          (c) => !isNFTCollection(c) || c.address !== collection.address,
         ),
-        { ...collection, standard: toStoredNftStandard(collection.standard) },
-      ),
-    ];
+        replaceStoredEntry(
+          "nft",
+          storedCollections.find(
+            (item) =>
+              isNFTCollection(item) && item.address === collection.address,
+          ),
+          { ...collection, standard: toStoredNftStandard(collection.standard) },
+        ),
+      ];
 
-    await walletLocalStorage.set(storageData);
+      await walletLocalStorage.set(storageData);
+    });
   },
 
   async getNFTCollectionsList(accountAddress: string) {
@@ -804,26 +857,127 @@ const StorageUtil = {
     ).filter(isNFTCollection);
   },
 
+  /**
+   * Remembers the token ids of a stored collection that passed an on-chain
+   * ownership check, so the gallery can still show them (after checking
+   * them again) when the explorer cannot be reached. An empty list forgets
+   * them. Does nothing for a collection that is not stored.
+   */
+  async setNFTKnownTokens(
+    accountAddress: string,
+    contractAddress: string,
+    tokens: OwnedNftToken[],
+  ) {
+    return withNftCollectionsLock(async () => {
+      const { chainId } = await this.getActiveBlockChain();
+
+      const storageData = await readLocalStorage(NFT_COLLECTIONS_IDENTIFIER);
+      const chainData = ensureStorageRecord(
+        storageData,
+        NFT_COLLECTIONS_IDENTIFIER,
+        ALL_NFT_COLLECTIONS_IDENTIFIER,
+        accountAddress,
+        chainId,
+      );
+      const stored = getStorageArray(
+        chainData.collections,
+        ALL_NFT_COLLECTIONS_IDENTIFIER,
+      ).find(
+        (item) => isNFTCollection(item) && item.address === contractAddress,
+      );
+      if (!isRecord(stored)) return;
+      const next = tokens
+        .slice(0, MAX_KNOWN_NFT_TOKENS)
+        .map(({ tokenId, balance }) =>
+          balance === undefined ? { tokenId } : { tokenId, balance },
+        );
+      const current = readKnownNftTokens(stored.knownTokens);
+      // Nothing to write when the stored list already says the same.
+      if (JSON.stringify(current) === JSON.stringify(next)) return;
+      if (next.length === 0) Reflect.deleteProperty(stored, "knownTokens");
+      else stored.knownTokens = next;
+      await walletLocalStorage.set(storageData);
+    });
+  },
+
+  /**
+   * Changes only the `standard` field of one stored collection, in place:
+   * the record keeps its position in the list and every other field as it
+   * is. Does nothing when the collection is not stored or already carries
+   * that standard.
+   */
+  async setNFTCollectionStandard(
+    accountAddress: string,
+    contractAddress: string,
+    standard: NFTStandard,
+  ) {
+    return withNftCollectionsLock(async () => {
+      const { chainId } = await this.getActiveBlockChain();
+
+      const storageData = await readLocalStorage(NFT_COLLECTIONS_IDENTIFIER);
+      const chainData = ensureStorageRecord(
+        storageData,
+        NFT_COLLECTIONS_IDENTIFIER,
+        ALL_NFT_COLLECTIONS_IDENTIFIER,
+        accountAddress,
+        chainId,
+      );
+      const stored = getStorageArray(
+        chainData.collections,
+        ALL_NFT_COLLECTIONS_IDENTIFIER,
+      ).find(
+        (item) => isNFTCollection(item) && item.address === contractAddress,
+      );
+      if (!isRecord(stored)) return;
+      if (readStoredNftStandard(stored.standard) === standard) return;
+      stored.standard = toStoredNftStandard(standard);
+      await walletLocalStorage.set(storageData);
+    });
+  },
+
+  async getNFTKnownTokens(
+    accountAddress: string,
+    contractAddress: string,
+  ): Promise<OwnedNftToken[]> {
+    const { chainId } = await this.getActiveBlockChain();
+
+    const storageData = await readLocalStorage(NFT_COLLECTIONS_IDENTIFIER);
+    const stored = getStorageArray(
+      getStoredValue(
+        storageData,
+        NFT_COLLECTIONS_IDENTIFIER,
+        ALL_NFT_COLLECTIONS_IDENTIFIER,
+        accountAddress,
+        chainId,
+        "collections",
+      ),
+      ALL_NFT_COLLECTIONS_IDENTIFIER,
+    ).find((item) => isNFTCollection(item) && item.address === contractAddress);
+    return isRecord(stored) ? readKnownNftTokens(stored.knownTokens) : [];
+  },
+
   async clearFromNFTCollectionsList(
     accountAddress: string,
     contractAddress: string,
   ) {
-    const { chainId } = await this.getActiveBlockChain();
+    return withNftCollectionsLock(async () => {
+      const { chainId } = await this.getActiveBlockChain();
 
-    const storageData = await readLocalStorage(NFT_COLLECTIONS_IDENTIFIER);
-    const chainData = ensureStorageRecord(
-      storageData,
-      NFT_COLLECTIONS_IDENTIFIER,
-      ALL_NFT_COLLECTIONS_IDENTIFIER,
-      accountAddress,
-      chainId,
-    );
-    chainData.collections = getStorageArray(
-      chainData.collections,
-      ALL_NFT_COLLECTIONS_IDENTIFIER,
-    ).filter((c) => !isNFTCollection(c) || c.address !== contractAddress);
+      const storageData = await readLocalStorage(NFT_COLLECTIONS_IDENTIFIER);
+      const chainData = ensureStorageRecord(
+        storageData,
+        NFT_COLLECTIONS_IDENTIFIER,
+        ALL_NFT_COLLECTIONS_IDENTIFIER,
+        accountAddress,
+        chainId,
+      );
+      chainData.collections = getStorageArray(
+        chainData.collections,
+        ALL_NFT_COLLECTIONS_IDENTIFIER,
+      ).filter((c) => !isNFTCollection(c) || c.address !== contractAddress);
 
-    await walletLocalStorage.set({ ...storageData });
+      await walletLocalStorage.set({ ...storageData });
+    });
   },
 
   /**
@@ -1078,18 +1232,23 @@ const StorageUtil = {
       [NFT_COLLECTIONS_IDENTIFIER, ALL_NFT_COLLECTIONS_IDENTIFIER],
     ];
     for (const [identifier, allIdentifier] of maps) {
-      const storageData = await readLocalStorage(identifier);
-      const byAccount = getStorageRecord(
-        storageData,
-        identifier,
-        allIdentifier,
-      );
-      const matches = Object.keys(byAccount).filter((address) =>
-        matchesStoredAccount(address, accountAddress),
-      );
-      if (matches.length === 0) continue;
-      for (const match of matches) Reflect.deleteProperty(byAccount, match);
-      await walletLocalStorage.set(storageData);
+      const clear = async () => {
+        const storageData = await readLocalStorage(identifier);
+        const byAccount = getStorageRecord(
+          storageData,
+          identifier,
+          allIdentifier,
+        );
+        const matches = Object.keys(byAccount).filter((address) =>
+          matchesStoredAccount(address, accountAddress),
+        );
+        if (matches.length === 0) return;
+        for (const match of matches) Reflect.deleteProperty(byAccount, match);
+        await walletLocalStorage.set(storageData);
+      };
+      if (identifier === NFT_COLLECTIONS_IDENTIFIER)
+        await withNftCollectionsLock(clear);
+      else await clear();
     }
   },
 

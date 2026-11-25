@@ -9,6 +9,7 @@ import { malformed } from "@/test-utils/malformed";
 import type { TransactionHistoryEntry } from "@/types/transactionHistory";
 import StorageUtil from "@/utilities/storageUtil";
 import type { AddedBlockchainData } from "@/utilities/approvalGuards";
+import { ExplorerUnavailableError } from "@/services/explorerUnavailableError";
 import QrlStore, { BALANCE_POLL_INTERVAL_MS } from "./qrlStore";
 
 const { responses, call, estimateGas, encodeABI, rpc, discover } = vi.hoisted(
@@ -209,6 +210,103 @@ describe("contract response boundaries", () => {
     });
   });
 
+  it("corrects a collection stored under the wrong standard from the chain", async () => {
+    // The contract answers as QRC-721; an earlier build stored QRC-1155.
+    const write = vi
+      .spyOn(StorageUtil, "setNFTCollectionStandard")
+      .mockResolvedValue(undefined);
+    const store = createStore();
+
+    expect(await store.verifyCollectionStandard(CONTRACT, "QRC1155")).toEqual({
+      standard: "QRC721",
+    });
+    expect(write).toHaveBeenCalledExactlyOnceWith(OWNER, CONTRACT, "QRC721");
+
+    // A matching stored value is not written again.
+    write.mockClear();
+    expect(await store.verifyCollectionStandard(CONTRACT, "QRC721")).toEqual({
+      standard: "QRC721",
+    });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("decides the standard from the interface probes alone", async () => {
+    // A collection without name() and symbol() (optional metadata) is still
+    // listed and keeps its stored text.
+    call.mockImplementation((name) =>
+      name === "supportsInterface"
+        ? Promise.resolve(true)
+        : Promise.reject(
+            Object.assign(new Error("execution reverted"), { code: 310 }),
+          ),
+    );
+    vi.spyOn(StorageUtil, "setNFTCollectionStandard").mockResolvedValue(
+      undefined,
+    );
+    expect(
+      await createStore().verifyCollectionStandard(CONTRACT, "QRC721"),
+    ).toEqual({ standard: "QRC721" });
+  });
+
+  it("keeps the stored standard for a stored collection whose contract has no ERC-165", async () => {
+    // Earlier builds listed and transferred such a collection on its stored
+    // standard, and so does this one. New picks are refused instead, by
+    // getNftCollectionDetails (see the test of that reader).
+    call.mockRejectedValue(
+      Object.assign(new Error("execution reverted"), { code: 310 }),
+    );
+    const write = vi
+      .spyOn(StorageUtil, "setNFTCollectionStandard")
+      .mockResolvedValue(undefined);
+    const store = createStore();
+    expect(await store.verifyCollectionStandard(CONTRACT, "QRC1155")).toEqual({
+      standard: "QRC1155",
+    });
+    expect(write).not.toHaveBeenCalled();
+    // The picker's reader still refuses the same contract for a new pick.
+    const refused = await store.getNftCollectionDetails(CONTRACT);
+    expect(refused.collection).toBeUndefined();
+    expect(refused.error).toBeTruthy();
+  });
+
+  it("keeps the stored standard when the contract answers neither interface", async () => {
+    call.mockResolvedValue(false);
+    const write = vi
+      .spyOn(StorageUtil, "setNFTCollectionStandard")
+      .mockResolvedValue(undefined);
+    expect(
+      await createStore().verifyCollectionStandard(CONTRACT, "QRC721"),
+    ).toEqual({ standard: "QRC721" });
+    expect(write).not.toHaveBeenCalled();
+    expect((await createStore().getNftCollectionDetails(CONTRACT)).error).toBe(
+      "Contract does not support QRC-721 or QRC-1155",
+    );
+  });
+
+  it("offers nothing when the node does not answer", async () => {
+    call.mockRejectedValue(new Error("network down"));
+    const write = vi
+      .spyOn(StorageUtil, "setNFTCollectionStandard")
+      .mockResolvedValue(undefined);
+    const result = await createStore().verifyCollectionStandard(
+      CONTRACT,
+      "QRC1155",
+    );
+    expect(result.standard).toBeUndefined();
+    expect(result.error).toBeTruthy();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("offers nothing when the interface answer is malformed", async () => {
+    responses.set("supportsInterface", "not a boolean");
+    const result = await createStore().verifyCollectionStandard(
+      CONTRACT,
+      "QRC1155",
+    );
+    expect(result.standard).toBeUndefined();
+    expect(result.error).toBeTruthy();
+  });
+
   it.each(["false", 1, {}, null])(
     "rejects non-boolean NFT interface responses: %j",
     async (value) => {
@@ -275,6 +373,134 @@ describe("contract response boundaries", () => {
       tokens: [],
       failed: false,
     });
+  });
+
+  it("reports an explorer that cannot answer as unknown, never as an empty collection", async () => {
+    // QRC-721 without the Enumerable extension, and QRC-1155, can only be
+    // listed through the explorer. When it fails the answer is "unknown".
+    responses.set("supportsInterface", "true");
+    discover.mockRejectedValue(new ExplorerUnavailableError());
+    const store = createStore();
+    expect(await store.getOwnedNftTokens(CONTRACT)).toEqual({
+      tokens: [],
+      failed: true,
+      explorerUnavailable: true,
+    });
+    expect(await store.getOwnedNftTokens(CONTRACT, "QRC1155")).toEqual({
+      tokens: [],
+      failed: true,
+      explorerUnavailable: true,
+    });
+    // Any other failure is not the explorer's.
+    discover.mockRejectedValue(new Error("boom"));
+    expect(await store.getOwnedNftTokens(CONTRACT, "QRC1155")).toEqual({
+      tokens: [],
+      failed: true,
+    });
+  });
+
+  it("remembers verified ids and shows the ones that still verify when the explorer fails", async () => {
+    responses.set("supportsInterface", "true");
+    const remember = vi
+      .spyOn(StorageUtil, "setNFTKnownTokens")
+      .mockResolvedValue(undefined);
+    const store = createStore();
+    // A healthy listing writes what it verified on chain.
+    expect(await store.getOwnedNftTokens(CONTRACT)).toEqual({
+      tokens: [{ tokenId: "9" }],
+      failed: false,
+    });
+    expect(remember).toHaveBeenCalledWith(OWNER, CONTRACT, [{ tokenId: "9" }]);
+
+    // The explorer fails: the remembered ids are checked on chain again.
+    // Id 4 is owned by someone else now and is dropped and forgotten.
+    discover.mockRejectedValue(new ExplorerUnavailableError());
+    vi.spyOn(StorageUtil, "getNFTKnownTokens").mockResolvedValue([
+      { tokenId: "9" },
+      { tokenId: "4" },
+    ]);
+    call.mockImplementation((name, args) =>
+      Promise.resolve(
+        name === "ownerOf" && args[0] === 4n
+          ? "Qsomeoneelse"
+          : responses.get(name),
+      ),
+    );
+    remember.mockClear();
+    expect(await store.getOwnedNftTokens(CONTRACT)).toEqual({
+      tokens: [{ tokenId: "9" }],
+      failed: true,
+      explorerUnavailable: true,
+    });
+    expect(remember).toHaveBeenCalledWith(OWNER, CONTRACT, [{ tokenId: "9" }]);
+  });
+
+  it("shows remembered 1155 ids with their live balance when the explorer fails", async () => {
+    vi.spyOn(StorageUtil, "getNFTKnownTokens").mockResolvedValue([
+      { tokenId: "9", balance: "1" },
+      { tokenId: "8", balance: "2" },
+    ]);
+    vi.spyOn(StorageUtil, "setNFTKnownTokens").mockResolvedValue(undefined);
+    discover.mockRejectedValue(new ExplorerUnavailableError());
+    call.mockImplementation((name, args) =>
+      Promise.resolve(name === "balanceOf" ? (args[1] === 8n ? 0n : 7n) : 0n),
+    );
+    expect(await createStore().getOwnedNftTokens(CONTRACT, "QRC1155")).toEqual({
+      tokens: [{ tokenId: "9", balance: "7" }],
+      failed: true,
+      explorerUnavailable: true,
+    });
+  });
+
+  it("keeps remembered ids when the chain check errors and forgets them only on a definite no", async () => {
+    // Ids 1 and 2 are remembered. The node fails for id 1 (not shown, kept),
+    // id 2 reverts (burned: dropped and forgotten), id 3 is owned.
+    responses.set("supportsInterface", "true");
+    discover.mockRejectedValue(new ExplorerUnavailableError());
+    vi.spyOn(StorageUtil, "getNFTKnownTokens").mockResolvedValue([
+      { tokenId: "1" },
+      { tokenId: "2" },
+      { tokenId: "3" },
+    ]);
+    const remember = vi
+      .spyOn(StorageUtil, "setNFTKnownTokens")
+      .mockResolvedValue(undefined);
+    call.mockImplementation((name, args) => {
+      if (name === "ownerOf" && args[0] === 1n)
+        return Promise.reject(new Error("connection dropped"));
+      if (name === "ownerOf" && args[0] === 2n)
+        return Promise.reject(
+          Object.assign(new Error("execution reverted"), { code: 310 }),
+        );
+      return Promise.resolve(responses.get(name));
+    });
+    expect(await createStore().getOwnedNftTokens(CONTRACT)).toEqual({
+      tokens: [{ tokenId: "3" }],
+      failed: true,
+      explorerUnavailable: true,
+    });
+    expect(remember).toHaveBeenCalledExactlyOnceWith(OWNER, CONTRACT, [
+      { tokenId: "1" },
+      { tokenId: "3" },
+    ]);
+  });
+
+  it("does not forget remembered ids because the explorer answered empty", async () => {
+    // The explorer lists nothing (an empty answer or a 404) while the chain
+    // still says the account holds id 9: the id stays listed and remembered.
+    discover.mockResolvedValue([]);
+    vi.spyOn(StorageUtil, "getNFTKnownTokens").mockResolvedValue([
+      { tokenId: "9" },
+    ]);
+    const remember = vi
+      .spyOn(StorageUtil, "setNFTKnownTokens")
+      .mockResolvedValue(undefined);
+    responses.set("supportsInterface", "true");
+    expect(await createStore().getOwnedNftTokens(CONTRACT)).toEqual({
+      tokens: [{ tokenId: "9" }],
+      failed: false,
+    });
+    expect(remember).toHaveBeenCalledWith(OWNER, CONTRACT, [{ tokenId: "9" }]);
   });
 
   it("preserves exact 1155 balances and skips malformed discovered balances", async () => {

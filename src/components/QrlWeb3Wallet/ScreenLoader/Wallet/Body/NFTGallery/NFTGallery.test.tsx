@@ -168,6 +168,84 @@ describe("NFTGallery", () => {
     expect(report).toHaveBeenCalledWith("Failed to load NFT gallery:", error);
   });
 
+  it("says the explorer is needed when only it can list the collection", async () => {
+    const getOwnedNftTokens = vi.fn().mockResolvedValue({
+      tokens: [],
+      failed: true,
+      explorerUnavailable: true,
+    });
+    renderComponent({ qrlStore: { getOwnedNftTokens } });
+
+    expect(
+      await screen.findByText(
+        "This collection can only be listed through the explorer, and the explorer did not answer.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("No NFTs found in this collection for this account."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("shows ids that still verify, with a notice and Retry, when the explorer could not refresh the list", async () => {
+    const getOwnedNftTokens = vi.fn().mockResolvedValue({
+      tokens: [{ tokenId: "9" }],
+      failed: true,
+      explorerUnavailable: true,
+    });
+    renderComponent({ qrlStore: { getOwnedNftTokens } });
+
+    expect(await screen.findByTestId("gallery-item-9")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Could not refresh this list from the explorer. Showing the NFTs checked earlier.",
+      ),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(getOwnedNftTokens).toHaveBeenCalledTimes(2);
+  });
+
+  it("lists and offers transfers on the standard the contract reports", async () => {
+    const getOwnedNftTokens = vi
+      .fn()
+      .mockResolvedValue({ tokens: [{ tokenId: "7" }], failed: false });
+    const verifyCollectionStandard = vi
+      .fn()
+      .mockResolvedValue({ standard: "QRC721" });
+    renderComponent(
+      { qrlStore: { getOwnedNftTokens, verifyCollectionStandard } },
+      { ...state, standard: "QRC1155" },
+    );
+
+    expect(await screen.findByTestId("gallery-item-7")).toBeInTheDocument();
+    expect(verifyCollectionStandard).toHaveBeenCalledWith(
+      state.contractAddress,
+      "QRC1155",
+    );
+    expect(getOwnedNftTokens).toHaveBeenCalledWith(
+      state.contractAddress,
+      "QRC721",
+    );
+  });
+
+  it("shows the existing error and lists nothing when the standard cannot be confirmed", async () => {
+    const getOwnedNftTokens = vi.fn();
+    renderComponent({
+      qrlStore: {
+        getOwnedNftTokens,
+        verifyCollectionStandard: vi
+          .fn()
+          .mockResolvedValue({ error: "Could not read" }),
+      },
+    });
+
+    expect(
+      await screen.findByText("Could not read this collection from the chain."),
+    ).toBeInTheDocument();
+    expect(getOwnedNftTokens).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
   it("ignores a token response after the active account changes", async () => {
     const pending = deferred<{
       tokens: { tokenId: string }[];
@@ -181,6 +259,10 @@ describe("NFTGallery", () => {
         failed: false,
       });
     const view = renderComponent({ qrlStore: { getOwnedNftTokens } });
+    // The standard check runs first; the first listing starts after it.
+    await waitFor(() => {
+      expect(getOwnedNftTokens).toHaveBeenCalledTimes(1);
+    });
     view.rerender(
       <StoreProvider
         value={mockedStore({

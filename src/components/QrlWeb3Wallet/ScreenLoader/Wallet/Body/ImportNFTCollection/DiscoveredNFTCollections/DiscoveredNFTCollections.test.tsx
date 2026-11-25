@@ -21,13 +21,23 @@ const DISCOVERED: DiscoveredNFTCollection = {
   tokenCount: 1,
 };
 
-const { navigate, getNFTCollectionsList, setNFTCollectionsList } = vi.hoisted(
-  () => ({
-    navigate: vi.fn<NavigateFunction>(),
-    getNFTCollectionsList: vi.fn<typeof StorageUtil.getNFTCollectionsList>(),
-    setNFTCollectionsList: vi.fn<typeof StorageUtil.setNFTCollectionsList>(),
-  }),
-);
+const {
+  navigate,
+  getNFTCollectionsList,
+  setNFTCollectionsList,
+  getNftCollectionDetails,
+} = vi.hoisted(() => ({
+  navigate: vi.fn<NavigateFunction>(),
+  getNFTCollectionsList: vi.fn<typeof StorageUtil.getNFTCollectionsList>(),
+  setNFTCollectionsList: vi.fn<typeof StorageUtil.setNFTCollectionsList>(),
+  getNftCollectionDetails: vi.fn(),
+}));
+
+// What the contract itself reports; mirrors the picker rows by default.
+const chainCollection = (name: string) => ({
+  collection: { name, symbol: "NFT", standard: "QRC721" as const },
+  error: "",
+});
 vi.mock("react-router-dom", async () => ({
   ...(await vi.importActual<typeof import("react-router-dom")>(
     "react-router-dom",
@@ -55,6 +65,15 @@ describe("DiscoveredNFTCollections", () => {
     getNFTCollectionsList.mockReset().mockResolvedValue([]);
     setNFTCollectionsList.mockReset().mockResolvedValue(undefined);
     navigate.mockReset();
+    getNftCollectionDetails
+      .mockReset()
+      .mockImplementation((address: string) =>
+        Promise.resolve(
+          chainCollection(
+            address === CONTRACT_ADDRESS ? "Test Collection" : "Second",
+          ),
+        ),
+      );
   });
 
   afterEach(() => {
@@ -65,7 +84,12 @@ describe("DiscoveredNFTCollections", () => {
 
   const component = (accountAddress = `Q${"a".repeat(128)}`) => (
     <StoreProvider
-      value={mockedStore({ qrlStore: { activeAccount: { accountAddress } } })}
+      value={mockedStore({
+        qrlStore: {
+          activeAccount: { accountAddress },
+          getNftCollectionDetails,
+        },
+      })}
     >
       <MemoryRouter>
         <DiscoveredNFTCollections />
@@ -185,6 +209,58 @@ describe("DiscoveredNFTCollections", () => {
       },
     );
     expect(navigate).toHaveBeenCalledExactlyOnceWith("/");
+  });
+
+  it("stores the name, symbol and standard the contract reports", async () => {
+    vi.mocked(discoverNftCollections).mockResolvedValueOnce([
+      {
+        ...DISCOVERED,
+        name: "Explorer Name",
+        symbol: "LIE",
+        standard: "QRC1155",
+      },
+    ]);
+    getNftCollectionDetails.mockResolvedValueOnce(
+      chainCollection("Chain Name"),
+    );
+    render(component());
+    await userEvent.click(await screen.findByRole("checkbox"));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add selected (1)" }),
+    );
+    await waitFor(() => {
+      expect(navigate).toHaveBeenCalledExactlyOnceWith("/");
+    });
+    expect(setNFTCollectionsList).toHaveBeenCalledExactlyOnceWith(
+      `Q${"a".repeat(128)}`,
+      {
+        address: CONTRACT_ADDRESS,
+        name: "Chain Name",
+        symbol: "NFT",
+        standard: "QRC721",
+        image: "",
+      },
+    );
+  });
+
+  it.each([
+    ["a contract that is not an NFT", { collection: undefined, error: "no" }],
+    ["a read that throws", new Error("rpc down")],
+  ])("keeps %s out of the wallet and says so", async (_label, outcome) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    if (outcome instanceof Error)
+      getNftCollectionDetails.mockRejectedValueOnce(outcome);
+    else getNftCollectionDetails.mockResolvedValueOnce(outcome);
+    render(component());
+    await userEvent.click(await screen.findByRole("checkbox"));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add selected (1)" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not read Test Collection from the chain. That collection stays out of your wallet.",
+    );
+    expect(setNFTCollectionsList).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it("ignores a late response for the previous account", async () => {

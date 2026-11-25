@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EXPLORER_TIMEOUT_MS } from "@/configuration/assetDiscoveryConfig";
 import { fetchOnChainHistory, ON_CHAIN_PAGE_SIZE } from "./onChainHistory";
 
 const ADDRESS = "Q6153d37Fa4DA7193E6219DCBd2bBe62Fa12905b1";
@@ -10,8 +11,8 @@ const sampleRow = {
   InOut: 0,
   TxType: "0x2",
   Address: "Qc1b1df9180b798534a67816da90f072e976bb4e4",
-  From: "Q6153d37fa4da7193e6219dcbd2bbe62fa12905b1",
-  To: "Qc1b1df9180b798534a67816da90f072e976bb4e4",
+  From: `Q${"61".repeat(64)}`,
+  To: `Q${"c1".repeat(64)}`,
   TxHash: "0xa0ac2873d4d76142bc4619473a9a639f1ce8e73ccd08ad2c0cbf175ce331bcc6",
   TimeStamp: "0x6a4fb2e4",
   Amount: "750.000000000000000000",
@@ -26,8 +27,8 @@ const sampleInternalRow = {
   Type: "CALL",
   CallType: "call",
   Hash: "0x421b1d9d4c41a6f1d699621dbd4980c78386a51910853f9f90d10ffcb710d8da",
-  From: "Q94cd8e406d2bb4ea251dce3f0558941f2ac056ee",
-  To: "Q79b662ce3d663643df4454a8ba3f532c0de6887f",
+  From: `Q${"94".repeat(64)}`,
+  To: `Q${"79".repeat(64)}`,
   Input: "0x",
   Output: "0x",
   TraceAddress: [1],
@@ -68,7 +69,10 @@ describe("fetchOnChainHistory", () => {
 
     expect(mockFetch).toHaveBeenCalledWith(
       `https://shorscan.com/api/address/aggregate/${ADDRESS}?page=1&limit=${ON_CHAIN_PAGE_SIZE}`,
+      expect.anything(),
     );
+    const init: unknown = mockFetch.mock.calls[0][1];
+    expect(init).toHaveProperty("signal", expect.any(AbortSignal));
     expect(page.totalCount).toBe(82);
     expect(page.entries).toHaveLength(1);
     const entry = page.entries[0];
@@ -249,7 +253,7 @@ describe("fetchOnChainHistory", () => {
           transactions_by_address: [
             sampleRow,
             row,
-            { ...sampleRow, TxHash: "0xsecond" },
+            { ...sampleRow, TxHash: `0x${"5e".repeat(32)}` },
           ],
           transactions_count: 8,
           internal_transactions_by_address: [sampleInternalRow],
@@ -263,7 +267,7 @@ describe("fetchOnChainHistory", () => {
       expect(page.totalCount).toBe(8);
       expect(page.entries.map((entry) => entry.id)).toEqual([
         sampleRow.TxHash,
-        "0xsecond",
+        `0x${"5e".repeat(32)}`,
         `${sampleInternalRow.Hash}-internal-1`,
       ]);
     },
@@ -456,5 +460,77 @@ describe("fetchOnChainHistory", () => {
       totalCount: 0,
       failed: true,
     });
+  });
+
+  it("gives up on an explorer that does not answer in time", async () => {
+    const timeout = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(AbortSignal.abort());
+    mockFetch.mockImplementation((_url: string, init: RequestInit) =>
+      init.signal?.aborted
+        ? Promise.reject(new DOMException("aborted", "TimeoutError"))
+        : new Promise(() => {}),
+    );
+    const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
+    expect(page).toEqual({ entries: [], totalCount: 0, failed: true });
+    expect(timeout).toHaveBeenCalledWith(EXPLORER_TIMEOUT_MS);
+    timeout.mockRestore();
+  });
+
+  it("reads at most one page from each list", async () => {
+    mockFetch.mockResolvedValue(
+      okResponse({
+        transactions_by_address: Array.from({ length: 3000 }, (_unused, i) => ({
+          ...sampleRow,
+          TxHash: `0x${i.toString(16).padStart(64, "0")}`,
+        })),
+        transactions_count: 3000,
+        internal_transactions_by_address: Array.from(
+          { length: 3000 },
+          (_unused, i) => ({
+            ...sampleInternalRow,
+            TraceAddress: [i],
+          }),
+        ),
+        internal_transactions_count: 3000,
+      }),
+    );
+    const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
+    expect(page.entries).toHaveLength(2 * ON_CHAIN_PAGE_SIZE);
+  });
+
+  it("drops rows whose hash is not 32 bytes of hex", async () => {
+    mockFetch.mockResolvedValue(
+      okResponse({
+        transactions_by_address: [
+          sampleRow,
+          { ...sampleRow, TxHash: "x".repeat(3000) },
+          { ...sampleRow, TxHash: "0x12" },
+        ],
+        transactions_count: 3,
+      }),
+    );
+    const page = await fetchOnChainHistory(ADDRESS, CHAIN, 1);
+    expect(page.entries.map((entry) => entry.transactionHash)).toEqual([
+      sampleRow.TxHash,
+    ]);
+  });
+
+  it("shows a party only when it is a QRL address", async () => {
+    mockFetch.mockResolvedValue(
+      okResponse({
+        transactions_by_address: [
+          {
+            ...sampleRow,
+            From: `${"X".repeat(3000)}\u202E`,
+            To: "Q\u0000evil",
+          },
+        ],
+        transactions_count: 1,
+      }),
+    );
+    const [entry] = (await fetchOnChainHistory(ADDRESS, CHAIN, 1)).entries;
+    expect(entry.from).toBe("");
+    expect(entry.to).toBe("");
   });
 });

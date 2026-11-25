@@ -48,6 +48,7 @@ const TransactionHistory = observer(() => {
     isLoadingOnChain,
     hasMoreOnChain,
     onChainFailed,
+    onChainPage,
     filter,
   } = transactionHistoryStore;
 
@@ -120,9 +121,32 @@ const TransactionHistory = observer(() => {
             </Tabs>
 
             {!showInitialSpinner && onChainFailed && (
-              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
-                {t("txHistory.explorerUnreachable")}
-              </p>
+              <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                <p>{t("txHistory.explorerUnreachable")}</p>
+                {/* After a failed first page nothing is listed to page
+                    on from, so the retry reloads it. A failed later page
+                    is retried with Load more. */}
+                {onChainPage === 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isLoadingOnChain}
+                    onClick={() => {
+                      transactionHistoryStore
+                        .loadOnChainHistory(accountAddress, blockchain.chainId)
+                        .catch((error: unknown) => {
+                          console.error(
+                            "Failed to load on-chain history:",
+                            error,
+                          );
+                        });
+                    }}
+                  >
+                    {t("common.retry")}
+                  </Button>
+                )}
+              </div>
             )}
 
             {showInitialSpinner && (
