@@ -18,12 +18,18 @@ const DAppRequest = observer(() => {
   const { hasCompleted } = approvalProcessingStatus;
   const { phishingDetectionEnabled, isPopupWindow } = settingsStore;
 
-  const [phishingAcknowledged, setPhishingAcknowledged] = useState(false);
+  // The screen can stay mounted while one request replaces another, so the
+  // "proceed anyway" answer is kept for the request it was given for.
+  const requestKey = dAppRequestData?.requestId ?? "";
+  const [acknowledgedRequestKey, setAcknowledgedRequestKey] = useState<
+    string | null
+  >(null);
 
   const phishingResult = dAppRequestData?.phishingResult;
   const isDomainPhishing =
     phishingDetectionEnabled && (phishingResult?.isDomainPhishing ?? false);
-  const showPhishingWarning = isDomainPhishing && !phishingAcknowledged;
+  const showPhishingWarning =
+    isDomainPhishing && acknowledgedRequestKey !== requestKey;
   const phishingDetectorUnavailable =
     phishingDetectionEnabled &&
     phishingResult !== undefined &&
@@ -108,7 +114,7 @@ const DAppRequest = observer(() => {
               : t("dapp.phishingUnavailableBody")}
           </div>
         )}
-        <DAppRequestContentSelection />
+        <DAppRequestContentSelection key={requestKey} />
       </div>
       <PhishingWarning
         isOpen={showPhishingWarning}
@@ -118,7 +124,7 @@ const DAppRequest = observer(() => {
           void dAppRequestStore.onPermission(false);
         }}
         onProceedAnyway={() => {
-          setPhishingAcknowledged(true);
+          setAcknowledgedRequestKey(requestKey);
         }}
       />
     </>
