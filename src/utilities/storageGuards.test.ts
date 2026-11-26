@@ -16,6 +16,7 @@ import {
   isStoredBlockchain,
   isStoredKeystore,
   isStoredPermission,
+  isStorageIdentity,
   isStringRecord,
   isTokenContract,
   isTransactionHistoryEntry,
@@ -53,6 +54,23 @@ const PRICE = {
 const PERMISSION = CONNECTION.permissions[0];
 
 describe("storage record guards", () => {
+  it.each(["null", "file://", " null ", "NULL", "FILE://"])(
+    "refuses %j as a stored identity",
+    (value) => {
+      expect(isStorageIdentity(value)).toBe(false);
+      expect(isConnectedAccounts({ urlOrigin: value, accounts: [] })).toBe(
+        false,
+      );
+    },
+  );
+
+  it.each(["https://dapp.example", "0x1", "null.example", "file"])(
+    "keeps %j as a stored identity",
+    (value) => {
+      expect(isStorageIdentity(value)).toBe(true);
+    },
+  );
+
   it.each([
     ACCOUNT,
     ACCOUNT.toLowerCase(),

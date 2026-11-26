@@ -335,8 +335,18 @@ export type StoredConnectedAccounts = StoredRecord<
 >;
 
 // Storage identities are opaque keys, including identifiers from legacy imports.
+// "null" is how an opaque origin serializes and "file://" is how Chromium
+// serializes every local file. Neither names one site, chain or contract,
+// so neither may key a stored record.
+const SHARED_PLACEHOLDER_IDENTITIES: ReadonlySet<string> = new Set([
+  "null",
+  "file://",
+]);
+
 export const isStorageIdentity = (value: unknown): value is string =>
-  isString(value) && value.trim().length > 0;
+  isString(value) &&
+  value.trim().length > 0 &&
+  !SHARED_PLACEHOLDER_IDENTITIES.has(value.trim().toLowerCase());
 
 export const hasCanonicalRegistry = (
   chain: StoredBlockchain,
