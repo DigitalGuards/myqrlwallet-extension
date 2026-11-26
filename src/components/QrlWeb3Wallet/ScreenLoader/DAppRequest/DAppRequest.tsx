@@ -19,17 +19,22 @@ const DAppRequest = observer(() => {
   const { phishingDetectionEnabled, isPopupWindow } = settingsStore;
 
   // The screen can stay mounted while one request replaces another, so the
-  // "proceed anyway" answer is kept for the request it was given for.
-  const requestKey = dAppRequestData?.requestId ?? "";
-  const [acknowledgedRequestKey, setAcknowledgedRequestKey] = useState<
-    string | null
-  >(null);
+  // "proceed anyway" answer is kept for the request it was given for. A
+  // request without an id cannot be told apart from the next one, so an
+  // answer is never honoured for it and the warning stays until it is
+  // rejected. The worker gives every request it writes an id.
+  const requestId = dAppRequestData?.requestId;
+  const requestKey = requestId ?? "";
+  const [acknowledgedRequestId, setAcknowledgedRequestId] = useState<
+    string | undefined
+  >(undefined);
 
   const phishingResult = dAppRequestData?.phishingResult;
   const isDomainPhishing =
     phishingDetectionEnabled && (phishingResult?.isDomainPhishing ?? false);
   const showPhishingWarning =
-    isDomainPhishing && acknowledgedRequestKey !== requestKey;
+    isDomainPhishing &&
+    (requestId === undefined || acknowledgedRequestId !== requestId);
   const phishingDetectorUnavailable =
     phishingDetectionEnabled &&
     phishingResult !== undefined &&
@@ -124,7 +129,7 @@ const DAppRequest = observer(() => {
           void dAppRequestStore.onPermission(false);
         }}
         onProceedAnyway={() => {
-          setAcknowledgedRequestKey(requestKey);
+          setAcknowledgedRequestId(requestId);
         }}
       />
     </>

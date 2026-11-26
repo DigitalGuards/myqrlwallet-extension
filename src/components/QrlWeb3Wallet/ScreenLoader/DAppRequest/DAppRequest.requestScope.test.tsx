@@ -16,7 +16,11 @@ vi.mock("./DAppRequestContentSelection/DAppRequestContentSelection", () => ({
   },
 }));
 
-const request = (requestId: string, url: string, isDomainPhishing: boolean) =>
+const request = (
+  requestId: string | undefined,
+  url: string,
+  isDomainPhishing: boolean,
+) =>
   mockedStore({
     dAppRequestStore: {
       dAppRequestData: {
@@ -74,6 +78,24 @@ describe("DAppRequest scope per request", () => {
     rerender(tree(store));
 
     expect(screen.queryByText("Phishing Warning")).not.toBeInTheDocument();
+  });
+
+  // Requests without an id cannot be told apart, so an acknowledgement is
+  // never honoured for one: the warning stays until the user rejects.
+  it("keeps warning about a request without an id after proceed anyway", () => {
+    const { rerender } = render(
+      tree(request(undefined, "https://first-bad.example/", true)),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "I understand the risk, proceed anyway",
+      }),
+    );
+    expect(screen.getByText("Phishing Warning")).toBeInTheDocument();
+
+    rerender(tree(request(undefined, "https://second-bad.example/", true)));
+
+    expect(screen.getByText("Phishing Warning")).toBeInTheDocument();
   });
 
   it("starts the request content fresh for each request", () => {
