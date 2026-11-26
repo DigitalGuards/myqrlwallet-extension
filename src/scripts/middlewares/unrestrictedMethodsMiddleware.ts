@@ -6,6 +6,7 @@ import {
   isValidJson,
 } from "@theqrl/qrl-wallet-provider/utils";
 import { isApprovalSender } from "@/utilities/approvalGuards";
+import { toRequestOrigin } from "@/utilities/requestOrigin";
 import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
 import { checkUrlOriginHasBeenConnected } from "../utils/restrictedMethodsMiddlewareUtils";
 import { executeUnrestrictedMethod } from "../utils/unrestrictedMethodExecutor";
@@ -31,10 +32,14 @@ const checkRequestCanProceed = async (req: JsonRpcRequest<JsonRpcRequest>) => {
     } catch {
       isLocked = true;
     }
-    if (!isLocked) {
-      const originConnectResult = await checkUrlOriginHasBeenConnected(
-        isApprovalSender(req.senderData) ? (req.senderData.url ?? "") : "",
-      );
+    // A sender with no usable origin (a sandboxed frame, a local file)
+    // holds no grant and can never be connected, so the gate leaves it to
+    // the executor, which answers it with an empty account list.
+    const origin = toRequestOrigin(
+      isApprovalSender(req.senderData) ? req.senderData.url : undefined,
+    );
+    if (!isLocked && origin) {
+      const originConnectResult = await checkUrlOriginHasBeenConnected(origin);
       if (!originConnectResult.canProceed) {
         return originConnectResult;
       }

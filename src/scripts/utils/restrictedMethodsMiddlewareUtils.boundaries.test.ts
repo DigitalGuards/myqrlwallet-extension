@@ -10,12 +10,15 @@ import {
   checkWalletAddQrlChainParams,
   checkWalletRequestPermissionParams,
   checkWalletSwitchQrlChainParams,
+  checkUrlOriginHasBeenConnected,
   checkWalletWatchAssetParams,
   excludeChainForUrlOrigin,
   extractPendingDAppTransactionHash,
   includeChainForUrlOrigin,
   revalidateAuthorizedDAppRequest,
+  updatePermissionsForUrlOrigin,
 } from "./restrictedMethodsMiddlewareUtils";
+import { useChromiumFileOrigins } from "@/test-utils/chromiumFileOrigin";
 
 type GrantWrite = Parameters<
   typeof import("@/utilities/storageUtil").default.setDAppsConnectedAccountsData
@@ -607,5 +610,94 @@ describe("validator results and approval errors", () => {
       ...error,
       transactionHash: "0xpending",
     });
+  });
+});
+
+// Every grant helper derives the requester origin through toRequestOrigin.
+// A sender with no usable origin (none at all, an opaque one, a local file,
+// a non-web scheme) can neither write a grant nor find one.
+describe("grant helpers with no requester origin", () => {
+  const NO_ORIGIN = "The requesting origin is unavailable.";
+  const writeLocal = vi.spyOn(browser.storage.local, "set");
+  const originless = [
+    undefined,
+    null,
+    "",
+    "null",
+    "about:blank",
+    "file:///home/user/dapp.html",
+    "file://",
+    "blob:file:///6f1c2b9e-1111-4222-8333-944455556666",
+    "chrome-extension://abcdefghijklmnop/index.html",
+  ];
+
+  beforeEach(() => {
+    useChromiumFileOrigins();
+    writeLocal.mockReset().mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each(originless)("refuses to write a grant for %j", async (urlOrigin) => {
+    await expect(
+      updatePermissionsForUrlOrigin({
+        urlOrigin,
+        accounts: [ACCOUNT],
+        blockchains: [CHAIN],
+      }),
+    ).rejects.toThrow(NO_ORIGIN);
+    await expect(
+      includeChainForUrlOrigin({ urlOrigin, chainId: CHAIN.chainId }),
+    ).rejects.toThrow(NO_ORIGIN);
+    await expect(
+      excludeChainForUrlOrigin({ urlOrigin, chainId: CHAIN.chainId }),
+    ).rejects.toThrow(NO_ORIGIN);
+    expect(writeGrants).not.toHaveBeenCalled();
+    expect(writeLocal).not.toHaveBeenCalled();
+  });
+
+  it.each(originless)("finds no grant for %j", async (url) => {
+    await expect(
+      checkUrlOriginHasBeenConnected(url ?? ""),
+    ).resolves.toMatchObject({ canProceed: false });
+    await expect(
+      checkAccountHasBeenAuthorized({
+        method: "qrl_signMessage",
+        params: [ACCOUNT, "0x1234"],
+        senderData: url === undefined || url === null ? {} : { url },
+      }),
+    ).resolves.toMatchObject({ canProceed: false });
+    expect(readGrants).not.toHaveBeenCalled();
+  });
+
+  // Grants already stored for these sites must keep matching, so the key
+  // the helpers derive is exactly what new URL(url).origin gave before.
+  it.each([
+    ["https://dapp.example:8443/app", "https://dapp.example:8443"],
+    ["http://localhost:5173/", "http://localhost:5173"],
+    ["https://bücher.example/shop", "https://xn--bcher-kva.example"],
+    ["https://dapp.example./swap", "https://dapp.example."],
+  ])("keeps the stored key for %s", async (url, origin) => {
+    await expect(checkUrlOriginHasBeenConnected(url)).resolves.toMatchObject({
+      canProceed: true,
+    });
+    expect(readGrants).toHaveBeenLastCalledWith(origin);
+
+    await updatePermissionsForUrlOrigin({
+      urlOrigin: url,
+      accounts: [ACCOUNT],
+      blockchains: [CHAIN],
+    });
+    expect(writeGrants).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        urlOrigin: origin,
+        permissions: [
+          expect.objectContaining({ invoker: origin }),
+          expect.objectContaining({ invoker: origin }),
+        ],
+      }),
+    );
   });
 });

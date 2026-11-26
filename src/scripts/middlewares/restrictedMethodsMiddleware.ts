@@ -32,6 +32,7 @@ import { claimApprovalSlot, releaseApprovalSlot } from "../utils/approvalSlot";
 import { openApprovalSurface } from "../utils/approvalSurface";
 import { isTrustedExtensionSender } from "../utils/trustedSender";
 import { resolveTrustedSenderOrigin } from "../utils/dAppAccountNotifications";
+import { toRequestOrigin } from "@/utilities/requestOrigin";
 import {
   buildDAppSendTransactionErrorData,
   checkAccountHasBeenAuthorized,
@@ -247,7 +248,8 @@ export const checkRequestCanCompleteSilently = async (req: JsonRpcRequest) => {
     // wallet_revokePermissions), after which this falls through to the
     // normal approval flow.
     try {
-      const urlOrigin = new URL(senderData?.url ?? "").origin;
+      const urlOrigin = toRequestOrigin(senderData?.url);
+      if (!urlOrigin) return { hasCompleted: false };
       const stored: unknown = await StorageUtil.getDAppsConnectedAccountsData(
         urlOrigin,
         isConnectionGrants,

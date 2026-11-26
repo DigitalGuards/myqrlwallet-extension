@@ -6,6 +6,7 @@ import {
 import { providerErrors, rpcErrors } from "@theqrl/qrl-wallet-provider";
 import { RESTRICTED_METHODS } from "../constants/requestConstants";
 import StorageUtil from "@/utilities/storageUtil";
+import { toRequestOrigin } from "@/utilities/requestOrigin";
 import {
   isApprovalSender,
   isStringArray,
@@ -87,8 +88,23 @@ const readStoredChains = (value: unknown): ChainGrant[] => {
   return value;
 };
 
-const requestOrigin = (sender: unknown): string =>
-  new URL(isApprovalSender(sender) ? (sender.url ?? "") : "").origin;
+// Grant reads and writes derive the requester origin through
+// toRequestOrigin. A read with no usable origin finds nothing; a write with
+// none is refused, so no grant can be keyed on an opaque or local-file
+// origin.
+const requestOrigin = (sender: unknown): string | undefined =>
+  toRequestOrigin(isApprovalSender(sender) ? sender.url : undefined);
+
+const readGrantsFor = async (origin: string | undefined) =>
+  origin ? await StorageUtil.getDAppsConnectedAccountsData(origin) : undefined;
+
+const NO_REQUESTER_ORIGIN = "The requesting origin is unavailable.";
+
+const requireRequesterOrigin = (urlOrigin?: string | null): string => {
+  const origin = toRequestOrigin(urlOrigin);
+  if (!origin) throw new Error(NO_REQUESTER_ORIGIN);
+  return origin;
+};
 
 /**
  * `qrl_signTypedData_v4` is the method @theqrl/web3's signTypedData sends:
@@ -174,7 +190,7 @@ export const checkAccountHasBeenAuthorized = async (
   const fromAddress = getFromAddress(req);
   const urlOrigin = requestOrigin(req.senderData);
   const connectedAccounts = readConnectionGrants(
-    await StorageUtil.getDAppsConnectedAccountsData(urlOrigin),
+    await readGrantsFor(urlOrigin),
   );
   const hasAddressConnected =
     connectedAccounts?.accounts?.some((address) =>
@@ -415,9 +431,7 @@ export const checkAccountAndChainHaveBeenAuthorized = async (
   }
 
   const origin = requestOrigin(req.senderData);
-  const connectedData = readConnectionGrants(
-    await StorageUtil.getDAppsConnectedAccountsData(origin),
-  );
+  const connectedData = readConnectionGrants(await readGrantsFor(origin));
   const activeChain: unknown = await StorageUtil.getActiveBlockChain();
   const activeChainId = normalizeChainId(
     isRecord(activeChain) ? activeChain.chainId : undefined,
@@ -955,11 +969,9 @@ export const checkUrlOriginHasBeenConnected = async (
   if (refuseWhileLocked && (await shouldRefuseWhileLocked(false))) {
     return buildLockedWalletRefusal();
   }
-  const urlOrigin = new URL(url).origin;
   const connectedAccounts =
-    readConnectionGrants(
-      await StorageUtil.getDAppsConnectedAccountsData(urlOrigin),
-    )?.accounts ?? [];
+    readConnectionGrants(await readGrantsFor(toRequestOrigin(url)))?.accounts ??
+    [];
   const hasConnectedAccounts = connectedAccounts.length > 0;
   return {
     canProceed: hasConnectedAccounts,
@@ -1174,7 +1186,7 @@ export const updatePermissionsForUrlOrigin = async ({
   accounts,
   blockchains,
 }: ApprovedConnection): Promise<Permission[]> => {
-  const origin = new URL(urlOrigin ?? "").origin;
+  const origin = requireRequesterOrigin(urlOrigin);
   // A connection approval grants access to the selected chains. Changing the
   // active chain requires a separate wallet_switchQRLChain approval (F-3).
   const canonicalAccounts = accounts.map(toCanonicalQrlAddress);
@@ -1219,7 +1231,7 @@ export const includeChainForUrlOrigin = async ({
   urlOrigin?: string | null;
   chainId?: string | null;
 }) => {
-  const origin = new URL(urlOrigin ?? "").origin;
+  const origin = requireRequesterOrigin(urlOrigin);
   const allBlockchains = readStoredChains(
     await StorageUtil.getAllBlockChains(),
   );
@@ -1320,6 +1332,6 @@ export const excludeChainForUrlOrigin = async ({
   urlOrigin?: string | null;
   chainId: string;
 }) => {
-  const origin = new URL(urlOrigin ?? "").origin;
+  const origin = requireRequesterOrigin(urlOrigin);
   await StorageUtil.removeDAppChain(origin, chainId);
 };

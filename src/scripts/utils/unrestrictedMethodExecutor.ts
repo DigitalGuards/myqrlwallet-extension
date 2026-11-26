@@ -1,5 +1,6 @@
 import { storedText } from "@/utilities/storageViews";
 import StorageUtil from "@/utilities/storageUtil";
+import { toRequestOrigin } from "@/utilities/requestOrigin";
 import { isRecord } from "@/utilities/storageGuards";
 import {
   isApprovalSender,
@@ -75,8 +76,14 @@ const readPermissions = (value: unknown): unknown[] => {
   return permissions;
 };
 
-const requestOrigin = (sender: unknown): string =>
-  new URL(isApprovalSender(sender) ? (sender.url ?? "") : "").origin;
+// A sender with no usable origin (a sandboxed frame, a local file) holds no
+// grant, so every read below answers it the way it answers a site that was
+// never connected.
+const requestOrigin = (sender: unknown): string | undefined =>
+  toRequestOrigin(isApprovalSender(sender) ? sender.url : undefined);
+
+const readGrantsFor = async (origin: string | undefined) =>
+  origin ? await StorageUtil.getDAppsConnectedAccountsData(origin) : undefined;
 
 /**
  * Executes read-only ("unrestricted") provider methods against the active
@@ -199,8 +206,7 @@ export const executeUnrestrictedMethod = async (
     // Read accounts after the network identity so a revoke that arrives while
     // provider initialization is pending cannot be overwritten by a stale
     // initial-state response.
-    const connectedAccountsData =
-      await StorageUtil.getDAppsConnectedAccountsData(urlOrigin);
+    const connectedAccountsData = await readGrantsFor(urlOrigin);
     // MetaMask parity (F8): the initial provider state must agree with
     // qrl_accounts. It previously reported isUnlocked: false unconditionally
     // while still handing back the stored account list, so a page had no way
@@ -254,10 +260,9 @@ export const executeUnrestrictedMethod = async (
     // all is a stale-permission leak the page has no way to detect.
     const { isLocked } = await LockManager.isLocked();
     if (isLocked) return [];
-    const connectedAccountsData =
-      await StorageUtil.getDAppsConnectedAccountsData(
-        requestOrigin(req.senderData),
-      );
+    const connectedAccountsData = await readGrantsFor(
+      requestOrigin(req.senderData),
+    );
     return readAccounts(connectedAccountsData);
   } else if (method === UNRESTRICTED_METHODS.WALLET_GET_PERMISSIONS) {
     // The permission caveats carry the connected account addresses, so a
@@ -265,15 +270,14 @@ export const executeUnrestrictedMethod = async (
     // reason qrl_accounts answers with an empty array.
     const { isLocked } = await LockManager.isLocked();
     if (isLocked) return [];
-    const dAppsConnectedAccountsData =
-      await StorageUtil.getDAppsConnectedAccountsData(
-        requestOrigin(req.senderData),
-      );
-    return getSerializableObject(readPermissions(dAppsConnectedAccountsData));
-  } else if (method === UNRESTRICTED_METHODS.WALLET_REVOKE_PERMISSIONS) {
-    await StorageUtil.clearDAppsConnectedAccountsData(
+    const dAppsConnectedAccountsData = await readGrantsFor(
       requestOrigin(req.senderData),
     );
+    return getSerializableObject(readPermissions(dAppsConnectedAccountsData));
+  } else if (method === UNRESTRICTED_METHODS.WALLET_REVOKE_PERMISSIONS) {
+    // Without an origin there is no grant to revoke.
+    const urlOrigin = requestOrigin(req.senderData);
+    if (urlOrigin) await StorageUtil.clearDAppsConnectedAccountsData(urlOrigin);
     return null;
   } else if (method === UNRESTRICTED_METHODS.WEB_3_CLIENT_VERSION) {
     const currentVersion = await qrl.getNodeInfo();

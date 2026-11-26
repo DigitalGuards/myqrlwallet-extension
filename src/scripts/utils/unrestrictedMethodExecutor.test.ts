@@ -6,6 +6,7 @@ import { UNRESTRICTED_METHODS } from "../constants/requestConstants";
 
 const {
   getConnectedAccounts,
+  clearConnectedAccounts,
   getChainId,
   getNetworkId,
   requestManagerSend,
@@ -13,6 +14,7 @@ const {
   getActiveBlockChain,
 } = vi.hoisted(() => ({
   getConnectedAccounts: vi.fn(),
+  clearConnectedAccounts: vi.fn(),
   getChainId: vi.fn(),
   getNetworkId: vi.fn(),
   requestManagerSend: vi.fn(),
@@ -30,6 +32,7 @@ vi.mock("@/utilities/storageUtil", () => ({
   default: {
     getActiveBlockChain,
     getDAppsConnectedAccountsData: getConnectedAccounts,
+    clearDAppsConnectedAccountsData: clearConnectedAccounts,
   },
 }));
 
@@ -58,6 +61,7 @@ vi.mock("@theqrl/web3-core", () => ({
 }));
 
 import { executeUnrestrictedMethod } from "./unrestrictedMethodExecutor";
+import { useChromiumFileOrigins } from "@/test-utils/chromiumFileOrigin";
 
 const request = (url: string): JsonRpcRequest => ({
   id: 1,
@@ -76,6 +80,71 @@ const rpcRequest = (method: string, params: Json[]): JsonRpcRequest => ({
 
 const ADDRESS = `Q${"0".repeat(128)}`;
 const TOPIC = `0x${"ab".repeat(64)}`;
+
+// A sandboxed frame or a local file has no origin. appendSenderDataMiddleware
+// then leaves senderData.url undefined, and such a sender holds no grant: it
+// gets the answers of a site that was never connected.
+describe("a sender with no origin holds no grant", () => {
+  const originless = (method: string, senderUrl?: string): JsonRpcRequest => ({
+    id: 1,
+    jsonrpc: "2.0",
+    method,
+    senderData: senderUrl === undefined ? {} : { url: senderUrl },
+  });
+
+  beforeEach(() => {
+    mockIsLocked
+      .mockReset()
+      .mockResolvedValue({ isLocked: false, hasPasswordSet: true });
+    getChainId.mockReset().mockResolvedValue(1337n);
+    getNetworkId.mockReset().mockResolvedValue(1337n);
+    getActiveBlockChain.mockReset().mockResolvedValue(ACTIVE_CHAIN);
+    getConnectedAccounts.mockReset().mockResolvedValue({
+      urlOrigin: "file://",
+      accounts: ["QLocal"],
+      permissions: [{ parentCapability: "qrl_accounts" }],
+    });
+    clearConnectedAccounts.mockReset().mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([undefined, "", "null", "file://"])(
+    "answers each grant method for sender url %j",
+    async (senderUrl) => {
+      useChromiumFileOrigins();
+
+      await expect(
+        executeUnrestrictedMethod(
+          originless(
+            UNRESTRICTED_METHODS.QRL_WEB3_WALLET_GET_PROVIDER_STATE,
+            senderUrl,
+          ),
+        ),
+      ).resolves.toMatchObject({ accounts: [], chainId: "0x539" });
+      await expect(
+        executeUnrestrictedMethod(
+          originless(UNRESTRICTED_METHODS.QRL_ACCOUNTS, senderUrl),
+        ),
+      ).resolves.toEqual([]);
+      await expect(
+        executeUnrestrictedMethod(
+          originless(UNRESTRICTED_METHODS.WALLET_GET_PERMISSIONS, senderUrl),
+        ),
+      ).resolves.toEqual([]);
+      await expect(
+        executeUnrestrictedMethod(
+          originless(UNRESTRICTED_METHODS.WALLET_REVOKE_PERMISSIONS, senderUrl),
+        ),
+      ).resolves.toBeNull();
+
+      expect(getConnectedAccounts).not.toHaveBeenCalled();
+      expect(clearConnectedAccounts).not.toHaveBeenCalled();
+    },
+  );
+});
 
 describe("qrlWallet_getProviderState", () => {
   beforeEach(() => {
