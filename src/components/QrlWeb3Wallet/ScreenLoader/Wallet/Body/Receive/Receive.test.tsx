@@ -67,7 +67,7 @@ describe("Receive", () => {
 
     const full = screen.getByTestId("address-disclosure-full");
     expect(full).toBeVisible();
-    expect(full.textContent).toContain("Q 01234 56789 abcde");
+    expect(full).toHaveTextContent("Q 01234 56789 abcde");
     expect(screen.queryByText(FINGERPRINT)).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Copy full address" }),
