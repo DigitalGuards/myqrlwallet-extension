@@ -10,6 +10,7 @@ import { getSerializableObject } from "@/scripts/utils/scriptUtils";
 import StorageUtil from "@/utilities/storageUtil";
 import { isRecord } from "@/utilities/storageGuards";
 import { isDAppRequest } from "@/utilities/approvalGuards";
+import { toRequestOrigin } from "@/utilities/requestOrigin";
 import { action, makeAutoObservable, observable } from "mobx";
 import browser from "webextension-polyfill";
 
@@ -29,15 +30,7 @@ type CurrentTabData = {
   connectedBlockchains: BlockchainDataType[];
 };
 
-const originFromTabUrl = (url?: string): string => {
-  if (!url) return "";
-  try {
-    const origin = new URL(url).origin;
-    return origin === "null" ? "" : origin;
-  } catch {
-    return "";
-  }
-};
+const originFromTabUrl = (url?: string): string => toRequestOrigin(url) ?? "";
 
 class DAppRequestStore {
   private currentTabFetchGeneration = 0;

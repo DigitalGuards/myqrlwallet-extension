@@ -1,6 +1,7 @@
 import { profileStorageKey } from "@/utilities/profileStorage";
 import { isAddQrlChainParameters } from "@/utilities/approvalGuards";
 import { malformed } from "@/test-utils/malformed";
+import { useChromiumFileOrigins } from "@/test-utils/chromiumFileOrigin";
 import { isRecord } from "@/utilities/storageGuards";
 import canonical from "@/functions/pqSigning/__fixtures__/canonical.json";
 import { TYPED_DATA_LIMITS } from "@/functions/pqSigning";
@@ -47,7 +48,7 @@ const ORIGIN = "https://dapp.example";
 const ACCOUNT = toChecksumAddress(`Q${"a".repeat(128)}`);
 const INVALID_PARAMS = -32602;
 
-const setupStorage = () => {
+const setupStorage = (extraDApps: Record<string, unknown> = {}) => {
   const records: Record<string, unknown> = {
     [profileStorageKey("DAPPS")]: {
       ALL_DAPPS: {
@@ -57,6 +58,7 @@ const setupStorage = () => {
           blockchains: [{ chainId: DEFAULT_BLOCKCHAIN.chainId }],
           permissions: [],
         },
+        ...extraDApps,
       },
     },
     [profileStorageKey("ACCOUNTS")]: { ALL_ACCOUNTS: [ACCOUNT] },
@@ -314,6 +316,46 @@ describe("qrl_signMessage refuses a message the signer cannot take", () => {
       expect(mockOpenApprovalSurface).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+// A local file has no origin of its own. Chromium reports every one as
+// "file://", so a grant keyed on that value would be shared by all of them.
+describe("a request from a local file is refused before any prompt", () => {
+  const FILE_ORIGIN = "file://";
+
+  beforeEach(() => {
+    useChromiumFileOrigins();
+    // A grant stored under the shared local-file origin.
+    setupStorage({
+      [FILE_ORIGIN]: {
+        urlOrigin: FILE_ORIGIN,
+        accounts: [ACCOUNT],
+        blockchains: [{ chainId: DEFAULT_BLOCKCHAIN.chainId }],
+        permissions: [],
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["qrl_requestAccounts", []],
+    ["qrl_signMessage", [ACCOUNT, "0x48656c6c6f"]],
+  ])("%s", async (method, params) => {
+    const req = buildRequest(method, params);
+    req.senderData = { url: FILE_ORIGIN, tabId: 7 };
+
+    const { res, end } = await run(req);
+
+    expect(res.error).toMatchObject({
+      code: 4100,
+      message: "The requesting origin is unavailable.",
+    });
+    expect(end).toHaveBeenCalledTimes(1);
+    expectNoPrompt();
+  });
 });
 
 describe("add-chain guard through checkWalletAddQrlChainParams", () => {

@@ -7,6 +7,7 @@ import { EXTENSION_MESSAGES } from "@/scripts/constants/streamConstants";
 import type { DAppRequestType } from "@/scripts/middlewares/middlewareTypes";
 import { isRecord } from "@/utilities/storageGuards";
 import { malformed } from "@/test-utils/malformed";
+import { useChromiumFileOrigins } from "@/test-utils/chromiumFileOrigin";
 
 const mockedBrowser = vi.mocked(browser, true);
 type ConnectedDApp = Awaited<
@@ -188,6 +189,31 @@ describe("DAppRequestStore permission refresh", () => {
       });
     });
     expect(getConnectedAccounts).not.toHaveBeenCalled();
+  });
+
+  it("looks up no grant for a local file tab in the form Chromium reports", async () => {
+    useChromiumFileOrigins();
+    try {
+      mockedBrowser.tabs.query.mockResolvedValue([
+        makeTab({ active: true, url: "file:///home/user/dapp.html" }),
+      ]);
+      const getConnectedAccounts = vi.spyOn(
+        StorageUtil,
+        "getDAppsConnectedAccountsData",
+      );
+
+      const store = new DAppRequestStore();
+
+      await vi.waitFor(() => {
+        expect(store.currentTabData).toMatchObject({
+          urlOrigin: "",
+          connectedAccounts: [],
+        });
+      });
+      expect(getConnectedAccounts).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("keeps the newest tab when permission reads resolve out of order", async () => {

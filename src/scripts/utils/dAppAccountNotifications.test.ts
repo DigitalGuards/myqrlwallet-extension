@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import StorageUtil from "@/utilities/storageUtil";
+import { useChromiumFileOrigins } from "@/test-utils/chromiumFileOrigin";
 import {
   notifyDAppAccountsChanged,
   notifyDAppChainChanged,
@@ -108,6 +109,28 @@ describe("dApp account notifications", () => {
     });
 
     expect(stream.write).not.toHaveBeenCalled();
+  });
+
+  it("rejects a local file sender in the form Chromium reports", () => {
+    useChromiumFileOrigins();
+    try {
+      const stream = { write: vi.fn() };
+      cleanups.push(
+        registerDAppAccountNotificationStream(
+          { origin: "file://", url: "file:///tmp/dapp.html" },
+          stream,
+        ),
+      );
+
+      notifyDAppAccountsChanged({
+        oldValue: dAppsStorage({}),
+        newValue: dAppsStorage({ "file://": ["QLocal"] }),
+      });
+
+      expect(stream.write).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("does not emit when the account list is unchanged", () => {

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import QrlRequestAccountAccountSelection from "./QrlRequestAccountAccountSelection/QrlRequestAccountAccountSelection";
 import QrlRequestAccountBlockchainSelection from "./QrlRequestAccountBlockchainSelection/QrlRequestAccountBlockchainSelection";
 import StorageUtil from "@/utilities/storageUtil";
+import { toRequestOrigin } from "@/utilities/requestOrigin";
 import {
   isApprovalBlockchainList,
   isApprovalGrants,
@@ -22,16 +23,8 @@ const QrlRequestAccountContent = observer(() => {
   // iframe request comes from an origin the tab bar never shows. Ticking
   // the active tab's grants here could pre-select accounts the requesting
   // site was never granted, one click away from being handed to it.
-  const requestOrigin = (() => {
-    try {
-      const origin = new URL(
-        dAppRequestData?.requestData?.senderData?.url ?? "",
-      ).origin;
-      return origin === "null" ? "" : origin;
-    } catch {
-      return "";
-    }
-  })();
+  const requestOrigin =
+    toRequestOrigin(dAppRequestData?.requestData?.senderData?.url) ?? "";
 
   const [isLoadingBlockchains, setIsLoadingBlockchains] = useState(true);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);

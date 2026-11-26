@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { JsonRpcEngine } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
+import { useChromiumFileOrigins } from "@/test-utils/chromiumFileOrigin";
+import { appendSenderDataMiddleware } from "./appendSenderDataMiddleware";
 import { unrestrictedMethodsMiddleware } from "./unrestrictedMethodsMiddleware";
 
 const { execute, isLocked, readGrants } = vi.hoisted(() => ({
@@ -133,6 +136,37 @@ describe("unrestricted RPC response boundaries", () => {
     });
     expect(end).toHaveBeenCalledTimes(1);
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("reads no grant for a local file sender in the form Chromium reports", async () => {
+    useChromiumFileOrigins();
+    try {
+      // A grant stored under the shared local-file origin.
+      readGrants.mockResolvedValue({
+        urlOrigin: "file://",
+        accounts: ["QLocal"],
+      });
+      const engine = new JsonRpcEngine();
+      engine.push(
+        appendSenderDataMiddleware({
+          sender: { origin: "file://", url: "file:///tmp/dapp.html" },
+        }),
+      );
+      engine.push(unrestrictedMethodsMiddleware);
+
+      const response = await engine.handle({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "qrl_accounts",
+      });
+
+      expect(readGrants).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+      expect(response).not.toHaveProperty("result");
+      expect(response).toHaveProperty("error");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("reports a rejected connection read through the engine callback", async () => {

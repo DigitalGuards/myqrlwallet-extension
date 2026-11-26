@@ -1,5 +1,6 @@
 import { JsonRpcRequest } from "@theqrl/qrl-wallet-provider/utils";
 import { describe, expect, it, vi } from "vitest";
+import { useChromiumFileOrigins } from "@/test-utils/chromiumFileOrigin";
 import {
   appendSenderDataMiddleware,
   MessageSenderWithOrigin,
@@ -92,6 +93,28 @@ describe("appendSenderDataMiddleware", () => {
     );
 
     expect(req.senderData?.url).toBeUndefined();
+  });
+
+  it("fails closed for a local file in the form Chromium reports", () => {
+    useChromiumFileOrigins();
+    try {
+      const req = buildReq();
+      const sender = buildSender({
+        origin: "file://",
+        url: "file:///home/user/dapp.html",
+      });
+
+      appendSenderDataMiddleware({ sender })(
+        req,
+        { id: req.id, jsonrpc: "2.0" },
+        () => {},
+        () => {},
+      );
+
+      expect(req.senderData?.url).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("uses the top-level frame URL when the request originates from the top frame", () => {
