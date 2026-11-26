@@ -81,11 +81,24 @@ describe("address display primitives", () => {
       screen.queryByRole("button", { name: "Hide full address" }),
     ).not.toBeInTheDocument();
     expect(screen.getAllByText(ADDRESS)).toHaveLength(1);
+    // No tooltip: assistive technology would read the address a second time.
+    expect(screen.queryByTitle(ADDRESS)).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+    // The copy action is a labelled button below the address.
+    expect(
+      screen.getByRole("button", { name: "Copy full address" }),
+    ).toHaveTextContent("Copy full address");
 
     await userEvent.click(
       screen.getByRole("button", { name: "Copy full address" }),
     );
     expect(writeText).toHaveBeenCalledWith(ADDRESS);
     expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Copied");
+  });
+
+  it("keeps the tooltip on the grouped address elsewhere", () => {
+    render(<FullAddress address={ADDRESS} />);
+    expect(screen.getByTitle(ADDRESS)).toBeInTheDocument();
   });
 });

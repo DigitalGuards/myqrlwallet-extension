@@ -78,19 +78,39 @@ const AddressDisclosure = ({
 
   if (alwaysShowFull) {
     return (
-      <div className={cn("min-w-0 max-w-full", className)}>
-        <div className="flex min-w-0 max-w-full items-start gap-1">
-          <div
-            data-testid="address-disclosure-full"
-            className="border-current/20 min-w-0 flex-1 rounded-md border bg-background/50 p-2"
-          >
-            <FullAddress
-              address={address}
-              className={cn("text-xs leading-relaxed", fullAddressClassName)}
-            />
-          </div>
-          {copyButton}
+      <div
+        className={cn(
+          "flex min-w-0 max-w-full flex-col items-center gap-2",
+          className,
+        )}
+      >
+        <div
+          data-testid="address-disclosure-full"
+          className="w-full min-w-0 rounded-md border border-border bg-background/50 p-2"
+        >
+          <FullAddress
+            address={address}
+            showTitle={false}
+            className={cn("text-xs leading-relaxed", fullAddressClassName)}
+          />
         </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="gap-2"
+          onClick={() => void onCopy()}
+        >
+          {copied ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+          {copied ? t("account.copied") : t("account.copyFullAddress")}
+        </Button>
+        <span role="status" className="sr-only">
+          {copied ? t("account.copied") : ""}
+        </span>
       </div>
     );
   }
@@ -135,7 +155,7 @@ const AddressDisclosure = ({
         <div
           id={fullAddressId}
           data-testid="address-disclosure-full"
-          className="border-current/20 mt-1 min-w-0 max-w-full rounded-md border bg-background/50 p-2"
+          className="mt-1 min-w-0 max-w-full rounded-md border border-border bg-background/50 p-2"
         >
           <FullAddress
             address={address}

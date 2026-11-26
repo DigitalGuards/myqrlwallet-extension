@@ -36,7 +36,7 @@ const Receive = observer(() => {
               address={accountAddress}
               className="w-full"
               alwaysShowFull
-              fullAddressClassName="block text-center text-identity-accent"
+              fullAddressClassName="block text-center text-sm text-identity-accent"
             />
           </CardContent>
         </Card>
