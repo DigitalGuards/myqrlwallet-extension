@@ -30,5 +30,9 @@ describe("getMnemonicFromHexSeed", () => {
       "hawse those etoile paul magic female ornate clinic carl sam hanoi cakile item shield beat aerial rarely delta argue pence eric curb inform modern handy exulat tunis noise bonus accuse him left";
 
     expect(getMnemonicFromHexSeed(hexSeed)).toBe(expectedMnemonic);
+    expect(getMnemonicFromHexSeed(hexSeed.slice(2))).toBe(expectedMnemonic);
+    expect(getMnemonicFromHexSeed(`0X${hexSeed.slice(2)}`)).toBe(
+      expectedMnemonic,
+    );
   });
 });
