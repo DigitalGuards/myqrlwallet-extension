@@ -455,7 +455,7 @@ class LedgerService {
    * P1=0x02 means "last data, start signing"
    * At this stage Ledger displays TX on screen and waits for approval.
    *
-   * Receive Dilithium signature chunks (~2420 bytes)
+   * Receive ML-DSA-87 signature chunks (4627 bytes)
    * First chunk is returned automatically.
    * Remaining 17 chunks are fetched via:
    * ┌──────┬──────┬──────┬──────┬──────┬──────┐
@@ -554,14 +554,10 @@ class LedgerService {
         signatureChunks.push(chunkData);
       }
 
-      // Combine all chunks. Bound the assembled length: ML-DSA-87 sigs sit
-      // around 2420 bytes, with some implementation variance. Reject
-      // responses outside the configured envelope.
+      // Combine all chunks. An ML-DSA-87 signature has one fixed length;
+      // any other reassembly is a malformed response.
       const fullSignature = combineSignatureChunks(signatureChunks);
-      if (
-        fullSignature.length < LEDGER_CONFIG.SIGNATURE_MIN_BYTES ||
-        fullSignature.length > LEDGER_CONFIG.SIGNATURE_MAX_BYTES
-      ) {
+      if (fullSignature.length !== LEDGER_CONFIG.EXPECTED_SIGNATURE_BYTES) {
         throw new Error(LEDGER_ERROR_MESSAGES.INCONSISTENT_DEVICE_RESPONSE);
       }
 

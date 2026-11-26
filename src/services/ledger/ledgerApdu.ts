@@ -307,11 +307,13 @@ export function parseQrlAddress(response: Buffer): string {
   // Extract data
   const data = extractResponseData(response);
 
-  // Standard QRL address: 1 byte prefix ('Q') + 20 bytes address = 21 bytes
-  if (data.length < 21) {
+  // Standard QRL address: 1 byte prefix ('Q') + 20 bytes address = 21 bytes.
+  // Exactly 21: the subarray below reads a fixed length, so a longer frame
+  // would otherwise be cut down to its first 20 address bytes.
+  if (data.length !== 21) {
     throw createLedgerError(
       0,
-      `Invalid response length: expected min. 21 bytes, got ${data.length}`,
+      `Invalid response length: expected exactly 21 bytes, got ${data.length}`,
     );
   }
 

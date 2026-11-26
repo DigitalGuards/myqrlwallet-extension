@@ -376,6 +376,20 @@ describe("ledgerApdu", () => {
       );
     });
 
+    it("refuses a longer address frame so it is never truncated", () => {
+      // A device that answers with a 64-byte QIP-55 address must not be read
+      // as its first 20 bytes.
+      const response = Buffer.concat([
+        Buffer.from([0x51]),
+        Buffer.alloc(64, 0xab),
+        Buffer.from([0x90, 0x00]),
+      ]);
+
+      expect(() => parseQrlAddress(response)).toThrow(
+        "Invalid response length: expected exactly 21 bytes, got 65",
+      );
+    });
+
     it("should throw for error status", () => {
       const response = Buffer.concat([
         Buffer.from([0x51]),

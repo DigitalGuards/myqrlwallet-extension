@@ -65,7 +65,7 @@ export type LedgerSigningStatus =
 export interface LedgerSignResult {
   /** Raw transaction (hex with 0x prefix) */
   rawTransaction: string;
-  /** Signature (hex with 0x prefix) - ~2420 bytes */
+  /** Signature (hex with 0x prefix) - 4627 bytes for ML-DSA-87 */
   signature: string;
   /** Public key used for signing (optional) */
   publicKey?: string;
