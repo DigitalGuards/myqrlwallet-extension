@@ -11,6 +11,12 @@ export type AddressDisclosureProps = {
   className?: string;
   fingerprintClassName?: string;
   fullAddressClassName?: string;
+  /**
+   * For surfaces whose purpose is to show the address (Receive). Renders the
+   * grouped full address at once with the copy button beside it, and no
+   * fingerprint line and no reveal toggle.
+   */
+  alwaysShowFull?: boolean;
 };
 
 /**
@@ -24,6 +30,7 @@ const AddressDisclosure = ({
   className,
   fingerprintClassName,
   fullAddressClassName,
+  alwaysShowFull = false,
 }: AddressDisclosureProps) => {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -51,22 +58,47 @@ const AddressDisclosure = ({
     }
   };
 
-  return (
-    <div className={cn("min-w-0 max-w-full", className)}>
-      <div className="flex min-w-0 max-w-full items-center gap-1">
-        <AddressFingerprint
-          address={address}
-          className={cn("min-w-0 flex-1 text-xs", fingerprintClassName)}
-        />
+  const copyButton = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="size-7 shrink-0"
+      aria-label={copied ? t("account.copied") : t("account.copyFullAddress")}
+      title={copied ? t("account.copied") : t("account.copyFullAddress")}
+      onClick={() => void onCopy()}
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5" />
+      ) : (
+        <Copy className="h-3.5 w-3.5" />
+      )}
+    </Button>
+  );
+
+  if (alwaysShowFull) {
+    return (
+      <div
+        className={cn(
+          "flex min-w-0 max-w-full flex-col items-center gap-2",
+          className,
+        )}
+      >
+        <div
+          data-testid="address-disclosure-full"
+          className="w-full min-w-0 rounded-md border border-border bg-background/50 px-2 py-1"
+        >
+          <FullAddress
+            address={address}
+            showTitle={false}
+            className={cn("text-xs leading-relaxed", fullAddressClassName)}
+          />
+        </div>
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className="size-7 shrink-0"
-          aria-label={
-            copied ? t("account.copied") : t("account.copyFullAddress")
-          }
-          title={copied ? t("account.copied") : t("account.copyFullAddress")}
+          size="sm"
+          className="h-8 gap-2"
           onClick={() => void onCopy()}
         >
           {copied ? (
@@ -74,7 +106,23 @@ const AddressDisclosure = ({
           ) : (
             <Copy className="h-3.5 w-3.5" />
           )}
+          {copied ? t("account.copied") : t("account.copyFullAddress")}
         </Button>
+        <span role="status" className="sr-only">
+          {copied ? t("account.copied") : ""}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn("min-w-0 max-w-full", className)}>
+      <div className="flex min-w-0 max-w-full items-center gap-1">
+        <AddressFingerprint
+          address={address}
+          className={cn("min-w-0 flex-1 text-xs", fingerprintClassName)}
+        />
+        {copyButton}
         <Button
           type="button"
           variant="ghost"
@@ -107,7 +155,7 @@ const AddressDisclosure = ({
         <div
           id={fullAddressId}
           data-testid="address-disclosure-full"
-          className="border-current/20 mt-1 min-w-0 max-w-full rounded-md border bg-background/50 p-2"
+          className="mt-1 min-w-0 max-w-full rounded-md border border-border bg-background/50 p-2"
         >
           <FullAddress
             address={address}

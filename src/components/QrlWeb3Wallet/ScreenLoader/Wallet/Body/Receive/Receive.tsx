@@ -28,15 +28,15 @@ const Receive = observer(() => {
           <CardHeader>
             <CardTitle>{t("receive.title")}</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col items-center gap-4">
+          <CardContent className="flex flex-col items-center gap-3 pb-4">
             <div className="rounded-lg bg-white p-3">
-              <QRCodeSVG value={accountAddress} size={150} />
+              <QRCodeSVG value={accountAddress} size={132} />
             </div>
             <AddressDisclosure
               address={accountAddress}
               className="w-full"
-              fingerprintClassName="text-center text-sm text-identity-accent"
-              fullAddressClassName="text-center text-identity-accent"
+              alwaysShowFull
+              fullAddressClassName="block text-center text-sm leading-snug text-identity-accent"
             />
           </CardContent>
         </Card>

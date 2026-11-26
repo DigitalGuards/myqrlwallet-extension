@@ -66,4 +66,39 @@ describe("address display primitives", () => {
     expect(writeText).toHaveBeenCalledWith(ADDRESS);
     expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
   });
+
+  it("with alwaysShowFull shows the full address at once and no toggle or fingerprint", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<AddressDisclosure address={ADDRESS} alwaysShowFull />);
+
+    expect(screen.getByTestId("address-disclosure-full")).toBeInTheDocument();
+    expect(screen.queryByText(FINGERPRINT)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Show full address" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Hide full address" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByText(ADDRESS)).toHaveLength(1);
+    // No tooltip: assistive technology would read the address a second time.
+    expect(screen.queryByTitle(ADDRESS)).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+    // The copy action is a labelled button below the address.
+    expect(
+      screen.getByRole("button", { name: "Copy full address" }),
+    ).toHaveTextContent("Copy full address");
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Copy full address" }),
+    );
+    expect(writeText).toHaveBeenCalledWith(ADDRESS);
+    expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Copied");
+  });
+
+  it("keeps the tooltip on the grouped address elsewhere", () => {
+    render(<FullAddress address={ADDRESS} />);
+    expect(screen.getByTitle(ADDRESS)).toBeInTheDocument();
+  });
 });

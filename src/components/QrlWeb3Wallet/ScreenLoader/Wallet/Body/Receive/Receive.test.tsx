@@ -58,14 +58,25 @@ describe("Receive", () => {
     expect(qr).toHaveAttribute("data-value", OTHER_ADDRESS);
   });
 
-  it("should display the approved compact address fingerprint", () => {
+  it("shows the full grouped address at once, without a toggle or a fingerprint", () => {
     renderComponent(
       mockedStore({
         qrlStore: { activeAccount: { accountAddress: ADDRESS } },
       }),
     );
 
-    expect(screen.getByText(FINGERPRINT)).toBeInTheDocument();
+    const full = screen.getByTestId("address-disclosure-full");
+    expect(full).toBeVisible();
+    expect(full).toHaveTextContent("Q 01234 56789 abcde");
+    expect(screen.queryByText(FINGERPRINT)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Copy full address" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Show full address" }),
+    ).not.toBeInTheDocument();
+    // The raw address is exposed to assistive technology once.
+    expect(screen.getAllByText(ADDRESS)).toHaveLength(1);
     expect(screen.getByText(ADDRESS)).toHaveClass("sr-only");
   });
 
