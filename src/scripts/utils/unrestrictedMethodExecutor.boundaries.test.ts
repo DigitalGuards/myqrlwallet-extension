@@ -672,15 +672,16 @@ describe("unrestricted storage boundaries", () => {
     expect(clearConnection).not.toHaveBeenCalled();
   });
 
+  // A sender without a usable origin holds no grant, so revoking is a no-op.
   it.each([undefined, null, {}, { url: 42 }])(
-    "rejects malformed origin metadata (%s)",
+    "revokes nothing for malformed origin metadata (%s)",
     async (senderData) => {
       await expect(
         executeUnrestrictedMethod({
           method: METHODS.WALLET_REVOKE_PERMISSIONS,
           senderData,
         }),
-      ).rejects.toThrow();
+      ).resolves.toBeNull();
       expect(clearConnection).not.toHaveBeenCalled();
     },
   );

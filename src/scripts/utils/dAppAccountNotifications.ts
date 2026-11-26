@@ -5,6 +5,7 @@ import {
   isString,
 } from "@/utilities/storageGuards";
 import { providerNetworkIdentity } from "@/utilities/providerNetwork";
+import { toRequestOrigin } from "@/utilities/requestOrigin";
 import {
   DEFAULT_BLOCKCHAIN,
   QRL_BLOCKCHAINS,
@@ -101,22 +102,11 @@ const broadcastLockStateToStreams = async (isLocked: boolean) => {
   }
 };
 
-const normalizeOrigin = (url: string): string | undefined => {
-  try {
-    const origin = new URL(url).origin;
-    return origin === "null" ? undefined : origin;
-  } catch {
-    return undefined;
-  }
-};
-
 export const resolveTrustedSenderOrigin = ({
   origin,
   url,
-}: SenderIdentity): string | undefined => {
-  if (origin !== undefined) return normalizeOrigin(origin);
-  return url ? normalizeOrigin(url) : undefined;
-};
+}: SenderIdentity): string | undefined =>
+  toRequestOrigin(origin !== undefined ? origin : url);
 
 const accountsByOrigin = (value: unknown): Map<string, string[]> => {
   const allDApps = isRecord(value) ? value.ALL_DAPPS : undefined;

@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { JsonRpcEngine } from "@theqrl/qrl-wallet-provider/json-rpc-engine";
+import { useChromiumFileOrigins } from "@/test-utils/chromiumFileOrigin";
+import { appendSenderDataMiddleware } from "./appendSenderDataMiddleware";
 import { unrestrictedMethodsMiddleware } from "./unrestrictedMethodsMiddleware";
 
 const { execute, isLocked, readGrants } = vi.hoisted(() => ({
@@ -134,6 +137,44 @@ describe("unrestricted RPC response boundaries", () => {
     expect(end).toHaveBeenCalledTimes(1);
     expect(execute).not.toHaveBeenCalled();
   });
+
+  // A sender with no origin (a sandboxed frame, or a local file, which
+  // Chromium reports as "file://") holds no grant. The connection gate lets
+  // it through so the executor answers qrl_accounts as it does for any site
+  // without a grant, with an empty list.
+  it.each([
+    { origin: "file://", url: "file:///tmp/dapp.html" },
+    { origin: "null", url: "https://sandboxed.example/frame" },
+  ])(
+    "answers qrl_accounts without reading a grant for sender %j",
+    async (sender) => {
+      useChromiumFileOrigins();
+      try {
+        // A grant stored under the shared local-file origin.
+        readGrants.mockResolvedValue({
+          urlOrigin: "file://",
+          accounts: ["QLocal"],
+        });
+        execute.mockResolvedValue([]);
+        const engine = new JsonRpcEngine();
+        engine.push(appendSenderDataMiddleware({ sender }));
+        engine.push(unrestrictedMethodsMiddleware);
+
+        const response = await engine.handle({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "qrl_accounts",
+        });
+
+        expect(readGrants).not.toHaveBeenCalled();
+        expect(execute).toHaveBeenCalledTimes(1);
+        expect(response).not.toHaveProperty("error");
+        expect(response).toMatchObject({ result: [] });
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 
   it("reports a rejected connection read through the engine callback", async () => {
     const error = new Error("Stored grants unavailable");

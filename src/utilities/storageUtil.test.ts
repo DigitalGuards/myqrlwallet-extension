@@ -1038,6 +1038,43 @@ describe("StorageUtil", () => {
       expect(result).toBeUndefined();
     });
 
+    // "null" is how an opaque origin serializes and "file://" is how
+    // Chromium serializes every local file, so neither names one site.
+    it.each(["null", "file://"])(
+      "refuses to store a grant under %s",
+      async (urlOrigin) => {
+        await expect(
+          StorageUtil.setDAppsConnectedAccountsData({
+            ...connectedData,
+            urlOrigin,
+          }),
+        ).rejects.toThrow("Invalid stored dApp identity");
+        await expect(
+          StorageUtil.addDAppChain(urlOrigin, connectedChain),
+        ).rejects.toThrow("Invalid stored dApp chain identity");
+        expect(localStore[profileStorageKey("DAPPS")]).toBeUndefined();
+      },
+    );
+
+    it.each(["null", "file://"])(
+      "leaves a grant stored under %s inert and the others readable",
+      async (urlOrigin) => {
+        localStore[profileStorageKey("DAPPS")] = {
+          ALL_DAPPS: {
+            [urlOrigin]: { ...connectedData, urlOrigin },
+            [connectedData.urlOrigin]: connectedData,
+          },
+        };
+
+        await expect(
+          StorageUtil.getDAppsConnectedAccountsData(urlOrigin),
+        ).resolves.toBeUndefined();
+        await expect(
+          StorageUtil.getDAppsConnectedAccountsData(connectedData.urlOrigin),
+        ).resolves.toMatchObject({ accounts: [ACCOUNT] });
+      },
+    );
+
     it("should clear connected accounts for a specific origin", async () => {
       await StorageUtil.setDAppsConnectedAccountsData(connectedData);
       await StorageUtil.clearDAppsConnectedAccountsData("https://example.com");
