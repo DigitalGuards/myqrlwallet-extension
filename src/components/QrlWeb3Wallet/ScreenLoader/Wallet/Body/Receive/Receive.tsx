@@ -35,8 +35,8 @@ const Receive = observer(() => {
             <AddressDisclosure
               address={accountAddress}
               className="w-full"
-              fingerprintClassName="text-center text-sm text-identity-accent"
-              fullAddressClassName="text-center text-identity-accent"
+              alwaysShowFull
+              fullAddressClassName="block text-center text-identity-accent"
             />
           </CardContent>
         </Card>
