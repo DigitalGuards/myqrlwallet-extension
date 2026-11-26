@@ -86,7 +86,7 @@ const AddressDisclosure = ({
       >
         <div
           data-testid="address-disclosure-full"
-          className="w-full min-w-0 rounded-md border border-border bg-background/50 p-2"
+          className="w-full min-w-0 rounded-md border border-border bg-background/50 px-2 py-1"
         >
           <FullAddress
             address={address}
@@ -98,7 +98,7 @@ const AddressDisclosure = ({
           type="button"
           variant="ghost"
           size="sm"
-          className="gap-2"
+          className="h-8 gap-2"
           onClick={() => void onCopy()}
         >
           {copied ? (
