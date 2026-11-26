@@ -43,6 +43,7 @@ describe("LedgerStore", () => {
         ...args: Parameters<typeof FeeMarketEIP1559Transaction.fromValuesArray>
       ) => Pick<FeeMarketEIP1559Transaction, "serialize">
     >();
+  const mockRecoverTransaction = vi.fn<(rawTransaction: string) => string>();
 
   // Store instance will be dynamically imported
   let LedgerStore: typeof import("./ledgerStore").default;
@@ -147,6 +148,7 @@ describe("LedgerStore", () => {
         fromTxData: mockFromTxData,
         fromValuesArray: mockFromValuesArray,
       },
+      recoverTransaction: mockRecoverTransaction,
     }));
 
     vi.doMock("@/utilities/storageUtil", () => ({
@@ -1003,6 +1005,42 @@ describe("LedgerStore", () => {
         signature: "0xabcdef",
         rawTransaction: "0xrawtx",
       });
+      // The fixtures carry no real signature, so recovery is stubbed to name
+      // the signing account. The mismatch path has its own test below.
+      mockRecoverTransaction.mockReturnValue(mockAccounts[0].address);
+    });
+
+    it("refuses a signed transaction whose sender is a different account", async () => {
+      mockRecoverTransaction.mockReturnValue(mockAccounts[1].address);
+
+      await expect(
+        store.signAndSerializeTransaction(
+          mockAccounts[0].address,
+          mockTxData,
+          mockCommon,
+        ),
+      ).rejects.toThrow(LEDGER_ERROR_MESSAGES.SENDER_MISMATCH);
+      expect(store.signingState).toBe("error");
+      expect(store.signResult).toEqual({
+        success: false,
+        error: LEDGER_ERROR_MESSAGES.SENDER_MISMATCH,
+      });
+    });
+
+    it("refuses a signed transaction whose signature does not verify", async () => {
+      mockRecoverTransaction.mockImplementation(() => {
+        throw new Error("Signature verification failed");
+      });
+
+      await expect(
+        store.signAndSerializeTransaction(
+          mockAccounts[0].address,
+          mockTxData,
+          mockCommon,
+        ),
+      ).rejects.toThrow(LEDGER_ERROR_MESSAGES.SENDER_MISMATCH);
+      expect(store.signingState).toBe("error");
+      expect(store.signResult?.success).toBe(false);
     });
 
     it("should sign and serialize transaction successfully", async () => {
@@ -1268,7 +1306,7 @@ describe("LedgerStore", () => {
         mockCommon,
       );
       const decoded = actual.FeeMarketEIP1559Transaction.fromSerializedTx(
-          new Uint8Array(Buffer.from(serialized.slice(2), "hex")),
+        new Uint8Array(Buffer.from(serialized.slice(2), "hex")),
         { common: mockCommon },
       );
       const unsigned = actual.FeeMarketEIP1559Transaction.fromTxData(txData, {

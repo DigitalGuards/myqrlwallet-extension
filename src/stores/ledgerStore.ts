@@ -40,7 +40,10 @@ import type { LedgerDeviceInfo } from "@/services/ledger/ledgerTypes";
 import StorageUtil from "@/utilities/storageUtil";
 import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
 import { getDerivationPath } from "@/services/ledger/ledgerApdu";
-import { FeeMarketEIP1559Transaction } from "@theqrl/web3-qrl-accounts";
+import {
+  FeeMarketEIP1559Transaction,
+  recoverTransaction,
+} from "@theqrl/web3-qrl-accounts";
 import { newMLDSA87Descriptor } from "@theqrl/wallet.js";
 import {
   isLedgerCommon,
@@ -701,7 +704,32 @@ class LedgerStore {
       { common },
     );
     const signedRawTx = signedTx.serialize();
-    return "0x" + Buffer.from(signedRawTx).toString("hex");
+    const rawTransaction = "0x" + Buffer.from(signedRawTx).toString("hex");
+    // The device signs with whatever key sits behind the stored derivation
+    // path, and the public key comes from storage or a separate request. The
+    // chain reads the sender from the signed transaction, so it must be the
+    // account this send is for. signTransaction has already recorded a
+    // success, which is corrected here when the check fails.
+    let recoveredSender: unknown;
+    try {
+      recoveredSender = recoverTransaction(rawTransaction);
+    } catch {
+      recoveredSender = undefined;
+    }
+    if (
+      typeof recoveredSender !== "string" ||
+      !fromAddress ||
+      recoveredSender.toLowerCase() !== fromAddress.toLowerCase()
+    ) {
+      const error = LEDGER_ERROR_MESSAGES.SENDER_MISMATCH;
+      runInAction(() => {
+        this.signingState = "error";
+        this.signingStatus = { state: "error", message: error };
+        this.signResult = { success: false, error };
+      });
+      throw new Error(error);
+    }
+    return rawTransaction;
   }
 
   clearSigningState(): void {

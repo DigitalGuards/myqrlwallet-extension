@@ -208,6 +208,9 @@ export const LEDGER_ERROR_MESSAGES = {
   /** Device returned data of unexpected size during chunk reassembly */
   INCONSISTENT_DEVICE_RESPONSE:
     "Ledger device returned an unexpected response. Reconnect the device or check the QRL Zond app firmware version.",
+  /** The signed transaction recovers to an account other than the sender */
+  SENDER_MISMATCH:
+    "The Ledger signature belongs to a different account than the one sending. Nothing was sent.",
   /** Current device protocol cannot carry QIP-55 identities and signatures. */
   QIP55_UNSUPPORTED:
     "Ledger support is unavailable for QIP-55 until the device app defines a 64-byte address and 4,627-byte ML-DSA-87 signature protocol.",
