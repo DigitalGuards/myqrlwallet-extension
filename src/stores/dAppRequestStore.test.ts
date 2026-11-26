@@ -191,30 +191,37 @@ describe("DAppRequestStore permission refresh", () => {
     expect(getConnectedAccounts).not.toHaveBeenCalled();
   });
 
-  it("looks up no grant for a local file tab in the form Chromium reports", async () => {
-    useChromiumFileOrigins();
-    try {
-      mockedBrowser.tabs.query.mockResolvedValue([
-        makeTab({ active: true, url: "file:///home/user/dapp.html" }),
-      ]);
-      const getConnectedAccounts = vi.spyOn(
-        StorageUtil,
-        "getDAppsConnectedAccountsData",
-      );
+  it.each([
+    "file:///home/user/dapp.html",
+    "blob:file:///6f1c2b9e-1111-4222-8333-944455556666",
+    "filesystem:file:///temporary/dapp.html",
+  ])(
+    "looks up no grant for a local file tab %s in the form Chromium reports",
+    async (url) => {
+      useChromiumFileOrigins();
+      try {
+        mockedBrowser.tabs.query.mockResolvedValue([
+          makeTab({ active: true, url }),
+        ]);
+        const getConnectedAccounts = vi.spyOn(
+          StorageUtil,
+          "getDAppsConnectedAccountsData",
+        );
 
-      const store = new DAppRequestStore();
+        const store = new DAppRequestStore();
 
-      await vi.waitFor(() => {
-        expect(store.currentTabData).toMatchObject({
-          urlOrigin: "",
-          connectedAccounts: [],
+        await vi.waitFor(() => {
+          expect(store.currentTabData).toMatchObject({
+            urlOrigin: "",
+            connectedAccounts: [],
+          });
         });
-      });
-      expect(getConnectedAccounts).not.toHaveBeenCalled();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
+        expect(getConnectedAccounts).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 
   it("keeps the newest tab when permission reads resolve out of order", async () => {
     let resolveConnectedTab: ((value: ConnectedDApp) => void) | undefined;
