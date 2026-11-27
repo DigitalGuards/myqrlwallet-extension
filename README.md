@@ -38,7 +38,7 @@ Your recovery phrase is the only way to get your wallet back if you lose your de
 ## What the extension connects to
 
 - **A QRL 2.0 node**, to read your balances and send your transactions. You can add a network with your own node in the settings.
-- **The ShorScan explorer**, for transaction history and for suggesting tokens and NFTs you own. What it suggests is checked on the network before it is shown as yours, and the wallet keeps working when the explorer is unreachable.
+- **The ShorScan explorer**, for transaction history and for suggesting tokens and NFTs you own.
 - **An IPFS gateway and the address an NFT names**, to load NFT pictures and descriptions.
 - **A list of known scam sites**, refreshed from a public list.
 - **A price service**, for the value of your balance in your currency once mainnet is live.
