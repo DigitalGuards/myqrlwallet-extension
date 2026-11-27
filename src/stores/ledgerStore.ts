@@ -665,80 +665,87 @@ class LedgerStore {
     if (!signResult.success) {
       throw new Error(signResult.error || "Ledger signing failed");
     }
-
-    const account = this.getAccountByAddress(fromAddress);
-    if (!account) {
-      throw new Error("Ledger account not found");
-    }
-
-    let publicKey =
-      typeof account.publicKey === "string" ? account.publicKey : "";
-    if (!publicKey) {
-      const { publicKey: fetchedPublicKey } =
-        await this.fetchPublicKey(fromAddress);
-      publicKey = fetchedPublicKey;
-      if (!publicKey) {
-        throw new Error("Failed to fetch public key from Ledger");
-      }
-    }
-
-    const rawValues = unsignedTx.raw();
-    const signature: unknown = signResult.signature;
-    if (typeof signature !== "string") {
-      throw new Error("Ledger signing returned no usable signature");
-    }
-    const signatureBytes = Buffer.from(signature.replace("0x", ""), "hex");
-    const publicKeyBytes = Buffer.from(publicKey.replace("0x", ""), "hex");
-
-    const signedTxValues: Parameters<
-      typeof FeeMarketEIP1559Transaction.fromValuesArray
-    >[0] = [
-      rawValues[0],
-      rawValues[1],
-      rawValues[2],
-      rawValues[3],
-      rawValues[4],
-      rawValues[5],
-      rawValues[6],
-      rawValues[7],
-      rawValues[8],
-      descriptor,
-      extraParams,
-      signatureBytes,
-      publicKeyBytes,
-    ];
-    const signedTx = FeeMarketEIP1559Transaction.fromValuesArray(
-      signedTxValues,
-      { common },
-    );
-    const signedRawTx = signedTx.serialize();
-    const rawTransaction = "0x" + Buffer.from(signedRawTx).toString("hex");
-    // The device signs with whatever key sits behind the stored derivation
-    // path, and the public key comes from storage or a separate request. The
-    // chain reads the sender from the signed transaction, so it must be the
-    // account this send is for. signTransaction has already recorded a
-    // success, which is corrected here when the check fails.
-    //
-    // Both sides must be well-formed 64-byte QIP-55 addresses. Device
-    // accounts in this code hold the 20-byte address of the old frame, so the
-    // check fails closed until device accounts carry the 64-byte address;
-    // that belongs to the work that opens the gate.
-    let recoveredSender: unknown;
+    // signTransaction has recorded a success for the device step. Any step
+    // below that fails turns that record into the error the caller gets.
     try {
-      recoveredSender = recoverTransaction(rawTransaction);
-    } catch (error) {
-      console.error(
-        "[LedgerStore] Signature verification failed:",
-        describeVerificationError(error),
+      const account = this.getAccountByAddress(fromAddress);
+      if (!account) {
+        throw new Error("Ledger account not found");
+      }
+
+      let publicKey =
+        typeof account.publicKey === "string" ? account.publicKey : "";
+      if (!publicKey) {
+        const { publicKey: fetchedPublicKey } =
+          await this.fetchPublicKey(fromAddress);
+        publicKey = fetchedPublicKey;
+        if (!publicKey) {
+          throw new Error("Failed to fetch public key from Ledger");
+        }
+      }
+
+      const rawValues = unsignedTx.raw();
+      const signature: unknown = signResult.signature;
+      if (typeof signature !== "string") {
+        throw new Error("Ledger signing returned no usable signature");
+      }
+      const signatureBytes = Buffer.from(signature.replace("0x", ""), "hex");
+      const publicKeyBytes = Buffer.from(publicKey.replace("0x", ""), "hex");
+
+      const signedTxValues: Parameters<
+        typeof FeeMarketEIP1559Transaction.fromValuesArray
+      >[0] = [
+        rawValues[0],
+        rawValues[1],
+        rawValues[2],
+        rawValues[3],
+        rawValues[4],
+        rawValues[5],
+        rawValues[6],
+        rawValues[7],
+        rawValues[8],
+        descriptor,
+        extraParams,
+        signatureBytes,
+        publicKeyBytes,
+      ];
+      const signedTx = FeeMarketEIP1559Transaction.fromValuesArray(
+        signedTxValues,
+        { common },
       );
-      this.recordSigningFailure(LEDGER_ERROR_MESSAGES.SIGNATURE_UNVERIFIED);
-      throw new Error(LEDGER_ERROR_MESSAGES.SIGNATURE_UNVERIFIED);
+      const signedRawTx = signedTx.serialize();
+      const rawTransaction = "0x" + Buffer.from(signedRawTx).toString("hex");
+      // The device signs with whatever key sits behind the stored
+      // derivation path, and the public key comes from storage or a separate
+      // request. The chain reads the sender from the signed transaction, so
+      // it must be the account this send is for.
+      //
+      // Both sides must be well-formed 64-byte QIP-55 addresses. Device
+      // accounts in this code hold the 20-byte address of the old frame, so
+      // the check fails closed until device accounts carry the 64-byte
+      // address; that belongs to the work that opens the gate.
+      let recoveredSender: unknown;
+      try {
+        recoveredSender = recoverTransaction(rawTransaction);
+      } catch (error) {
+        console.error(
+          "[LedgerStore] Signature verification failed:",
+          describeVerificationError(error),
+        );
+        throw new Error(LEDGER_ERROR_MESSAGES.SIGNATURE_UNVERIFIED);
+      }
+      if (!areAddressesEquivalent(recoveredSender, fromAddress)) {
+        throw new Error(LEDGER_ERROR_MESSAGES.SENDER_MISMATCH);
+      }
+      return rawTransaction;
+    } catch (error) {
+      this.recordSigningFailure(
+        error instanceof Error
+          ? error.message
+          : LEDGER_ERROR_MESSAGES.SIGNING_FAILED,
+      );
+      throw error;
     }
-    if (!areAddressesEquivalent(recoveredSender, fromAddress)) {
-      this.recordSigningFailure(LEDGER_ERROR_MESSAGES.SENDER_MISMATCH);
-      throw new Error(LEDGER_ERROR_MESSAGES.SENDER_MISMATCH);
-    }
-    return rawTransaction;
   }
 
   /** Record a failure that follows a successful device signature. */

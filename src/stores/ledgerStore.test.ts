@@ -1235,6 +1235,11 @@ describe("LedgerStore", () => {
           mockCommon,
         ),
       ).rejects.toThrow("Ledger account not found");
+      expect(store.signingState).toBe("error");
+      expect(store.signResult).toEqual({
+        success: false,
+        error: "Ledger account not found",
+      });
     });
 
     it("should throw if fetchPublicKey returns empty public key", async () => {
@@ -1260,6 +1265,11 @@ describe("LedgerStore", () => {
           mockCommon,
         ),
       ).rejects.toThrow("Failed to fetch public key from Ledger");
+      expect(store.signingState).toBe("error");
+      expect(store.signResult).toEqual({
+        success: false,
+        error: "Failed to fetch public key from Ledger",
+      });
     });
 
     it("preserves transaction fields and orders signing fields for the library", async () => {
