@@ -339,7 +339,7 @@ export function parseQrlAddress(response: Buffer): string {
 export interface PublicKeyResponse {
   /** Legacy device address in Q + 40 hex format */
   address: string;
-  /** Dilithium public key (hex with 0x prefix), empty if not included in response */
+  /** ML-DSA-87 public key (hex with 0x prefix), empty if not included in response */
   publicKey: string;
 }
 

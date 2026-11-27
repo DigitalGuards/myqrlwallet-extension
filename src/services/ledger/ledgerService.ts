@@ -466,7 +466,7 @@ class LedgerService {
    *
    * @param derivationPath - BIP-44 path of signing key
    * @param rlpEncodedTx - RLP-encoded transaction (hex string or Buffer)
-   * @returns Signed transaction with Dilithium signature
+   * @returns Signed transaction with ML-DSA-87 signature
    */
   async signTransaction(
     derivationPath: string,
