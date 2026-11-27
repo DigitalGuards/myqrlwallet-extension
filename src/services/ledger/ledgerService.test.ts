@@ -24,7 +24,7 @@ vi.mock("./ledgerApdu", () => ({
   getDerivationPath: vi.fn((index: number) => `m/44'/238'/0'/0/${index}`),
   splitIntoChunks: vi.fn((data: Buffer) => [data]),
   combineSignatureChunks: vi.fn((chunks: Buffer[]) => Buffer.concat(chunks)),
-  parseQrlAddress: vi.fn(() => "Q" + "ab".repeat(24)),
+  parseQrlAddress: vi.fn(() => "Q" + "ab".repeat(20)),
   parsePublicKeyResponse: vi.fn(() => ({
     address: "Q" + "ab".repeat(24),
     publicKey: "0x" + "cc".repeat(100),
@@ -70,7 +70,7 @@ describe("LedgerService", () => {
       combineSignatureChunks: vi.fn((chunks: Buffer[]) =>
         Buffer.concat(chunks),
       ),
-      parseQrlAddress: vi.fn(() => "Q" + "ab".repeat(24)),
+      parseQrlAddress: vi.fn(() => "Q" + "ab".repeat(20)),
       parsePublicKeyResponse: vi.fn(() => ({
         address: "Q" + "ab".repeat(24),
         publicKey: "0x" + "cc".repeat(100),
@@ -508,6 +508,32 @@ describe("LedgerService", () => {
       transport.send.mockResolvedValue(
         Buffer.concat([Buffer.alloc(100, 0xaa), Buffer.from([0x90, 0x00])]),
       );
+
+      await expect(
+        ledgerService.signTransaction(mockDerivationPath, mockTxHex),
+      ).rejects.toThrow(LEDGER_ERROR_MESSAGES.INCONSISTENT_DEVICE_RESPONSE);
+    });
+
+    // Sizes of the chunks a device returns, first to last: the answer to the
+    // last transaction packet, then P2=1..17.
+    const answerWithSignatureChunks = (sizes: number[]) => {
+      transport.send.mockImplementation((_cla, _ins, p1, p2) => {
+        const size = p1 === 0x02 ? (sizes[p2] ?? 0) : 0;
+        return Promise.resolve(
+          Buffer.concat([Buffer.alloc(size, 0xaa), Buffer.from([0x90, 0x00])]),
+        );
+      });
+    };
+
+    it.each([
+      ["4626 bytes in all", [...Array<number>(17).fill(258), 240]],
+      ["4628 bytes in all", [...Array<number>(17).fill(258), 242]],
+      [
+        "a skewed split that still totals 4627 bytes",
+        [257, ...Array<number>(16).fill(258), 242],
+      ],
+    ])("rejects a signature delivered as %s", async (_label, sizes) => {
+      answerWithSignatureChunks(sizes);
 
       await expect(
         ledgerService.signTransaction(mockDerivationPath, mockTxHex),

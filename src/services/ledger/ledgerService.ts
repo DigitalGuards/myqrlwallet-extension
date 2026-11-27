@@ -524,11 +524,16 @@ class LedgerService {
       // Check status of first signature chunk
       checkStatusWord(signatureResponse);
 
-      // Dilithium signature is returned in 18 chunks. Each chunk must be
-      // non-empty; an empty chunk indicates a transport fault or padded
-      // response that cannot be trusted (F-12).
+      // The ML-DSA-87 signature is returned in 18 chunks: 17 of 258 bytes
+      // and a last one of 241. A chunk of any other size is a transport
+      // fault or a padded response that cannot be trusted (F-12), even when
+      // the sizes still add up to the full signature.
+      const expectedSignatureChunkBytes = (chunkIndex: number) =>
+        chunkIndex === LEDGER_CONFIG.SIGNATURE_CHUNKS - 1
+          ? LEDGER_CONFIG.SIGNATURE_LAST_CHUNK_BYTES
+          : LEDGER_CONFIG.SIGNATURE_CHUNK_BYTES;
       const firstChunk = extractResponseData(signatureResponse);
-      if (firstChunk.length === 0) {
+      if (firstChunk.length !== expectedSignatureChunkBytes(0)) {
         throw new Error(LEDGER_ERROR_MESSAGES.INCONSISTENT_DEVICE_RESPONSE);
       }
       const signatureChunks: Buffer[] = [firstChunk];
@@ -548,7 +553,7 @@ class LedgerService {
 
         checkStatusWord(chunkResponse);
         const chunkData = extractResponseData(chunkResponse);
-        if (chunkData.length === 0) {
+        if (chunkData.length !== expectedSignatureChunkBytes(chunkIndex)) {
           throw new Error(LEDGER_ERROR_MESSAGES.INCONSISTENT_DEVICE_RESPONSE);
         }
         signatureChunks.push(chunkData);
