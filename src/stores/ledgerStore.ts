@@ -38,6 +38,7 @@ import { ledgerService } from "@/services/ledger/ledgerService";
 import { ledgerTransport } from "@/services/ledger/ledgerTransport";
 import type { LedgerDeviceInfo } from "@/services/ledger/ledgerTypes";
 import StorageUtil from "@/utilities/storageUtil";
+import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
 import { getDerivationPath } from "@/services/ledger/ledgerApdu";
 import {
@@ -710,17 +711,18 @@ class LedgerStore {
     // chain reads the sender from the signed transaction, so it must be the
     // account this send is for. signTransaction has already recorded a
     // success, which is corrected here when the check fails.
+    //
+    // Both sides must be well-formed 64-byte QIP-55 addresses. Device
+    // accounts in this code hold the 20-byte address of the old frame, so the
+    // check fails closed until device accounts carry the 64-byte address;
+    // that belongs to the work that opens the gate.
     let recoveredSender: unknown;
     try {
       recoveredSender = recoverTransaction(rawTransaction);
     } catch {
       recoveredSender = undefined;
     }
-    if (
-      typeof recoveredSender !== "string" ||
-      !fromAddress ||
-      recoveredSender.toLowerCase() !== fromAddress.toLowerCase()
-    ) {
+    if (!areAddressesEquivalent(recoveredSender, fromAddress)) {
       const error = LEDGER_ERROR_MESSAGES.SENDER_MISMATCH;
       runInAction(() => {
         this.signingState = "error";
