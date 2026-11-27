@@ -43,6 +43,7 @@ describe("LedgerStore", () => {
         ...args: Parameters<typeof FeeMarketEIP1559Transaction.fromValuesArray>
       ) => Pick<FeeMarketEIP1559Transaction, "serialize">
     >();
+  const mockRecoverTransaction = vi.fn<(rawTransaction: string) => string>();
 
   // Store instance will be dynamically imported
   let LedgerStore: typeof import("./ledgerStore").default;
@@ -147,6 +148,7 @@ describe("LedgerStore", () => {
         fromTxData: mockFromTxData,
         fromValuesArray: mockFromValuesArray,
       },
+      recoverTransaction: mockRecoverTransaction,
     }));
 
     vi.doMock("@/utilities/storageUtil", () => ({
@@ -993,21 +995,74 @@ describe("LedgerStore", () => {
       data: "0x",
     };
     const mockCommon = Common.custom({ chainId: 1 });
+    // The sender check compares well-formed QIP-55 addresses, so these tests
+    // sign for 64-byte senders.
+    const LEDGER_SENDER = `Q${"12".repeat(64)}`;
+    const OTHER_SENDER = `Q${"34".repeat(64)}`;
+    const ledgerAccount = { ...mockAccounts[0], address: LEDGER_SENDER };
 
     beforeEach(() => {
       store.connectionState = "connected";
-      store.accounts = [...mockAccounts];
+      store.accounts = [ledgerAccount, mockAccounts[1]];
 
       // signTransaction mock (ledgerService level)
       mockSignTransaction.mockResolvedValue({
         signature: "0xabcdef",
         rawTransaction: "0xrawtx",
       });
+      // The fixtures carry no real signature, so recovery is stubbed to name
+      // the signing account. The mismatch path has its own test below.
+      mockRecoverTransaction.mockReturnValue(LEDGER_SENDER);
+    });
+
+    it("refuses a signed transaction whose sender is a different account", async () => {
+      mockRecoverTransaction.mockReturnValue(OTHER_SENDER);
+
+      await expect(
+        store.signAndSerializeTransaction(
+          ledgerAccount.address,
+          mockTxData,
+          mockCommon,
+        ),
+      ).rejects.toThrow(LEDGER_ERROR_MESSAGES.SENDER_MISMATCH);
+      expect(store.signingState).toBe("error");
+      expect(store.signResult).toEqual({
+        success: false,
+        error: LEDGER_ERROR_MESSAGES.SENDER_MISMATCH,
+      });
+    });
+
+    it("refuses a signed transaction whose signature does not verify", async () => {
+      // Decoding errors can quote raw bytes; none may reach the log.
+      const rawBytes = "ab".repeat(80);
+      mockRecoverTransaction.mockImplementation(() => {
+        throw new Error(`Signature verification failed for 0x${rawBytes}`);
+      });
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+
+      await expect(
+        store.signAndSerializeTransaction(
+          ledgerAccount.address,
+          mockTxData,
+          mockCommon,
+        ),
+      ).rejects.toThrow(LEDGER_ERROR_MESSAGES.SIGNATURE_UNVERIFIED);
+      expect(store.signingState).toBe("error");
+      expect(store.signResult).toEqual({
+        success: false,
+        error: LEDGER_ERROR_MESSAGES.SIGNATURE_UNVERIFIED,
+      });
+      const logged = consoleError.mock.calls.flat().map(String).join(" ");
+      expect(logged).toContain("Signature verification failed");
+      expect(logged).not.toContain(rawBytes.slice(0, 64));
+      consoleError.mockRestore();
     });
 
     it("should sign and serialize transaction successfully", async () => {
       const result = await store.signAndSerializeTransaction(
-        mockAccounts[0].address,
+        ledgerAccount.address,
         mockTxData,
         mockCommon,
       );
@@ -1042,7 +1097,7 @@ describe("LedgerStore", () => {
       async (invalid) => {
         await expect(
           store.signAndSerializeTransaction(
-            mockAccounts[0].address,
+            ledgerAccount.address,
             { ...mockTxData, ...invalid },
             mockCommon,
           ),
@@ -1057,7 +1112,7 @@ describe("LedgerStore", () => {
       async (invalid) => {
         await expect(
           store.signAndSerializeTransaction(
-            mockAccounts[0].address,
+            ledgerAccount.address,
             malformed<Record<string, unknown>>(invalid),
             mockCommon,
           ),
@@ -1068,7 +1123,7 @@ describe("LedgerStore", () => {
 
     it("rejects an invalid chain configuration before signing", async () => {
       await expect(
-        store.signAndSerializeTransaction(mockAccounts[0].address, mockTxData, {
+        store.signAndSerializeTransaction(ledgerAccount.address, mockTxData, {
           chainId: 1,
         }),
       ).rejects.toThrow("Invalid Ledger transaction configuration");
@@ -1086,7 +1141,7 @@ describe("LedgerStore", () => {
       async (fields) => {
         const txData = { ...mockTxData, ...fields, future: { version: 2 } };
         await store.signAndSerializeTransaction(
-          mockAccounts[0].address,
+          ledgerAccount.address,
           txData,
           mockCommon,
         );
@@ -1106,7 +1161,7 @@ describe("LedgerStore", () => {
         });
         await expect(
           store.signAndSerializeTransaction(
-            mockAccounts[0].address,
+            ledgerAccount.address,
             mockTxData,
             mockCommon,
           ),
@@ -1118,7 +1173,7 @@ describe("LedgerStore", () => {
 
     it("should use existing public key from account", async () => {
       await store.signAndSerializeTransaction(
-        mockAccounts[0].address,
+        ledgerAccount.address,
         mockTxData,
         mockCommon,
       );
@@ -1131,7 +1186,7 @@ describe("LedgerStore", () => {
       // Account without public key
       store.accounts = [
         {
-          address: "Q1234567890123456789012345678901234567890",
+          address: LEDGER_SENDER,
           derivationPath: "m/44'/238'/0'/0'/0'",
           publicKey: "",
           index: 0,
@@ -1139,13 +1194,13 @@ describe("LedgerStore", () => {
       ];
 
       mockGetPublicKey.mockResolvedValue({
-        address: "Q1234567890123456789012345678901234567890",
+        address: LEDGER_SENDER,
         derivationPath: "m/44'/238'/0'/0'/0'",
         publicKey: "0xfetchedpublickey",
       });
 
       await store.signAndSerializeTransaction(
-        "Q1234567890123456789012345678901234567890",
+        LEDGER_SENDER,
         mockTxData,
         mockCommon,
       );
@@ -1158,7 +1213,7 @@ describe("LedgerStore", () => {
 
       await expect(
         store.signAndSerializeTransaction(
-          mockAccounts[0].address,
+          ledgerAccount.address,
           mockTxData,
           mockCommon,
         ),
@@ -1175,17 +1230,22 @@ describe("LedgerStore", () => {
 
       await expect(
         store.signAndSerializeTransaction(
-          mockAccounts[0].address,
+          ledgerAccount.address,
           mockTxData,
           mockCommon,
         ),
       ).rejects.toThrow("Ledger account not found");
+      expect(store.signingState).toBe("error");
+      expect(store.signResult).toEqual({
+        success: false,
+        error: "Ledger account not found",
+      });
     });
 
     it("should throw if fetchPublicKey returns empty public key", async () => {
       store.accounts = [
         {
-          address: "Q1234567890123456789012345678901234567890",
+          address: LEDGER_SENDER,
           derivationPath: "m/44'/238'/0'/0'/0'",
           publicKey: "",
           index: 0,
@@ -1193,23 +1253,28 @@ describe("LedgerStore", () => {
       ];
 
       mockGetPublicKey.mockResolvedValue({
-        address: "Q1234567890123456789012345678901234567890",
+        address: LEDGER_SENDER,
         derivationPath: "m/44'/238'/0'/0'/0'",
         publicKey: "",
       });
 
       await expect(
         store.signAndSerializeTransaction(
-          "Q1234567890123456789012345678901234567890",
+          LEDGER_SENDER,
           mockTxData,
           mockCommon,
         ),
       ).rejects.toThrow("Failed to fetch public key from Ledger");
+      expect(store.signingState).toBe("error");
+      expect(store.signResult).toEqual({
+        success: false,
+        error: "Failed to fetch public key from Ledger",
+      });
     });
 
     it("preserves transaction fields and orders signing fields for the library", async () => {
       await store.signAndSerializeTransaction(
-        mockAccounts[0].address,
+        ledgerAccount.address,
         mockTxData,
         mockCommon,
       );
@@ -1246,7 +1311,7 @@ describe("LedgerStore", () => {
       const publicKey = Buffer.alloc(2592, 1);
       const signature = Buffer.alloc(4627, 2);
       store.accounts = [
-        { ...mockAccounts[0], publicKey: `0x${publicKey.toString("hex")}` },
+        { ...ledgerAccount, publicKey: `0x${publicKey.toString("hex")}` },
       ];
       mockSignTransaction.mockResolvedValue({
         signature: `0x${signature.toString("hex")}`,
@@ -1263,12 +1328,12 @@ describe("LedgerStore", () => {
       };
 
       const serialized = await store.signAndSerializeTransaction(
-        mockAccounts[0].address,
+        ledgerAccount.address,
         txData,
         mockCommon,
       );
       const decoded = actual.FeeMarketEIP1559Transaction.fromSerializedTx(
-          new Uint8Array(Buffer.from(serialized.slice(2), "hex")),
+        new Uint8Array(Buffer.from(serialized.slice(2), "hex")),
         { common: mockCommon },
       );
       const unsigned = actual.FeeMarketEIP1559Transaction.fromTxData(txData, {
@@ -1281,6 +1346,83 @@ describe("LedgerStore", () => {
       expect(fields[10]).toEqual(new Uint8Array());
       expect(fields[11]).toEqual(new Uint8Array(signature));
       expect(fields[12]).toEqual(new Uint8Array(publicKey));
+    });
+
+    it("refuses a 20-byte sender even when the recovered signer names it", async () => {
+      store.accounts = [...mockAccounts];
+      mockRecoverTransaction.mockReturnValue(mockAccounts[0].address);
+
+      await expect(
+        store.signAndSerializeTransaction(
+          mockAccounts[0].address,
+          mockTxData,
+          mockCommon,
+        ),
+      ).rejects.toThrow(LEDGER_ERROR_MESSAGES.SENDER_MISMATCH);
+      expect(store.signingState).toBe("error");
+    });
+
+    it("checks the sender against the signer the real recovery finds", async () => {
+      const actual = await vi.importActual<
+        typeof import("@theqrl/web3-qrl-accounts")
+      >("@theqrl/web3-qrl-accounts");
+      mockFromTxData.mockImplementation(
+        (...args: Parameters<typeof FeeMarketEIP1559Transaction.fromTxData>) =>
+          actual.FeeMarketEIP1559Transaction.fromTxData(...args),
+      );
+      mockFromValuesArray.mockImplementation((...args) =>
+        actual.FeeMarketEIP1559Transaction.fromValuesArray(...args),
+      );
+      mockRecoverTransaction.mockImplementation((rawTransaction) =>
+        actual.recoverTransaction(rawTransaction),
+      );
+      // A throwaway key signs the transaction in software. The device would
+      // return the same signature and public key for its own key.
+      const signer = actual.create();
+      const txData = {
+        nonce: 7n,
+        maxPriorityFeePerGas: 1n,
+        maxFeePerGas: 2n,
+        gasLimit: 21000n,
+        to: OTHER_SENDER,
+        value: 3n,
+        data: "0x",
+      };
+      const signed = await actual.signTransaction(
+        actual.FeeMarketEIP1559Transaction.fromTxData(txData, {
+          common: mockCommon,
+        }),
+        signer.seed,
+      );
+      const signedFields = actual.FeeMarketEIP1559Transaction.fromSerializedTx(
+        new Uint8Array(Buffer.from(signed.rawTransaction.slice(2), "hex")),
+        { common: mockCommon },
+      ).raw();
+      const toHex = (value: unknown) => {
+        if (!(value instanceof Uint8Array)) throw new Error("expected bytes");
+        return `0x${Buffer.from(value).toString("hex")}`;
+      };
+      mockSignTransaction.mockResolvedValue({
+        signature: toHex(signedFields[11]),
+        rawTransaction: "0xraw",
+      });
+      const signFor = (address: string) => {
+        store.accounts = [
+          { ...ledgerAccount, address, publicKey: toHex(signedFields[12]) },
+        ];
+        return store.signAndSerializeTransaction(address, txData, mockCommon);
+      };
+
+      await expect(signFor(signer.address)).resolves.toBe(
+        signed.rawTransaction,
+      );
+      await expect(signFor(OTHER_SENDER)).rejects.toThrow(
+        LEDGER_ERROR_MESSAGES.SENDER_MISMATCH,
+      );
+      await expect(signFor(mockAccounts[0].address)).rejects.toThrow(
+        LEDGER_ERROR_MESSAGES.SENDER_MISMATCH,
+      );
+      expect(mockAccounts[0].address).toHaveLength(41);
     });
   });
 });

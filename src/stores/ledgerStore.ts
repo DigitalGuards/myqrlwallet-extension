@@ -38,9 +38,13 @@ import { ledgerService } from "@/services/ledger/ledgerService";
 import { ledgerTransport } from "@/services/ledger/ledgerTransport";
 import type { LedgerDeviceInfo } from "@/services/ledger/ledgerTypes";
 import StorageUtil from "@/utilities/storageUtil";
+import { areAddressesEquivalent } from "@/utilities/addressUtil";
 import { LEDGER_CONFIG, LEDGER_ERROR_MESSAGES } from "@/constants/ledger";
 import { getDerivationPath } from "@/services/ledger/ledgerApdu";
-import { FeeMarketEIP1559Transaction } from "@theqrl/web3-qrl-accounts";
+import {
+  FeeMarketEIP1559Transaction,
+  recoverTransaction,
+} from "@theqrl/web3-qrl-accounts";
 import { newMLDSA87Descriptor } from "@theqrl/wallet.js";
 import {
   isLedgerCommon,
@@ -48,6 +52,13 @@ import {
 } from "./ledgerTransactionGuards";
 
 const isQip55Supported = (): boolean => LEDGER_CONFIG.QIP55_SUPPORTED;
+
+// Errors from decoding a transaction can quote its bytes. Long hex runs are
+// dropped so no key or signature material reaches the log.
+const describeVerificationError = (error: unknown): string =>
+  (error instanceof Error ? `${error.name}: ${error.message}` : typeof error)
+    .replace(/(0x)?[0-9a-fA-F]{64,}/g, "[hex omitted]")
+    .slice(0, 300);
 
 /**
  * Possible states for Ledger connection.
@@ -654,54 +665,96 @@ class LedgerStore {
     if (!signResult.success) {
       throw new Error(signResult.error || "Ledger signing failed");
     }
-
-    const account = this.getAccountByAddress(fromAddress);
-    if (!account) {
-      throw new Error("Ledger account not found");
-    }
-
-    let publicKey =
-      typeof account.publicKey === "string" ? account.publicKey : "";
-    if (!publicKey) {
-      const { publicKey: fetchedPublicKey } =
-        await this.fetchPublicKey(fromAddress);
-      publicKey = fetchedPublicKey;
-      if (!publicKey) {
-        throw new Error("Failed to fetch public key from Ledger");
+    // signTransaction has recorded a success for the device step. Any step
+    // below that fails turns that record into the error the caller gets.
+    try {
+      const account = this.getAccountByAddress(fromAddress);
+      if (!account) {
+        throw new Error("Ledger account not found");
       }
-    }
 
-    const rawValues = unsignedTx.raw();
-    const signature: unknown = signResult.signature;
-    if (typeof signature !== "string") {
-      throw new Error("Ledger signing returned no usable signature");
-    }
-    const signatureBytes = Buffer.from(signature.replace("0x", ""), "hex");
-    const publicKeyBytes = Buffer.from(publicKey.replace("0x", ""), "hex");
+      let publicKey =
+        typeof account.publicKey === "string" ? account.publicKey : "";
+      if (!publicKey) {
+        const { publicKey: fetchedPublicKey } =
+          await this.fetchPublicKey(fromAddress);
+        publicKey = fetchedPublicKey;
+        if (!publicKey) {
+          throw new Error("Failed to fetch public key from Ledger");
+        }
+      }
 
-    const signedTxValues: Parameters<
-      typeof FeeMarketEIP1559Transaction.fromValuesArray
-    >[0] = [
-      rawValues[0],
-      rawValues[1],
-      rawValues[2],
-      rawValues[3],
-      rawValues[4],
-      rawValues[5],
-      rawValues[6],
-      rawValues[7],
-      rawValues[8],
-      descriptor,
-      extraParams,
-      signatureBytes,
-      publicKeyBytes,
-    ];
-    const signedTx = FeeMarketEIP1559Transaction.fromValuesArray(
-      signedTxValues,
-      { common },
-    );
-    const signedRawTx = signedTx.serialize();
-    return "0x" + Buffer.from(signedRawTx).toString("hex");
+      const rawValues = unsignedTx.raw();
+      const signature: unknown = signResult.signature;
+      if (typeof signature !== "string") {
+        throw new Error("Ledger signing returned no usable signature");
+      }
+      const signatureBytes = Buffer.from(signature.replace("0x", ""), "hex");
+      const publicKeyBytes = Buffer.from(publicKey.replace("0x", ""), "hex");
+
+      const signedTxValues: Parameters<
+        typeof FeeMarketEIP1559Transaction.fromValuesArray
+      >[0] = [
+        rawValues[0],
+        rawValues[1],
+        rawValues[2],
+        rawValues[3],
+        rawValues[4],
+        rawValues[5],
+        rawValues[6],
+        rawValues[7],
+        rawValues[8],
+        descriptor,
+        extraParams,
+        signatureBytes,
+        publicKeyBytes,
+      ];
+      const signedTx = FeeMarketEIP1559Transaction.fromValuesArray(
+        signedTxValues,
+        { common },
+      );
+      const signedRawTx = signedTx.serialize();
+      const rawTransaction = "0x" + Buffer.from(signedRawTx).toString("hex");
+      // The device signs with whatever key sits behind the stored
+      // derivation path, and the public key comes from storage or a separate
+      // request. The chain reads the sender from the signed transaction, so
+      // it must be the account this send is for.
+      //
+      // Both sides must be well-formed 64-byte QIP-55 addresses. Device
+      // accounts in this code hold the 20-byte address of the old frame, so
+      // the check fails closed until device accounts carry the 64-byte
+      // address; that belongs to the work that opens the gate.
+      let recoveredSender: unknown;
+      try {
+        recoveredSender = recoverTransaction(rawTransaction);
+      } catch (error) {
+        console.error(
+          "[LedgerStore] Signature verification failed:",
+          describeVerificationError(error),
+        );
+        throw new Error(LEDGER_ERROR_MESSAGES.SIGNATURE_UNVERIFIED);
+      }
+      if (!areAddressesEquivalent(recoveredSender, fromAddress)) {
+        throw new Error(LEDGER_ERROR_MESSAGES.SENDER_MISMATCH);
+      }
+      return rawTransaction;
+    } catch (error) {
+      this.recordSigningFailure(
+        error instanceof Error
+          ? error.message
+          : LEDGER_ERROR_MESSAGES.SIGNING_FAILED,
+      );
+      throw error;
+    }
+  }
+
+  /** Record a failure that follows a successful device signature. */
+  private recordSigningFailure(error: string): void {
+    runInAction(() => {
+      this.signingState = "error";
+      this.signingStatus = { state: "error", message: error };
+      this.signResult = { success: false, error };
+    });
   }
 
   clearSigningState(): void {

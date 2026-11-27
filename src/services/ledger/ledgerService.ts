@@ -455,7 +455,7 @@ class LedgerService {
    * P1=0x02 means "last data, start signing"
    * At this stage Ledger displays TX on screen and waits for approval.
    *
-   * Receive Dilithium signature chunks (~2420 bytes)
+   * Receive ML-DSA-87 signature chunks (4627 bytes)
    * First chunk is returned automatically.
    * Remaining 17 chunks are fetched via:
    * ┌──────┬──────┬──────┬──────┬──────┬──────┐
@@ -466,7 +466,7 @@ class LedgerService {
    *
    * @param derivationPath - BIP-44 path of signing key
    * @param rlpEncodedTx - RLP-encoded transaction (hex string or Buffer)
-   * @returns Signed transaction with Dilithium signature
+   * @returns Signed transaction with ML-DSA-87 signature
    */
   async signTransaction(
     derivationPath: string,
@@ -524,11 +524,16 @@ class LedgerService {
       // Check status of first signature chunk
       checkStatusWord(signatureResponse);
 
-      // Dilithium signature is returned in 18 chunks. Each chunk must be
-      // non-empty; an empty chunk indicates a transport fault or padded
-      // response that cannot be trusted (F-12).
+      // The ML-DSA-87 signature is returned in 18 chunks: 17 of 258 bytes
+      // and a last one of 241. A chunk of any other size is a transport
+      // fault or a padded response that cannot be trusted (F-12), even when
+      // the sizes still add up to the full signature.
+      const expectedSignatureChunkBytes = (chunkIndex: number) =>
+        chunkIndex === LEDGER_CONFIG.SIGNATURE_CHUNKS - 1
+          ? LEDGER_CONFIG.SIGNATURE_LAST_CHUNK_BYTES
+          : LEDGER_CONFIG.SIGNATURE_CHUNK_BYTES;
       const firstChunk = extractResponseData(signatureResponse);
-      if (firstChunk.length === 0) {
+      if (firstChunk.length !== expectedSignatureChunkBytes(0)) {
         throw new Error(LEDGER_ERROR_MESSAGES.INCONSISTENT_DEVICE_RESPONSE);
       }
       const signatureChunks: Buffer[] = [firstChunk];
@@ -548,20 +553,16 @@ class LedgerService {
 
         checkStatusWord(chunkResponse);
         const chunkData = extractResponseData(chunkResponse);
-        if (chunkData.length === 0) {
+        if (chunkData.length !== expectedSignatureChunkBytes(chunkIndex)) {
           throw new Error(LEDGER_ERROR_MESSAGES.INCONSISTENT_DEVICE_RESPONSE);
         }
         signatureChunks.push(chunkData);
       }
 
-      // Combine all chunks. Bound the assembled length: ML-DSA-87 sigs sit
-      // around 2420 bytes, with some implementation variance. Reject
-      // responses outside the configured envelope.
+      // Combine all chunks. An ML-DSA-87 signature has one fixed length;
+      // any other reassembly is a malformed response.
       const fullSignature = combineSignatureChunks(signatureChunks);
-      if (
-        fullSignature.length < LEDGER_CONFIG.SIGNATURE_MIN_BYTES ||
-        fullSignature.length > LEDGER_CONFIG.SIGNATURE_MAX_BYTES
-      ) {
+      if (fullSignature.length !== LEDGER_CONFIG.EXPECTED_SIGNATURE_BYTES) {
         throw new Error(LEDGER_ERROR_MESSAGES.INCONSISTENT_DEVICE_RESPONSE);
       }
 
