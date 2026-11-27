@@ -1033,9 +1033,14 @@ describe("LedgerStore", () => {
     });
 
     it("refuses a signed transaction whose signature does not verify", async () => {
+      // Decoding errors can quote raw bytes; none may reach the log.
+      const rawBytes = "ab".repeat(80);
       mockRecoverTransaction.mockImplementation(() => {
-        throw new Error("Signature verification failed");
+        throw new Error(`Signature verification failed for 0x${rawBytes}`);
       });
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
 
       await expect(
         store.signAndSerializeTransaction(
@@ -1043,9 +1048,16 @@ describe("LedgerStore", () => {
           mockTxData,
           mockCommon,
         ),
-      ).rejects.toThrow(LEDGER_ERROR_MESSAGES.SENDER_MISMATCH);
+      ).rejects.toThrow(LEDGER_ERROR_MESSAGES.SIGNATURE_UNVERIFIED);
       expect(store.signingState).toBe("error");
-      expect(store.signResult?.success).toBe(false);
+      expect(store.signResult).toEqual({
+        success: false,
+        error: LEDGER_ERROR_MESSAGES.SIGNATURE_UNVERIFIED,
+      });
+      const logged = consoleError.mock.calls.flat().map(String).join(" ");
+      expect(logged).toContain("Signature verification failed");
+      expect(logged).not.toContain(rawBytes.slice(0, 64));
+      consoleError.mockRestore();
     });
 
     it("should sign and serialize transaction successfully", async () => {

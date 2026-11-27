@@ -208,6 +208,9 @@ export const LEDGER_ERROR_MESSAGES = {
   /** Device returned data of unexpected size during chunk reassembly */
   INCONSISTENT_DEVICE_RESPONSE:
     "Ledger device returned an unexpected response. Reconnect the device or check the QRL Zond app firmware version.",
+  /** The signature in the assembled transaction does not verify */
+  SIGNATURE_UNVERIFIED:
+    "The Ledger signature could not be verified. Nothing was sent.",
   /** The signed transaction recovers to an account other than the sender */
   SENDER_MISMATCH:
     "The Ledger signature belongs to a different account than the one sending. Nothing was sent.",

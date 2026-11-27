@@ -53,6 +53,13 @@ import {
 
 const isQip55Supported = (): boolean => LEDGER_CONFIG.QIP55_SUPPORTED;
 
+// Errors from decoding a transaction can quote its bytes. Long hex runs are
+// dropped so no key or signature material reaches the log.
+const describeVerificationError = (error: unknown): string =>
+  (error instanceof Error ? `${error.name}: ${error.message}` : typeof error)
+    .replace(/(0x)?[0-9a-fA-F]{64,}/g, "[hex omitted]")
+    .slice(0, 300);
+
 /**
  * Possible states for Ledger connection.
  */
@@ -719,19 +726,28 @@ class LedgerStore {
     let recoveredSender: unknown;
     try {
       recoveredSender = recoverTransaction(rawTransaction);
-    } catch {
-      recoveredSender = undefined;
+    } catch (error) {
+      console.error(
+        "[LedgerStore] Signature verification failed:",
+        describeVerificationError(error),
+      );
+      this.recordSigningFailure(LEDGER_ERROR_MESSAGES.SIGNATURE_UNVERIFIED);
+      throw new Error(LEDGER_ERROR_MESSAGES.SIGNATURE_UNVERIFIED);
     }
     if (!areAddressesEquivalent(recoveredSender, fromAddress)) {
-      const error = LEDGER_ERROR_MESSAGES.SENDER_MISMATCH;
-      runInAction(() => {
-        this.signingState = "error";
-        this.signingStatus = { state: "error", message: error };
-        this.signResult = { success: false, error };
-      });
-      throw new Error(error);
+      this.recordSigningFailure(LEDGER_ERROR_MESSAGES.SENDER_MISMATCH);
+      throw new Error(LEDGER_ERROR_MESSAGES.SENDER_MISMATCH);
     }
     return rawTransaction;
+  }
+
+  /** Record a failure that follows a successful device signature. */
+  private recordSigningFailure(error: string): void {
+    runInAction(() => {
+      this.signingState = "error";
+      this.signingStatus = { state: "error", message: error };
+      this.signResult = { success: false, error };
+    });
   }
 
   clearSigningState(): void {
