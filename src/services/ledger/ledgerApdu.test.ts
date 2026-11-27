@@ -419,9 +419,12 @@ describe("ledgerApdu", () => {
     });
 
     it("should parse address with public key", () => {
-      // 'Q' prefix + 20 bytes address + public key + success status
+      // 'Q' prefix + 20 bytes address + full ML-DSA-87 public key + status
       const addressBytes = Buffer.alloc(20, 0xab);
-      const publicKeyBytes = Buffer.alloc(100, 0xcc); // Simplified public key
+      const publicKeyBytes = Buffer.alloc(
+        LEDGER_CONFIG.EXPECTED_PUBLIC_KEY_BYTES,
+        0xcc,
+      );
       const response = Buffer.concat([
         Buffer.from([0x51]), // 'Q'
         addressBytes,
@@ -434,26 +437,32 @@ describe("ledgerApdu", () => {
       expect(result.address.startsWith("Q")).toBe(true);
       expect(result.address.length).toBe(41);
       expect(result.publicKey).toMatch(/^0x/);
-      expect(result.publicKey.length).toBe(2 + 100 * 2); // 0x + 100 bytes as hex
+      expect(result.publicKey.length).toBe(
+        2 + LEDGER_CONFIG.EXPECTED_PUBLIC_KEY_BYTES * 2,
+      );
     });
 
-    it("should parse full Dilithium public key", () => {
-      // 'Q' prefix + 20 bytes address + 2528 bytes Dilithium key + success status
-      const addressBytes = Buffer.alloc(20, 0xab);
-      const publicKeyBytes = Buffer.alloc(DILITHIUM_PUBLIC_KEY_SIZE, 0xdd);
+    // Only the address frame alone, or the address frame followed by one full
+    // ML-DSA-87 public key, is a response this parser can read.
+    it.each([
+      ["a 64-byte QIP-55 address frame", 44],
+      ["a short trailing key", 100],
+      [
+        "a trailing key of DILITHIUM_PUBLIC_KEY_SIZE",
+        DILITHIUM_PUBLIC_KEY_SIZE,
+      ],
+      ["one byte past a full key", 1 + 2592],
+    ])("refuses %s", (_label, trailingBytes) => {
       const response = Buffer.concat([
         Buffer.from([0x51]), // 'Q'
-        addressBytes,
-        publicKeyBytes,
-        Buffer.from([0x90, 0x00]), // Success
+        Buffer.alloc(20, 0xab),
+        Buffer.alloc(trailingBytes, 0xdd),
+        Buffer.from([0x90, 0x00]),
       ]);
 
-      const result = parsePublicKeyResponse(response);
-
-      expect(result.address.startsWith("Q")).toBe(true);
-      expect(result.publicKey).toMatch(/^0x/);
-      // 0x prefix + 2528 bytes as hex (2 chars per byte)
-      expect(result.publicKey.length).toBe(2 + DILITHIUM_PUBLIC_KEY_SIZE * 2);
+      expect(() => parsePublicKeyResponse(response)).toThrow(
+        "Invalid response length",
+      );
     });
 
     it("should throw for invalid prefix", () => {

@@ -354,7 +354,7 @@ export const DILITHIUM_PUBLIC_KEY_SIZE = 2528;
  * RESPONSE FORMAT (with public key):
  * ┌────────┬───────────────────┬────────────────────┬────────┐
  * │ PREFIX │     ADDRESS       │    PUBLIC_KEY      │   SW   │
- * │  'Q'   │     20 bytes      │    2528 bytes      │   2B   │
+ * │  'Q'   │     20 bytes      │    2592 bytes      │   2B   │
  * │  1B    │      (hex)        │                    │        │
  * └────────┴───────────────────┴────────────────────┴────────┘
  *
@@ -368,11 +368,15 @@ export function parsePublicKeyResponse(response: Buffer): PublicKeyResponse {
   // Extract data
   const data = extractResponseData(response);
 
-  // Standard QRL address: 1 byte prefix ('Q') + 20 bytes address = 21 bytes
-  if (data.length < 21) {
+  // Standard QRL address: 1 byte prefix ('Q') + 20 bytes address = 21 bytes,
+  // optionally followed by one full public key. Any other length is refused,
+  // so a longer address frame is never cut down to its first 20 bytes and no
+  // partial key is returned.
+  const withPublicKeyLength = 21 + LEDGER_CONFIG.EXPECTED_PUBLIC_KEY_BYTES;
+  if (data.length !== 21 && data.length !== withPublicKeyLength) {
     throw createLedgerError(
       0,
-      `Invalid response length: expected min. 21 bytes, got ${data.length}`,
+      `Invalid response length: expected exactly 21 or ${withPublicKeyLength} bytes, got ${data.length}`,
     );
   }
 
