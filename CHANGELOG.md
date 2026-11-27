@@ -13,6 +13,8 @@
 ### Changed
 
 - Use shorscan.com for explorer links, history, token and NFT discovery and the price fallback; a stored built-in testnet entry follows.
+- The light theme uses the web wallet's Ink and blue colours.
+- The Welcome screen says in plain words what the wallet does and where keys are kept; the note about the test network is hidden on a build pinned to mainnet.
 
 ## [0.3.0](https://github.com/theQRL/qrl-web3-wallet/compare/v0.2.0...v0.3.0) (2026-05-07)
 

@@ -163,7 +163,7 @@ const AccountCreateImport = observer(() => {
           <h2 className="-mb-4 break-words text-2xl font-semibold leading-tight tracking-tight">
             {t("home.activeAccount")}
           </h2>
-          <Card className="surface-ember relative w-full overflow-hidden [background:linear-gradient(180deg,hsl(var(--primary)/0.06),transparent_46%),hsl(var(--card)/0.45)]">
+          <Card className="surface-ember surface-balance relative w-full overflow-hidden dark:[background:linear-gradient(180deg,hsl(var(--primary)/0.06),transparent_46%),hsl(var(--card)/0.45)]">
             <div className="relative z-10">
               <CardContent className="pt-6">
                 <ActiveAccountDisplay />

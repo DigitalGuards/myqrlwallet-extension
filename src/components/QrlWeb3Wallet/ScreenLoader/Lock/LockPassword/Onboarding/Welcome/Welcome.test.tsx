@@ -14,6 +14,11 @@ vi.mock(
 );
 
 const hasLegacyWalletData = vi.hoisted(() => vi.fn<() => Promise<boolean>>());
+const pinnedMainnet = vi.hoisted(() => vi.fn<() => object | null>(() => null));
+vi.mock("@/configuration/pinnedNetworks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/configuration/pinnedNetworks")>()),
+  pinnedMainnet,
+}));
 vi.mock("@/utilities/legacyWalletData", () => ({ hasLegacyWalletData }));
 
 const LEGACY_NOTICE =
@@ -24,6 +29,7 @@ describe("Welcome", () => {
 
   beforeEach(() => {
     hasLegacyWalletData.mockResolvedValue(false);
+    pinnedMainnet.mockReturnValue(null);
   });
 
   const renderComponent = (
@@ -40,21 +46,35 @@ describe("Welcome", () => {
       </StoreProvider>,
     );
 
+  it("leaves the test network out of the note once a mainnet is pinned", () => {
+    pinnedMainnet.mockReturnValue({ chainId: "0x1" });
+    renderComponent();
+
+    expect(screen.getByText("Open source.")).toBeInTheDocument();
+    expect(screen.queryByText(/test network/)).not.toBeInTheDocument();
+  });
+
   it("should render the welcome component", () => {
     renderComponent();
 
     expect(
-      screen.getByRole("heading", { level: 3, name: "Welcome" }),
+      screen.getByRole("heading", {
+        level: 2,
+        name: "Your wallet for QRL 2.0",
+      }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("Let's start using MyQRLWallet"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("We are")).toBeInTheDocument();
-    expect(screen.getByText("The Quantum")).toBeInTheDocument();
-    expect(screen.getByText("Resistant Ledger")).toBeInTheDocument();
-    expect(
-      screen.getByRole("img", { name: "MyQRLWallet" }),
-    ).toBeInTheDocument();
+    for (const text of [
+      "Your keys stay on this device",
+      "Keys you create or import are stored here, encrypted with your password.",
+      "Post-quantum signatures",
+      "Every transaction is signed with ML-DSA-87.",
+      "Connect to dApps",
+      "You approve each connection, signature and transaction.",
+      "Open source. Currently on the QRL 2.0 test network.",
+    ]) {
+      expect(screen.getByText(text)).toBeInTheDocument();
+    }
+    expect(screen.queryByText("We are")).not.toBeInTheDocument();
     const continueButton = screen.getByRole("button", { name: "Continue" });
     expect(continueButton).toBeInTheDocument();
     expect(continueButton).toBeEnabled();
@@ -64,7 +84,10 @@ describe("Welcome", () => {
     renderComponent();
 
     expect(
-      await screen.findByRole("heading", { level: 3, name: "Welcome" }),
+      await screen.findByRole("heading", {
+        level: 2,
+        name: "Your wallet for QRL 2.0",
+      }),
     ).toBeInTheDocument();
     await waitFor(() => {
       expect(hasLegacyWalletData).toHaveBeenCalled();
@@ -84,7 +107,10 @@ describe("Welcome", () => {
     renderComponent();
 
     expect(
-      await screen.findByRole("heading", { level: 3, name: "Welcome" }),
+      await screen.findByRole("heading", {
+        level: 2,
+        name: "Your wallet for QRL 2.0",
+      }),
     ).toBeInTheDocument();
     expect(screen.queryByText(LEGACY_NOTICE)).not.toBeInTheDocument();
   });

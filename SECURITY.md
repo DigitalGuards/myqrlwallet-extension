@@ -1,8 +1,8 @@
-# Security Policy — QRL Web3 Wallet
+# Security Policy: MyQRLWallet Extension
 
-Thank you for taking the time to help make the QRL Web3 Wallet safer.
+Thank you for taking the time to help make the MyQRLWallet browser extension safer.
 
-You can read more about the QRL's security program at [theqrl.org/security-report](https://theqrl.org/security-report/).
+This extension is a fork of [theQRL/qrl-web3-wallet](https://github.com/theQRL/qrl-web3-wallet). A flaw that also exists upstream is best reported to both projects.
 
 ## Reporting a vulnerability
 
@@ -10,14 +10,14 @@ You can read more about the QRL's security program at [theqrl.org/security-repor
 
 Preferred channels (in order):
 
-1. Email: `security@theqrl.org`
-2. GitHub Security Advisories: <https://github.com/theQRL/qrl-web3-wallet/security/advisories/new>
+1. Email: `security@digitalguards.nl`
+2. GitHub Security Advisories: <https://github.com/DigitalGuards/myqrlwallet-extension/security/advisories/new>
 
 Please include:
 
 - A clear description of the issue and the conditions required to trigger it.
 - A proof of concept if you have one (source files, reproducer steps, a short video, or a hosted page).
-- The wallet version / commit hash you tested.
+- The extension version / commit hash you tested.
 - Your browser and OS.
 - Any suggested mitigation.
 
@@ -42,4 +42,4 @@ Please include:
 - The remote QRL RPC node. Signed transactions are authenticated end-to-end by consensus; RPC-level lies can at worst mislead UI reads.
 - Social engineering against the user outside the extension surface.
 
-If in doubt, report privately. We will triage and determine scope and severity internally.
+If in doubt, report privately. We triage reports and decide scope and severity internally.
